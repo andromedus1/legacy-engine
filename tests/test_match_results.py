@@ -657,3 +657,55 @@ class TestComputeMatchResults:
             normalize_player,
             parse_match_result,
         )
+
+    # ── Unit 1 (matchup-matrix): additive mirror_n field ─────────────────────
+
+    def test_mirror_n_populated_for_same_archetype_pairing(self):
+        """Two Delver players → mirror_n == {"Delver": 1}; coverage.mirror_matches==1 unchanged."""
+        con = _con()
+        raw = {
+            "Tournament": {
+                "Name": "Mirror N Test",
+                "Date": "2026-05-29",
+                "Uri": "https://www.mtgo.com/decklist/mirror-n-test-2026-05-29",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                {
+                    "Player": "alice",
+                    "Result": "1st",
+                    "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                    "Sideboard": [],
+                },
+                {
+                    "Player": "bob",
+                    "Result": "2nd",
+                    "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                    "Sideboard": [],
+                },
+            ],
+            "Rounds": [{"Player1": "alice", "Player2": "bob", "Result": "2-1"}],
+            "Standings": [],
+        }
+        tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ?",
+            [tid],
+        )
+        res = compute_match_results(con)
+
+        # Additive field: mirror_n tracks per-archetype count
+        assert res.mirror_n == {"Delver": 1}
+        # Existing behavior: coverage.mirror_matches still incremented
+        assert res.coverage.mirror_matches == 1
+        # Existing behavior: no directed cells for mirror
+        assert ("Delver", "Delver") not in res.matchups
+        con.close()
+
+    def test_mirror_n_empty_for_non_mirror_pairing(self):
+        """Non-mirror pairing → mirror_n stays empty; no regression."""
+        con = _con()
+        self._load_online_challenge(con)
+        res = compute_match_results(con)
+        assert res.mirror_n == {}
+        con.close()

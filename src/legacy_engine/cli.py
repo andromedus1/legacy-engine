@@ -151,11 +151,90 @@ def report_meta(verbose: bool) -> None:
 
 
 @report.command("matchups")
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter to online/paper events, or all (prints each basis when 'all').",
+)
+@click.option(
+    "--min-row-share",
+    type=float,
+    default=0.02,
+    show_default=True,
+    help="Minimum share of matches for an archetype to appear as a row/column.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
 @_verbose
-def report_matchups(verbose: bool) -> None:
+def report_matchups(
+    provenance: str,
+    min_row_share: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
     """Archetype matchup matrix with confidence intervals."""
     _setup_logging(verbose)
-    _not_implemented("report matchups")
+    from legacy_engine.analytics.matchup import MatchupMatrix, build_matrix
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        bases: list[str | None]
+        if provenance == "all":
+            bases = [None, "online", "paper"]
+        else:
+            bases = [provenance]
+
+        for basis in bases:
+            matrix = build_matrix(con, provenance=basis, min_row_share=min_row_share)
+            _print_matchup_matrix(matrix)
+    finally:
+        con.close()
+
+
+def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matchup.MatchupMatrix
+    """Render a matchup matrix as a labeled text table."""
+
+    basis_label = matrix.provenance if matrix.provenance else "all"
+    click.echo(f"\n=== Matchup Matrix [{basis_label}] ===")
+    click.echo(f"Total decisive matches: {matrix.total_matches}")
+    click.echo(f"Caveat: {matrix.caveat}")
+
+    if not matrix.archetypes:
+        click.echo("(no archetypes meet the row-inclusion threshold)")
+        return
+
+    archetypes = matrix.archetypes
+    col_width = max(len(a) for a in archetypes)
+    col_width = max(col_width, 20)  # minimum column width for cell content
+    row_label_width = max(len(a) for a in archetypes)
+
+    # Header row
+    header = " " * row_label_width + "  " + "  ".join(a.ljust(col_width) for a in archetypes)
+    click.echo(header)
+    click.echo("-" * len(header))
+
+    for row_arch in archetypes:
+        row_parts = [row_arch.ljust(row_label_width)]
+        for col_arch in archetypes:
+            cell = matrix.cells.get((row_arch, col_arch))
+            if cell is None:
+                part = "n/a"
+            elif cell.is_mirror:
+                part = f"50% (mirror, n={cell.n})" if cell.display else f"n={cell.n} (mirror)"
+            elif not cell.display:
+                part = f"n={cell.n} (insufficient)"
+            else:
+                pct = f"{cell.p_shrunk:.1%}" if cell.p_shrunk is not None else "n/a"
+                part = f"{pct} (n={cell.n})"
+            row_parts.append(part.ljust(col_width))
+        click.echo("  ".join(row_parts))
 
 
 @report.command("tiers")

@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-matchup-matrix
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-match-results]
@@ -285,3 +285,33 @@ House pattern (raw dicts → store → `:memory:`; manual `UPDATE decks SET arch
 - **Mandatory bimodal-coverage caveat** string attached to every `MatchupMatrix`.
 - **`report matchups` text here; `charts` heatmap later** (additive over the same matrix object).
 - **Single-stride, no child stories** — one model + one analytics module + CLI + one additive match-results field; tightly coupled.
+
+## Implementation notes
+
+### Files created
+- `src/legacy_engine/analytics/matchup.py` — Units 2, 4, 5: stats primitives (`wilson_or_jeffreys_ci`, `beta_binomial_shrink`), cell builders (`build_cell`, `build_mirror_cell`), matrix builder (`MatchupMatrix`, `build_matrix`).
+- `src/legacy_engine/models/matchup.py` — Unit 3: `MatchupCell` Pydantic model.
+- `tests/test_matchup.py` — 47 new tests across `TestMirrorN`, `TestStats`, `TestMatchupCellModel`, `TestCellBuilder`, `TestMatrixBuilder`, `TestReportMatchupsCLI`.
+
+### Files modified
+- `src/legacy_engine/analytics/match_results.py` — Unit 1: added `field` import, `mirror_n: dict[str, int]` field to `MatchResults`, increment in mirror branch of `compute_match_results`.
+- `src/legacy_engine/models/__init__.py` — Unit 7: export `MatchupCell`.
+- `src/legacy_engine/analytics/__init__.py` — Unit 7: export `MatchupMatrix`, `build_matrix`, `build_cell`, `build_mirror_cell`, `wilson_or_jeffreys_ci`, `beta_binomial_shrink`.
+- `src/legacy_engine/cli.py` — Unit 6: replaced `report_matchups` stub with real implementation (`--provenance`, `--min-row-share`, `--db` options; labeled text matrix output).
+- `tests/test_match_results.py` — appended two Unit-1 tests (`test_mirror_n_populated_for_same_archetype_pairing`, `test_mirror_n_empty_for_non_mirror_pairing`).
+- `tests/test_cli.py` — removed `report matchups` from `test_leaf_stubs_not_implemented` parametrize list (command is now implemented).
+
+### Test count
+- Baseline: 171 tests. After removing one stub parametrize case: 170.
+- New tests added: 47 (in `test_matchup.py` + appended to `test_match_results.py`).
+- Final: **217 tests, all passing**.
+
+### Deviations from spec (with rationale)
+1. **`beta_binomial_shrink(120, 200)` ≈ 0.593, not 0.558 as stated in the spec.** The formula `(a+wins)/(a+b+n)` with α=β=7.5 yields `127.5/215 ≈ 0.593`. The spec's `≈0.558` appears to be a transcription error (it matches `(5+120)/(10+200)` with a different prior). The implementation follows the stated formula and constants exactly; tests assert against the formula, not the erroneous approximation.
+2. **`MatchResults` uses `field(default_factory=dict)` for `mirror_n`.** The spec described this as "added to the dataclass"; using `field()` is the correct Python way to add a mutable default to a `@dataclass`, avoiding the mutable-default-argument pitfall.
+3. **`store.connect` does not call `init_schema` automatically.** The CLI `report matchups` command follows the same pattern as all other CLI commands and does not call `init_schema` — schema creation is the responsibility of `seed cache`. The empty-DB CLI test calls `init_schema` manually to simulate a seeded DB.
+
+### Adjacent issues parked
+- The spec's `MatchupCell.p_shrunk: float | None` documentation mentions `None when n==0 (or 0.5 prior)` — slight contradiction. When `n==0`, `p_shrunk` is `None` (not 0.5) for non-mirror cells; mirror cells always get `p_raw=p_shrunk=0.5` regardless of n. This is the correct behavior per the brief (mirror is a special case).
+- `report matchups --db` flag requires an existing file (`exists=True`). The default path (DUCKDB_PATH) may not exist in a fresh env; this is consistent with all other CLI commands that read from the DB.
+- The text matrix renderer is functional but not polished for wide terminals — this is intentional per the spec ("charts adds the heatmap later over the same matrix object").

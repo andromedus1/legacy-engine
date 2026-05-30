@@ -10,6 +10,14 @@ from legacy_engine.analytics.match_results import (
     normalize_player,
     parse_match_result,
 )
+from legacy_engine.analytics.matchup import (
+    MatchupMatrix,
+    beta_binomial_shrink,
+    build_cell,
+    build_matrix,
+    build_mirror_cell,
+    wilson_or_jeffreys_ci,
+)
 
 __all__ = [
     "ArchetypeRecord",
@@ -20,4 +28,11 @@ __all__ = [
     "compute_match_results",
     "normalize_player",
     "parse_match_result",
+    # matchup matrix
+    "MatchupMatrix",
+    "beta_binomial_shrink",
+    "build_cell",
+    "build_matrix",
+    "build_mirror_cell",
+    "wilson_or_jeffreys_ci",
 ]
