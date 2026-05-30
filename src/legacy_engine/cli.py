@@ -609,27 +609,362 @@ def advise() -> None:
 
 
 @advise.command("positioning")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Override archetype classification.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--candidates",
+    "candidates_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a file listing candidate archetypes (one per line) for ranking.",
+)
+@click.option(
+    "--reserved",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Sideboard slots to reserve (for --report mode; ignored here).",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="RNG seed for deterministic MC output.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
 @_verbose
-def advise_positioning(verbose: bool) -> None:
+def advise_positioning(
+    deck: str,
+    archetype: str | None,
+    field_file: str | None,
+    candidates_file: str | None,
+    reserved: int,
+    seed: int | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
     """Score a deck's expected win rate against the weighted field."""
     _setup_logging(verbose)
-    _not_implemented("advise positioning")
+    from pathlib import Path
+
+    from legacy_engine.advisory.positioning import positioning_score, rank_decks
+    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.analytics.matchup import build_matrix
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    field_text = Path(field_file).read_text() if field_file else None
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+        matrix = build_matrix(con)
+
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, mainboard, sideboard_cards)
+            resolved_archetype = result.archetype
+            click.echo(f"Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        if candidates_file:
+            candidates = [
+                ln.strip() for ln in Path(candidates_file).read_text().splitlines()
+                if ln.strip() and not ln.startswith("#")
+            ]
+            ranking = rank_decks(matrix, field, candidates, seed=seed)
+            click.echo(f"\n=== Deck Ranking (field_source={ranking.field_source}) ===")
+            for d in ranking.decks:
+                lo, hi = ranking.s_ci[d]
+                click.echo(
+                    f"  {d:<35}  S={ranking.s_mean[d]:.3f}  "
+                    f"CI=[{lo:.3f},{hi:.3f}]  P(best)={ranking.p_best[d]:.3f}"
+                )
+        else:
+            pos = positioning_score(matrix, field, resolved_archetype, seed=seed)
+            click.echo(f"\n=== Positioning: {pos.deck_archetype} (field_source={pos.field_source}) ===")
+            click.echo(f"  S (meta-positioning): {pos.s_mean:.3f}")
+            click.echo(f"  95% CI: [{pos.s_ci[0]:.3f}, {pos.s_ci[1]:.3f}]")
+            click.echo(f"  Unweighted mean (u_bar): {pos.u_bar:.3f}")
+            click.echo(f"  MC draws: {pos.n_draws}")
+            if pos.imputed:
+                click.echo(f"  Imputed opponents ({len(pos.imputed)}): {', '.join(sorted(pos.imputed))}")
+            for w in pos.warnings:
+                click.echo(f"  [warn] {w}")
+    finally:
+        con.close()
 
 
 @advise.command("sideboard")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--reserved",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Sideboard slots reserved for flex/maindeck-overlap.",
+)
+@click.option(
+    "--solver",
+    type=click.Choice(["ilp", "greedy"], case_sensitive=False),
+    default="ilp",
+    show_default=True,
+    help="Solver to use: ilp (exact, primary) or greedy (fallback).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
 @_verbose
-def advise_sideboard(verbose: bool) -> None:
+def advise_sideboard(
+    deck: str,
+    field_file: str | None,
+    reserved: int,
+    solver: str,
+    db: str | None,
+    verbose: bool,
+) -> None:
     """Recommend a sideboard package for an expected field."""
     _setup_logging(verbose)
-    _not_implemented("advise sideboard")
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _load_field, _parse_decklist
+    from legacy_engine.advisory.sideboard import recommend_sideboard
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    mainboard, _sideboard = _parse_decklist(deck_text)
+    field_text = Path(field_file).read_text() if field_file else None
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+        pkg = recommend_sideboard(con, field, mainboard, reserved=reserved, solver=solver)
+        click.echo(f"\n=== Sideboard Recommendation (solver={pkg.solver_used}, field_source={pkg.field_source}) ===")
+        click.echo(f"  Budget: {pkg.budget}  |  Reserved: {pkg.reserved}")
+        click.echo(f"  Covered weight: {pkg.covered_weight:.4f}")
+        if pkg.cards:
+            for card, copies in sorted(pkg.cards.items(), key=lambda kv: kv[1], reverse=True):
+                click.echo(f"  {copies}x {card}")
+        else:
+            click.echo("  (no recommendations — no castable hosers for this deck's colors)")
+        click.echo(f"  Note: {pkg.heuristic_note}")
+        for w in pkg.warnings:
+            click.echo(f"  [warn] {w}")
+    finally:
+        con.close()
 
 
 @advise.command("whattoplay")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Override archetype classification.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
 @_verbose
-def advise_whattoplay(verbose: bool) -> None:
+def advise_whattoplay(
+    deck: str,
+    archetype: str | None,
+    field_file: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
     """Field read and deck recommendation."""
     _setup_logging(verbose)
-    _not_implemented("advise whattoplay")
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist, _render_whattoplay
+    from legacy_engine.advisory.whattoplay import proactivity_score, vulnerability_tags_for_deck
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    field_text = Path(field_file).read_text() if field_file else None
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, mainboard, sideboard_cards)
+            resolved_archetype = result.archetype
+            click.echo(f"Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        from legacy_engine.advisory.report import FieldReadReport
+        from legacy_engine.advisory.whattoplay import best_deck_vs_best_call, field_vulnerability_tags, hate_equity
+        from legacy_engine.analytics.matchup import build_matrix
+
+        matrix = build_matrix(con)
+        archetype_tags = field_vulnerability_tags(con, field)
+        field_vuln_profile = hate_equity(field, archetype_tags)
+
+        proactivity = proactivity_score(con, mainboard, archetype_tag=resolved_archetype)
+        deck_vuln = vulnerability_tags_for_deck(con, mainboard)
+
+        # Build a minimal report shell for the renderer
+        from legacy_engine.advisory.sideboard import SideboardPackage
+        from legacy_engine.advisory.sideboard import PickTrace
+        dummy_sb = SideboardPackage(
+            cards={}, trace=[], covered_weight=0.0, budget=15, reserved=0,
+            solver_used="none", field_source=field.field_source,
+            heuristic_note="(not computed in whattoplay mode)", warnings=(),
+        )
+
+        from legacy_engine.advisory.whattoplay import BestDeckCall
+        bdc = best_deck_vs_best_call(matrix, field, resolved_archetype)
+
+        report = FieldReadReport(
+            deck_archetype=resolved_archetype,
+            field_source=field.field_source,
+            field_shares=dict(field.shares),
+            field_vuln_profile=field_vuln_profile,
+            positioning=None,
+            proactivity=proactivity,
+            vulnerability=deck_vuln,
+            best_deck_call=bdc,
+            sideboard=dummy_sb,
+            audit=[],
+            warnings=(),
+        )
+        click.echo(_render_whattoplay(report))
+    finally:
+        con.close()
+
+
+@advise.command("report")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Override archetype classification.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--reserved",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Sideboard slots reserved for flex/maindeck-overlap.",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="RNG seed for deterministic MC output.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def advise_report(
+    deck: str,
+    archetype: str | None,
+    field_file: str | None,
+    reserved: int,
+    seed: int | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Full Field Read & Deck Recommendation (positioning + what-to-play + sideboard + audit)."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import (
+        _load_field,
+        _parse_decklist,
+        build_field_read_report,
+        render_field_read,
+    )
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    field_text = Path(field_file).read_text() if field_file else None
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+        report = build_field_read_report(
+            con,
+            mainboard,
+            sideboard_cards,
+            field,
+            archetype=archetype,
+            reserved=reserved,
+            seed=seed,
+        )
+        click.echo(render_field_read(report))
+    finally:
+        con.close()
 
 
 if __name__ == "__main__":
