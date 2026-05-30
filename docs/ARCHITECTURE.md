@@ -17,6 +17,11 @@ decisions:
   - "Scryfall is the shared card-dimension source with edh-engine; deck-as-data + mana + mulligan code is ported from edh-engine's goldfish/ when the Deck Mechanics pillar starts."
 created: 2026-05-29
 updated: 2026-05-29
+related:
+  - {slug: docs/VISION.md, relationship: depends-on}
+  - {slug: docs/SPEC.md, relationship: depends-on}
+  - {slug: docs/research-plan.md, relationship: parallel-to}
+  - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 ---
 
 # Architecture: legacy-engine (high-level)

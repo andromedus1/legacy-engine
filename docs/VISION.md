@@ -17,6 +17,12 @@ decisions:
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
 created: 2026-05-29
 updated: 2026-05-29
+related:
+  - {slug: docs/SPEC.md, relationship: refines}
+  - {slug: docs/ARCHITECTURE.md, relationship: refines}
+  - {slug: docs/PRINCIPLES.md, relationship: parallel-to}
+  - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+  - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
 ---
 
 # Vision: legacy-engine

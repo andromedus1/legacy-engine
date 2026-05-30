@@ -16,6 +16,8 @@ key_findings:
   - "Two genuine contradictions: (1) CARD-CONTRACT 'extend edh-engine scryfall.py' vs PRIOR-ART 'adopt Scrython/mtg_parser' (flagged by synthesis); (2) matcher cited as ~210 LOC (CLASSIFY) vs ~600 LOC (PORT) — NOT flagged by synthesis, caught by the evaluator."
   - "Riskiest unverified assumption: the golden-test fidelity gate assumes the archived C# parser's labels are obtainable — confirm before committing to ≥99% agreement as the primary risk control."
   - "Groundedness is high where it matters — CLASSIFY cites C# file:line, CARD-CONTRACT's reuse verdict was independently verified against real edh-engine source by the evaluator."
+related:
+  - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: part-of}
 ---
 
 # Campaign Report: Ingestion + Archetype-Parser Data Contracts

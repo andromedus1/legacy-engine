@@ -19,6 +19,9 @@ decisions:
   - "Advisory is first-class — 'how to attack the field' is a headline product surface, not a footnote to descriptive stats."
 created: 2026-05-29
 updated: 2026-05-29
+related:
+  - {slug: docs/VISION.md, relationship: depends-on}
+  - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
 ---
 
 # Principles: legacy-engine

@@ -17,6 +17,10 @@ decisions:
   - "Reproducibility is an NFR: deterministic given inputs+seed; all external data pre-fetched and cached; legality validated against a dated BanListSnapshot."
 created: 2026-05-29
 updated: 2026-05-29
+related:
+  - {slug: docs/VISION.md, relationship: depends-on}
+  - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
+  - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 ---
 
 # Spec: legacy-engine
