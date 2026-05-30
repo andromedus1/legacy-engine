@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-field-model
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory
 depends_on: []
@@ -274,3 +274,27 @@ archetype`; `TestX` classes). Build the global field from a real labeled corpus 
 - **`min_share=0.0` includes a long tail** of sub-1% archetypes with thin matchup data. **Mitigation**: this is
   intentional (the field is real); the n<30 matchup display gate downstream keeps thin cells honest. Callers
   wanting a headline field can raise `min_share`.
+
+## Implementation notes
+
+### Files created/modified
+- `src/legacy_engine/advisory/field.py` — new module: `_normalize_shares`, `FieldSource`, `FieldDistribution`, `build_global_field`, `build_custom_field`
+- `src/legacy_engine/advisory/__init__.py` — exports: `FieldDistribution`, `FieldSource`, `build_global_field`, `build_custom_field` + `__all__`
+- `tests/test_field_model.py` — 43 new tests across `TestNormalizeShares`, `TestBuildGlobalField`, `TestBuildCustomField`, `TestFieldDistribution`
+
+### Test count
+- Before: 344 passing
+- After: 387 passing (+43)
+
+### Deviations from spec
+- **Extra normalization warning in `build_global_field`**: When Unknown/Conflict entries are excluded, the
+  remaining shares do not sum to 1.0, so `_normalize_shares` emits an additional "custom field shares summed to…"
+  warning. This warning is technically accurate (the raw shares were 0.75 in a 3/4 example) but the message
+  wording says "custom field" in a global-field context. Rationale: the spec says `_normalize_shares` always
+  warns on sum deviation — this is a helper with a single contract. The exclusion warning already names the
+  excluded fraction. The extra normalization warning is correct but could be confusing; noted for a future
+  cleanup (e.g., suppress the norm warning in `build_global_field` when the deviation is entirely attributable
+  to Known/Conflict exclusion). No behaviour change made — left as-is to follow spec precisely.
+
+### Adjacent issues parked
+- None found. `compute_metashare` and `_is_never_other` work exactly as expected for this consumer.
