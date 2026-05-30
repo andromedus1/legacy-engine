@@ -105,8 +105,9 @@ observed → label → analytics → advisory arc.
 ### `analytics/` — Meta & Performance
 | File | Responsibility | Brief |
 |---|---|---|
-| `metashare.py` | Meta-% three labeled ways (raw count / top-cut presence / win-rate-weighted), split online/paper/blend; ≥2%-of-field inclusion. SQL over DuckDB. | ingestion-ops-and-metashare |
-| `matchup.py` | Build the matchup matrix from `rounds` joined to `archetype_labels`: per-cell `{wins, n, p_raw, p_shrunk(Wilson/Beta), ci, tier}`; mirror fixed 0.5; **matchup-n separate from metashare-n**. | advisory-methods |
+| `match_results.py` | Shared foundation: join `rounds` → archetype labels via `decks` (normalized player name within a tournament), parse the aggregate match-score string into match-level W/L, accumulate directed `(arch_a, arch_b)→{wins,losses,n}` cells + per-archetype marginal records; normalize names, drop byes/draws, surface unmatched-pairing coverage. Consumed by both `metashare` (§3c) and `matchup.py`. | ingestion-ops-and-metashare |
+| `metashare.py` | Meta-% three labeled ways (raw count / top-cut presence / win-rate-weighted via `match_results`), split online/paper/blend; ≥2%-of-field inclusion. SQL over DuckDB. | ingestion-ops-and-metashare |
+| `matchup.py` | Build the matchup matrix from `match_results`' directed cells: per-cell `{wins, n, p_raw, p_shrunk(Wilson/Beta), ci, tier}`; mirror fixed 0.5; **matchup-n separate from metashare-n**. | advisory-methods |
 | `trends.py` | Meta evolution across ban-list regimes (version-stamped). | legacy-metagame |
 | `charts.py` | matplotlib charts: tier list, meta share, matchup heatmap, trends. | (edh-engine pattern) |
 

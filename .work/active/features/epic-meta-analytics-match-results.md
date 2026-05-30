@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-match-results
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: []
@@ -308,3 +308,23 @@ None. Every unit follows the spec exactly:
 - The `DuckDBPyConnection` type hint in `_con()` in the test file uses `store.DuckDBPyConnection`
   which is actually from the `duckdb` package re-exported. The type comment uses `# type: ignore`
   to avoid a runtime AttributeError; the actual object returned is correct.
+
+## Review (2026-05-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none (the one foundation-doc finding was fixed inline — see below)
+**Nits**: dead `field` import in `match_results.py` (removed inline during review).
+
+**Notes**:
+- Implementation is an exact match to the locked design — hybrid SQL-join + Python-parse-and-tally,
+  on-demand compute, mirror carried in `coverage.mirror_matches` with honest +1/+1 marginal, both
+  directed cells materialised for symmetry. SQL is parameterised (no injection). 42 new tests cover
+  every acceptance criterion incl. mirror, unmatched coverage, draw-drop, provenance filter, cell
+  symmetry, and SQL/Python normalization parity. 171 tests green.
+- **Rolling-foundation fix applied inline**: the implementation introduced `analytics/match_results.py`,
+  which `docs/ARCHITECTURE.md`'s analytics module map didn't list (it assigned the rounds-join to
+  `matchup.py`). Rolled the doc forward — added a `match_results.py` row and noted `metashare`/`matchup`
+  now consume it. No behavioral assertion was invalidated; this was a file-decomposition refinement.
+- No findings parked as items — the two issues were both small enough to fix during review.
