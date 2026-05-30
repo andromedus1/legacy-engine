@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-banlist-snapshots
 kind: feature
-stage: drafting
+stage: done
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: [epic-foundations-card-data-package-skeleton]
@@ -40,3 +40,16 @@ only on the model base. Does NOT cover archetype labeling or analytics.
 - `docs/ARCHITECTURE.md` — `ingestion/banlist.py`, the `BanListSnapshot` model.
 - `docs/SPEC.md` — BanListSnapshot entity; version-stamped-legality NFR.
 - `docs/PRINCIPLES.md` — legality is live data; validate against a dated snapshot.
+
+## Implementation notes
+- **Files created**: `src/legacy_engine/models/banlist.py` (`BanListSnapshot` + copy-limit/basic-land/override constants), `src/legacy_engine/ingestion/banlist.py` (`BASELINE_BANS`, dated `BAN_EVENTS` 2022–2026, `banlist_as_of`, `current_banlist`, `validate_deck`); wired `seed banlist` CLI.
+- **Tests added**: `tests/test_banlist.py` — as-of-date legality + deck-construction validation. Full suite **80 passing in 0.27s**.
+- **Discrepancies from design**: none material.
+- **Bug caught during implementation**: `Entomb` was initially in both `BASELINE_BANS` and `BAN_EVENTS` — removed from baseline so as-of-date legality is correct (it must only be banned from 2025-11-10).
+- **Test debt fixed in-session**: removed `seed banlist` from `test_cli`'s not-implemented list (now wired); fixed two `test_banlist` fixtures that were themselves illegal decks (24 copies of Daze) — the validator correctly rejected them.
+- **Adjacent issues parked**: none.
+
+## Review (2026-05-29)
+**Verdict**: Approve. **Blockers/Important**: none.
+**Nits**: `BASELINE_BANS` is seeded from the brief and is extensive but not guaranteed exhaustive of every historical ban; `BAN_EVENTS` is the authoritative dated layer and is current to 2026-05-18. The Underworld Breach Legacy date is approximate (flagged in the brief) — `2025-02-01` placeholder. Category bans (conspiracy/ante/stickers/offensive) are listed but predicate-matching is left to the caller (no card-type data needed yet).
+**Notes**: as-of-date legality verified across four date windows; `validate_deck` covers size, 4-of (with basic/override exemptions), and ban checks. Legality is the version-stamped blacklist, NOT Scryfall's flag (PRINCIPLES #5). 80 tests green.

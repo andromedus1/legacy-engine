@@ -85,9 +85,12 @@ def seed_rules(verbose: bool) -> None:
 @seed.command("banlist")
 @_verbose
 def seed_banlist(verbose: bool) -> None:
-    """Refresh the dated ban-list snapshots."""
+    """Report the current Legacy ban-list snapshot."""
     _setup_logging(verbose)
-    _not_implemented("seed banlist")
+    from legacy_engine.ingestion.banlist import current_banlist
+
+    snap = current_banlist()
+    click.echo(f"Legacy ban list as of {snap.as_of}: {len(snap.banned)} cards banned")
 
 
 # ── refresh: incremental update of mirrored sources ──
