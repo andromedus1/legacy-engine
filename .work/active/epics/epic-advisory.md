@@ -35,6 +35,13 @@ player actually uses. Does NOT cover simulation (goldfish) or deck generation.
 - `docs/SPEC.md` — SideboardPackage entity; the advisory MVP capabilities.
 - `docs/PRINCIPLES.md` — advisory is first-class; confidence-gate (BEST-CALL only on established/evolving data).
 
+## Design decisions
+*(Captured via `/epic-design --only-questions`, 2026-05-29 — locked inputs for the feature-design pass; do not re-ask.)*
+- **MVP scope:** **Full Field-Read & Deck-Recommendation report.** Build the whole surface — field composition + vulnerability profile, decks ranked by meta-positioning score, a recommended 15-card sideboard package, and an audit trail (every figure with derivation + sample size). It's the differentiator pillar and directly serves the project goal "how to attack the meta."
+- **Sideboard solver:** **ILP default + greedy explanation.** PuLP/CBC computes the exact-optimal 15; the greedy marginal-gain trace is surfaced alongside as the legible "why each card." (Brief's recommendation.)
+- **Custom field:** **Included in the MVP.** Ship user-supplied expected-field input (archetype→share map; auto-normalize; warn on no-data archetypes) from the start — the "best metagame call for MY room" headline feature, not just global-meta scoring.
+- **(Pinned by advisory-methods brief, not forks):** matchup cells = Wilson CI + Beta-Binomial shrinkage + n<30 display gate; positioning = Bayesian Monte-Carlo (Beta cells + Dirichlet shares), rank by probability-of-being-best, report S *and* the unweighted aggregate (best-call vs best-deck); confidence-gate everything.
+
 ## Anticipated child features
 - Meta-positioning score (Bayesian MC: Beta cells + Dirichlet shares; custom field; rank by P(best); report S and unweighted aggregate)
 - Sideboard recommender (weighted submodular max-coverage; PuLP ILP + greedy fallback; bounded-integer copies; color pre-filter; anti-hate pseudo-elements)
