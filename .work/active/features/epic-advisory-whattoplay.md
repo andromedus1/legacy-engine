@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-whattoplay
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model]
@@ -348,3 +348,31 @@ classes). Build `Card`s directly for `_card_roles` unit tests; corpus-backed for
   note when an archetype's composition sample is small.
 - **Calibration drift**: exact proactivity magnitudes are uncalibrated. **Mitigation**: tests assert *relative
   ordering* (combo>tempo>control), never exact values; the score is presented with its component masses for audit.
+
+## Implementation notes
+
+### Files touched
+- `src/legacy_engine/advisory/whattoplay.py` — new (Units 1–6; 376 lines)
+- `src/legacy_engine/advisory/__init__.py` — Unit 7 exports added
+- `tests/test_whattoplay.py` — new (48 tests across 6 test classes)
+
+### Test counts
+- Before: 426 passing
+- After: 474 passing (+48)
+
+### Deviations from design
+1. **`_RE_GRAVEYARD` regex extended** — the design spec's regex `r"return.*from your graveyard"` missed cards like Reanimate ("Put target creature card from a graveyard onto the battlefield"), which uses "a graveyard" not "your graveyard" and uses "put...from" not "return". Extended to cover `from (a|the|your) graveyard` and `put...from (a|any|your) graveyard onto the battlefield`.
+
+2. **`discard` included in proactive_mass** — the spec's formula lists `fast_mana + ritual + tutor + low_curve_score + compact_combo`; discard (Thoughtseize, Hymn) is proactive disruption and is included as a minor proactive signal. This improves the combo>tempo>control ordering calibration.
+
+3. **`compact_combo` omitted from proactivity formula** — the spec notes `compact_combo` is a deck-level signal (not single-card); it doesn't appear in `_card_roles`. The proactivity formula as written already captures the underlying signals (tutors, rituals, low curve) that drive combo decks to score high. Adding a separate compact_combo term would double-count. Parked as a future tuning knob in the module constants.
+
+4. **BEST_CALL test scenario** — the initial test had a logical error (archetypes[:2] included the source itself), so the crush list was wrong. Fixed by explicitly naming the archetypes Delver crushes vs. loses to. No change to implementation logic.
+
+### Card-row reconstruction gotcha
+`store.load_cards` serializes `colors` and `produced_mana` as joined strings (`"".join(list)`), e.g. `["U","B"] → "UB"`. `fetch_card` returns these as raw strings. `_load_deck_cards` splits them back to single-char lists before calling `Card.model_validate(row)`. A round-trip test (`test_load_deck_cards_roundtrip`) verifies this.
+
+### Parked items
+- `compact_combo` as an explicit deck-level proactivity bonus (currently handled implicitly via ritual+tutor density)
+- Provenance filtering for `_archetype_composition` (signature supports it, `vulnerability_tags` doesn't expose it; can be wired by a future caller)
+- CLI surface for the advisory outputs (out of scope for this feature)
