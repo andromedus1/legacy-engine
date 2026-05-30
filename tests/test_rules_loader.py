@@ -66,6 +66,24 @@ def test_unknown_type_in_variant_fails_fast(tmp_path):
         load_ruleset(_build_rules(tmp_path, extra_archetype=bad))
 
 
+def test_trailing_comma_tolerated(tmp_path):
+    """Some hand-maintained MTGOFormatData files carry trailing commas (e.g. Dredge/Stompy fallbacks).
+
+    Regression: strict json.loads crashed the whole label run; load_ruleset must recover the archetype.
+    """
+    legacy = tmp_path / "Formats" / "Legacy"
+    (legacy / "Archetypes").mkdir(parents=True)
+    (legacy / "Fallbacks").mkdir(parents=True)
+    # Trailing comma after the last array element + after the last object member.
+    (legacy / "Fallbacks" / "Dredge.json").write_text(
+        '{\n  "Name": "Dredge",\n  "CommonCards": [\n    "Cabal Therapy",\n    "Narcomoeba",\n  ],\n}'
+    )
+    rs = load_ruleset(tmp_path)
+    assert any(fb.name == "Dredge" for fb in rs.fallbacks)
+    dredge = next(fb for fb in rs.fallbacks if fb.name == "Dredge")
+    assert dredge.common_cards == ["Cabal Therapy", "Narcomoeba"]
+
+
 def test_empty_rules_dir(tmp_path):
     rs = load_ruleset(tmp_path)  # no Formats/Legacy tree
     assert rs.archetypes == [] and rs.fallbacks == []
