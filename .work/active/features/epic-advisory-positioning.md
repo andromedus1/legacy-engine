@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-positioning
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model]
@@ -301,3 +301,38 @@ arithmetic assertions, corpus-backed for the seam). All MC tests pin `seed`.
   **Mitigation** — explicit renormalize when `include_mirror=False`, asserted by a test.
 - **Performance**: ~20k×~40 per deck × many candidates in `rank_decks`. **Mitigation** — fully vectorized numpy;
   shared-field matrix sampled once. Microsecond-scale per the brief; not a real risk at MVP corpus size.
+
+## Implementation notes
+
+### Files touched
+- `src/legacy_engine/advisory/positioning.py` — new (Units 1–5: `_row_winrate_inputs`, `_sample_S`,
+  `PositioningResult`, `positioning_score`, `DeckRanking`, `rank_decks`, `delta_var_S`)
+- `src/legacy_engine/advisory/__init__.py` — added 5 exports (`positioning_score`, `rank_decks`,
+  `PositioningResult`, `DeckRanking`, `delta_var_S`) to `__all__`
+- `tests/test_positioning.py` — new; 39 tests across 5 test classes
+
+### Test count
+- Before: 387 passing
+- After: 426 passing (+39)
+- All existing tests remain green.
+
+### Deviations with rationale
+1. **`PositioningResult` placed in `advisory/positioning.py` not `models/`** — as documented in the
+   design decisions: it holds numpy arrays (awkward with Pydantic), mirrors the `MatchupMatrix`/
+   `MetaShareReport` convention for computed analytic records. Deviation logged in spec.
+2. **No-data imputation uses `n==0 OR cell absent` check** — `_row_winrate_inputs` checks
+   `cell.n > 0` (not just cell presence). An n=0 cell emitted by `build_matrix` for unobserved
+   pairs is correctly treated as no-data, matching the matrix builder's rectangular guarantee.
+3. **`field.no_data` archetypes also merged into `result.imputed`** — custom fields carry
+   `no_data` from `build_custom_field`; these are folded into the imputed set so warnings are
+   complete even when the matrix row does have a cell (but the field flagged those archetypes
+   as data-absent upstream).
+4. **`_sample_S` builds the Beta matrix with a Python loop over m columns** — the design note
+   says "vectorize with broadcasting" but m≤40, so a loop over columns is equivalent to
+   broadcasting without the shape-contortion complexity. Each column is already vectorized over
+   n_draws via `rng.beta(..., size=n_draws)`. The outer loop is O(m) not O(n_draws).
+
+### Parked items
+- CLI surface (`advisory position <archetype>`) — out of scope for this feature; belongs to the
+  `report` feature downstream.
+- `include_mirror=False` is implemented and tested but not exposed in the CLI path yet.
