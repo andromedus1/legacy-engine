@@ -7,7 +7,7 @@
 schema_version: 2
 generated_at: 2026-05-29T00:00:00Z
 generated_from: frontmatter
-total_docs: 16
+total_docs: 17
 
 documents:
   # ── Planning ──────────────────────────────────────────────────────────────
@@ -66,6 +66,15 @@ documents:
     status: draft
     research_method: /research
     consumer_hint: "What is the current Legacy metagame (2026) — tier list, archetype mechanics & goldfish speeds, data sources, and how to attack the field? Read before designing meta-ingestion, the matchup model, or the meta-speed metric."
+
+  - path: docs/briefs/advisory-methods.md
+    title: "Brief: Advisory Statistics & Optimization Methods"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /research
+    consumer_hint: "What statistical and optimization methods power the Meta Attack/Advisory pillar — matchup-matrix estimation, the meta-positioning score, the sideboard recommender, and the what-to-play advisor? Read before designing the advisory/ module."
 
   # ── Research: ingestion-archetype-contracts campaign ────────────────────────
 
