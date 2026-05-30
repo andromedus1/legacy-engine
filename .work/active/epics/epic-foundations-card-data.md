@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data
 kind: epic
-stage: implementing
+stage: done
 tags: [ingestion]
 parent: null
 depends_on: []
@@ -62,3 +62,16 @@ ban-list running in parallel off the skeleton.
 - `card-model-scryfall` Card-model scope could balloon — constrain to the contract brief's named fields.
 - `card-derivations` and `card-model-scryfall` are adjacent (Card + its derived fields); if `card-derivations` proves thin at feature-design it may merge upward.
 - `duckdb-store` forward-declares tournament-data tables it doesn't populate — define only `cards` fully now; the tournament-ingestion epic owns the rest.
+
+## Epic review (2026-05-29) — Children complete
+
+All 5 child features at `stage: done`. **Verdict: Approve — epic delivered as briefed.**
+
+Aggregate capability check: the foundations capability works end-to-end — `legacy seed cards`
+downloads the Scryfall oracle bulk, builds the whole-pool name index, and materializes the DuckDB
+`cards` table; `Card` resolves typed; `compute_deck_colors` + Legacy tags derive correctly;
+`legacy seed banlist` reports the version-stamped ban list and `validate_deck` enforces construction
+rules. **80 tests green.** Project patterns established and codified (`.agents/skills/patterns/`).
+
+No cross-cutting concerns, no foundation-doc drift, no breaking-change surface (greenfield). Unblocks
+the next epic in the chain (`epic-tournament-ingestion`).
