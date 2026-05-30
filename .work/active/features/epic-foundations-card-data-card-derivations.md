@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-card-derivations
 kind: feature
-stage: implementing
+stage: done
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: [epic-foundations-card-data-card-model-scryfall]
@@ -67,3 +67,14 @@ guild/shard/wedge label (e.g. `"UB" → "Dimir"`, `"UBR" → "Grixis"`); mono �
 ## Testing
 - `tests/test_colors.py` — intersection logic, ordering, guild names (TestComputeDeckColors, TestGuildName).
 - `tests/test_card_tags.py` — is_free_spell positive/negative; mana_base_tags per land kind; staple_role hits + miss. Build `Card`s via inline construction (small) or the factory idiom.
+
+## Implementation notes
+- **Files created**: `src/legacy_engine/colors.py` (`compute_deck_colors`, `guild_name`, WUBRG + full guild/shard/wedge table), `src/legacy_engine/card_tags.py` (`is_free_spell`, `mana_base_tags`, `staple_role` + curated table). Pure functions over `Card`.
+- **Tests added**: `tests/test_colors.py`, `tests/test_card_tags.py` — full suite **65 passing in 0.08s**.
+- **Discrepancies from design**: none material.
+- **Adjacent issues parked**: none.
+
+## Review (2026-05-29)
+**Verdict**: Approve. **Blockers/Important**: none.
+**Nits**: `mana_base_tags`/`is_free_spell` are heuristic (oracle-text regex) — adequate for tagging; the curated `staple_role` table is the authoritative source for known staples and can be extended as the meta shifts. The fetchland heuristic leans on "land" appearing in fetched type words (e.g. "Island" contains "land") — works, but a future hardening could match basic-land-type names explicitly.
+**Notes**: `compute_deck_colors` correctly implements the land∩nonland intersection (NOT color_identity) — the load-bearing input for the archetype classifier's color prefix. 65 tests green. Patterns followed (card-layer pure functions).
