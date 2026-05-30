@@ -41,7 +41,7 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
         # ("seed", "cards") is implemented (see test_scryfall); the rest remain stubs.
         (["seed", "cache"], "seed cache"),
         (["seed", "rules"], "seed rules"),
-        (["seed", "banlist"], "seed banlist"),
+        # ("seed", "banlist") is implemented (see test_banlist); the rest remain stubs.
         (["refresh"], "refresh"),
         (["label"], "label"),
         (["report", "meta"], "report meta"),
