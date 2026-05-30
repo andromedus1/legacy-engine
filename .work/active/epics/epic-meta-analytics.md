@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics
 kind: epic
-stage: drafting
+stage: implementing
 tags: [analytics]
 parent: null
 depends_on: [epic-tournament-ingestion, epic-archetype-classifier]
@@ -36,8 +36,42 @@ Does NOT cover the positioning score, sideboard recommender, or what-to-play adv
 - `docs/SPEC.md` — MatchupCell entity; confidence-gating + source-transparency NFRs.
 - `docs/PRINCIPLES.md` — never an unlabeled meta-%; confidence-gate every stat.
 
-## Anticipated child features
-- Meta-share computation (3 definitions, online/paper/blend, ≥2% inclusion) over DuckDB
-- Matchup matrix (Rounds → cells; Wilson CI + Beta-Binomial shrinkage + tiers; mirror=50%; n separation)
-- Trends across ban-list regimes (version-stamped)
-- Charts (tier list, meta share, matchup heatmap, trends)
+## Decomposition
+
+Split by **capability**, with one shared **foundation feature extracted**. The provisional sketch had
+four arcs (metashare, matchup, trends, charts) mapping 1:1 to the architecture's `analytics/` files. The
+realized shape adds a fifth, `match-results`, pulled out in front of metashare and matchup: both the
+win-rate-weighted meta-share (§3c) and every matchup cell need the same rounds→archetype match-outcome
+join — including the player-name normalization the ops brief flags as the weak link. Extracting it once
+removes duplication and lets metashare and matchup-matrix parallelize. Trends reuses metashare's
+per-window computation; charts is the terminal rendering + CLI-wiring sink over all three producers.
+
+The dependency graph is a clean DAG (`match-results` source → `charts` sink), so autopilot can run
+metashare ∥ matchup-matrix after the foundation lands.
+
+### Child features
+
+- `epic-meta-analytics-match-results` — rounds→archetype match-outcome join, player-name normalization, result-string parsing (match-level W/L), byes/draws handling, per-pair + per-archetype raw aggregates; surfaces unmatched-pairing coverage — depends on: `[]`
+- `epic-meta-analytics-metashare` — three labeled meta-% definitions (raw / top-cut / win-rate-weighted), online/paper/blend split, ≥2% inclusion floor, confidence tiers; wires `report meta` — depends on: `[epic-meta-analytics-match-results]`
+- `epic-meta-analytics-matchup-matrix` — `MatchupCell`s from the raw aggregates: Wilson CI + Beta-Binomial shrinkage + confidence tiers (n<30 display gate) + mirror=50% + matchup-n separation + bimodal caveat; wires `report matchups` — depends on: `[epic-meta-analytics-match-results]`
+- `epic-meta-analytics-trends` — version-stamped meta-share evolution segmented by ban-list regime; window gating — depends on: `[epic-meta-analytics-metashare]`
+- `epic-meta-analytics-charts` — matplotlib tier list / meta share / matchup heatmap / trends, confidence rendered honestly; wires the `report` CLI output surface — depends on: `[epic-meta-analytics-metashare, epic-meta-analytics-matchup-matrix, epic-meta-analytics-trends]`
+
+## Design decisions
+
+Resolved under autopilot delegation (no strategic 50/50s — all pinned by the briefs / architecture /
+codebase; logged here so each feature-design pass inherits them):
+
+- **Match-result granularity**: match-level W/L, not game-level. `rounds.result` ("2-1") is an aggregate match score, not per-game winners — count one match win for the winner. *(ops brief §4.2, explicit.)*
+- **rounds↔decks join key**: normalized `player` name within a `tournament_id` (the only available key); pairings that don't resolve to a labeled deck → surfaced `unmatched` coverage count, never silently dropped. Byes/draws/forfeits dropped from win-rate accumulation. *(ops brief §4.4 + project never-drop-silently convention.)*
+- **Win-rate-weighted meta-share couples to the foundation**: metashare §3c consumes `match-results`' per-archetype win/loss; §3a/§3b are pure deck counts. Hence the `metashare → match-results` edge.
+- **Confidence display gate = n<30** (hide rate, show n), 30–99 evolving (flagged), ≥100 established — advisory-methods resolves the ops brief's n<100 *down* to n<30 (n<100 is the *established* floor; 30–99 carries usable directional signal the CI honestly bounds). Reuse `confidence.tier_for_sample`.
+- **MatchupCell ownership**: lives in `models/` (per architecture). `match-results` emits raw `{wins, losses, n}` aggregates; `matchup-matrix` produces the full `MatchupCell {p_raw, p_shrunk, ci, tier}`.
+- **Charts is a separate terminal feature** (matches architecture's `charts.py`) depending on all three data producers — rather than per-feature rendering — so the `report` CLI surface and confidence-honest rendering live in one place.
+- **Matchup trends deferred** from `trends` (MVP = meta-share trends only): per-regime matchup sample is too sparse to present honestly; revisit post-MVP.
+
+## Decomposition risks
+
+- **Player-name join coverage** (`match-results`): handles/casing/byes make the rounds↔decks join lossy; sparse joins → thin matchup cells. Mitigated by surfacing the unmatched-pairing coverage as an explicit stat (not silent), and by the n<30 display gate downstream. This is the riskiest unit — design it first within `match-results`.
+- **Bimodal coverage** is structural, not a bug: MTGO Leagues feed metashare-n but contribute zero matchup-n. The separate-aggregates design (`match-results`) and the mandatory provenance caveat (`matchup-matrix`, `charts`) contain it, but the matchup matrix will always be a smaller, challenge/paper-skewed sample — must stay labeled as such.
+- **Trends regime boundaries** depend on `BanListSnapshot` dates from the (done) ingestion epic; if B&R snapshots are sparse, regimes are coarse — acceptable for MVP.
