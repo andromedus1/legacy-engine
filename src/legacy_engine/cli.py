@@ -321,6 +321,126 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
         click.echo("  ".join(row_parts))
 
 
+@report.command("trends")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+    help="Which meta-share definition to compute per regime.",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter to online/paper events, or all (prints each basis when 'all').",
+)
+@click.option(
+    "--min-share",
+    type=float,
+    default=0.02,
+    show_default=True,
+    help="Minimum share (0..1) for an archetype to appear; sub-floor rows are omitted per regime.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_trends(
+    definition: str,
+    provenance: str,
+    min_share: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Meta-share evolution across ban-list regimes (version-stamped)."""
+    _setup_logging(verbose)
+    from legacy_engine.analytics.trends import compute_trends
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        bases: list[str | None]
+        if provenance == "all":
+            bases = [None, "online", "paper"]
+        else:
+            bases = [provenance]
+
+        for basis in bases:
+            series = compute_trends(
+                con,
+                definition=definition,
+                provenance=basis,
+                min_share=min_share,
+            )
+            _print_trend_series(series)
+    finally:
+        con.close()
+
+
+def _print_trend_series(series: "TrendSeries") -> None:
+    """Render a meta-share trend series as a trajectory table (archetypes × regimes)."""
+    from legacy_engine.analytics.trends import TrendSeries  # noqa: F401
+
+    basis_label = series.provenance if series.provenance else "all"
+    click.echo(f"\n=== Meta Trends [{series.definition.upper()}] basis={basis_label} ===")
+
+    if not series.regimes:
+        click.echo("(no events in corpus — nothing to trend)")
+        return
+
+    # Print regime sub-headers
+    for regime in series.regimes:
+        since_str = regime.since.isoformat() if regime.since else "—"
+        until_str = regime.until.isoformat() if regime.until else "current"
+        thin_banner = "  ⚠ THIN (flagged evolving)" if regime.thin else ""
+        click.echo(
+            f"  Regime: {regime.label!r}  [{since_str} → {until_str}]"
+            f"  events={regime.event_count}  span={regime.span_days}d{thin_banner}"
+        )
+
+    click.echo("")
+
+    if not series.archetypes:
+        click.echo("(no archetypes meet the inclusion threshold in any regime)")
+        return
+
+    # Build trajectory table: archetype rows × regime columns
+    # Column widths: archetype col + one col per regime (share%)
+    arch_col_w = max(len(a) for a in series.archetypes)
+    arch_col_w = max(arch_col_w, 12)
+
+    # Abbreviated regime column headers
+    regime_headers = []
+    for r in series.regimes:
+        since_str = r.since.isoformat() if r.since else "baseline"
+        regime_headers.append(since_str)
+
+    col_w = max(max(len(h) for h in regime_headers), 10)
+
+    # Header row
+    header_parts = [f"{'Archetype':<{arch_col_w}}"]
+    for h in regime_headers:
+        header_parts.append(h.rjust(col_w))
+    click.echo("  ".join(header_parts))
+    click.echo("-" * (arch_col_w + (col_w + 2) * len(series.regimes)))
+
+    for archetype in series.archetypes:
+        row_parts = [f"{archetype:<{arch_col_w}}"]
+        for regime in series.regimes:
+            cell = series.cells.get((regime.label, archetype))
+            if cell is None:
+                row_parts.append("—".rjust(col_w))
+            else:
+                thin_marker = "*" if regime.thin else " "
+                row_parts.append(f"{cell.share:>6.1%}{thin_marker}".rjust(col_w))
+        click.echo("  ".join(row_parts))
+
+
 @report.command("tiers")
 @_verbose
 def report_tiers(verbose: bool) -> None:
