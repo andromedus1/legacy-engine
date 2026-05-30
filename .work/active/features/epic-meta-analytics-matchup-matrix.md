@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-matchup-matrix
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-match-results]
@@ -315,3 +315,18 @@ House pattern (raw dicts → store → `:memory:`; manual `UPDATE decks SET arch
 - The spec's `MatchupCell.p_shrunk: float | None` documentation mentions `None when n==0 (or 0.5 prior)` — slight contradiction. When `n==0`, `p_shrunk` is `None` (not 0.5) for non-mirror cells; mirror cells always get `p_raw=p_shrunk=0.5` regardless of n. This is the correct behavior per the brief (mirror is a special case).
 - `report matchups --db` flag requires an existing file (`exists=True`). The default path (DUCKDB_PATH) may not exist in a fresh env; this is consistent with all other CLI commands that read from the DB.
 - The text matrix renderer is functional but not polished for wide terminals — this is intentional per the spec ("charts adds the heatmap later over the same matrix object").
+
+## Review (2026-05-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- Row-inclusion denominator (`matchup.py:187`): `denom = 2 * total_matches` counts only non-mirror decisive matches, but the numerator `rec.n` includes each archetype's mirror contributions (+1/+1 per mirror). Shares are thus slightly inflated when mirrors exist — affects only which archetypes clear the 2% *display threshold*, never a displayed rate. Negligible impact (mirrors are a small fraction; over-inclusion is the safe direction). Left as-is; a future refinement could use `denom = sum(rec.n for rec in mr.archetypes.values())`.
+- `build_matrix(con, ...)` lacks a `con` type annotation (other module fns type it `duckdb.DuckDBPyConnection`).
+
+**Notes**:
+- Verified the implementer's spec-vs-formula catch: `beta_binomial_shrink(120,200)=0.593` is correct per `(7.5+120)/(15+200)`; the design's `0.558` was my transcription error. Implementation correctly follows the formula. Confirmed `shrink(3,4)=0.5526`, `shrink(0,0)=0.5`, `ci(0,0)=(0.0,1.0)`, `ci(3,4)` uses Jeffreys.
+- Verified the `tests/test_cli.py` change is legitimate: `report matchups` removed only from the *not-implemented stub* parametrize; the group-help coverage test still asserts it appears under `report --help`.
+- SQL flows through `match_results`' parameterized join (no injection). CLI renders confidence honestly (low-n → "insufficient", mirror → "50% (mirror)"), carries the bimodal caveat. `MatchupCell` self-describing + Pydantic in `models/` per the locked decision. 47 tests; foundation (architecture's `matchup.py`/`MatchupCell`) already matched — no doc drift.
