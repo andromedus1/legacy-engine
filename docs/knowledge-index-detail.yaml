@@ -17,6 +17,12 @@ documents:
       - "MVP arc = ingestion + meta analytics + advisory together; goldfish and generation later."
       - "Legacy is 1v1, best-of-3, 60-card + sideboard — sideboarding and matchups are first-class."
       - "Banned-list legality is a live blacklist; version-stamp by date."
+    related:
+      - {slug: docs/SPEC.md, relationship: refines}
+      - {slug: docs/ARCHITECTURE.md, relationship: refines}
+      - {slug: docs/PRINCIPLES.md, relationship: parallel-to}
+      - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+      - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
 
   docs/SPEC.md:
     summary: |
@@ -29,6 +35,10 @@ documents:
       - "Meta-% computed under multiple definitions, always labeled online/paper/blend."
       - "Matchup cells carry sample-size + confidence; n<100 flagged."
       - "Reproducibility NFR: deterministic; data cached; legality vs dated BanListSnapshot."
+    related:
+      - {slug: docs/VISION.md, relationship: depends-on}
+      - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 
   docs/ARCHITECTURE.md:
     summary: |
@@ -41,6 +51,11 @@ documents:
       - "Ingestion consumes the fbettega cache JSON (mirrored locally), not mtgo.com directly."
       - "Biggest risk: fragile externally-owned scraper/cache layer — mirror repos, swap upstream behind ingestion/ boundary."
       - "Scryfall is the shared card dimension; goldfish code ported from edh-engine later."
+    related:
+      - {slug: docs/VISION.md, relationship: depends-on}
+      - {slug: docs/SPEC.md, relationship: depends-on}
+      - {slug: docs/research-plan.md, relationship: parallel-to}
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 
   docs/PRINCIPLES.md:
     summary: |
@@ -54,6 +69,9 @@ documents:
       - "Legality is live data — validate vs dated BanListSnapshot; version-stamp ban-affected roles."
       - "Never an unlabeled meta-% — state definition + online/paper/blend basis."
       - "Confidence-gate every derived stat; advisory is a first-class product surface; sibling-consistent, divergence-justified."
+    related:
+      - {slug: docs/VISION.md, relationship: depends-on}
+      - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
 
   docs/research-plan.md:
     summary: |
@@ -66,6 +84,11 @@ documents:
       - "Next /research: advisory statistics (matchup CI, sideboard set-cover)."
       - "Scryfall ingestion needs no research — port edh-engine's scryfall.py."
       - "Goldfish-pillar research deferred to Deck Mechanics pillar."
+    related:
+      - {slug: docs/ARCHITECTURE.md, relationship: depends-on}
+      - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
+      - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 
   docs/briefs/legacy-foundations.md:
     summary: |
@@ -123,6 +146,8 @@ documents:
       - "Two contradictions: (1) extend-edh-scryfall vs adopt-Scrython (flagged); (2) ~210 vs ~600 matcher LOC (caught by evaluator, not synthesis)."
       - "Riskiest unverified assumption: the golden-test oracle's availability — confirm before committing to ≥99% agreement as the primary risk control."
       - "Groundedness high — CARD-CONTRACT's reuse verdict independently verified against real edh-engine source."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: part-of}
 
   docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md:
     summary: |

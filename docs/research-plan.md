@@ -17,6 +17,11 @@ decisions:
   - "Goldfish-pillar research (mana-solver port, straight-London mulligan adaptation, clock calibration) is deferred to the Deck Mechanics pillar; rules grounding already exists in legacy-foundations."
 created: 2026-05-29
 updated: 2026-05-29
+related:
+  - {slug: docs/ARCHITECTURE.md, relationship: depends-on}
+  - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
+  - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+  - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
 ---
 
 # Research Plan: legacy-engine
