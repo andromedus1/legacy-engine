@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-charts
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-metashare, epic-meta-analytics-matchup-matrix, epic-meta-analytics-trends]
@@ -363,3 +363,36 @@ and **smoke-render** for the matplotlib layer.
   running in the suite.
 - **Empty / sparse inputs** (no decks, suppressed-everything matrix): **Mitigation**: every renderer
   handles empty by writing a labeled placeholder PNG rather than raising; tested.
+
+## Implementation notes
+
+A prior worker created `src/legacy_engine/analytics/charts.py` (594 lines) with all four
+prep helpers, renderers, and model dataclasses fully implemented.  This worker completed
+CLI wiring (Unit 5) and the test suite (Unit 6 was already done).
+
+### Files created
+- `tests/test_charts.py` — 48 new tests covering all six test classes from the spec.
+
+### Files modified
+- `src/legacy_engine/cli.py` — added `--chart-dir` option to `report meta`, `report matchups`,
+  `report trends`; replaced `report tiers` `_not_implemented` stub with full implementation;
+  added `_print_tier_list` and `_chart_filename` helpers.
+- `tests/test_cli.py` — removed `report tiers` from the `_not_implemented` stubs parametrize list.
+- `.work/active/features/epic-meta-analytics-charts.md` — stage `implementing → review`; these notes.
+
+### Test counts
+- Baseline: 297 passing.
+- After: 344 passing (297 baseline − 1 removed tiers-stub test + 48 new test_charts tests = 344).
+
+### Deviations from spec
+- **`_chart_filename` for matchups**: the spec example shows `matchups_all.png` (no definition
+  segment).  The `report matchups` command has no `--definition` option, so the helper drops
+  the definition segment for `kind="matchups"` and produces `matchups_{basis}.png`.  All other
+  kinds follow `{kind}_{definition}_{basis}.png` as specified.
+- **`_con()` helper in tests**: the spec did not call out that `:memory:` connections need
+  `init_schema` called explicitly (unlike file-based connections loaded via `store.load_tournament`).
+  The helper was updated to call `init_schema` so empty-corpus tests work correctly; no behaviour
+  change to production code.
+
+### Adjacent issues parked
+- None identified.

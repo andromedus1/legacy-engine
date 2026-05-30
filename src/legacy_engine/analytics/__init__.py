@@ -1,5 +1,15 @@
 """Meta & performance analytics — meta-share, matchup matrix, trends, charts."""
 
+from legacy_engine.analytics.charts import (
+    BarModel,
+    HeatmapModel,
+    TierModel,
+    TrendModel,
+    render_matchup_heatmap,
+    render_metashare,
+    render_tier_list,
+    render_trends,
+)
 from legacy_engine.analytics.match_results import (
     ArchetypeRecord,
     MatchCoverage,
@@ -34,6 +44,16 @@ from legacy_engine.analytics.trends import (
 )
 
 __all__ = [
+    # charts
+    "BarModel",
+    "HeatmapModel",
+    "TierModel",
+    "TrendModel",
+    "render_matchup_heatmap",
+    "render_metashare",
+    "render_tier_list",
+    "render_trends",
+    # match_results
     "ArchetypeRecord",
     "MatchCoverage",
     "MatchOutcome",
