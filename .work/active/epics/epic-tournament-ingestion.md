@@ -1,7 +1,7 @@
 ---
 id: epic-tournament-ingestion
 kind: epic
-stage: implementing
+stage: done
 tags: [ingestion]
 parent: null
 depends_on: [epic-foundations-card-data]
@@ -51,3 +51,16 @@ the parser keeps raw names, the analytics layer joins to the `cards` table).
 ### Decomposition risks
 - Mirror/git operations must be isolated behind a thin function so tests drive discovery/load from fixtures, never a live clone.
 - The `decks`↔`rounds` player join keys on player name strings (the cache's only link) — tolerate missing/duplicate names gracefully.
+
+## Epic review (2026-05-29) — Children complete
+
+All 3 child features `done`. **Verdict: Approve — epic delivered as briefed.**
+
+Aggregate capability check: `legacy seed cache` mirrors the fbettega repo (git clone/pull, isolated
+behind an injected runner), discovers Legacy events across the `Tournaments/<Source>/...` tree
+(filtering non-Legacy), parses each `CacheItem` into typed models (provenance derived, League
+empty-rounds handled), and loads them idempotently into the DuckDB tournament tables
+(tournaments/decks/deck_cards/rounds/standings). **105 tests green.** No cross-cutting concerns; reused
+the foundations Card/store patterns cleanly; no foundation-doc drift.
+
+Unblocks `epic-archetype-classifier` (the next epic — now ready to label the ingested decks).
