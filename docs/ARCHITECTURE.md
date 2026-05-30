@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-05-29
+updated: 2026-05-30
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -175,7 +175,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ## Conventions
 - **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/` (+ deferred `goldfish/ generation/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
-- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers`, `advise positioning|sideboard|whattoplay`); lazy imports inside commands; `_setup_logging(verbose)` first.
+- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends`, `advise positioning|sideboard|whattoplay`); lazy imports inside commands; `_setup_logging(verbose)` first.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.
