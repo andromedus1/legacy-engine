@@ -32,7 +32,8 @@ for how it's built.
 
 ## Status
 
-MVP in progress — the **observed-data spine and meta analytics** are built and tested:
+MVP — the **observed-data spine, meta analytics, and the advisory differentiator** are built and tested
+(577 passing tests):
 
 | Capability | State |
 |---|---|
@@ -41,9 +42,12 @@ MVP in progress — the **observed-data spine and meta analytics** are built and
 | Archetype classifier (ported MTGOArchetypeParser) | ✅ built |
 | Meta-share (3 definitions, online/paper) | ✅ built |
 | Matchup matrix (Wilson/Jeffreys CI + Beta-Binomial shrinkage + confidence tiers) | ✅ built |
-| Meta trends across ban-list regimes | 🔨 in progress |
-| Charts (tier list, meta-share, matchup heatmap) | 🔨 in progress |
-| Advisory (positioning, sideboard, what-to-play) | 📋 designed, not built |
+| Meta trends across ban-list regimes (version-stamped) | ✅ built |
+| Charts (tier list, meta-share, matchup heatmap, trends) | ✅ built |
+| Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck) | ✅ built |
+| Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate) | ✅ built |
+| What-to-play (proactivity, vulnerability tags, hate-equity, best-deck/best-call) | ✅ built |
+| Field Read & Deck Recommendation report (the `advise` surface) | ✅ built |
 | Goldfish simulation, deck generation | 📋 deferred pillars |
 
 ## Architecture in one breath
@@ -89,14 +93,22 @@ legacy-engine label
 # Meta & performance reports
 legacy-engine report meta       # meta-share (raw / top-cut / win-rate-weighted; online vs paper)
 legacy-engine report matchups   # archetype matchup matrix with confidence intervals
-legacy-engine report tiers      # tier list (planned)
+legacy-engine report tiers      # S/A/B tier list over meta-share
+legacy-engine report trends     # meta-share evolution across ban-list regimes
+# any report command takes --chart-dir DIR to also emit matplotlib PNGs
 
-# Meta attack / advisory (planned)
-legacy-engine advise positioning | sideboard | whattoplay
+# Meta attack / advisory — "how to attack the field"
+legacy-engine advise positioning --deck my.txt   # expected WR vs the weighted field (P(best) ranking)
+legacy-engine advise sideboard   --deck my.txt   # recommended 15-card sideboard (ILP + greedy "why")
+legacy-engine advise whattoplay  --deck my.txt   # proactivity, vulnerability tags, best-deck/best-call
+legacy-engine advise report      --deck my.txt   # the full Field Read & Deck Recommendation + audit trail
+# advise commands take --field FILE (a custom "<share> <archetype>" field) and --db
 ```
 
-Each leaf takes `-v/--verbose`; `report` commands take `--provenance [online|paper|all]` and a `--db`
-path. Commands not yet implemented fail loudly rather than returning empty results.
+Each leaf takes `-v/--verbose`; `report` commands take `--provenance [online|paper|all]`, `--chart-dir`,
+and a `--db` path. Every emitted number is labeled with its definition/basis, sample size, and confidence
+tier; advisory output carries a heuristic-vs-data-driven audit trail. Commands not yet implemented fail
+loudly rather than returning empty results.
 
 ## Development
 
@@ -119,8 +131,8 @@ This project is built with a research-grounded, substrate-driven workflow:
 src/legacy_engine/
   ingestion/   # Scryfall, fbettega cache, MTGOFormatData rules, banlist, DuckDB store
   archetype/   # rules loader, matcher (ported Detect), colors, labeler
-  analytics/   # match_results, matchup, metashare  (+ trends, charts in progress)
-  advisory/    # positioning, sideboard, whattoplay  (planned)
+  analytics/   # match_results, matchup, metashare, trends, charts
+  advisory/    # field, positioning, sideboard, whattoplay, report
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, ...)
   cli.py · config.py · confidence.py
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
