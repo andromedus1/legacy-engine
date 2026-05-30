@@ -3,61 +3,77 @@
 # Provides corpus situational awareness only. Read knowledge-index.yaml for full index.
 
 schema_version: 3
-generated_at: 2026-05-29T00:00:00Z
+generated_at: 2026-05-30T00:00:00Z
 generated_from: frontmatter
-total_docs: 17
+total_docs: 18
 
 by_kind:
   planning: 5
-  research: 12
+  research: 13
 
-# Top high-signal docs (planning + research hubs; the 7 campaign specialist briefs
-# are reachable via their parent.md and omitted here to avoid flooding).
 recent:
-  - path: docs/VISION.md
-    title: "Vision: legacy-engine"
-    kind: planning
-    updated: 2026-05-29
-  - path: docs/briefs/ingestion-archetype-contracts/parent.md
-    title: "Ingestion + Archetype-Parser Data Contracts (campaign synthesis)"
-    kind: research
-    updated: 2026-05-29
   - path: docs/ARCHITECTURE.md
-    title: "Architecture: legacy-engine (high-level)"
+    title: 'Architecture: legacy-engine'
+    kind: planning
+    updated: 2026-05-30
+  - path: docs/briefs/deck-generation-and-moxfield.md
+    title: 'Brief: Deck Generation & Moxfield Surfacing'
+    kind: research
+    updated: 2026-05-30
+  - path: docs/PRINCIPLES.md
+    title: 'Principles: legacy-engine'
     kind: planning
     updated: 2026-05-29
   - path: docs/SPEC.md
-    title: "Spec: legacy-engine"
+    title: 'Spec: legacy-engine'
     kind: planning
     updated: 2026-05-29
-  - path: docs/PRINCIPLES.md
-    title: "Principles: legacy-engine"
+  - path: docs/VISION.md
+    title: 'Vision: legacy-engine'
     kind: planning
-    updated: 2026-05-29
-  - path: docs/research-plan.md
-    title: "Research Plan: legacy-engine"
-    kind: planning
-    updated: 2026-05-29
-  - path: docs/briefs/legacy-metagame.md
-    title: "Brief: Legacy Metagame (2026)"
-    kind: research
-    updated: 2026-05-29
-  - path: docs/briefs/legacy-foundations.md
-    title: "Brief: Legacy Format Foundations"
-    kind: research
     updated: 2026-05-29
   - path: docs/briefs/advisory-methods.md
-    title: "Brief: Advisory Statistics & Optimization Methods"
+    title: 'Brief: Advisory Statistics & Optimization Methods'
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
+    title: 'Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)'
     kind: research
     updated: 2026-05-29
   - path: docs/briefs/ingestion-archetype-contracts/campaign.md
-    title: "Campaign Report: Ingestion + Archetype-Parser Data Contracts"
+    title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
+    title: "C#\u2192Python Port Strategy for the Archetype Classifier"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+    title: "Brief: fbettega Tournament-Data Cache \u2014 Schema & Ingestion Contract"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
+    title: 'Brief: Ingestion Operations & Meta-Share Computation'
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
+    title: "Brief: Badaro/MTGOFormatData \u2014 The Archetype Rule Schema (Legacy)"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/parent.md
+    title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
+    title: "Brief: Prior-Art Scan \u2014 Ingestion & Archetype Classification"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
+    title: 'Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier'
     kind: research
     updated: 2026-05-29
 
-# Docs flagged with nav_priority: high in frontmatter
 load_bearing: []
 
-# On-demand layers (Read tool):
 full_index_path: docs/knowledge-index.yaml
 detail_index_path: docs/knowledge-index-detail.yaml
