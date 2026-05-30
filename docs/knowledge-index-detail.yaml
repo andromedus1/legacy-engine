@@ -115,6 +115,26 @@ documents:
       - "Aggregators 403-block bots; meta-% computed differently per source; online/paper diverge — compute % yourself, labeled."
       - "Universal constant: graveyard hate + free counters in every sideboard."
 
+  docs/briefs/advisory-methods.md:
+    summary: |
+      Methods brief for the advisory/ module. Pins matchup-matrix estimation (Wilson CIs, Beta-Binomial
+      shrinkage, confidence tiers, bimodal-coverage caveat), the meta-positioning score with Bayesian
+      Monte-Carlo uncertainty (Beta cells + Dirichlet shares) and best-deck-vs-best-call, the sideboard
+      recommender as weighted submodular max-coverage (ILP primary + greedy fallback, anti-hate second
+      order), and the what-to-play advisor (composition-derived proactivity, plan-clash heuristics,
+      vulnerability-tag hate-equity).
+    key_findings:
+      - "Matchup cells: Wilson CI default (Jeffreys n<=40); Beta-Binomial shrinkage to 50% (alpha+beta~10-20); mirror fixed 50%; always show n. Tiers: speculative n<30 (hide rate), evolving 30-99, established >=100. Display gate n<30."
+      - "Bimodal-coverage caveat: matchups only from rounds-bearing events (Challenges+paper); keep matchup-n separate from metashare-n, never conflate."
+      - "Positioning S(D)=Σ w_a·winrate = expected WR vs weighted field; Bayesian MC (Beta cells + Dirichlet shares) primary; rank by probability-of-being-best from shared-field draws; always report S AND unweighted aggregate (best-call vs best-deck)."
+      - "Sideboard recommender = weighted MAX-COVERAGE (15-slot budget), submodular saturating value; ILP (PuLP/CBC) exact primary + greedy (1-1/e) explainable fallback; bounded-integer copies; color pre-filter; anti-hate counter-hosers as expected-opposing-hate pseudo-elements (unified pass)."
+      - "What-to-play: composition-derived proactivity score; vulnerability tags (graveyard-reliant/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant); hate-equity = field share each tag exposes (coverage not sum); best-deck (low matchup-spread) vs best-call (high-spread gamble)."
+      - "No published sideboard-as-optimization prior art (NIU thesis 403, flag for manual pull); OR theory (max-coverage/NWF-1978 submodular greedy) is load-bearing."
+    related:
+      - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md, relationship: depends-on}
+      - {slug: docs/ARCHITECTURE.md, relationship: refines}
+
   docs/briefs/ingestion-archetype-contracts/parent.md:
     summary: |
       Synthesizes the 7-specialist campaign into one buildable design for the ingestion/ and archetype/
