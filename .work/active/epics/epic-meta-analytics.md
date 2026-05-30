@@ -1,14 +1,14 @@
 ---
 id: epic-meta-analytics
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics]
 parent: null
 depends_on: [epic-tournament-ingestion, epic-archetype-classifier]
 release_binding: null
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 ---
 
 # Meta & Performance Analytics
@@ -75,3 +75,14 @@ codebase; logged here so each feature-design pass inherits them):
 - **Player-name join coverage** (`match-results`): handles/casing/byes make the rounds↔decks join lossy; sparse joins → thin matchup cells. Mitigated by surfacing the unmatched-pairing coverage as an explicit stat (not silent), and by the n<30 display gate downstream. This is the riskiest unit — design it first within `match-results`.
 - **Bimodal coverage** is structural, not a bug: MTGO Leagues feed metashare-n but contribute zero matchup-n. The separate-aggregates design (`match-results`) and the mandatory provenance caveat (`matchup-matrix`, `charts`) contain it, but the matchup matrix will always be a smaller, challenge/paper-skewed sample — must stay labeled as such.
 - **Trends regime boundaries** depend on `BanListSnapshot` dates from the (done) ingestion epic; if B&R snapshots are sparse, regimes are coarse — acceptable for MVP.
+
+## Children complete (2026-05-30)
+
+All five child features are at `stage: done`:
+- `epic-meta-analytics-match-results` — rounds→archetype join, player-name normalization, raw aggregates
+- `epic-meta-analytics-metashare` — three labeled meta-% definitions + online/paper split + confidence tiers
+- `epic-meta-analytics-matchup-matrix` — Wilson/Jeffreys CI + Beta-Binomial shrinkage + n<30 gate
+- `epic-meta-analytics-trends` — version-stamped meta-share evolution across ban-list regimes
+- `epic-meta-analytics-charts` — matplotlib tier-list / meta-share / matchup-heatmap / trends + CLI wiring
+
+Advancing epic `implementing → review` for aggregate epic-level review. Suite: 344 tests green.
