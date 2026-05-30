@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-metashare
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-match-results]
@@ -353,3 +353,18 @@ House pattern (raw dicts → `parse_cache_item` → `store.load_tournament` into
   expected to pass ungrouped reports (`group_other=False`) for blending.
 - The wrw bimodal-coverage warning (logged via `log.debug`) is per-archetype and at DEBUG level.
   Upgrading to INFO or surfacing it in the CLI output is a future additive concern.
+
+## Review (2026-05-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- `blend_shares` includes any pre-existing "Other" row if passed grouped reports; the implementer documents the contract as "pass `group_other=False` for blending." Reasonable but slightly fragile — a future guard could `assert` ungrouped inputs or strip "Other". Left as-is (blend is opt-in/advanced).
+- wrw bimodal-coverage gap is logged at DEBUG per-archetype; surfacing it in the CLI report would make the bimodal caveat more visible (additive, future).
+
+**Notes**:
+- Verified the flagged `display_total` deviation is sound: wrw weights are renormalised to sum to 1 (so `total=1` makes `share=value`), and `display_total=sum(matchup_n)` surfaces the honest match-sample basis as `total_decks` rather than a meaningless `1`. Correct fix, well-reasoned.
+- All three definitions always carry `(definition, provenance)` labels (PRINCIPLES #6); blend is opt-in and labeled `blend(...)`. `Unknown`/`Conflict(...)` correctly excluded from the "Other" fringe bucket (`_is_never_other`). NULL-archetype decks excluded from denominators and surfaced via `unlabeled`.
+- All SQL parameterized (`?` for provenance/cut_size) — no injection. §3c win-rate consumed from `compute_match_results(...).archetypes` (matchup-n), distinct from deck-count n; wrw entry tiers use matchup-n — honest. tier via `tier_for_sample`. 41 tests; foundation (architecture's `metashare.py`) matched — no doc drift. 257 tests green.
