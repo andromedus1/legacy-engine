@@ -87,7 +87,10 @@ def seed_cache(verbose: bool) -> None:
 def seed_rules(verbose: bool) -> None:
     """Vendor the MTGOFormatData archetype rules (pinned SHA)."""
     _setup_logging(verbose)
-    _not_implemented("seed rules")
+    from legacy_engine.ingestion.rules_vendor import refresh_rules
+
+    sha = refresh_rules()
+    click.echo(f"Vendored MTGOFormatData rules @ {sha or '(sha unresolved)'}")
 
 
 @seed.command("banlist")
