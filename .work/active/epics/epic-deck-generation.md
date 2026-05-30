@@ -2,7 +2,7 @@
 id: epic-deck-generation
 kind: epic
 stage: drafting
-tags: [generation, needs-brief]
+tags: [generation]
 parent: null
 depends_on: [epic-advisory, epic-goldfish-simulation]
 release_binding: null
@@ -20,13 +20,20 @@ tune existing builds against the (current or projected) meta: the knowledge laye
 gaps, deck-mechanics knowledge constrains the build (mana, roles, consistency floor), and the matchup +
 goldfish layers validate candidates. Analytically guided, not brute force.
 
-Marked `[needs-brief]`: no research brief covers generation methods yet. Depends on both the advisory
-pillar (positioning/matchups to validate against the meta) and the goldfish pillar (consistency/clock
-validation of candidates). Bottom of the dependency graph; design only after the MVP arc and goldfish
-ship and a generation-methods brief is written.
+Brief gate satisfied (2026-05-30): `docs/briefs/deck-generation-and-moxfield.md` now covers both the
+Moxfield surfacing path and the generation/tuning approach over our existing advisory layers. Note the
+brief's finding that the **consensus-baseline + Moxfield export sub-arc can ship independently** (pure data
+aggregation, no goldfish, no advisory-heuristic dependency), while the **tune/discover modes depend_on** the
+three advisory-improvement items filed this session — `/epic-design` should likely split the epic along that
+line and may relax the hard `epic-goldfish-simulation` dependency (goldfish-validation is a later cross-pillar
+enhancement, not a blocker for consensus+export+field-tuning).
 
 ## Research briefs
-- **[needs-brief]** — a deck-generation-methods brief: gap-discovery techniques, constrained build search, candidate validation against matchups + goldfish. Run `/research-pipeline:research` (likely reuses edh-engine's deferred-optimizer thinking) before `/epic-design`.
+- `docs/briefs/deck-generation-and-moxfield.md` — **(written 2026-05-30)** Moxfield integration (no official
+  API → export-as-import, support@moxfield.com for sanctioned reads) + generation modes (consensus baseline →
+  field-tuning → gap discovery) consuming meta-share / matchup / positioning / sideboard, with the advisory
+  heuristic gaps as hard prerequisites for the tuning modes.
+- `docs/briefs/advisory-methods.md` — the positioning / matchup / sideboard methods the generator orchestrates.
 
 ## Foundation references
 - `docs/ARCHITECTURE.md` — the deferred `generation/` module (consumes advisory + goldfish outputs).
