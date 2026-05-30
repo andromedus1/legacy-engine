@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-package-skeleton
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: []
@@ -170,3 +170,15 @@ pytest, `tests/` mirroring `src/legacy_engine/` layout; deterministic; shared fi
 ## Risks
 - **Pydantic-everywhere divergence from edh-engine** — low risk; isolated to model definitions, and consistency outweighs strict parity. **Fallback**: none needed; the base model is trivial to adjust.
 - **Declaring advisory deps (scipy/statsmodels/pulp) now** — they go unused until later epics, slightly heavier install. Accepted: avoids churning `pyproject.toml` per epic; **fallback**: move to optional-dependency groups if install weight becomes an issue.
+
+## Implementation notes
+- **Files created**: `pyproject.toml`, `.gitignore`, `src/legacy_engine/__init__.py`, `config.py`, `confidence.py`, `cli.py`, `models/{__init__,base}.py`, and `__init__.py` for `ingestion/ archetype/ analytics/ advisory/`.
+- **Tests added**: `tests/conftest.py` (factory-fixture idiom), `tests/test_config.py`, `tests/test_confidence.py`, `tests/test_models_base.py`, `tests/test_cli.py` — **35 tests, all passing** (`pytest -q` → 35 passed in 0.03s).
+- **Verified**: editable install resolves the full dependency set (incl. duckdb/numpy/scipy/statsmodels/pulp); `legacy-engine --help` lists all 5 command groups via the entry point; every leaf stub exits non-zero with `not implemented: <cmd>`.
+- **Discrepancies from design**:
+  - Design sketch had `ConfidenceMetadata.production` default `"heuristic"` — invalid (that's a `source` value). Corrected to `production="template-generated"`, `source="heuristic"`.
+  - Test factory delivered as a pytest **fixture returning a builder** (`make_confidence`) rather than a bare importable `_make_X` — more robust than cross-importing `conftest`; this is the established test idiom for the project.
+  - Added a `[project.optional-dependencies] dev = ["pytest"]` group and a `.gitignore` (venv/pycache/`/data/`) — not in the design, standard hygiene for the pattern-setter.
+  - Python 3.13.11 used for the venv (design said `>=3.11`; 3.13 satisfies it).
+- **Patterns established for downstream features**: Pydantic-everywhere via `LegacyEngineModel` (`extra="ignore"`); `config.py` constants-only, no side effects; Click nested-group CLI with `_setup_logging` + `_not_implemented` stubs; pytest with factory-fixture builders in `conftest.py`.
+- **Adjacent issues parked**: none.
