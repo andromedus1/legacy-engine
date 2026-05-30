@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data
 kind: epic
-stage: drafting
+stage: implementing
 tags: [ingestion]
 parent: null
 depends_on: []
@@ -35,10 +35,30 @@ database that the rest of the system reads. It does NOT cover tournament data (t
 - `docs/SPEC.md` — Card, BanListSnapshot entities; reproducibility + version-stamped-legality NFRs.
 - `docs/PRINCIPLES.md` — legality is live data; sibling-consistent, divergence-justified.
 
-## Anticipated child features
-- Pydantic models package (`Card`, `BanListSnapshot`, `ConfidenceMetadata`, shared base types)
-- CLI + config skeleton (Click nested groups; `config.py` paths/URLs/pinned-SHAs)
-- Extended Scryfall ingestion (oracle bulk + whole-pool name index + face-name keys + batch fallback)
-- Deck-color helper + Legacy card tags (`is_free_spell`, `staple_role`, mana-base tags)
-- DuckDB store scaffolding (schema, load helpers, rebuildable-from-raw guarantee)
-- Ban-list snapshots (dated blacklist + as-of-date validation)
+## Design decisions
+- **Card representation: typed `Card` Pydantic model** (canonical) — `scryfall.py` resolves raw JSON → Card with derived colors + Legacy tags. Sets the project's model idiom. (vs edh-engine's raw-dict + lazy-resolve.)
+- **Card storage: both** — in-memory name index as the primary O(1) resolution path (classifier hot path) + a materialized DuckDB `cards` table for relational joins in analytics.
+- **Analytical store: DuckDB** (confirmed) — embedded, column-oriented, rebuildable derived cache over a raw-JSON source of truth; chosen for the matchup-matrix rounds-join + meta-share group-by workload while keeping the "no server, reproducible local files" property.
+- **Stack: mirror edh-engine** (hatchling, `src/legacy_engine/`, Click, Pydantic, httpx) + declare duckdb/numpy/scipy/statsmodels/pulp now.
+- **Scryfall: extend, don't fork** edh-engine's `scryfall.py`; index the whole oracle pool, resolve on demand.
+- **Legality: version-stamped blacklist** validated as-of-event-date (NOT Scryfall's lagging `legacy` flag).
+
+## Decomposition
+
+Split by capability into 5 features. The package skeleton sets the model/CLI/config/confidence patterns
+everything inherits; card resolution produces the typed `Card` + in-memory index; derivations and the
+DuckDB store both build on the Card model and parallelize; the ban-list is independent (depends only on
+the skeleton). Critical path is skeleton → card-model-scryfall → (derivations | store), with the
+ban-list running in parallel off the skeleton.
+
+### Child features
+- `epic-foundations-card-data-package-skeleton` — package/pyproject/config/CLI skeleton + ConfidenceMetadata + model base (pattern-setting) — depends on: `[]`
+- `epic-foundations-card-data-card-model-scryfall` — typed `Card` model + ported Scryfall ingestion (whole-pool index) — depends on: `[epic-foundations-card-data-package-skeleton]`
+- `epic-foundations-card-data-card-derivations` — `compute_deck_colors` helper + Legacy card tags — depends on: `[epic-foundations-card-data-card-model-scryfall]`
+- `epic-foundations-card-data-duckdb-store` — DuckDB store scaffolding + materialized `cards` table — depends on: `[epic-foundations-card-data-card-model-scryfall]`
+- `epic-foundations-card-data-banlist-snapshots` — `BanListSnapshot` blacklist + as-of-date legality validation — depends on: `[epic-foundations-card-data-package-skeleton]`
+
+### Decomposition risks
+- `card-model-scryfall` Card-model scope could balloon — constrain to the contract brief's named fields.
+- `card-derivations` and `card-model-scryfall` are adjacent (Card + its derived fields); if `card-derivations` proves thin at feature-design it may merge upward.
+- `duckdb-store` forward-declares tournament-data tables it doesn't populate — define only `cards` fully now; the tournament-ingestion epic owns the rest.
