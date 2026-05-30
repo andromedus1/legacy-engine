@@ -47,7 +47,12 @@ def seed() -> None:
 def seed_cards(verbose: bool) -> None:
     """Download Scryfall oracle bulk and build the card index."""
     _setup_logging(verbose)
-    _not_implemented("seed cards")
+    from legacy_engine.ingestion.scryfall import ScryfallClient
+
+    with ScryfallClient() as client:
+        path = client.download_bulk_data()
+        index = client.load_card_index()
+    click.echo(f"Indexed {len(index)} card names from {path}")
 
 
 @seed.command("cache")

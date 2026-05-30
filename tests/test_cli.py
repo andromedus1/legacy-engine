@@ -38,7 +38,7 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
 @pytest.mark.parametrize(
     "args,label",
     [
-        (["seed", "cards"], "seed cards"),
+        # ("seed", "cards") is implemented (see test_scryfall); the rest remain stubs.
         (["seed", "cache"], "seed cache"),
         (["seed", "rules"], "seed rules"),
         (["seed", "banlist"], "seed banlist"),
