@@ -13,6 +13,13 @@ from legacy_engine.advisory.positioning import (
     positioning_score,
     rank_decks,
 )
+from legacy_engine.advisory.sideboard import (
+    HOSER_CATALOG,
+    HoserCard,
+    PickTrace,
+    SideboardPackage,
+    recommend_sideboard,
+)
 from legacy_engine.advisory.whattoplay import (
     BestDeckCall,
     ProactivityProfile,
@@ -36,6 +43,12 @@ __all__ = [
     "delta_var_S",
     "positioning_score",
     "rank_decks",
+    # sideboard
+    "HOSER_CATALOG",
+    "HoserCard",
+    "PickTrace",
+    "SideboardPackage",
+    "recommend_sideboard",
     # whattoplay
     "BestDeckCall",
     "ProactivityProfile",
