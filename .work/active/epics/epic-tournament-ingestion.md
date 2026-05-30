@@ -1,0 +1,43 @@
+---
+id: epic-tournament-ingestion
+kind: epic
+stage: drafting
+tags: [ingestion]
+parent: null
+depends_on: [epic-foundations-card-data]
+release_binding: null
+gate_origin: null
+created: 2026-05-29
+updated: 2026-05-29
+---
+
+# Tournament Ingestion
+
+## Brief
+
+Mirror and parse the fbettega `MTG_decklistcache` — the Legacy analog to cEDH's edhtop16 — and load it
+into DuckDB. This epic delivers the observed-data fact layer: tournaments, decks (mainboard +
+sideboard), rounds (pairings + results), and standings, with online-vs-paper provenance derived at
+ingest and card names joined to the card dimension.
+
+Covers: the git-mirror + incremental pull of the cache, parsing the PascalCase `CacheItem
+{Tournament, Decks[], Rounds[], Standings[]}` (treating empty Rounds/Standings on MTGO Leagues as
+normal, not an error), provenance derivation (source-dir + Uri host), the unmatched-card-name bucket,
+and normalization into DuckDB tables. The `ingestion/` port boundary keeps a replacement source
+swappable without touching analytics. Does NOT cover archetype labeling (that's
+`epic-archetype-classifier`) or any analytics.
+
+## Research briefs
+- `docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md` — the exact CacheItem JSON schema, repo layout, provenance, cadence, consumption/mirroring strategy.
+- `docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md` — mirror-and-decouple resilience, source fragility, the Rounds → matchup-matrix feasibility (bimodal coverage).
+- `docs/briefs/legacy-metagame.md` — data-source ecosystem context.
+
+## Foundation references
+- `docs/ARCHITECTURE.md` — `ingestion/cache.py`, `ingestion/store.py`; the mirror-and-decouple data flow; DuckDB tables (tournaments/decks/deck_cards/rounds/standings).
+- `docs/SPEC.md` — Decklist, TournamentResult, Round, Standing entities; ingestion-resilience NFR.
+
+## Anticipated child features
+- fbettega cache mirror (git clone/sparse-checkout + incremental `git pull` + day-folder diff)
+- CacheItem parser → typed models (provenance derivation; League vs Challenge structural branch)
+- Card-name join to the dimension + unmatched-name bucket
+- DuckDB load (tournaments/decks/deck_cards/rounds/standings) behind the ingestion/ port
