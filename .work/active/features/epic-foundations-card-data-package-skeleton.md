@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-package-skeleton
 kind: feature
-stage: drafting
+stage: implementing
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: []
@@ -42,3 +42,131 @@ on this skeleton.
 ## Foundation references
 - `docs/ARCHITECTURE.md` — `cli.py`, `config.py`, `confidence.py`, `models/` conventions.
 - edh-engine reference: `/Users/<user>/dev/edh-engine/pyproject.toml`, `src/edh_engine/config.py` (32 lines), `src/edh_engine/cli.py`, `src/edh_engine/models/goldfish.py` (ConfidenceMetadata).
+
+## Architectural choice
+
+Mirror edh-engine's `src/`-layout hatchling package, with **one deliberate divergence: standardize all
+shared models on Pydantic v2.** edh-engine mixes dataclasses (goldfish) and Pydantic (registry); since
+the epic locked a typed Pydantic `Card`, the project uses Pydantic uniformly — `ConfidenceMetadata` is
+ported as a Pydantic model, and a `LegacyEngineModel` base sets the shared config (strict validation at
+boundaries). Considered alternatives: (a) copy edh-engine's dataclass+Pydantic mix — rejected, two
+idioms invites drift; (b) attrs — rejected, no sibling precedent. The CLI is a thin Click skeleton of
+nested groups whose leaf commands are stubs that fail loudly (`raise click.ClickException("not
+implemented: <cmd>")`) so the command surface is real and discoverable from day one while the
+implementations land feature by feature.
+
+## Implementation Units
+
+### Unit 1: Package + build config
+**Files**: `pyproject.toml`, `src/legacy_engine/__init__.py`, and `__init__.py` in `models/ ingestion/ archetype/ analytics/ advisory/`
+```toml
+[project]
+name = "legacy-engine"
+version = "0.1.0"
+description = "Analytics platform for the Magic: The Gathering Legacy format"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27", "pydantic>=2.0", "click>=8.0", "matplotlib>=3.8", "pyyaml>=6.0",
+  "duckdb>=1.0", "numpy>=1.26", "scipy>=1.11", "statsmodels>=0.14", "pulp>=2.8",
+]
+[project.scripts]
+legacy-engine = "legacy_engine.cli:main"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+[tool.hatch.build.targets.wheel]
+packages = ["src/legacy_engine"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+```
+**Acceptance**: `pip install -e .` succeeds; `import legacy_engine` works; `legacy-engine --help` runs via the entry point.
+
+### Unit 2: `src/legacy_engine/config.py`
+**File**: `src/legacy_engine/config.py` (mirror edh-engine's shape)
+```python
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+SCRYFALL_DIR = DATA_DIR / "scryfall"
+CACHE_DIR = DATA_DIR / "cache"        # mirrored fbettega tournament JSON
+RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData
+BANLIST_DIR = DATA_DIR / "banlist"    # dated B&R snapshots
+DUCKDB_PATH = DATA_DIR / "legacy.duckdb"
+SCRYFALL_API_BASE = "https://api.scryfall.com"
+SCRYFALL_BULK_TYPE = "oracle_cards"
+SCRYFALL_API_DELAY = 0.1
+USER_AGENT = "LegacyEngine/0.1.0"
+FBETTEGA_CACHE_REPO = "https://github.com/fbettega/MTG_decklistcache"
+MTGOFORMATDATA_REPO = "https://github.com/Badaro/MTGOFormatData"
+RULES_PINNED_SHA = ""  # set by `legacy refresh rules`; "" = unpinned (fail-fast in archetype epic)
+```
+**Acceptance**: all paths are absolute and rooted at the repo; importing config triggers no filesystem writes.
+
+### Unit 3: `src/legacy_engine/confidence.py`
+**File**: `src/legacy_engine/confidence.py`
+```python
+ConfidenceLevel = Literal["established", "evolving", "speculative"]
+Production = Literal["hand-written", "template-generated", "template+llm-enriched"]
+Source = Literal["user", "llm-synthesis", "heuristic"]
+
+class ConfidenceMetadata(BaseModel):
+    level: ConfidenceLevel = "speculative"
+    production: Production = "heuristic"  # maps from Source default? keep explicit
+    source: Source = "heuristic"
+    updated: date | None = None
+
+def tier_for_sample(n: int, *, evolving_min: int = 30, established_min: int = 100) -> ConfidenceLevel:
+    """Map a sample size to a confidence tier (advisory-methods §1 thresholds)."""
+    if n >= established_min: return "established"
+    if n >= evolving_min:    return "evolving"
+    return "speculative"
+```
+**Acceptance**: `tier_for_sample(29)=="speculative"`, `(30)=="evolving"`, `(99)=="evolving"`, `(100)=="established"`; `ConfidenceMetadata()` validates with defaults.
+
+### Unit 4: `src/legacy_engine/models/base.py`
+**File**: `src/legacy_engine/models/base.py`
+```python
+class LegacyEngineModel(BaseModel):
+    """Shared base for all project models. Strict at boundaries."""
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+```
+**Implementation note**: `extra="ignore"` (not `forbid`) because Scryfall card JSON carries many fields we don't model; `models/__init__.py` re-exports `LegacyEngineModel`, `ConfidenceMetadata`, `tier_for_sample`.
+**Acceptance**: a subclass with declared fields ignores unknown input keys; base importable from `legacy_engine.models`.
+
+### Unit 5: `src/legacy_engine/cli.py`
+**File**: `src/legacy_engine/cli.py`
+```python
+def _setup_logging(verbose: bool) -> None: ...   # mirror edh-engine exactly
+
+@click.group()
+def main() -> None:
+    """legacy-engine — Magic: The Gathering Legacy analytics."""
+
+@main.group()
+def seed() -> None: """Fetch + cache external data."""
+@seed.command("cards")
+@click.option("-v", "--verbose", is_flag=True)
+def seed_cards(verbose): _setup_logging(verbose); _not_implemented("seed cards")
+# ... seed cache|rules|banlist; refresh; label;
+# report group: meta|matchups|tiers; advise group: positioning|sideboard|whattoplay
+
+def _not_implemented(cmd: str) -> NoReturn:
+    raise click.ClickException(f"not implemented: {cmd}")
+```
+**Acceptance**: `legacy-engine --help` lists `seed`, `refresh`, `label`, `report`, `advise`; `legacy-engine seed --help` lists `cards/cache/rules/banlist`; every leaf stub exits non-zero with "not implemented: <cmd>"; `-v` enables DEBUG logging.
+
+## Implementation Order
+1. Unit 1 (package/pyproject) — nothing imports without it.
+2. Unit 2 (config) — imported by everything.
+3. Unit 3 (confidence) + Unit 4 (models/base) — independent, either order.
+4. Unit 5 (cli) — imports config; the entry point that ties it together.
+
+## Testing
+pytest, `tests/` mirroring `src/legacy_engine/` layout; deterministic; shared fixtures in `tests/conftest.py` with `_make_X(**kwargs)` factory helpers per `.claude/rules/patterns.md` test-factory-patterns (establishes the project test idiom).
+- `tests/test_config.py` — paths absolute + repo-rooted; no import side effects.
+- `tests/test_confidence.py` — `tier_for_sample` boundaries (29/30/99/100); `ConfidenceMetadata` default + explicit construction validates; bad `level` rejected.
+- `tests/test_models_base.py` — `LegacyEngineModel` subclass ignores extra keys; required fields enforced.
+- `tests/test_cli.py` — Click `CliRunner`: `main --help` exit 0 and lists all groups; `seed --help`, `report --help`, `advise --help` list subcommands; a representative leaf stub exits non-zero with the not-implemented message.
+
+## Risks
+- **Pydantic-everywhere divergence from edh-engine** — low risk; isolated to model definitions, and consistency outweighs strict parity. **Fallback**: none needed; the base model is trivial to adjust.
+- **Declaring advisory deps (scipy/statsmodels/pulp) now** — they go unused until later epics, slightly heavier install. Accepted: avoids churning `pyproject.toml` per epic; **fallback**: move to optional-dependency groups if install weight becomes an issue.
