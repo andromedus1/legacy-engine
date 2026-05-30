@@ -25,6 +25,13 @@ from legacy_engine.analytics.metashare import (
     compute_all,
     compute_metashare,
 )
+from legacy_engine.analytics.trends import (
+    RegimeWindow,
+    TrendCell,
+    TrendSeries,
+    compute_trends,
+    regime_windows,
+)
 
 __all__ = [
     "ArchetypeRecord",
@@ -48,4 +55,10 @@ __all__ = [
     "blend_shares",
     "compute_all",
     "compute_metashare",
+    # trends
+    "RegimeWindow",
+    "TrendCell",
+    "TrendSeries",
+    "compute_trends",
+    "regime_windows",
 ]

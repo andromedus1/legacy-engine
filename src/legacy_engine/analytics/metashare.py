@@ -34,19 +34,28 @@ JOIN standings s ON s.tournament_id = d.tournament_id
 WHERE d.archetype IS NOT NULL
   AND s.rank <= ?
   AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
 GROUP BY d.archetype
 """
 
 
 def _topcut_counts(
-    con: duckdb.DuckDBPyConnection, *, provenance: str | None, cut_size: int
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    cut_size: int,
+    since: str | None = None,
+    until: str | None = None,
 ) -> dict[str, int]:
     """Per-archetype count of decks finishing within the event's top cut (standings.rank <= cut_size).
 
     Decks with no standings row (e.g. MTGO League 5-0 dumps) are excluded from
     definition (b)'s numerator AND denominator — top-cut is undefined for them.
     """
-    rows = con.execute(_TOPCUT_SQL, [cut_size, provenance, provenance]).fetchall()
+    rows = con.execute(
+        _TOPCUT_SQL, [cut_size, provenance, provenance, since, since, until, until]
+    ).fetchall()
     return {archetype: n for archetype, n in rows}
 
 
@@ -58,7 +67,10 @@ _RAW_SQL = """
 SELECT d.archetype AS archetype, count(*) AS n
 FROM decks d
 JOIN tournaments t ON t.id = d.tournament_id
-WHERE d.archetype IS NOT NULL AND (? IS NULL OR t.provenance = ?)
+WHERE d.archetype IS NOT NULL
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
 GROUP BY d.archetype
 """
 
@@ -66,19 +78,38 @@ _UNLABELED_SQL = """
 SELECT count(*) AS n
 FROM decks d
 JOIN tournaments t ON t.id = d.tournament_id
-WHERE d.archetype IS NULL AND (? IS NULL OR t.provenance = ?)
+WHERE d.archetype IS NULL
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
 """
 
 
-def _raw_counts(con: duckdb.DuckDBPyConnection, *, provenance: str | None) -> dict[str, int]:
+def _raw_counts(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, int]:
     """Per-archetype deck count over labeled decks (archetype IS NOT NULL)."""
-    rows = con.execute(_RAW_SQL, [provenance, provenance]).fetchall()
+    rows = con.execute(
+        _RAW_SQL, [provenance, provenance, since, since, until, until]
+    ).fetchall()
     return {archetype: n for archetype, n in rows}
 
 
-def _unlabeled_count(con: duckdb.DuckDBPyConnection, *, provenance: str | None) -> int:
+def _unlabeled_count(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    since: str | None = None,
+    until: str | None = None,
+) -> int:
     """Decks with NULL archetype (labeler not yet run / failed) — surfaced as coverage, not counted."""
-    row = con.execute(_UNLABELED_SQL, [provenance, provenance]).fetchone()
+    row = con.execute(
+        _UNLABELED_SQL, [provenance, provenance, since, since, until, until]
+    ).fetchone()
     return int(row[0]) if row else 0
 
 
@@ -277,19 +308,31 @@ def compute_metashare(
     min_share: float = 0.02,
     cut_size: int = 8,
     group_other: bool = True,
+    since: str | None = None,
+    until: str | None = None,
 ) -> MetaShareReport:
     """Compute meta-share for one definition and provenance basis.
 
     ``definition`` must be one of ``"raw"``, ``"topcut"``, or ``"wrw"``.
     ``provenance`` filters to ``"online"``/``"paper"``; ``None`` = all.
+    ``since``/``until`` are ISO ``YYYY-MM-DD`` strings for a half-open ``[since, until)``
+    date window against ``tournaments.date``; ``None`` = no bound.
+
+    ``definition="wrw"`` with a date window raises ``NotImplementedError`` — windowed
+    win-rate-weighted share is incoherent because ``compute_match_results`` is not windowed.
 
     Returns a fully-labeled ``MetaShareReport`` with confidence tiers and the
     inclusion floor applied.
     """
-    unlabeled = _unlabeled_count(con, provenance=provenance)
+    if definition == "wrw" and (since is not None or until is not None):
+        raise NotImplementedError(
+            "windowed wrw is unsupported — match_results is not windowed; use raw/topcut for trends"
+        )
+
+    unlabeled = _unlabeled_count(con, provenance=provenance, since=since, until=until)
 
     if definition == "raw":
-        counts = _raw_counts(con, provenance=provenance)
+        counts = _raw_counts(con, provenance=provenance, since=since, until=until)
         total = sum(counts.values())
         n_by_arch = dict(counts)
         return _assemble(
@@ -304,7 +347,7 @@ def compute_metashare(
         )
 
     elif definition == "topcut":
-        counts = _topcut_counts(con, provenance=provenance, cut_size=cut_size)
+        counts = _topcut_counts(con, provenance=provenance, cut_size=cut_size, since=since, until=until)
         total = sum(counts.values())
         n_by_arch = dict(counts)
         return _assemble(
