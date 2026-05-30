@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-sideboard
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model, epic-advisory-whattoplay]
@@ -329,3 +329,41 @@ ILP/greedy arithmetic is exact and seed-free.
   archetypes via multiple copies where the catalog allows.
 - **Catalog coverage gaps** (a field archetype no catalog hoser attacks). **Mitigation**: such archetypes get
   weight 0 and are listed in `warnings` (honest — "no curated answer for X"), never silently ignored.
+
+## Implementation notes
+
+### Files
+- **New**: `src/legacy_engine/advisory/sideboard.py` — Units 1–5: `HoserCard`, `HOSER_CATALOG` (23 entries),
+  `CoverageModel`, `_build_coverage_model`, `PickTrace`, `_greedy_solve`, `_ILPFailed`, `_ilp_solve`,
+  `SideboardPackage`, `recommend_sideboard`, `_compute_covered_weight`, `_HEURISTIC_NOTE` constant.
+- **Modified**: `src/legacy_engine/advisory/__init__.py` — Unit 6: exports added for `recommend_sideboard`,
+  `SideboardPackage`, `HoserCard`, `HOSER_CATALOG`, `PickTrace` (+ `__all__`).
+- **New**: `tests/test_sideboard.py` — 68 tests across `TestHoserCatalog`, `TestCoverageModel`, `TestGreedy`,
+  `TestILP`, `TestRecommendSideboard`, `TestSideboardPackageStructure`, `TestILPvsGreedyObjective`.
+
+### Test count
+- Before: 474 passing
+- After: 542 passing (+68 new, zero regressions)
+
+### Deviations from spec with rationale
+1. **Anti-hate pseudo-element weight heuristic**: The spec describes `h_k = Σ_a field_share(a)·P(a sideboards
+   hate k vs you)` with per-archetype color-availability estimation. Implemented a conservative MVP: weight =
+   Σ field_share(a) for archetypes with share ≥ 0.01 (assumes all interactive archetypes can bring hate).
+   Rationale: archetype sideboard colors are not tracked in the current data model; the conservative overestimate
+   means counter-hosers compete fairly for slots, which is the spec's intent. Noted as a future refinement.
+2. **PuLP v3 deprecation warnings**: `LpVariable` direct construction and `PULP_CBC_CMD` emit DeprecationWarning
+   (PuLP 4.0 will change the API). Not fixed — both still work correctly in 3.3.2; updating to PuLP 4.0 API
+   is a separate concern. 99 deprecation warnings surface in the test run, all from PuLP internals.
+3. **`_ILPFailed` exposed from module**: The sentinel exception is importable (used in tests). The spec treats it
+   as an internal signal; exposing it enables explicit testing of the fallback path without mocking.
+
+### Parked items (non-blocking, noted open)
+- **NIU thesis prior-art check**: Still open. The OR formulation is the deliverable regardless; novelty claim
+  should not be made until a manual pull of the thesis is done. Flagged in the research brief (advisory-methods
+  §3) and preserved here.
+- **Saturating g(n) redundancy refinement**: The `g(n)=1−(1−p)^n` extension for multi-answer diminishing
+  returns is documented as a future additive extension. Binary coverage (n=1) is the shipped MVP.
+- **Empirical swing Δ**: When before/after-sideboard win-rate data becomes available, `swing` values can be
+  replaced with data-driven estimates. The `HOSER_CATALOG` structure is ready for this; current values are
+  heuristic constants as documented.
+- **PuLP 4.0 API migration**: `prob.add_variable()` / `COIN_CMD` migration deferred.
