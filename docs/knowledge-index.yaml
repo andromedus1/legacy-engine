@@ -17,7 +17,7 @@ documents:
     type: architecture
     kind: planning
     updated: 2026-05-29
-    consumer_hint: "Read for the high-level module map and data flow of legacy-engine. HIGH-LEVEL ONLY — detailed module design comes from /architecture after the pre-architecture research lands."
+    consumer_hint: "Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision (DuckDB), conventions, dependencies, and the built-vs-deferred split."
 
   - path: docs/VISION.md
     title: "Vision: legacy-engine"
