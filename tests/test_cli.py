@@ -38,9 +38,8 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
 @pytest.mark.parametrize(
     "args,label",
     [
-        # seed cards/cache/rules/banlist, label, report matchups, and report meta are implemented.
+        # seed cards/cache/rules/banlist, label, report matchups, report meta, and report tiers are implemented.
         (["refresh"], "refresh"),
-        (["report", "tiers"], "report tiers"),
         (["advise", "positioning"], "advise positioning"),
         (["advise", "sideboard"], "advise sideboard"),
         (["advise", "whattoplay"], "advise whattoplay"),
