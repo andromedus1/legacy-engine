@@ -1,0 +1,68 @@
+# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index to regenerate.
+# Frontmatter is the source of truth — edit each doc's frontmatter and re-run.
+#
+# schema_version controls lint mode:
+#   1 = grace (missing v2 fields produce warnings, not errors)
+#   2 = enforce (missing v2 fields are errors)
+schema_version: 2
+generated_at: 2026-05-29T00:00:00Z
+generated_from: frontmatter
+total_docs: 7
+
+documents:
+  # ── Planning ──────────────────────────────────────────────────────────────
+
+  - path: docs/ARCHITECTURE.md
+    title: "Architecture: legacy-engine (high-level)"
+    type: architecture
+    kind: planning
+    updated: 2026-05-29
+    consumer_hint: "Read for the high-level module map and data flow of legacy-engine. HIGH-LEVEL ONLY — detailed module design comes from /architecture after the pre-architecture research lands."
+
+  - path: docs/VISION.md
+    title: "Vision: legacy-engine"
+    type: north-star
+    kind: planning
+    updated: 2026-05-29
+    consumer_hint: "Read first — the why and what of legacy-engine. Vision, problem, principles pointer, and the four-pillar domain model for the Legacy analytics platform."
+
+  - path: docs/PRINCIPLES.md
+    title: "Principles: legacy-engine"
+    type: principles
+    kind: planning
+    updated: 2026-05-29
+    consumer_hint: "Read when making a design or modeling trade-off — the decision heuristics specific to legacy-engine (beyond generic best practice)."
+
+  - path: docs/research-plan.md
+    title: "Research Plan: legacy-engine"
+    type: research-plan
+    kind: planning
+    updated: 2026-05-29
+    consumer_hint: "Read to know what research must run before /architecture, and what's deferred per-pillar. The routing plan for /research, /deep-research, and /brief invocations."
+
+  - path: docs/SPEC.md
+    title: "Spec: legacy-engine"
+    type: spec
+    kind: planning
+    updated: 2026-05-29
+    consumer_hint: "Read when scoping what to build — the capabilities, domain entities, and non-functional requirements of legacy-engine. Pairs with VISION (why) and ARCHITECTURE (how)."
+
+  # ── Research ──────────────────────────────────────────────────────────────
+
+  - path: docs/briefs/legacy-metagame.md
+    title: "Brief: Legacy Metagame (2026)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /research
+    consumer_hint: "What is the current Legacy metagame (2026) — tier list, archetype mechanics & goldfish speeds, data sources, and how to attack the field? Read before designing meta-ingestion, the matchup model, or the meta-speed metric."
+
+  - path: docs/briefs/legacy-foundations.md
+    title: "Brief: Legacy Format Foundations"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /research
+    consumer_hint: "What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation platform must encode? Read before designing the deck-as-data model, goldfish sim, or legality validation."

@@ -1,0 +1,102 @@
+# Auto-generated. DO NOT EDIT BY HAND.
+# On-demand layer — load when surfacing a specific doc's full context.
+generated_at: 2026-05-29T00:00:00Z
+generated_from: frontmatter
+schema_version: 2
+
+documents:
+  docs/VISION.md:
+    summary: |
+      legacy-engine is a Magic: The Gathering Legacy-format analytics platform — sibling to edh-engine
+      (cEDH). It answers "what's the meta, how do I attack it, and how do I tune my deck?" via three
+      reinforcing data layers (observed tournament data, synthetic goldfish simulation, generated insight)
+      powering four analytical pillars: Meta & Performance, Deck Mechanics, Deck Generation, and Meta Attack/Advisory.
+    decisions:
+      - "Four analytical pillars — Meta & Performance, Deck Mechanics (goldfish), Deck Generation, and Meta Attack/Advisory (matchup positioning, sideboard recommender, what-to-play)."
+      - "Sibling-of-edh-engine: reuse its 3-data-layer → pillar architecture, deck-as-data model, goldfish/mana/mulligan engines where domains overlap; diverge only where Legacy demands it."
+      - "Key architectural delta: an explicit archetype-parser layer (no commander to key on)."
+      - "MVP arc = ingestion + meta analytics + advisory shipped together; goldfish and generation later."
+      - "Legacy is 1v1, best-of-3, 60-card + sideboard — sideboarding and matchups are first-class."
+      - "Banned-list legality is a live blacklist (changes ~quarterly); version-stamp by date."
+
+  docs/SPEC.md:
+    summary: |
+      Capability spec for legacy-engine. Defines capabilities across four pillars, the core domain
+      entities (Card, Decklist, Archetype, TournamentResult, MatchupCell, DeckDefinition, SideboardPackage,
+      BanListSnapshot), the MVP slice (ingestion + meta analytics + advisory), and NFRs (reproducibility,
+      version-stamped legality, sample-size confidence gating).
+    decisions:
+      - "MVP = card ingestion, tournament-results ingestion, archetype parsing, meta analytics, advisory."
+      - "Deferred = goldfish simulation and deck generation, reusing edh-engine's goldfish/mana/mulligan code."
+      - "Core entities: Card, Decklist, Archetype, TournamentResult, MatchupCell, DeckDefinition, SideboardPackage, BanListSnapshot."
+      - "Meta-% computed under multiple definitions and always labeled online/paper/blend."
+      - "Matchup cells carry sample-size + confidence; n<100 flagged (edh-engine confidence pattern)."
+      - "Reproducibility NFR: deterministic; data pre-fetched/cached; legality vs dated BanListSnapshot."
+
+  docs/ARCHITECTURE.md:
+    summary: |
+      High-level architecture sketch (from /ideate). Mirrors edh-engine's Python-CLI + local-files shape:
+      ingestion → archetype-parser → analytics/advisory → models → data. Names modules, data flow,
+      committed external deps, and the biggest risk (fragile community scraper layer). Detailed design
+      deferred to /architecture.
+    decisions:
+      - "Mirror edh-engine stack exactly: Python 3.11+, Click CLI, Pydantic, httpx, local files, matplotlib; no DB/server for MVP."
+      - "Modules: ingestion/ → archetype/ (ported MTGOFormatData rules) → analytics/ + advisory/ → models/ → data/. goldfish/ + generation/ later."
+      - "archetype/ is the key novel subsystem (no commander to key on)."
+      - "Ingestion consumes the fbettega cache JSON (mirrored locally), not mtgo.com directly."
+      - "Biggest risk: fragile externally-owned scraper/cache layer — mirror repos, swap upstream behind ingestion/ boundary."
+      - "Scryfall is the shared card dimension; deck-as-data/mana/mulligan ported from edh-engine when Deck Mechanics starts."
+
+  docs/PRINCIPLES.md:
+    summary: |
+      Project-specific decision heuristics. Inherits edh-engine's analytics principles (analytics is the
+      product, data-driven over vibes, rules-correct at fidelity claimed, knowledge compiled not re-derived)
+      and adds Legacy-specific ones: legality is live data, always label the meta-% definition and
+      online/paper basis, confidence-gate every stat, advisory is first-class.
+    decisions:
+      - "Analytics is the product; infrastructure justified by questions unlocked."
+      - "Data-driven over vibes; build a pipeline wherever there's a data source."
+      - "Rules-correct at the fidelity claimed; goldfish simplifies transparently with confidence metadata."
+      - "Legality is live data — validate vs dated BanListSnapshot; version-stamp ban-affected roles."
+      - "Never an unlabeled meta-% — state definition + online/paper/blend basis."
+      - "Confidence-gate every derived stat; advisory is a first-class product surface."
+
+  docs/research-plan.md:
+    summary: |
+      Research routing plan. Two grounding briefs done (legacy-foundations, legacy-metagame). One
+      load-bearing /research before /architecture: the fbettega-cache + MTGOFormatData data contracts.
+      Advisory statistics is a smaller /research; Scryfall is reuse-from-edh-engine. Goldfish and
+      generation research deferred to their pillars.
+    decisions:
+      - "Two grounding briefs DONE (legacy-foundations, legacy-metagame)."
+      - "Load-bearing pre-architecture /research: fbettega cache JSON + MTGOFormatData rule schema + parser port."
+      - "Advisory statistics /research: win-rate CI, sample-size gating, sideboard set-cover."
+      - "Scryfall ingestion needs no research — port edh-engine's scryfall.py."
+      - "Goldfish-pillar research deferred to Deck Mechanics pillar; rules grounding already exists."
+
+  docs/briefs/legacy-metagame.md:
+    summary: |
+      The core domain brief for legacy-engine. Maps the 2026 Legacy metagame: four-pillar tier structure
+      (no Tier 0), per-archetype game plans and goldfish clocks, the data-source ecosystem (the edhtop16
+      analog), and how to attack the field (matchup matrix, hosers-by-target, sideboard strategy, what-to-play).
+    key_findings:
+      - "2026 Legacy is a blue-tempo-centered four-pillar format with NO Tier 0; Dimir Tempo is #1 (~16%, ~52% non-mirror WR), deemed healthy (Feb 2026 no-change)."
+      - "Data ingestion analog to edhtop16 = fbettega pipeline (scrapper + decklistcache, both pushed 2026-05-29) labeled by Badaro/MTGOFormatData; Scryfall is the shared card source. No clean official API."
+      - "Legacy needs an explicit archetype-PARSER layer that cEDH does not — the key architectural delta."
+      - "Goldfish clock anchor: Oops All Spells 66% T1 / 76% T2 / 83% T3 [cited]; combo T1-3, fair tempo/control T4-6+ (win by disruption/attrition)."
+      - "Meta-speed = per-archetype clock PMF weighted by meta share; model goldfish (upper bound) AND effective (⊗ FoW/Daze) clocks; the gap is a format-health signal."
+      - "Aggregators 403-block bots; meta-% computed differently per source; online/paper diverge — compute % yourself under multiple definitions and label the source."
+      - "Universal constant: dedicated graveyard hate + free counters in every sideboard."
+
+  docs/briefs/legacy-foundations.md:
+    summary: |
+      Grounding brief on Legacy fundamentals. Covers Magic's turn structure / stack / state-based actions
+      (framed for goldfish simulation), the London mulligan and its hand-quality math, and Legacy's
+      deck-construction + banned-list constraints with format-defining staples.
+    key_findings:
+      - "A Legacy goldfish sim needs ~8 core rules; the heart is a mana-payment solver (can_pay(cost, untapped_sources)) + a LIFO stack for the deck's own triggers."
+      - "Legacy uses straight London mulligan, NO free mulligan; model keep() and bottom() separately via Monte Carlo, not closed-form hypergeometric."
+      - "London disproportionately benefits combo/specific-card decks (+10-18pp); calibrate vs published tables (Chalice T1 53->63%)."
+      - "Legacy legality is a BLACKLIST (all legal except banned list); changes ~quarterly; version-stamp by date."
+      - "Legacy bans outright what Vintage restricts; no restricted list. 'Free' interaction (Force of Will/Daze) is the defining structural trait."
+      - "Banned list current as of May 18 2026 (Undercity Informer); next scheduled June 30 2026."
