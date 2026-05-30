@@ -143,11 +143,95 @@ def report() -> None:
 
 
 @report.command("meta")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut", "wrw", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Which meta-share definition(s) to compute.",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter to online/paper events, or all (prints each basis when 'all').",
+)
+@click.option(
+    "--min-share",
+    type=float,
+    default=0.02,
+    show_default=True,
+    help="Minimum share (0..1) for an archetype to appear in headline rows; sub-floor → Other.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
 @_verbose
-def report_meta(verbose: bool) -> None:
+def report_meta(
+    definition: str,
+    provenance: str,
+    min_share: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
     """Metagame share (raw / top-cut / win-rate-weighted; online vs paper)."""
     _setup_logging(verbose)
-    _not_implemented("report meta")
+    from legacy_engine.analytics.metashare import MetaShareReport, compute_all, compute_metashare
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        bases: list[str | None]
+        if provenance == "all":
+            bases = [None, "online", "paper"]
+        else:
+            bases = [provenance]
+
+        definitions: list[str]
+        if definition == "all":
+            definitions = ["raw", "topcut", "wrw"]
+        else:
+            definitions = [definition]
+
+        for basis in bases:
+            for defn in definitions:
+                report = compute_metashare(
+                    con,
+                    definition=defn,
+                    provenance=basis,
+                    min_share=min_share,
+                )
+                _print_metashare_report(report)
+    finally:
+        con.close()
+
+
+def _print_metashare_report(report: "MetaShareReport") -> None:
+    """Render a meta-share report as a labeled text table."""
+    from legacy_engine.analytics.metashare import MetaShareReport  # noqa: F401
+
+    basis_label = report.provenance if report.provenance else "all"
+    click.echo(f"\n=== Meta Share [{report.definition.upper()}] basis={basis_label} ===")
+    click.echo(f"Total decks (denominator): {report.total_decks}")
+    if report.unlabeled > 0:
+        click.echo(f"Unlabeled (NULL archetype, excluded): {report.unlabeled}")
+    click.echo(f"Inclusion floor: {report.min_share:.1%}")
+    click.echo(f"{'Archetype':<30}  {'Share':>7}  {'n':>6}  {'Tier':<12}")
+    click.echo("-" * 62)
+
+    if not report.entries:
+        click.echo("(no archetypes meet the inclusion threshold)")
+        return
+
+    for entry in report.entries:
+        fringe_marker = " *" if entry.fringe and entry.archetype != "Other" else "  "
+        click.echo(
+            f"{entry.archetype:<30}  {entry.share:>6.1%}  {entry.n:>6}  {entry.tier:<12}{fringe_marker}"
+        )
 
 
 @report.command("matchups")
