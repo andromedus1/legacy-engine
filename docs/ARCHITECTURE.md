@@ -60,8 +60,8 @@ observed → label → analytics → advisory arc.
 ┌───▼────────────▼──────────────▼──────────────▼────────────────────────────┐
 │                                 models/                                     │
 │  Card · Decklist · Deck · TournamentResult · Round · Standing · Archetype · │
-│  ArchetypeRule · Condition · MatchupCell · BanListSnapshot · SideboardPackage│
-│  PositioningResult · ConfidenceMetadata                                     │
+│  ArchetypeRule · Condition · MatchupCell · BanListSnapshot · ConfidenceMetadata │
+│  (advisory/analytics result records are dataclasses in their own modules)   │
 └──────────────────────────────────┬──────────────────────────────────────────┘
                                    │
 ┌──────────────────────────────────▼──────────────────────────────────────────┐
@@ -114,6 +114,7 @@ observed → label → analytics → advisory arc.
 ### `advisory/` — Meta Attack/Advisory (the differentiator)
 | File | Responsibility | Brief |
 |---|---|---|
+| `field.py` | `FieldDistribution` (the SSOT for "what is the field"): global-from-`metashare` (with Dirichlet counts) + custom user field (normalize/impute/Other); consumed by positioning, sideboard, whattoplay. | advisory-methods |
 | `positioning.py` | `score(deck, field) = Σ w_a·winrate(D vs a)`; Bayesian Monte-Carlo (Beta cells + Dirichlet shares) primary, delta-method fast check; custom user field; rank by P(best) from shared-field draws; report S **and** unweighted aggregate. | advisory-methods |
 | `sideboard.py` | Weighted submodular max-coverage; ILP (PuLP/CBC) exact primary + greedy (1−1/e) explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements. | advisory-methods |
 | `whattoplay.py` | Composition-derived proactivity score; vulnerability tags (graveyard-reliant/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant); hate-equity (coverage not sum); best-deck vs best-call (matchup-spread variance). | advisory-methods |
@@ -121,8 +122,11 @@ observed → label → analytics → advisory arc.
 
 ### `models/` — shared Pydantic types
 `Card`, `Decklist`, `Deck`, `TournamentResult`, `Round`, `Standing`, `Archetype`, `ArchetypeRule`,
-`Condition`, `Variant`, `Fallback`, `MatchupCell`, `BanListSnapshot`, `SideboardPackage`,
-`PositioningResult`, `ConfidenceMetadata` (`established | evolving | speculative`, reused from edh-engine).
+`Condition`, `Variant`, `Fallback`, `MatchupCell`, `BanListSnapshot`,
+`ConfidenceMetadata` (`established | evolving | speculative`, reused from edh-engine). The advisory
+result records `PositioningResult` / `DeckRanking` / `SideboardPackage` / `FieldDistribution` /
+`FieldReadReport` live as dataclasses in `advisory/` (computed records carrying numpy samples / coverage
+state), alongside the analytics records (`MetaShareReport`, `MatchupMatrix`, `TrendSeries`) — not here.
 
 ### Support
 `cli.py` (Click nested groups per the project's CLI pattern), `config.py` (paths, URLs, rate limits,
@@ -175,7 +179,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ## Conventions
 - **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/` (+ deferred `goldfish/ generation/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
-- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends`, `advise positioning|sideboard|whattoplay`); lazy imports inside commands; `_setup_logging(verbose)` first.
+- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends`, `advise positioning|sideboard|whattoplay|report`); lazy imports inside commands; `_setup_logging(verbose)` first.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.
