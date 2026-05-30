@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-package-skeleton
 kind: feature
-stage: review
+stage: done
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: []
@@ -182,3 +182,13 @@ pytest, `tests/` mirroring `src/legacy_engine/` layout; deterministic; shared fi
   - Python 3.13.11 used for the venv (design said `>=3.11`; 3.13 satisfies it).
 - **Patterns established for downstream features**: Pydantic-everywhere via `LegacyEngineModel` (`extra="ignore"`); `config.py` constants-only, no side effects; Click nested-group CLI with `_setup_logging` + `_not_implemented` stubs; pytest with factory-fixture builders in `conftest.py`.
 - **Adjacent issues parked**: none.
+
+## Review (2026-05-29)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: every leaf CLI stub takes its own `-v`/`_setup_logging` — fine for stubs; consider hoisting `--verbose` to the group level when real implementations land.
+
+**Notes**: 35 tests green; `compileall` clean; editable install resolves the full dep set; entry point + stubs verified. Patterns sound to propagate (Pydantic-everywhere via `LegacyEngineModel`, constants-only config, Click nested-group CLI, pytest factory-fixture idiom). No foundation-doc drift. Parent epic stays `implementing` — 4 sibling features remain.
