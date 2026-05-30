@@ -31,3 +31,10 @@ packages = ["src/legacy_engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # PuLP 3.3.2 emits PuLP-4.0 migration DeprecationWarnings from our current-API usage
+    # (LpVariable(...) constructor, PULP_CBC_CMD); the 4.0 replacements don't exist in 3.3.2.
+    # Silence the noise so real warnings stay visible; migrate when PuLP 4.0 lands.
+    "ignore:Constructing LpVariable.*:DeprecationWarning",
+    "ignore:PULP_CBC_CMD is deprecated.*:DeprecationWarning",
+]

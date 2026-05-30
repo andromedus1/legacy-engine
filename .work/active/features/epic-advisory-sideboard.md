@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-sideboard
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model, epic-advisory-whattoplay]
@@ -367,3 +367,19 @@ ILP/greedy arithmetic is exact and seed-free.
   replaced with data-driven estimates. The `HOSER_CATALOG` structure is ready for this; current values are
   heuristic constants as documented.
 - **PuLP 4.0 API migration**: `prob.add_variable()` / `COIN_CMD` migration deferred.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- (Fixed inline during review) PuLP 3.3.2 emitted 99 DeprecationWarnings from our current-API usage (`LpVariable(...)` constructor + `PULP_CBC_CMD`) pointing at a PuLP-4.0 migration whose replacements don't exist in 3.3.2. Added scoped `filterwarnings` ignores in pyproject so the noise doesn't bury real warnings; migration noted for when PuLP 4.0 lands. 542 still green.
+- Anti-hate `P(a brings hate k)` is simplified to total field share of share≥1% archetypes (archetype sideboard colors aren't tracked) — a conservative overestimate; documented. Refine when per-archetype sideboard composition is modeled.
+
+**Notes**:
+- ILP is a correct weighted max-coverage formulation (`max Σ w_e·y_e s.t. Σx_c≤budget, y_e≤Σ_{c covers e}x_c`) solved by PuLP/CBC with `msg=0`; `_ILPFailed` sentinel cleanly falls back to greedy on non-Optimal/missing-CBC. `TestILP` asserts ILP objective ≥ greedy on a hand-built model and runs the real solver (not skipped) — exact ≥ (1−1/e) verified.
+- Coverage model is data-driven where it matters: element weights = `field_share × best-tag-swing`, archetypes covered per their `whattoplay` vulnerability tags, color pre-filter via `compute_deck_colors`, anti-hate pseudo-elements folded into one unified solve. Swing magnitudes are honestly flagged heuristic (`heuristic_note` on every package); archetypes with no curated answer get weight 0 + a warning (never silent). Greedy marginal-gain trace always attached as the per-card "why."
+- `HOSER_CATALOG` (23 entries) faithfully seeds legacy-metagame §6 (graveyard / combo / counter-hosers / manabase / artifacts). `SideboardPackage` is a `@dataclass` in `advisory/sideboard.py` — same sanctioned placement deviation as `PositioningResult`/analytics records.
+- Open items carried (non-blocking): NIU-thesis prior-art manual pull; saturating `g(n)` redundancy refinement; empirical swing Δ when before/after-sideboard data exists. 68 tests; 542 total green.
