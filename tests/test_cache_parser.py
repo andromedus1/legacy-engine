@@ -67,6 +67,22 @@ class TestParseRounds:
         rounds = parse_rounds([{"RoundName": "R1", "Matches": [{"Player1": "a", "Player2": "b", "Result": "2-0"}]}])
         assert len(rounds) == 1 and rounds[0].result == "2-0"
 
+    def test_bye_null_player2_coerced_to_empty(self):
+        """A bye carries an explicit null Player2 in the fbettega cache — must not crash ingest.
+
+        Regression: the field default only applies when the key is absent; an explicit null
+        previously failed str validation. A bye is parsed as an empty opponent (dropped downstream).
+        """
+        rounds = parse_rounds([{"Player1": "alice", "Player2": None, "Result": None}])
+        assert len(rounds) == 1
+        assert rounds[0].player1 == "alice"
+        assert rounds[0].player2 == ""
+        assert rounds[0].result == ""
+
+    def test_nested_bye_null_player2(self):
+        rounds = parse_rounds([{"Matches": [{"Player1": "a", "Player2": None, "Result": "2-0"}]}])
+        assert len(rounds) == 1 and rounds[0].player2 == ""
+
 
 class TestParseCacheItem:
     def test_challenge(self):

@@ -8,11 +8,30 @@ would mislabel decks and corrupt the meta-share the platform exists to produce.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field
 
 from legacy_engine.models.base import LegacyEngineModel
+
+# Trailing comma before a closing ] or } — invalid strict JSON but present in some hand-maintained
+# MTGOFormatData files (e.g. Fallbacks/Dredge.json, Stompy.json, color_overrides.json).
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _loads_lenient(text: str) -> Any:
+    """Parse JSON, tolerating trailing commas in the hand-maintained upstream rule files.
+
+    Strict ``json.loads`` first; on a trailing-comma failure, strip them and retry rather than
+    dropping a real archetype/fallback. (The rule-file values are card-name strings, so the regex
+    can't corrupt legitimate content.)
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_TRAILING_COMMA_RE.sub(r"\1", text))
 
 # The 12 condition types defined by MTGOFormatData (mtgoformatdata-rule-schema brief).
 KNOWN_CONDITION_TYPES: frozenset[str] = frozenset({
@@ -68,16 +87,16 @@ def load_ruleset(rules_dir: Path) -> RuleSet:
     arch_dir = legacy / "Archetypes"
     if arch_dir.exists():
         for path in sorted(arch_dir.glob("*.json")):
-            rule = ArchetypeRule.model_validate(json.loads(path.read_text()))
+            rule = ArchetypeRule.model_validate(_loads_lenient(path.read_text()))
             _validate_condition_types(rule, path)  # fail-fast on unknown Type
             archetypes.append(rule)
 
     fb_dir = legacy / "Fallbacks"
     if fb_dir.exists():
         for path in sorted(fb_dir.glob("*.json")):
-            fallbacks.append(Fallback.model_validate(json.loads(path.read_text())))
+            fallbacks.append(Fallback.model_validate(_loads_lenient(path.read_text())))
 
     overrides_path = legacy / "color_overrides.json"
-    color_overrides = json.loads(overrides_path.read_text()) if overrides_path.exists() else {}
+    color_overrides = _loads_lenient(overrides_path.read_text()) if overrides_path.exists() else {}
 
     return RuleSet(archetypes=archetypes, fallbacks=fallbacks, color_overrides=color_overrides)
