@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-trends
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-metashare]
@@ -379,3 +379,40 @@ events dated `2024-09-01` (after Grief 2024-08-26, before Psychic Frog 2024-12-1
 - **Windowed-wrw incoherence**: guarded twice — `compute_metashare` raises `NotImplementedError` if
   windowed-wrw is requested, and `compute_trends` raises `ValueError` for `definition="wrw"`. No silent
   incoherent number can escape.
+
+## Implementation notes
+
+### Files created
+- `src/legacy_engine/analytics/trends.py` — new module containing `RegimeWindow`, `regime_windows()`,
+  `TrendCell`, `TrendSeries`, `_window_event_stats`, `_cap_thin`, `compute_trends`
+- `tests/test_trends.py` — 40 new tests across `TestRegimeWindows`, `TestMetashareWindowing`,
+  `TestComputeTrends`, `TestReportTrendsCLI`
+
+### Files modified
+- `src/legacy_engine/analytics/metashare.py` — Units 1–2 SQL constants and helpers updated to accept
+  `since`/`until` kwargs (additive, default `None`); `compute_metashare` gains the same kwargs plus
+  the wrw-window guard (`NotImplementedError`)
+- `src/legacy_engine/analytics/__init__.py` — added `RegimeWindow`, `TrendCell`, `TrendSeries`,
+  `regime_windows`, `compute_trends` to imports and `__all__`
+- `src/legacy_engine/cli.py` — added `report_trends` command and `_print_trend_series` helper before
+  the `report tiers` stub
+
+### Test counts
+- Baseline: 257 tests passing
+- After implementation: 297 tests passing (40 new trend tests added)
+- All 257 existing tests still green (metashare regression gate confirmed)
+
+### Deviations from spec
+- **None.** Implemented exactly to spec. Implementation order followed: Unit 2 → Unit 1 → Unit 3 →
+  Unit 4 → Unit 5.
+
+### One minor implementation note
+- `test_empty_corpus_returns_empty_series` initializes the schema explicitly via `init_schema(con)`
+  before calling `compute_trends`. This matches house style: `store.connect(":memory:")` does not
+  automatically create tables — they are created lazily by `load_tournament`. The test fixture
+  reflects the real precondition (schema initialized, no data loaded). This is not a design deviation.
+
+### Adjacent issues parked
+- `report tiers` stub remains intentionally untouched per spec ("DO NOT touch it").
+- `wrw` trends deferred as designed; the double guard (NotImplementedError in metashare +
+  ValueError in compute_trends) is in place.
