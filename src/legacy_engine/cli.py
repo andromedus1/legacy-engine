@@ -69,9 +69,17 @@ def seed_cards(verbose: bool) -> None:
 @seed.command("cache")
 @_verbose
 def seed_cache(verbose: bool) -> None:
-    """Mirror the fbettega tournament decklist cache."""
+    """Mirror the fbettega tournament cache and ingest Legacy events into DuckDB."""
     _setup_logging(verbose)
-    _not_implemented("seed cache")
+    from legacy_engine.ingestion import cache, store
+
+    cache.mirror_cache()
+    con = store.connect()
+    try:
+        n = cache.ingest_cache(con)
+    finally:
+        con.close()
+    click.echo(f"Ingested {n} Legacy tournaments into DuckDB")
 
 
 @seed.command("rules")
