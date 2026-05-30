@@ -12,7 +12,7 @@ downstream consumers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import duckdb
 
@@ -163,6 +163,10 @@ class MatchResults:
     contribute ``+1 win`` and ``+1 loss`` to the matching archetype's marginal
     so win-rate-weighted meta-share remains honest.
 
+    ``mirror_n`` tracks per-archetype mirror-match counts so the matchup-matrix
+    can render honest mirror cells (n only, p=0.5 fixed).  Additive field —
+    existing consumers that do not read it are unaffected.
+
     ``provenance`` records the filter that was applied: ``"online"``,
     ``"paper"``, or ``None`` (all sources).
     """
@@ -171,6 +175,7 @@ class MatchResults:
     archetypes: dict[str, ArchetypeRecord]
     coverage: MatchCoverage
     provenance: str | None  # "online" | "paper" | None
+    mirror_n: dict[str, int] = field(default_factory=dict)  # per-archetype mirror count
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +214,7 @@ def compute_match_results(
     cov = MatchCoverage()
     matchups: dict[tuple[str, str], MatchupTally] = {}
     archetypes: dict[str, ArchetypeRecord] = {}
+    mirror_n: dict[str, int] = {}
 
     rows = con.execute(_JOIN_SQL, [provenance, provenance]).fetchall()
 
@@ -229,6 +235,7 @@ def compute_match_results(
         # ── Mirror match: same archetype on both sides ──────────────────────
         if arch1 == arch2:
             cov.mirror_matches += 1
+            mirror_n[arch1] = mirror_n.get(arch1, 0) + 1
             # Marginal: a mirror is +1 win AND +1 loss for that archetype
             rec = archetypes.setdefault(arch1, ArchetypeRecord(archetype=arch1))
             rec.wins += 1
@@ -264,4 +271,5 @@ def compute_match_results(
         archetypes=archetypes,
         coverage=cov,
         provenance=provenance,
+        mirror_n=mirror_n,
     )
