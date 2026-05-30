@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-match-results
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: []
@@ -276,3 +276,35 @@ Follow the house pattern (module-level raw dicts → `parse_cache_item` → `sto
 - **Mirror**: not written to directed cells; carried in `coverage.mirror_matches`; marginal gets +1/+1 (see risk).
 - **Dataclasses for internal aggregates** (not Pydantic) — `MatchupCell` in `models/` remains the Pydantic, consumer-facing type owned by `matchup-matrix`.
 - **Single-stride, no child stories** — one cohesive module, units tightly coupled.
+
+## Implementation notes
+
+### Files created/modified
+- **Created**: `src/legacy_engine/analytics/match_results.py` — all five units (parser, normalizer,
+  record types, join+accumulator, public names).
+- **Modified**: `src/legacy_engine/analytics/__init__.py` — exports `compute_match_results`,
+  `MatchResults`, `MatchupTally`, `ArchetypeRecord`, `MatchCoverage`, `MatchOutcome`,
+  `parse_match_result`, `normalize_player` (Unit 5).
+- **Created**: `tests/test_match_results.py` — 42 new tests.
+
+### Test count
+- Baseline: 129 passing.
+- After implementation: 171 passing (42 new, 0 failures).
+
+### Deviations from design
+None. Every unit follows the spec exactly:
+- `parse_match_result` splits on `-`, takes first two int tokens, third token (draw count) is
+  silently ignored; all non-numeric / empty / single-token inputs return `None`.
+- `normalize_player` = `(name or "").strip().lower()` — verbatim from spec.
+- Dataclasses used throughout (not Pydantic) as required.
+- Mirror matches: not written to directed `matchups`; counted in `coverage.mirror_matches`;
+  per-archetype marginal credited `+1 win / +1 loss`.
+- SQL join is the spec's `_JOIN_SQL` verbatim.
+- Both directed cells `(W,L)` and `(L,W)` materialised for every decisive non-mirror match.
+
+### Adjacent issues parked
+- None. Coverage count invariant (`total == decisive + unmatched + dropped + mirror`) holds by
+  construction; verified by `test_multi_scenario_coverage_totals`.
+- The `DuckDBPyConnection` type hint in `_con()` in the test file uses `store.DuckDBPyConnection`
+  which is actually from the `duckdb` package re-exported. The type comment uses `# type: ignore`
+  to avoid a runtime AttributeError; the actual object returned is correct.
