@@ -18,6 +18,13 @@ from legacy_engine.analytics.matchup import (
     build_mirror_cell,
     wilson_or_jeffreys_ci,
 )
+from legacy_engine.analytics.metashare import (
+    MetaShareEntry,
+    MetaShareReport,
+    blend_shares,
+    compute_all,
+    compute_metashare,
+)
 
 __all__ = [
     "ArchetypeRecord",
@@ -35,4 +42,10 @@ __all__ = [
     "build_matrix",
     "build_mirror_cell",
     "wilson_or_jeffreys_ci",
+    # metashare
+    "MetaShareEntry",
+    "MetaShareReport",
+    "blend_shares",
+    "compute_all",
+    "compute_metashare",
 ]

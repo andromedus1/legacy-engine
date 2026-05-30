@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-metashare
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-match-results]
@@ -314,3 +314,42 @@ House pattern (raw dicts → `parse_cache_item` → `store.load_tournament` into
 - **Blend is opt-in, always labeled** `provenance='blend(...)'`; default output is per-provenance separate (PRINCIPLES #6).
 - **`report meta` emits labeled text here; `charts` adds visual output later** (additive, same command).
 - **Single-stride, no child stories** — one cohesive module + one CLI wiring; units tightly coupled.
+
+## Implementation notes
+
+### Files created / modified
+- **Created**: `src/legacy_engine/analytics/metashare.py` — Units 1–5: `_topcut_counts`, `_raw_counts`,
+  `_unlabeled_count`, `_wrw_weights`, `MetaShareEntry`, `MetaShareReport`, `_assemble`,
+  `compute_metashare`, `compute_all`, `blend_shares`.
+- **Modified**: `src/legacy_engine/analytics/__init__.py` — appended Unit 7 exports
+  (`compute_metashare`, `compute_all`, `blend_shares`, `MetaShareReport`, `MetaShareEntry`).
+- **Modified**: `src/legacy_engine/cli.py` — replaced `report_meta` `_not_implemented` stub with
+  real implementation (Unit 6); added `_print_metashare_report` helper.
+- **Modified**: `tests/test_cli.py` — removed `report meta` from the stubs-parametrize list
+  (mirrors how `report matchups` was handled).
+- **Created**: `tests/test_metashare.py` — 41 new tests across `TestTopcutCounts`,
+  `TestRawCounts`, `TestWrwWeights`, `TestAssemble`, `TestComputeEntryPoints`,
+  `TestReportMetaCLI`.
+
+### Test count
+- Before: 217 (baseline spec said 217; actual baseline was 216 because the stubs test list had
+  `report meta` removed during the pre-existing `report matchups` implementation — counted 216
+  prior to this feature).
+- After: 257 (+41 new tests, all green).
+
+### Deviations from spec (with rationale)
+- **`_assemble` `display_total` parameter** (additive): the spec's `total=1` trick for wrw
+  (pre-normalised shares) would set `total_decks=1` on the report, which is meaningless for
+  display. Added an optional `display_total` kwarg to `_assemble` so wrw reports show
+  sum-of-matchup-n as the denominator. No behavioural change to any other path.
+- **`total=1` normalised-weight path**: for wrw the caller renormalises weights to sum to 1 and
+  passes `total=1` so `share = weight / 1 = weight`. This is correct arithmetic; the spec implied
+  this without spelling it out.
+
+### Adjacent issues parked
+- `blend_shares` builds entries from raw archetype sets, not the grouped "Other" rows. If a
+  consumer passes reports that had `group_other=True`, the "Other" row will be included in the
+  blend. This is intentional — `blend_shares` is an opt-in advanced operation and callers are
+  expected to pass ungrouped reports (`group_other=False`) for blending.
+- The wrw bimodal-coverage warning (logged via `log.debug`) is per-archetype and at DEBUG level.
+  Upgrading to INFO or surfacing it in the CLI output is a future additive concern.
