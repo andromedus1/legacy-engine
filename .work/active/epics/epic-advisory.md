@@ -1,7 +1,7 @@
 ---
 id: epic-advisory
 kind: epic
-stage: implementing
+stage: done
 tags: [advisory]
 parent: null
 depends_on: [epic-meta-analytics]
@@ -78,3 +78,32 @@ clean DAG (`field-model` source → `report` sink) with `positioning ∥ whattop
 
 ### UI alignment
 - Skipped — `epic-advisory` is a CLI-only surface (`advise` text reports + audit trail); no net-new screens. `ux-ui-design` mockups N/A.
+
+## Children complete (2026-05-30)
+
+All five child features at `stage: done`:
+- `epic-advisory-field-model` — `FieldDistribution` SSOT (global-from-metashare + custom field)
+- `epic-advisory-positioning` — `S(D)` Bayesian Monte-Carlo + `rank_decks` (P(best), best-call vs best-deck)
+- `epic-advisory-whattoplay` — proactivity, vulnerability tags, hate-equity, best-deck/best-call, plan-clash
+- `epic-advisory-sideboard` — weighted max-coverage (PuLP/CBC ILP + greedy trace) + anti-hate pseudo-elements
+- `epic-advisory-report` — Field Read & Deck Recommendation surface + the `advise` CLI group
+
+Suite: 577 tests green.
+
+## Review (2026-05-30) — epic-level
+
+**Verdict**: Approve
+
+**Lenses** (per-line lenses skipped — each child was reviewed individually):
+- **Design alignment**: realized decomposition matches the brief — `field-model` foundation → `positioning` ∥ `whattoplay` → `sideboard` (needs whattoplay's hate-equity) → `report` sink, a clean DAG built in dependency order. The `field-model` extraction (beyond the architecture's 4-file table) paid off: positioning/sideboard/whattoplay all consume one `FieldDistribution` SSOT with no duplication.
+- **Capability completeness**: "how to attack the field" works end-to-end. `advise positioning` (Bayesian-MC S + P(best) ranking, best-call vs best-deck), `advise sideboard` (exact ILP 15 + greedy "why each card" + anti-hate), `advise whattoplay` (proactivity + vulnerability + hate-equity), and `advise report` (the full audit-trailed Field Read) — all wired, custom-field threaded throughout.
+- **Foundation-doc alignment**: fixed three drifts inline — ARCHITECTURE's `advise` CLI enumeration now includes `report`; the advisory module table now lists `field.py`; and `PositioningResult`/`SideboardPackage`/`FieldDistribution`/`FieldReadReport` are documented as advisory-module dataclasses (alongside the analytics records) rather than `models/` types, matching the as-built sanctioned convention. No other drift.
+- **Breaking changes**: none. The whole epic is additive (`advisory/` was empty; the three `advise` stubs are now implemented; no existing signature changed). All 577 tests green.
+
+**Blockers**: none (the ARCHITECTURE drift fixed inline during this review)
+**Important**: none
+**Nits**: carried in each child's review (`_card_roles` dead branch, anti-hate weight simplification, PuLP-4.0-deprecation filter, classifier-path test coverage via override) — cosmetic / sanctioned.
+
+**Notes**:
+- Confidence-honesty thread holds across the pillar: Bayesian MC carries Beta-cell + Dirichlet-share uncertainty with percentile CIs; matchup n<30 gate reused (never recomputed); positioning best-call gated; sideboard swings explicitly flagged heuristic-not-data with an audit note; the report collects every component's provenance (field_source, CI/tier, heuristic notes, imputed sets) into a labeled audit trail; BEST-CALL gated on row data sufficiency. Honest about the heuristic layers (swing magnitudes, oracle-text role regexes) without hiding them.
+- Open items carried to backlog-awareness (non-blocking): NIU-thesis sideboard prior-art manual pull; saturating g(n) sideboard redundancy; empirical swing Δ; PuLP 4.0 migration; saturating/concentration custom-field counts. Left at `stage: done` in active/ for late-binding release pickup (not archived).
