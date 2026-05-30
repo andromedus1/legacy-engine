@@ -42,20 +42,24 @@ documents:
 
   docs/ARCHITECTURE.md:
     summary: |
-      High-level architecture (from /ideate). Mirrors edh-engine's Python-CLI + local-files shape:
-      ingestion → archetype-parser → analytics/advisory → models → data. Detailed design deferred to /architecture.
+      Detailed architecture grounded in all four research streams. Python 3.11+ Click CLI mirroring
+      edh-engine + scipy/numpy/statsmodels/pulp for advisory and DuckDB as an embedded analytical store
+      (the one justified divergence, driven by the matchup-matrix rounds-join workload). MVP arc:
+      ingestion/ → archetype/ → analytics/ + advisory/ → models/ → data/; goldfish/ + generation/ deferred.
     decisions:
-      - "Mirror edh-engine stack: Python 3.11+, Click CLI, Pydantic, httpx, local files, matplotlib; no DB/server for MVP."
-      - "Modules: ingestion/ → archetype/ (ported MTGOFormatData rules) → analytics/ + advisory/ → models/ → data/."
-      - "archetype/ is the key novel subsystem (no commander to key on)."
-      - "Ingestion consumes the fbettega cache JSON (mirrored locally), not mtgo.com directly."
-      - "Biggest risk: fragile externally-owned scraper/cache layer — mirror repos, swap upstream behind ingestion/ boundary."
-      - "Scryfall is the shared card dimension; goldfish code ported from edh-engine later."
+      - "Mirror edh-engine stack + add scipy/numpy/statsmodels (advisory stats) and pulp/CBC (sideboard ILP)."
+      - "STORAGE: raw mirrored JSON = source of truth; rebuildable embedded DuckDB = analytical layer for meta-share + matchup joins (the one justified divergence)."
+      - "archetype/: vendor MTGOFormatData rules pinned to a SHA, reimplement the ~210-line Detect matcher, golden-test >=99% label agreement (fallback: hand-curated fixtures)."
+      - "Scryfall ADR RESOLVED: extend edh-engine's scryfall.py, index the whole oracle pool; no Scrython/mtg_parser."
+      - "Deck color = lands.produced_mana ∩ nonlands.colors (NOT color_identity); legality via version-stamped BanListSnapshot blacklist."
+      - "Matchup matrix computed from Rounds; Wilson CIs + Beta-Binomial shrinkage; tiers (n<30 hidden / 30-99 / >=100); matchup-n separate from metashare-n; meta-% 3 labeled ways + online/paper."
+      - "Ingestion mirror-and-decouple behind a port; MVP = ingestion+archetype+analytics+advisory; goldfish/ + generation/ deferred with clear seams."
     related:
       - {slug: docs/VISION.md, relationship: depends-on}
       - {slug: docs/SPEC.md, relationship: depends-on}
       - {slug: docs/research-plan.md, relationship: parallel-to}
       - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: depends-on}
+      - {slug: docs/briefs/advisory-methods.md, relationship: depends-on}
 
   docs/PRINCIPLES.md:
     summary: |
