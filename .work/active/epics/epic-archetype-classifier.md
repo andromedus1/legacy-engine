@@ -39,6 +39,13 @@ agreement against the archived C# parser. Carries the must-verify **golden-test-
 - `docs/SPEC.md` — Archetype, ArchetypeRule, Condition entities.
 - `docs/PRINCIPLES.md` — knowledge compiled not re-derived; fail-fast on unknown condition type.
 
+## Design decisions
+*(Captured via `/epic-design --only-questions`, 2026-05-29 — locked inputs for the feature-design pass; do not re-ask.)*
+- **Golden-test oracle:** **Both — fixtures now, C# corpus as follow-up.** Build the matcher golden-tested against hand-curated label fixtures (a few dozen community-consensus-labeled Legacy decks) so the epic isn't blocked on the archived .NET 8 binary. Add a **separate follow-up story** to attempt the full C#-parser golden corpus (≥99% agreement) *if* the binary proves runnable / labels are recoverable. Resolves the campaign's must-verify item pragmatically (don't block; strengthen later).
+- **Conflict/Unknown handling:** **Store the raw matcher label faithfully** — persist exactly what the C# engine emits (`Conflict(A,B)`, `Unknown`) into `decks.archetype`. Keeps the port a faithful, golden-testable replica; the **analytics/meta-share epic owns the bucketing policy** (Conflict→review, Unknown→"Other"). Do NOT bake PreferSimpler or Unknown→Other into the classifier.
+- **Fallback tier:** **Rules-only for now.** Match the community pipeline exactly (MTGOFormatData rules + fallback piles); `Unknown` is honest signal. No ML/statistical tier — revisit only if the real-data Unknown rate proves high.
+- **Rules vendoring (settled, not a fork):** vendor MTGOFormatData's `Formats/Legacy/` JSON pinned to a commit SHA in a manifest (`config.RULES_PINNED_SHA`); `legacy refresh rules` pulls + diffs upstream; unknown condition `Type` fails fast at load (mirrors the foundation's fail-fast convention).
+
 ## Anticipated child features
 - Vendor MTGOFormatData rules (git subtree @ SHA + RULES_MANIFEST + `legacy refresh rules` diff/fail-fast)
 - Typed rule loader (12 condition types; archetype/variant/fallback)
