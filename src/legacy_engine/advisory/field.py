@@ -55,7 +55,7 @@ def _normalize_shares(raw: dict[str, float]) -> tuple[dict[str, float], list[str
     warnings: list[str] = []
     if abs(total - 1.0) > _SUM_TOLERANCE:
         warnings.append(
-            f"custom field shares summed to {total:.4f}; normalized to 1.0"
+            f"field shares summed to {total:.4f}; normalized to 1.0"
         )
 
     normalized = {archetype: share / total for archetype, share in raw.items()}

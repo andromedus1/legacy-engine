@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-field-model
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory
 depends_on: []
@@ -298,3 +298,16 @@ archetype`; `TestX` classes). Build the global field from a real labeled corpus 
 
 ### Adjacent issues parked
 - None found. `compute_metashare` and `_is_never_other` work exactly as expected for this consumer.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- (Fixed inline during review) `_normalize_shares` hard-coded "custom field shares summed to…", which leaked misleadingly into `build_global_field`'s post-exclusion renormalization warning. Generalized to "field shares summed to…" — accurate in both contexts. No test pinned the string; 387 tests still green.
+
+**Notes**:
+- Matches the design exactly: fail-fast `ValueError` on empty/negative/zero-sum; `field_source` always set; `counts` carried for global (Dirichlet input) and `None` for custom (point-shares warning emitted); `no_data` flags user archetypes absent from `known_archetypes` (kept in the field, warned). Unknown/Conflict excluded via the reused `metashare._is_never_other` (SSOT, not reimplemented) and the excluded fraction is surfaced — never silently dropped.
+- Empty-field edge handled (no positionable archetypes → empty distribution + warning, no crash). Recomputes nothing — consumes `compute_metashare`. Plain `@dataclass`, consistent with the analytics records. 43 tests; the global-field test builds a real labeled corpus including an `Unknown` deck to prove the exclusion + renormalization seam end-to-end.
