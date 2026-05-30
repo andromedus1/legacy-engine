@@ -1,188 +1,175 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index to regenerate.
 # Frontmatter is the source of truth — edit each doc's frontmatter and re-run.
 schema_version: 2
-generated_at: 2026-05-30T00:00:00Z
+generated_at: '2026-05-30T00:00:00Z'
 generated_from: frontmatter
 total_docs: 18
-
 documents:
-  - path: docs/ARCHITECTURE.md
-    title: 'Architecture: legacy-engine'
-    type: architecture
-    kind: planning
-    updated: 2026-05-30
-    consumer_hint: "Read for how legacy-engine is built \u2014 module map, file responsibilities, data\
-  \ flow, the core data models, storage decision, conventions, dependencies, and the\
-  \ built-vs-deferred split. The detailed architecture grounded in all four research\
-  \ streams."
-  - path: docs/VISION.md
-    title: 'Vision: legacy-engine'
-    type: north-star
-    kind: planning
-    updated: 2026-05-29
-    consumer_hint: "Read first \u2014 the why and what of legacy-engine. Vision, problem, principles\
-  \ pointer, and the four-pillar domain model for the Legacy analytics platform."
-  - path: docs/PRINCIPLES.md
-    title: 'Principles: legacy-engine'
-    type: principles
-    kind: planning
-    updated: 2026-05-29
-    consumer_hint: "Read when making a design or modeling trade-off \u2014 the decision heuristics specific\
-  \ to legacy-engine (beyond generic best practice)."
-  - path: docs/research-plan.md
-    title: 'Research Plan: legacy-engine'
-    type: research-plan
-    kind: planning
-    updated: 2026-05-29
-    consumer_hint: Read to know what research must run before /architecture, and what's deferred per-pillar.
-  The routing plan for /research, /deep-research, and /brief invocations.
-...
-  - path: docs/SPEC.md
-    title: 'Spec: legacy-engine'
-    type: spec
-    kind: planning
-    updated: 2026-05-29
-    consumer_hint: "Read when scoping what to build \u2014 the capabilities, domain entities, and non-functional\
-  \ requirements of legacy-engine. Pairs with VISION (why) and ARCHITECTURE (how)."
-  - path: docs/briefs/advisory-methods.md
-    title: 'Brief: Advisory Statistics & Optimization Methods'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /research
-    consumer_hint: "What statistical and optimization methods power the Meta Attack/Advisory pillar \u2014\
-  \ matchup-matrix estimation, the meta-positioning score, the sideboard recommender,\
-  \ and the what-to-play advisor? Read before designing the advisory/ module."
-  - path: docs/briefs/deck-generation-and-moxfield.md
-    title: 'Brief: Deck Generation & Moxfield Surfacing'
-    type: brief
-    kind: research
-    updated: 2026-05-30
-    status: draft
-    research_method: /brief
-    blocks_phase: epic-deck-generation
-    consumer_hint: How should legacy-engine generate/tune decklists from its meta + advisory layers,
-  and surface them to Moxfield? Read before designing epic-deck-generation.
-...
-  - path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
-    title: 'Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The exact C# matching algorithm of Badaro/MTGOArchetypeParser \u2014 how a decklist\
-  \ + rule set produces an archetype label \u2014 specified for a faithful Python\
-  \ reimplementation of legacy-engine's archetype/ module."
-  - path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
-    title: "C#\u2192Python Port Strategy for the Archetype Classifier"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The C#\u2192Python port strategy for the archetype classifier \u2014 vendor Badaro's\
-  \ MTGOFormatData JSON rules as a pinned data dependency, reimplement only the matcher\
-  \ in Python, and gate fidelity with a golden-test harness against the frozen C#\
-  \ parser's labels."
-  - path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
-    title: "Brief: fbettega Tournament-Data Cache \u2014 Schema & Ingestion Contract"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "Read before designing the ingestion/ module \u2014 the exact JSON schema, repo layout,\
-  \ source/provenance encoding, update cadence, and consumption strategy for the fbettega\
-  \ tournament-data cache."
-  - path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
-    title: 'Brief: Ingestion Operations & Meta-Share Computation'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The operational + downstream-computation contract for the data layer \u2014 source-layer\
-  \ fragility, the mirror-and-decouple resilience strategy, the three meta-% definitions\
-  \ (raw / top-cut / win-rate-weighted), online-vs-paper splitting, and whether we\
-  \ can compute our own matchup matrix from the cache (we can \u2014 the JSON carries\
-  \ Rounds with pairings). Read before designing the ingestion boundary, the meta-share\
-  \ computation, or the matchup-matrix module."
-  - path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
-    title: "Brief: Badaro/MTGOFormatData \u2014 The Archetype Rule Schema (Legacy)"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The exact JSON rule schema of Badaro/MTGOFormatData (the archetype-detection ruleset\
-  \ we WRAP, ported to Python). Defines the data contract the legacy-engine `archetype/`\
-  \ module consumes \u2014 condition types, archetype/variant/fallback structure,\
-  \ color flags, and the Legacy taxonomy. Read before designing the rule-loader and\
-  \ the matching algorithm."
-  - path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
-    title: "Brief: Prior-Art Scan \u2014 Ingestion & Archetype Classification"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "Prior-art scan for the legacy-engine ingestion + archetype-classification pipeline\
-  \ \u2014 what already exists (ports, scrapers, classifiers, analytics platforms,\
-  \ card libs) and the reuse verdict for each. Read before deciding adopt-vs-build\
-  \ on the MTGOArchetypeParser port."
-  - path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
-    title: 'Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: What Scryfall card fields the Legacy archetype classifier keys on, how MTGOArchetypeParser
-  derives deck colors, how decklist names resolve to canonical cards, and whether
-  edh-engine's Scryfall layer can be reused as-is. Read before designing the Card
-  model, the name index, or the color-prefix step of the classifier.
-...
-  - path: docs/briefs/legacy-foundations.md
-    title: 'Brief: Legacy Format Foundations'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /research
-    consumer_hint: What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation
-  platform must encode? Read before designing the deck-as-data model, goldfish sim,
-  or legality validation.
-...
-  - path: docs/briefs/legacy-metagame.md
-    title: 'Brief: Legacy Metagame (2026)'
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /research
-    consumer_hint: "What is the current Legacy metagame (2026) \u2014 tier list, archetype mechanics\
-  \ & goldfish speeds, data sources, and how to attack the field? Read before designing\
-  \ meta-ingestion, the matchup model, or the meta-speed metric."
-  - path: docs/briefs/ingestion-archetype-contracts/parent.md
-    title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
-    type: program-parent
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "Read first for the ingestion + archetype-parser data layer \u2014 the synthesized\
-  \ contracts and build plan for legacy-engine's ingestion/ and archetype/ modules.\
-  \ Navigation hub for the 7 specialist briefs."
-  - path: docs/briefs/ingestion-archetype-contracts/campaign.md
-    title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
-    type: program-report
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: The quality report + metadata for the ingestion-archetype-contracts deep-research
-  campaign. Read to know how trustworthy the brief set is, the contradictions flagged,
-  and what to verify before building.
-...
+- path: docs/ARCHITECTURE.md
+  title: 'Architecture: legacy-engine'
+  type: architecture
+  kind: planning
+  updated: '2026-05-30'
+  consumer_hint: Read for how legacy-engine is built — module map, file responsibilities, data flow, the
+    core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The
+    detailed architecture grounded in all four research streams.
+- path: docs/VISION.md
+  title: 'Vision: legacy-engine'
+  type: north-star
+  kind: planning
+  updated: '2026-05-29'
+  consumer_hint: Read first — the why and what of legacy-engine. Vision, problem, principles pointer,
+    and the four-pillar domain model for the Legacy analytics platform.
+- path: docs/PRINCIPLES.md
+  title: 'Principles: legacy-engine'
+  type: principles
+  kind: planning
+  updated: '2026-05-29'
+  consumer_hint: Read when making a design or modeling trade-off — the decision heuristics specific to
+    legacy-engine (beyond generic best practice).
+- path: docs/research-plan.md
+  title: 'Research Plan: legacy-engine'
+  type: research-plan
+  kind: planning
+  updated: '2026-05-29'
+  consumer_hint: Read to know what research must run before /architecture, and what's deferred per-pillar.
+    The routing plan for /research, /deep-research, and /brief invocations.
+- path: docs/SPEC.md
+  title: 'Spec: legacy-engine'
+  type: spec
+  kind: planning
+  updated: '2026-05-29'
+  consumer_hint: Read when scoping what to build — the capabilities, domain entities, and non-functional
+    requirements of legacy-engine. Pairs with VISION (why) and ARCHITECTURE (how).
+- path: docs/briefs/advisory-methods.md
+  title: 'Brief: Advisory Statistics & Optimization Methods'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /research
+  consumer_hint: What statistical and optimization methods power the Meta Attack/Advisory pillar — matchup-matrix
+    estimation, the meta-positioning score, the sideboard recommender, and the what-to-play advisor? Read
+    before designing the advisory/ module.
+- path: docs/briefs/deck-generation-and-moxfield.md
+  title: 'Brief: Deck Generation & Moxfield Surfacing'
+  type: brief
+  kind: research
+  updated: '2026-05-30'
+  status: draft
+  research_method: /brief
+  blocks_phase: epic-deck-generation
+  consumer_hint: How should legacy-engine generate/tune decklists from its meta + advisory layers, and
+    surface them to Moxfield? Read before designing epic-deck-generation.
+- path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
+  title: 'Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The exact C# matching algorithm of Badaro/MTGOArchetypeParser — how a decklist + rule
+    set produces an archetype label — specified for a faithful Python reimplementation of legacy-engine's
+    archetype/ module.
+- path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
+  title: C#→Python Port Strategy for the Archetype Classifier
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The C#→Python port strategy for the archetype classifier — vendor Badaro's MTGOFormatData
+    JSON rules as a pinned data dependency, reimplement only the matcher in Python, and gate fidelity
+    with a golden-test harness against the frozen C# parser's labels.
+- path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+  title: 'Brief: fbettega Tournament-Data Cache — Schema & Ingestion Contract'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Read before designing the ingestion/ module — the exact JSON schema, repo layout, source/provenance
+    encoding, update cadence, and consumption strategy for the fbettega tournament-data cache.
+- path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
+  title: 'Brief: Ingestion Operations & Meta-Share Computation'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The operational + downstream-computation contract for the data layer — source-layer fragility,
+    the mirror-and-decouple resilience strategy, the three meta-% definitions (raw / top-cut / win-rate-weighted),
+    online-vs-paper splitting, and whether we can compute our own matchup matrix from the cache (we can
+    — the JSON carries Rounds with pairings). Read before designing the ingestion boundary, the meta-share
+    computation, or the matchup-matrix module.
+- path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
+  title: 'Brief: Badaro/MTGOFormatData — The Archetype Rule Schema (Legacy)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The exact JSON rule schema of Badaro/MTGOFormatData (the archetype-detection ruleset
+    we WRAP, ported to Python). Defines the data contract the legacy-engine `archetype/` module consumes
+    — condition types, archetype/variant/fallback structure, color flags, and the Legacy taxonomy. Read
+    before designing the rule-loader and the matching algorithm.
+- path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
+  title: 'Brief: Prior-Art Scan — Ingestion & Archetype Classification'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Prior-art scan for the legacy-engine ingestion + archetype-classification pipeline —
+    what already exists (ports, scrapers, classifiers, analytics platforms, card libs) and the reuse verdict
+    for each. Read before deciding adopt-vs-build on the MTGOArchetypeParser port.
+- path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
+  title: 'Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: What Scryfall card fields the Legacy archetype classifier keys on, how MTGOArchetypeParser
+    derives deck colors, how decklist names resolve to canonical cards, and whether edh-engine's Scryfall
+    layer can be reused as-is. Read before designing the Card model, the name index, or the color-prefix
+    step of the classifier.
+- path: docs/briefs/legacy-foundations.md
+  title: 'Brief: Legacy Format Foundations'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /research
+  consumer_hint: What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation
+    platform must encode? Read before designing the deck-as-data model, goldfish sim, or legality validation.
+- path: docs/briefs/legacy-metagame.md
+  title: 'Brief: Legacy Metagame (2026)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /research
+  consumer_hint: What is the current Legacy metagame (2026) — tier list, archetype mechanics & goldfish
+    speeds, data sources, and how to attack the field? Read before designing meta-ingestion, the matchup
+    model, or the meta-speed metric.
+- path: docs/briefs/ingestion-archetype-contracts/parent.md
+  title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
+  type: program-parent
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Read first for the ingestion + archetype-parser data layer — the synthesized contracts
+    and build plan for legacy-engine's ingestion/ and archetype/ modules. Navigation hub for the 7 specialist
+    briefs.
+- path: docs/briefs/ingestion-archetype-contracts/campaign.md
+  title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
+  type: program-report
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The quality report + metadata for the ingestion-archetype-contracts deep-research campaign.
+    Read to know how trustworthy the brief set is, the contradictions flagged, and what to verify before
+    building.
