@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-card-model-scryfall
 kind: feature
-stage: review
+stage: done
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: [epic-foundations-card-data-package-skeleton]
@@ -84,3 +84,8 @@ Moxfield-metadata filtering (no Moxfield), add `get_card(name) -> Card | None` r
 - **Discrepancies from design**: none material. Followed the established patterns (Card subclasses `LegacyEngineModel`; scryfall paths via config; CLI stub replaced per cli-nested-groups pattern).
 - **Test debt fixed in-session**: `test_cli` still listed `seed cards` as a not-implemented stub — stale after wiring it; removed that parametrize entry (which had been triggering a real ~170MB Scryfall download in the suite). Its real behavior is covered by mocked `test_scryfall`.
 - **Adjacent issues parked**: none.
+
+## Review (2026-05-29)
+**Verdict**: Approve. **Blockers**: none. **Important**: none.
+**Nits**: `get_card` resolves one card at a time; if a bulk-resolve path is needed later, add a `resolve_many` using `_batch_lookup` for misses (not needed yet).
+**Notes**: Faithful port of edh-engine's ScryfallClient; whole-pool index + face keys verified; Card model maps only contract-named fields (extra ignored). 45 tests green, deterministic. Patterns adhered to. Unblocks card-derivations + duckdb-store.
