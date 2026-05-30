@@ -168,7 +168,11 @@ def _window_event_stats(
     min_date_str, max_date_str = row[1], row[2]
     if event_count <= 1 or min_date_str is None or max_date_str is None:
         return event_count, 0
-    span_days = (date.fromisoformat(max_date_str) - date.fromisoformat(min_date_str)).days
+    # tournaments.date is ISO, but real-corpus values mix plain dates ("2025-11-09") with full
+    # timestamps ("2025-11-09T14:00:00+00:00", from Melee). Take the date portion for the span.
+    span_days = (
+        date.fromisoformat(max_date_str[:10]) - date.fromisoformat(min_date_str[:10])
+    ).days
     return event_count, span_days
 
 

@@ -505,6 +505,33 @@ class TestMetashareWindowing:
 # ---------------------------------------------------------------------------
 
 
+    def test_timestamp_format_dates_do_not_crash_span(self):
+        """Real-corpus dates mix plain 'YYYY-MM-DD' with full ISO timestamps (Melee).
+
+        Regression: _window_event_stats did date.fromisoformat() on the raw value and crashed on
+        '2025-11-09T14:00:00+00:00'. The span must be computed from the date portion.
+        """
+        con = _con()
+
+        def _evt(name, date_str, players):
+            raw = {
+                "Tournament": {"Name": name, "Date": date_str, "Formats": "Legacy",
+                               "Uri": f"https://melee.gg/{name}"},
+                "Decks": [{"Player": p, "Result": "", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                           "Sideboard": []} for p in players],
+                "Rounds": [], "Standings": [],
+            }
+            _load_and_label(con, raw, "melee", {p: "Delver" for p in players})
+
+        # Two events, full-timestamp dates, same regime → event_count==2, span computed from date part.
+        _evt("mauto-1", "2025-11-09T14:00:00+00:00", ["a", "b", "c"])
+        _evt("mauto-2", "2025-11-09T18:30:00+00:00", ["d", "e"])
+        series = compute_trends(con, definition="raw", min_share=0.0)
+        # Must not raise; the regime containing these events is present with both counted.
+        assert any(r.event_count >= 2 for r in series.regimes)
+        con.close()
+
+
 class TestComputeTrends:
     def test_wrw_raises_value_error(self):
         """compute_trends(definition='wrw') raises ValueError."""
