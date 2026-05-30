@@ -41,7 +41,6 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
         # seed cards/cache/rules/banlist and label are implemented now; the rest remain stubs.
         (["refresh"], "refresh"),
         (["report", "meta"], "report meta"),
-        (["report", "matchups"], "report matchups"),
         (["report", "tiers"], "report tiers"),
         (["advise", "positioning"], "advise positioning"),
         (["advise", "sideboard"], "advise sideboard"),
