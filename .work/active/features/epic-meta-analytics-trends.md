@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-trends
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-metashare]
@@ -416,3 +416,18 @@ events dated `2024-09-01` (after Grief 2024-08-26, before Psychic Frog 2024-12-1
 - `report tiers` stub remains intentionally untouched per spec ("DO NOT touch it").
 - `wrw` trends deferred as designed; the double guard (NotImplementedError in metashare +
   ValueError in compute_trends) is in place.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- `trends.py:22` imports `MetaShareEntry` but never references it (only `compute_metashare` is used). Harmless dead import (no ruff configured); drop it on next touch.
+
+**Notes**:
+- Metashare windowing is genuinely additive: `since`/`until` default `None`, param ordering correct, `compute_all` untouched. The no-window path is byte-identical — `test_no_window_regression_equals_unwindowed` proves it, and all 257 prior tests stay green (297 total).
+- Reuse-not-re-derive is verified, not asserted: `test_archetype_shares_match_per_regime_metashare` confirms each regime's cells equal `compute_metashare(..., since, until)` for the same window. `trends` owns only partitioning + version-stamping; share math, the floor, "Other", and tiers all stay in `metashare`.
+- Honesty gates intact: thin windows (`<4 events or <14-day span`) flagged + tier capped at `evolving` via `_cap_thin`; empty regimes omitted (not zeroed); both incoherent-wrw paths guarded (`NotImplementedError` in metashare, `ValueError` in `compute_trends`). Every series carries `(definition, provenance)` labels (PRINCIPLES #6); CLI never prints an unlabeled/blended number.
+- Regime boundaries derive from `BAN_EVENTS` (SSOT) — no re-listing; half-open `[since, until)` so an event on a ban date lands in the new regime (tested). All SQL parameterized (`?`), no injection. No foundation-doc drift (`analytics/trends.py` matches ARCHITECTURE).
