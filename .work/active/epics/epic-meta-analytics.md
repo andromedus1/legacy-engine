@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics
 kind: epic
-stage: review
+stage: done
 tags: [analytics]
 parent: null
 depends_on: [epic-tournament-ingestion, epic-archetype-classifier]
@@ -86,3 +86,21 @@ All five child features are at `stage: done`:
 - `epic-meta-analytics-charts` — matplotlib tier-list / meta-share / matchup-heatmap / trends + CLI wiring
 
 Advancing epic `implementing → review` for aggregate epic-level review. Suite: 344 tests green.
+
+## Review (2026-05-30) — epic-level
+
+**Verdict**: Approve
+
+**Lenses** (per-line lenses skipped — exercised in each child's own review):
+- **Design alignment**: realized decomposition matches the brief — the 5-feature shape (match-results foundation → metashare ∥ matchup-matrix → trends → charts sink) is a clean DAG, built in dependency order. The provisional 4-arc sketch's `match-results` extraction paid off (no duplicated rounds→archetype join).
+- **Capability completeness**: "what's the meta, and how do the decks match up" works end-to-end. CLI surface delivered: `report meta` (3 labeled definitions × online/paper), `report matchups` (Wilson/Jeffreys CI + Beta-Binomial shrinkage + n<30 gate + bimodal caveat), `report tiers` (S/A/B), `report trends` (version-stamped across ban-list regimes), all with `--chart-dir` PNG output via `charts.py`.
+- **Foundation-doc alignment**: one drift found and fixed inline — `ARCHITECTURE.md` CLI enumeration omitted the `report trends` leaf added by the trends feature; now `report meta|matchups|tiers|trends`. No other drift (analytics/ module table, MatchupCell, confidence tiers all match code).
+- **Breaking changes**: none cross-cutting. metashare/match_results gained only additive, default-None kwargs (date window); `compute_all` untouched; all prior tests green.
+
+**Blockers**: none (the ARCHITECTURE drift was fixed inline during this review)
+**Important**: none
+**Nits**: carried in each child's review (unused imports in trends.py/charts.py; render_trends legend dedupe) — cosmetic, deferred to next touch.
+
+**Notes**:
+- Confidence-honesty thread holds across the whole epic: never an unlabeled meta-% (PRINCIPLES #6); n<30 display gate enforced in matchup cells and rendered as masked heatmap cells; matchup-n kept distinct from metashare-n; bimodal-coverage caveat carried from `match-results` through `matchup-matrix` into `charts`; thin trend windows capped at `evolving`.
+- 344 tests green across the suite. Left at `stage: done` in active/ (no release_binding) for late-binding pickup by `/agile-workflow:release-deploy` — not archived, per the project's late-binding-releases rule.
