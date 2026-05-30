@@ -8,7 +8,16 @@ Result — that is normal, never an error.
 
 from __future__ import annotations
 
+import json
+import logging
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+
+from legacy_engine.config import CACHE_DIR, FBETTEGA_CACHE_REPO
 from legacy_engine.models.tournament import Deck, RoundMatch, Standing, TournamentResult
+
+logger = logging.getLogger(__name__)
 
 _ONLINE_SOURCES = {"mtgo", "manatraders", "manatrader"}
 _PAPER_SOURCES = {"mtgmelee", "melee", "topdeck", "cardsrealm"}
@@ -69,3 +78,61 @@ def _coerce_format(value) -> str:
     if isinstance(value, list):
         return value[0] if value else ""
     return value or ""
+
+
+# ── Mirror + discovery + ingest ──
+
+def mirror_cache(
+    repo: str = FBETTEGA_CACHE_REPO,
+    dest: Path = CACHE_DIR,
+    runner: Callable = subprocess.run,
+) -> Path:
+    """Mirror the fbettega cache repo locally: clone if absent, else pull. Returns the dest path.
+
+    The git call is injected (``runner``) so tests can assert clone-vs-pull without invoking git.
+    """
+    dest = Path(dest)
+    if (dest / ".git").exists():
+        logger.info("Updating cache mirror at %s", dest)
+        runner(["git", "-C", str(dest), "pull", "--ff-only"], check=True)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        logger.info("Cloning cache mirror %s -> %s", repo, dest)
+        runner(["git", "clone", "--depth", "1", repo, str(dest)], check=True)
+    return dest
+
+
+def discover_legacy_events(cache_dir: Path = CACHE_DIR) -> list[tuple[Path, str]]:
+    """Find Legacy tournament JSON files under ``Tournaments/<Source>/<Y>/<M>/<D>/``.
+
+    Returns (path, source) pairs, where source is the directory under ``Tournaments/`` (e.g. "MTGO").
+    Files whose ``Tournament.Formats`` is not "Legacy", and non-JSON files, are skipped.
+    """
+    root = Path(cache_dir) / "Tournaments"
+    if not root.exists():
+        return []
+    events: list[tuple[Path, str]] = []
+    for path in sorted(root.rglob("*.json")):
+        try:
+            raw = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Skipping unreadable cache file: %s", path)
+            continue
+        fmt = _coerce_format((raw.get("Tournament", {}) or {}).get("Formats"))
+        if fmt != "Legacy":
+            continue
+        source = path.relative_to(root).parts[0]  # <Source> directory
+        events.append((path, source))
+    return events
+
+
+def ingest_cache(con, cache_dir: Path = CACHE_DIR) -> int:
+    """Parse + load every discovered Legacy event into the DuckDB store. Returns the count loaded."""
+    from legacy_engine.ingestion import store
+
+    count = 0
+    for path, source in discover_legacy_events(cache_dir):
+        raw = json.loads(path.read_text())
+        store.load_tournament(con, parse_cache_item(raw, source))
+        count += 1
+    return count
