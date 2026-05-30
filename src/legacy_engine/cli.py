@@ -119,7 +119,21 @@ def refresh(verbose: bool) -> None:
 def label(verbose: bool) -> None:
     """Label ingested decklists with archetypes."""
     _setup_logging(verbose)
-    _not_implemented("label")
+    from legacy_engine.archetype.labeler import label_decks
+    from legacy_engine.archetype.rules import load_ruleset
+    from legacy_engine.config import RULES_DIR
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.scryfall import ScryfallClient
+
+    ruleset = load_ruleset(RULES_DIR)
+    con = store.connect()
+    try:
+        with ScryfallClient() as client:
+            client.load_card_index()
+            n = label_decks(con, ruleset, client.get_card)
+    finally:
+        con.close()
+    click.echo(f"Labeled {n} decks")
 
 
 # ── report: meta & performance analytics ──

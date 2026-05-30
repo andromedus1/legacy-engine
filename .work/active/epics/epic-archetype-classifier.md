@@ -1,7 +1,7 @@
 ---
 id: epic-archetype-classifier
 kind: epic
-stage: implementing
+stage: done
 tags: [archetype]
 parent: null
 depends_on: [epic-foundations-card-data, epic-tournament-ingestion]
@@ -63,3 +63,18 @@ follow-up story off the matcher (per the locked golden-oracle decision), not a b
 - The matcher must reproduce the C# engine's exact semantics (collect-all-matches, Conflict, nested variants, ≥10% fallback) — the algorithm brief's pseudocode is the spec; the `ConditionTests` port is the guardrail.
 - Vendoring needs a real git fetch (CLI step); tests run the loader/matcher against fixture rule JSON, never a live clone.
 - Follow-up: `epic-archetype-classifier-golden-corpus` story (C#-parser ≥99% agreement) — attempt only if the archived .NET 8 binary proves runnable.
+
+## Epic review (2026-05-29) — Children complete
+
+All 3 child features `done`. **Verdict: Approve — epic delivered as briefed.**
+
+Aggregate capability check: the architectural-delta capability works end-to-end — `legacy seed rules`
+vendors MTGOFormatData (pinned SHA), the typed loader rejects unknown condition types, the matcher
+faithfully ports `ArchetypeAnalyzer.Detect` (collect-all-matches, nested variants, raw Conflict/Unknown,
+≥10% fallback, golden-tested), and `legacy label` classifies every ingested deck into the community
+taxonomy and writes `decks.archetype`. **129 tests green.** Locked decisions honored (fixtures-now
+golden tests, Conflict/Unknown raw, rules-only). The C#-corpus ≥99% gate remains an explicit follow-up
+(create `epic-archetype-classifier-golden-corpus` when the archived binary is confirmed runnable).
+
+Unblocks `epic-meta-analytics` — the labeled decks + ingested rounds are now ready to aggregate into
+the metagame + matchup matrix.

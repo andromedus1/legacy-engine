@@ -1,7 +1,7 @@
 ---
 id: epic-archetype-classifier-labeler
 kind: feature
-stage: drafting
+stage: done
 tags: [archetype]
 parent: epic-archetype-classifier
 depends_on: [epic-archetype-classifier-matcher]
@@ -34,3 +34,15 @@ column those will read.
 
 ## Foundation references
 - `docs/ARCHITECTURE.md` — `archetype/labeler.py`; the `legacy label` CLI; `decks.archetype` column.
+
+## Implementation notes
+- **Files created**: `src/legacy_engine/archetype/labeler.py` (`label_decks`, injected `resolve_card`); wired `legacy label` CLI (load_ruleset + ScryfallClient.get_card + store).
+- **Tests added**: `tests/test_labeler.py` — end-to-end (load tournament → label → assert `decks.archetype`); Dimir Tempo + Unknown; idempotent relabel. Full suite **129 passing in 0.55s**.
+- **Discrepancies from design**: none. `resolve_card` injected so the test runs without the Scryfall bulk.
+- **Test debt fixed**: removed `label` from `test_cli`'s not-implemented list (now wired).
+- **Adjacent issues parked**: none.
+
+## Review (2026-05-29)
+**Verdict**: Approve. **Blockers/Important**: none.
+**Nits**: `label_decks` resolves + classifies one deck at a time (fine; analytics will read the persisted column, not re-run this). Unresolved card names simply don't contribute to color computation (no crash) — consistent with the foundations unmatched-name tolerance.
+**Notes**: Ties rules-loader + matcher + foundations (Card index, compute_deck_colors, DuckDB store) into `legacy label`; Conflict/Unknown written raw. Idempotent. 129 tests green. Closes archetype-classifier.
