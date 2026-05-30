@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-positioning
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model]
@@ -336,3 +336,18 @@ arithmetic assertions, corpus-backed for the seam). All MC tests pin `seed`.
 - CLI surface (`advisory position <archetype>`) — out of scope for this feature; belongs to the
   `report` feature downstream.
 - `include_mirror=False` is implemented and tested but not exposed in the CLI path yet.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none beyond the sanctioned placement deviation below.
+
+**Notes**:
+- MC core is correct and honestly vectorized: Jeffreys Beta `Beta(wins+½, (n−wins)+½)` per known cell, mirror fixed 0.5 (zero variance), no-data imputed with a weak Beta (`_NODATA_STRENGTH=2`) centered on mean-vs-known (or worst-observed under `robust`), shares via `Dirichlet(counts+γ)` when count-backed else tiled point shares, `S=(W*P).sum(axis=1)`. `include_mirror=False` zeros the mirror column and renormalizes (safe against zero-sum). Loop is over the ~30 archetype columns, vectorized over the 20k draws — correct and fast.
+- `rank_decks` samples ONE shared field per draw and scores all candidates against it — the correlation that makes `P(best)` honest (respects Dirichlet Σw=1 across decks). pairwise `P(a>b)` and `risk_averse` lower-quantile sort present.
+- Best-call-vs-best-deck payload verified: `test` reproduces the brief's §2 worked example exactly (Deck X S≈.530 > Y S≈.515; Y Ū≈.573 > X Ū≈.473) with seed-pinned MC and honest ±0.025 tolerances — not gamed. 39 tests; both direct-`MatchupCell` construction (arithmetic) and `build_matrix` corpus seam (integration) covered.
+- **Sanctioned deviation**: `PositioningResult`/`DeckRanking` live in `advisory/positioning.py` as `@dataclass`es rather than `models/` (they hold numpy sample arrays; pydantic is awkward; mirrors the `MatchupMatrix`/`MetaShareReport` analytics-record convention). Documented in the design + implementation notes. Architecture's `models/` listing for these is the same kind of aspirational-placement drift already accepted for analytics records — fold into the docs gate at release rather than blocking.
+- Consumes `MatchupCell.wins/n` + `FieldDistribution` (counts→Dirichlet, None→point shares); recomputes nothing. 426 tests green.
