@@ -1,7 +1,7 @@
 ---
 id: epic-archetype-classifier
 kind: epic
-stage: drafting
+stage: implementing
 tags: [archetype]
 parent: null
 depends_on: [epic-foundations-card-data, epic-tournament-ingestion]
@@ -46,10 +46,20 @@ agreement against the archived C# parser. Carries the must-verify **golden-test-
 - **Fallback tier:** **Rules-only for now.** Match the community pipeline exactly (MTGOFormatData rules + fallback piles); `Unknown` is honest signal. No ML/statistical tier — revisit only if the real-data Unknown rate proves high.
 - **Rules vendoring (settled, not a fork):** vendor MTGOFormatData's `Formats/Legacy/` JSON pinned to a commit SHA in a manifest (`config.RULES_PINNED_SHA`); `legacy refresh rules` pulls + diffs upstream; unknown condition `Type` fails fast at load (mirrors the foundation's fail-fast convention).
 
-## Anticipated child features
-- Vendor MTGOFormatData rules (git subtree @ SHA + RULES_MANIFEST + `legacy refresh rules` diff/fail-fast)
-- Typed rule loader (12 condition types; archetype/variant/fallback)
-- Matcher port (`classify`; ConditionTests ports 1:1 as a parametrized suite)
-- Deck-color computation (lands ∩ nonlands; guild/shard naming table)
-- Labeler (resolve → colors → classify → persist labels)
-- Golden-test harness (≥99% agreement vs archived C# parser; fallback fixtures) — resolves the golden-oracle open question
+## Decomposition
+
+Split by capability into 3 features (deck-color computation already exists in foundations'
+`colors.py`, so it's not a feature here). Linear chain: the rules-loader produces the typed ruleset →
+the matcher classifies against it (with fixture golden tests) → the labeler ties matcher + foundations
+(Card index, colors, DuckDB) into `legacy label`. The C#-corpus ≥99% golden gate is a separate
+follow-up story off the matcher (per the locked golden-oracle decision), not a blocker.
+
+### Child features
+- `epic-archetype-classifier-rules-loader` — vendor MTGOFormatData rules (pinned SHA + `legacy refresh rules`) + typed rule loader (12 condition types, fail-fast) — depends on: `[]`
+- `epic-archetype-classifier-matcher` — `classify()` port + hand-curated fixture golden tests — depends on: `[epic-archetype-classifier-rules-loader]`
+- `epic-archetype-classifier-labeler` — `legacy label` CLI: resolve → colors → classify → persist to `decks.archetype` — depends on: `[epic-archetype-classifier-matcher]`
+
+### Decomposition risks
+- The matcher must reproduce the C# engine's exact semantics (collect-all-matches, Conflict, nested variants, ≥10% fallback) — the algorithm brief's pseudocode is the spec; the `ConditionTests` port is the guardrail.
+- Vendoring needs a real git fetch (CLI step); tests run the loader/matcher against fixture rule JSON, never a live clone.
+- Follow-up: `epic-archetype-classifier-golden-corpus` story (C#-parser ≥99% agreement) — attempt only if the archived .NET 8 binary proves runnable.
