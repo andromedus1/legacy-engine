@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-whattoplay
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-field-model]
@@ -376,3 +376,18 @@ classes). Build `Card`s directly for `_card_roles` unit tests; corpus-backed for
 - `compact_combo` as an explicit deck-level proactivity bonus (currently handled implicitly via ritual+tutor density)
 - Provenance filtering for `_archetype_composition` (signature supports it, `vulnerability_tags` doesn't expose it; can be wired by a future caller)
 - CLI surface for the advisory outputs (out of scope for this feature)
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- `_card_roles` has a redundant `fast_mana` branch (`sr == "fast_mana"` checked twice) and a dead `if is_free_spell(card) and sr == "free_interaction": pass` block. Harmless cosmetic dead code; drop on next touch.
+
+**Notes**:
+- Shared `_card_roles` substrate is transparent (curated regexes + reused `card_tags`, never a learned matrix) and well-tested: Brainstorm→card_advantage, Tendrils→storm, Swords→removal, FoW→counter, Thoughtseize negative cases. The implementer correctly extended the graveyard regex to catch Reanimate-style "from a graveyard" templating (a real spec gap) — good catch, documented.
+- Proactivity asserted by RELATIVE ORDERING (combo>tempo>control) with explicit comparison messages — not exact magic numbers, not gamed. Both-zero→0.5; unknown cards skipped+warned; computed-vs-archetype-tag disagreement surfaced as a finding. The `_proactivity_from_cards` pure core keeps it DB-free testable.
+- Hate-equity is per-tag share sum; `covered_share` correctly dedupes multi-tag archetypes (union semantics) — the exact contract the sideboard recommender needs. best-deck/best-call uses matchup-spread variance over known cells (independent of positioning's S, as designed). plan_clash layers WHY strings over the empirical cell and flags heuristic-vs-data disagreement.
+- Card-row reconstruction gotcha handled: `store.load_cards` joins `colors`/`produced_mana` to strings; `_load_deck_cards` splits them back before `Card.model_validate`, verified by a round-trip test. Recomputes nothing from matchup/field. 48 tests; 474 total green.
