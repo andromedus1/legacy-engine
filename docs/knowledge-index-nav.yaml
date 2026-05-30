@@ -1,0 +1,51 @@
+# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index to regenerate.
+# Navigator layer — auto-loaded at session start (capped at 10KB by harness).
+# Provides corpus situational awareness only. Read knowledge-index.yaml for full index.
+
+schema_version: 3
+generated_at: 2026-05-29T00:00:00Z
+generated_from: frontmatter
+total_docs: 7
+
+by_kind:
+  planning: 5
+  research: 2
+  historical: 0
+
+# Top 15 most-recently-updated high-signal docs
+recent:
+  - path: docs/VISION.md
+    title: "Vision: legacy-engine"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/SPEC.md
+    title: "Spec: legacy-engine"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/ARCHITECTURE.md
+    title: "Architecture: legacy-engine (high-level)"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/PRINCIPLES.md
+    title: "Principles: legacy-engine"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/research-plan.md
+    title: "Research Plan: legacy-engine"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/briefs/legacy-metagame.md
+    title: "Brief: Legacy Metagame (2026)"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/legacy-foundations.md
+    title: "Brief: Legacy Format Foundations"
+    kind: research
+    updated: 2026-05-29
+
+# Docs flagged with nav_priority: high in frontmatter
+load_bearing: []
+
+# On-demand layers (Read tool):
+full_index_path: docs/knowledge-index.yaml
+detail_index_path: docs/knowledge-index-detail.yaml
