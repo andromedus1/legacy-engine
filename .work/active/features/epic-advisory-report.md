@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-report
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-positioning, epic-advisory-whattoplay, epic-advisory-sideboard]
@@ -274,3 +274,25 @@ House style (`:memory:` corpus with `store.load_cards` + labeled decks + a loade
   **Mitigation**: the assembler builds the matrix once and guards the archetype-dependent calls; component
   warnings flow into the report's `warnings`/`audit` rather than aborting. **Fallback**: the individual `advise`
   leaves let a user run one component in isolation.
+
+## Implementation notes
+
+### Files touched
+- `src/legacy_engine/advisory/report.py` — new; Units 1–3 (plumbing + assembler + renderers)
+- `src/legacy_engine/cli.py` — replaced 3 `_not_implemented` stubs (`advise positioning`, `advise sideboard`, `advise whattoplay`) with full implementations; added `advise report` leaf (Unit 4)
+- `src/legacy_engine/advisory/__init__.py` — added `FieldReadReport`, `build_field_read_report`, `render_field_read` exports (Unit 5)
+- `tests/test_advise_report.py` — new; 37 tests
+- `tests/test_cli.py` — updated: removed 3 advise stubs from `test_leaf_stubs_not_implemented` parametrize (they are implemented); added `test_advise_subcommands_require_deck`
+
+### Test count
+- Before: 542 passing
+- After: 577 passing (+37 new, -2 net from test_cli.py refactor = +35 net)
+
+### Deviations from design with rationale
+1. **`advise whattoplay` builds a partial `FieldReadReport` shell** (with `positioning=None` and a dummy `SideboardPackage`) rather than calling `build_field_read_report`, so it only runs the proactivity/vulnerability/best-deck-call components. This avoids running the expensive sideboard solver just to render the whattoplay section. The design says each leaf "prints its section" — honoured.
+2. **`load_ruleset` is called inside `_classify_deck` at call time** (not lazily cached). This matches the pattern in `cli.py`'s `label` command and keeps the module side-effect-free.
+3. **`_classify_deck` tests monkeypatch `load_ruleset`** instead of loading the vendored rules dir. This avoids a hard dependency on the vendored rules being present in CI (which the test corpus doesn't guarantee). Real integration is covered by the `_classify_deck` live path in CLI tests via the `--archetype` override path.
+
+### Parked items
+- Multi-card saturation (g(n) > 1) in sideboard is noted in sideboard.py as a future extension; not in scope here.
+- `advise positioning --candidates` ranking output could be enriched with pairwise P(S_a > S_b) table; left as an additive extension.

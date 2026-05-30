@@ -1,4 +1,4 @@
-"""Meta attack / advisory — positioning score, sideboard recommender, what-to-play."""
+"""Meta attack / advisory — positioning score, sideboard recommender, what-to-play, report."""
 
 from legacy_engine.advisory.field import (
     FieldDistribution,
@@ -32,6 +32,11 @@ from legacy_engine.advisory.whattoplay import (
     vulnerability_tags,
     vulnerability_tags_for_deck,
 )
+from legacy_engine.advisory.report import (
+    FieldReadReport,
+    build_field_read_report,
+    render_field_read,
+)
 
 __all__ = [
     "FieldDistribution",
@@ -60,4 +65,8 @@ __all__ = [
     "proactivity_score",
     "vulnerability_tags",
     "vulnerability_tags_for_deck",
+    # report
+    "FieldReadReport",
+    "build_field_read_report",
+    "render_field_read",
 ]

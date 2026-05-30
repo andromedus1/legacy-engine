@@ -25,7 +25,7 @@ def test_top_level_help_lists_groups(runner):
     [
         ("seed", ("cards", "cache", "rules", "banlist")),
         ("report", ("meta", "matchups", "tiers")),
-        ("advise", ("positioning", "sideboard", "whattoplay")),
+        ("advise", ("positioning", "sideboard", "whattoplay", "report")),
     ],
 )
 def test_group_help_lists_subcommands(runner, group, subcommands):
@@ -39,13 +39,18 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
     "args,label",
     [
         # seed cards/cache/rules/banlist, label, report matchups, report meta, and report tiers are implemented.
+        # advise positioning/sideboard/whattoplay/report are also implemented (no longer stubs).
         (["refresh"], "refresh"),
-        (["advise", "positioning"], "advise positioning"),
-        (["advise", "sideboard"], "advise sideboard"),
-        (["advise", "whattoplay"], "advise whattoplay"),
     ],
 )
 def test_leaf_stubs_not_implemented(runner, args, label):
     result = runner.invoke(main, args)
     assert result.exit_code != 0
     assert f"not implemented: {label}" in result.output
+
+
+def test_advise_subcommands_require_deck(runner):
+    """Implemented advise commands require --deck; missing → non-zero exit + usage error."""
+    for sub in ("positioning", "sideboard", "whattoplay", "report"):
+        result = runner.invoke(main, ["advise", sub])
+        assert result.exit_code != 0, f"advise {sub} should fail without --deck"
