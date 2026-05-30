@@ -1,7 +1,7 @@
 ---
 id: epic-meta-analytics-charts
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-metashare, epic-meta-analytics-matchup-matrix, epic-meta-analytics-trends]
@@ -396,3 +396,20 @@ CLI wiring (Unit 5) and the test suite (Unit 6 was already done).
 
 ### Adjacent issues parked
 - None identified.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- `charts.py:16` imports `field` from dataclasses but never uses it — drop on next touch.
+- `render_trends` legend: an archetype whose trajectory has a `None` gap (present, absent, present) can emit two legend entries with the same label (duplicate). Purely cosmetic — the line data is correct; dedupe legend handles on a future touch.
+- `_chart_filename("matchups", "matchups", basis)` passes the kind as the `definition` arg since `report matchups` has no `--definition`; produces the intended `matchups_<basis>.png`. Works; slightly awkward call site.
+
+**Notes**:
+- The prep/render split holds: every honesty rule lives in a pure prep helper and is asserted directly (low-n + n=0 masking, mirror flagging, speculative muting, fringe/"Other" hatching, S/A/B share-binning that excludes "Other"/`_is_never_other`, None-gap trend series, per-regime thin flags). Renderers are thin, `plt.close(fig)` after every save, and write a labeled placeholder PNG on empty input rather than raising. 48 tests across 7 classes; boundary tests (12%→S, 7%→A, 3%→B, 1%→untiered; n<30 masked) prove the gates, not just smoke.
+- Presentation-only verified: prep helpers consume `MetaShareReport`/`MatchupMatrix`/`TrendSeries` and their already-computed `display`/`tier`/`fringe`/`thin` flags; the tier-list bins existing raw shares (no new statistic). `_is_never_other` reused from `metashare` (SSOT, not re-listed).
+- CLI is additive: `--chart-dir` adds PNG emission to `report meta|matchups|trends` and the new `report tiers` (last `_not_implemented` stub now implemented); text output and its tests are unchanged when the flag is absent (regression-gated). `matplotlib.use("Agg")` forced at import → headless, deterministic in CI. 344 tests green. No foundation-doc drift (`analytics/charts.py` + the `report meta|matchups|tiers` group match ARCHITECTURE).
+- Worker crash/resume handled cleanly: charts.py from the first worker was verified against the design before the second worker built CLI + tests on top; final state is coherent and committed in one `implement:` commit.
