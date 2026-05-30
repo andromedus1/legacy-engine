@@ -7,96 +7,250 @@ schema_version: 2
 documents:
   docs/VISION.md:
     summary: |
-      legacy-engine is a Magic: The Gathering Legacy-format analytics platform — sibling to edh-engine
-      (cEDH). It answers "what's the meta, how do I attack it, and how do I tune my deck?" via three
-      reinforcing data layers (observed tournament data, synthetic goldfish simulation, generated insight)
-      powering four analytical pillars: Meta & Performance, Deck Mechanics, Deck Generation, and Meta Attack/Advisory.
+      legacy-engine is a Magic: The Gathering Legacy-format analytics platform — sibling to edh-engine.
+      Three reinforcing data layers (observed / synthetic / generated) power four pillars: Meta &
+      Performance, Deck Mechanics, Deck Generation, and Meta Attack/Advisory.
     decisions:
-      - "Four analytical pillars — Meta & Performance, Deck Mechanics (goldfish), Deck Generation, and Meta Attack/Advisory (matchup positioning, sideboard recommender, what-to-play)."
-      - "Sibling-of-edh-engine: reuse its 3-data-layer → pillar architecture, deck-as-data model, goldfish/mana/mulligan engines where domains overlap; diverge only where Legacy demands it."
-      - "Key architectural delta: an explicit archetype-parser layer (no commander to key on)."
-      - "MVP arc = ingestion + meta analytics + advisory shipped together; goldfish and generation later."
+      - "Four analytical pillars including Meta Attack/Advisory (the Legacy-specific differentiator)."
+      - "Sibling-of-edh-engine: reuse its architecture/deck-as-data/goldfish/mana/mulligan where domains overlap."
+      - "Key delta: an explicit archetype-parser layer (no commander to key on)."
+      - "MVP arc = ingestion + meta analytics + advisory together; goldfish and generation later."
       - "Legacy is 1v1, best-of-3, 60-card + sideboard — sideboarding and matchups are first-class."
-      - "Banned-list legality is a live blacklist (changes ~quarterly); version-stamp by date."
+      - "Banned-list legality is a live blacklist; version-stamp by date."
 
   docs/SPEC.md:
     summary: |
-      Capability spec for legacy-engine. Defines capabilities across four pillars, the core domain
-      entities (Card, Decklist, Archetype, TournamentResult, MatchupCell, DeckDefinition, SideboardPackage,
-      BanListSnapshot), the MVP slice (ingestion + meta analytics + advisory), and NFRs (reproducibility,
-      version-stamped legality, sample-size confidence gating).
+      Capability spec across four pillars; core domain entities; the MVP slice (ingestion + meta
+      analytics + advisory); NFRs (reproducibility, version-stamped legality, sample-size confidence gating).
     decisions:
       - "MVP = card ingestion, tournament-results ingestion, archetype parsing, meta analytics, advisory."
-      - "Deferred = goldfish simulation and deck generation, reusing edh-engine's goldfish/mana/mulligan code."
+      - "Deferred = goldfish simulation and deck generation, reusing edh-engine code."
       - "Core entities: Card, Decklist, Archetype, TournamentResult, MatchupCell, DeckDefinition, SideboardPackage, BanListSnapshot."
-      - "Meta-% computed under multiple definitions and always labeled online/paper/blend."
-      - "Matchup cells carry sample-size + confidence; n<100 flagged (edh-engine confidence pattern)."
-      - "Reproducibility NFR: deterministic; data pre-fetched/cached; legality vs dated BanListSnapshot."
+      - "Meta-% computed under multiple definitions, always labeled online/paper/blend."
+      - "Matchup cells carry sample-size + confidence; n<100 flagged."
+      - "Reproducibility NFR: deterministic; data cached; legality vs dated BanListSnapshot."
 
   docs/ARCHITECTURE.md:
     summary: |
-      High-level architecture sketch (from /ideate). Mirrors edh-engine's Python-CLI + local-files shape:
-      ingestion → archetype-parser → analytics/advisory → models → data. Names modules, data flow,
-      committed external deps, and the biggest risk (fragile community scraper layer). Detailed design
-      deferred to /architecture.
+      High-level architecture (from /ideate). Mirrors edh-engine's Python-CLI + local-files shape:
+      ingestion → archetype-parser → analytics/advisory → models → data. Detailed design deferred to /architecture.
     decisions:
-      - "Mirror edh-engine stack exactly: Python 3.11+, Click CLI, Pydantic, httpx, local files, matplotlib; no DB/server for MVP."
-      - "Modules: ingestion/ → archetype/ (ported MTGOFormatData rules) → analytics/ + advisory/ → models/ → data/. goldfish/ + generation/ later."
+      - "Mirror edh-engine stack: Python 3.11+, Click CLI, Pydantic, httpx, local files, matplotlib; no DB/server for MVP."
+      - "Modules: ingestion/ → archetype/ (ported MTGOFormatData rules) → analytics/ + advisory/ → models/ → data/."
       - "archetype/ is the key novel subsystem (no commander to key on)."
       - "Ingestion consumes the fbettega cache JSON (mirrored locally), not mtgo.com directly."
       - "Biggest risk: fragile externally-owned scraper/cache layer — mirror repos, swap upstream behind ingestion/ boundary."
-      - "Scryfall is the shared card dimension; deck-as-data/mana/mulligan ported from edh-engine when Deck Mechanics starts."
+      - "Scryfall is the shared card dimension; goldfish code ported from edh-engine later."
 
   docs/PRINCIPLES.md:
     summary: |
-      Project-specific decision heuristics. Inherits edh-engine's analytics principles (analytics is the
-      product, data-driven over vibes, rules-correct at fidelity claimed, knowledge compiled not re-derived)
-      and adds Legacy-specific ones: legality is live data, always label the meta-% definition and
-      online/paper basis, confidence-gate every stat, advisory is first-class.
+      Project-specific decision heuristics: edh-inherited (analytics is the product, data-driven, rules-correct
+      at fidelity claimed, knowledge compiled) + Legacy-specific (legality is live data, label meta-% basis,
+      confidence-gate stats, advisory is first-class).
     decisions:
       - "Analytics is the product; infrastructure justified by questions unlocked."
       - "Data-driven over vibes; build a pipeline wherever there's a data source."
       - "Rules-correct at the fidelity claimed; goldfish simplifies transparently with confidence metadata."
       - "Legality is live data — validate vs dated BanListSnapshot; version-stamp ban-affected roles."
       - "Never an unlabeled meta-% — state definition + online/paper/blend basis."
-      - "Confidence-gate every derived stat; advisory is a first-class product surface."
+      - "Confidence-gate every derived stat; advisory is a first-class product surface; sibling-consistent, divergence-justified."
 
   docs/research-plan.md:
     summary: |
-      Research routing plan. Two grounding briefs done (legacy-foundations, legacy-metagame). One
-      load-bearing /research before /architecture: the fbettega-cache + MTGOFormatData data contracts.
-      Advisory statistics is a smaller /research; Scryfall is reuse-from-edh-engine. Goldfish and
-      generation research deferred to their pillars.
+      Research routing. Two grounding briefs done; one load-bearing /research before /architecture (the
+      contracts campaign — now complete via /deep-research); advisory statistics is the next /research;
+      goldfish/generation research deferred to their pillars.
     decisions:
       - "Two grounding briefs DONE (legacy-foundations, legacy-metagame)."
-      - "Load-bearing pre-architecture /research: fbettega cache JSON + MTGOFormatData rule schema + parser port."
-      - "Advisory statistics /research: win-rate CI, sample-size gating, sideboard set-cover."
+      - "Load-bearing pre-architecture research: ingestion + archetype-parser contracts (done via /deep-research)."
+      - "Next /research: advisory statistics (matchup CI, sideboard set-cover)."
       - "Scryfall ingestion needs no research — port edh-engine's scryfall.py."
-      - "Goldfish-pillar research deferred to Deck Mechanics pillar; rules grounding already exists."
-
-  docs/briefs/legacy-metagame.md:
-    summary: |
-      The core domain brief for legacy-engine. Maps the 2026 Legacy metagame: four-pillar tier structure
-      (no Tier 0), per-archetype game plans and goldfish clocks, the data-source ecosystem (the edhtop16
-      analog), and how to attack the field (matchup matrix, hosers-by-target, sideboard strategy, what-to-play).
-    key_findings:
-      - "2026 Legacy is a blue-tempo-centered four-pillar format with NO Tier 0; Dimir Tempo is #1 (~16%, ~52% non-mirror WR), deemed healthy (Feb 2026 no-change)."
-      - "Data ingestion analog to edhtop16 = fbettega pipeline (scrapper + decklistcache, both pushed 2026-05-29) labeled by Badaro/MTGOFormatData; Scryfall is the shared card source. No clean official API."
-      - "Legacy needs an explicit archetype-PARSER layer that cEDH does not — the key architectural delta."
-      - "Goldfish clock anchor: Oops All Spells 66% T1 / 76% T2 / 83% T3 [cited]; combo T1-3, fair tempo/control T4-6+ (win by disruption/attrition)."
-      - "Meta-speed = per-archetype clock PMF weighted by meta share; model goldfish (upper bound) AND effective (⊗ FoW/Daze) clocks; the gap is a format-health signal."
-      - "Aggregators 403-block bots; meta-% computed differently per source; online/paper diverge — compute % yourself under multiple definitions and label the source."
-      - "Universal constant: dedicated graveyard hate + free counters in every sideboard."
+      - "Goldfish-pillar research deferred to Deck Mechanics pillar."
 
   docs/briefs/legacy-foundations.md:
     summary: |
-      Grounding brief on Legacy fundamentals. Covers Magic's turn structure / stack / state-based actions
-      (framed for goldfish simulation), the London mulligan and its hand-quality math, and Legacy's
-      deck-construction + banned-list constraints with format-defining staples.
+      Grounding brief on Legacy fundamentals: turn structure / stack / state-based actions (framed for
+      goldfish sim), the London mulligan + its math, deck-construction + banned-list constraints with staples.
     key_findings:
-      - "A Legacy goldfish sim needs ~8 core rules; the heart is a mana-payment solver (can_pay(cost, untapped_sources)) + a LIFO stack for the deck's own triggers."
-      - "Legacy uses straight London mulligan, NO free mulligan; model keep() and bottom() separately via Monte Carlo, not closed-form hypergeometric."
-      - "London disproportionately benefits combo/specific-card decks (+10-18pp); calibrate vs published tables (Chalice T1 53->63%)."
-      - "Legacy legality is a BLACKLIST (all legal except banned list); changes ~quarterly; version-stamp by date."
-      - "Legacy bans outright what Vintage restricts; no restricted list. 'Free' interaction (Force of Will/Daze) is the defining structural trait."
-      - "Banned list current as of May 18 2026 (Undercity Informer); next scheduled June 30 2026."
+      - "A Legacy goldfish sim needs ~8 core rules; the heart is a mana-payment solver + a LIFO stack for the deck's own triggers."
+      - "Legacy uses straight London mulligan, NO free mulligan; model keep() and bottom() separately via Monte Carlo."
+      - "London disproportionately benefits combo/specific-card decks; calibrate vs published tables."
+      - "Legacy legality is a BLACKLIST; changes ~quarterly; version-stamp by date."
+      - "Legacy bans outright what Vintage restricts; 'free' interaction (Force of Will/Daze) is the defining trait."
+      - "Banned list current as of May 18 2026 (Undercity Informer)."
+
+  docs/briefs/legacy-metagame.md:
+    summary: |
+      Core domain brief: 2026 tier structure (no Tier 0), per-archetype game plans + goldfish clocks, the
+      data-source ecosystem (the edhtop16 analog), and how to attack the field.
+    key_findings:
+      - "2026 Legacy is blue-tempo-centered, four-pillar, no Tier 0; Dimir Tempo #1 (~16%, ~52% non-mirror WR), deemed healthy."
+      - "Data analog to edhtop16 = fbettega pipeline labeled by Badaro/MTGOFormatData; Scryfall is the shared card source; no clean official API."
+      - "Legacy needs an explicit archetype-PARSER layer — the key architectural delta."
+      - "Goldfish clock anchor: Oops All Spells 66% T1 / 76% T2 / 83% T3; fair tempo/control win by attrition (T4-6+)."
+      - "Meta-speed = per-archetype clock PMF weighted by share; model goldfish AND effective (⊗ FoW/Daze) clocks."
+      - "Aggregators 403-block bots; meta-% computed differently per source; online/paper diverge — compute % yourself, labeled."
+      - "Universal constant: graveyard hate + free counters in every sideboard."
+
+  docs/briefs/ingestion-archetype-contracts/parent.md:
+    summary: |
+      Synthesizes the 7-specialist campaign into one buildable design for the ingestion/ and archetype/
+      modules. Archetype labeling is a classification problem (no commander key); solved by wrapping
+      MTGOFormatData rules (vendored JSON) + reimplementing the matcher in Python. Pins every data contract
+      end-to-end. Most important open seam: the Scryfall-library reuse verdict is contested.
+    key_findings:
+      - "Archetype labeling is a CLASSIFICATION problem, not key-lookup; no maintained Python port of the matcher exists — net-new code."
+      - "Own the matcher, rent the rules: vendor MTGOFormatData JSON pinned to a SHA; reimplement only the matcher; the C# engine was archived 2025-09-24 (a frozen, lockable target)."
+      - "Deck color = lands.produced_mana ∩ nonlands.colors — NOT color_identity, NOT Scryfall colors-of-everything."
+      - "fbettega schema = PascalCase CacheItem {Tournament, Decks[], Rounds[], Standings[]}; README is stale; build against to_dict()/live files."
+      - "Provenance (online/paper) is NOT a field — derive from source directory + Uri host; meta-% must split on it."
+      - "Coverage is bimodal: Challenges + paper carry Rounds → matchup matrix computable; MTGO Leagues are decklist-only. Empty Rounds/Standings is NORMAL."
+      - "Fidelity is the dominant port risk: golden gate replays the archived C# parser's labels at the same rules SHA, ≥99% agreement as a CI check."
+      - "Drift is fail-fast: new archetype = zero code; new condition Type RAISES at load time."
+      - "Index the WHOLE oracle pool (~30k+ IDs), not a fixed subset — Legacy's pool dwarfs cEDH's ~3,148 cards."
+      - "Mirror-and-decouple is non-negotiable: vendor both repos behind an ingestion/ port; analytics never reads live upstream."
+    related:
+      - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
+      - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
+
+  docs/briefs/ingestion-archetype-contracts/campaign.md:
+    summary: |
+      Quality report for the contracts campaign. Evaluator scored it 4/5 overall ("unusually buildable"):
+      coverage 5, coherence 5, contradictions 4, groundedness 4, recommendations 4. Captures flagged
+      contradictions and the must-verify-before-building list.
+    key_findings:
+      - "Overall 4/5 — buildable now; ingestion/ and archetype/ are design-ready from these briefs alone."
+      - "Two contradictions: (1) extend-edh-scryfall vs adopt-Scrython (flagged); (2) ~210 vs ~600 matcher LOC (caught by evaluator, not synthesis)."
+      - "Riskiest unverified assumption: the golden-test oracle's availability — confirm before committing to ≥99% agreement as the primary risk control."
+      - "Groundedness high — CARD-CONTRACT's reuse verdict independently verified against real edh-engine source."
+
+  docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md:
+    summary: |
+      Pins the data contract for the fbettega tournament cache (the edhtop16 analog): CacheItem with
+      Tournament/Decks/Rounds/Standings in PascalCase; provenance by source-dir; card names pre-normalized
+      to Scryfall canonical forms.
+    key_findings:
+      - "Verified schema: CacheItem PascalCase {Tournament, Decks, Rounds, Standings}; Deck cards = {Count, CardName}."
+      - "README example is STALE (lowercase, Formats as list); build against to_dict() output; Formats is a bare string — normalize defensively."
+      - "Layout Tournaments/<Source>/<Y>/<M>/<D>/<slug>.json; find Legacy via Formats=='Legacy', not the filename."
+      - "Provenance is NOT a field — derive online/paper from source dir + Uri host at ingest."
+      - "Leagues = 5-0 dumps (Rounds=[], Standings=[]); Challenges carry full Rounds + 32 Standings. Empty is normal."
+      - "Card names already Scryfall-canonical (split = ' // '); but runtime-built map drifts — keep an unmatched bucket."
+      - "Cadence: one automated daily commit ~18:32 UTC; git pull is the incremental signal."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md, relationship: parallel-to}
+
+  docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md:
+    summary: |
+      The rule-as-data schema of Badaro/MTGOFormatData for Legacy: Name + IncludeColorInName + Conditions
+      (AND-combined) + optional ordered Variants; 12 condition Types; fallback piles by ≥10% overlap;
+      color naming lives in the consumer, not the rules. ~174 archetypes + 8 fallbacks; updated monthly.
+    key_findings:
+      - "A rule = JSON {Name, IncludeColorInName, Conditions[] (AND), optional Variants[]}; one archetype per file."
+      - "12 condition Types: In{Mainboard,Sideboard,MainOrSideboard}, OneOrMore*/TwoOrMore* per zone, DoesNotContain*. Cards within a condition = OR."
+      - "Variants require parent match first; DoesNotContain makes siblings mutually exclusive."
+      - "Fallbacks (8 files) have CommonCards, no Conditions; used only when nothing matched, ≥10% overlap floor."
+      - "Color/guild naming is the CONSUMER's job; repo supplies only IncludeColorInName + color_overrides.json."
+      - "Legacy coverage ≈174 archetype files; taxonomy matches the community tier list."
+      - "metas.json defines ~40 format eras; pin a commit SHA and diff Formats/Legacy/ between SHAs."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md, relationship: extends}
+      - {slug: docs/briefs/legacy-metagame.md, relationship: refines}
+
+  docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md:
+    summary: |
+      Reverse-engineers the MTGOArchetypeParser C# engine (one ~210-line method ArchetypeAnalyzer.Detect):
+      AND-tests every archetype's conditions, collects all matches (emits Conflict(...) with no default
+      tie-break), nests variants, falls back by most-shared-cards (10% floor), computes colors by
+      land/nonland intersection. Includes Python-ready pseudocode.
+    key_findings:
+      - "Core is one method ArchetypeAnalyzer.Detect; a rule matches only if ALL conditions pass (AND, short-circuit)."
+      - "NO default tie-break (Conflict(...)); PreferSimpler picks fewest-conditions match."
+      - "Variants nested: tested only if parent matched; N passing variants → N matches (a conflict)."
+      - "Fallback fires only when zero archetypes match; scored by summed Count, ≥10% similarity floor else Unknown."
+      - "Colors = intersection: a color counts only if in ≥1 LAND AND ≥1 NONLAND."
+      - "Card-name matching is exact, case-sensitive; no normalization in the engine — a hard upstream contract."
+      - "Output: ArchetypeResult{Matches[], Color, Companion?} flattened to RecordArchetype{Archetype, Color, Companion}."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md, relationship: parallel-to}
+
+  docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md:
+    summary: |
+      Recommends vendoring MTGOFormatData JSON as a pinned data dependency (git subtree + refresh CLI) and
+      reimplementing ONLY the matcher in Python. The C# parser was archived 2025-09-24 — a frozen target.
+      Fidelity is gated by a golden harness asserting ≥99% label agreement; drift is handled fail-fast.
+    key_findings:
+      - "HEADLINE: vendor the JSON rules pinned to a SHA + reimplement only the matcher; reject shelling-out, .NET interop, and rewriting the data."
+      - "The C# parser was ARCHIVED 2025-09-24 — a frozen, lockable port target; the DATA keeps changing (vendor + sync)."
+      - "Matcher scope is small: ~11-12 condition Types, archetype→variant→fallback(≥10%), color from decklist + color_overrides."
+      - "Vendor via git subtree into data/archetype_rules/ pinned to a SHA in a manifest; a 'legacy refresh rules' CLI diffs upstream."
+      - "Golden gate: replay the archived C# parser's published labels over a frozen corpus, assert ≥99% agreement in CI."
+      - "Drift fail-fast: unknown condition Type raises at load (mirrors edh-engine fail-fast-on-unknown-role); new archetypes need no code."
+      - "Effort ~3-5 days; top risks: silent label divergence, post-archival schema drift, color-detection edge cases."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md, relationship: extends}
+      - {slug: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md, relationship: extends}
+      - {slug: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md, relationship: depends-on}
+
+  docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md:
+    summary: |
+      The card-data contract. Deck colors come from intersecting lands' produced_mana with nonlands' colors
+      (never color_identity). Specifies a multi-key name index (split/DFC/adventure), the oracle_cards bulk
+      choice, how Legacy tags derive from Scryfall fields, and a Card Pydantic model. Reuse verdict: extend
+      edh-engine's scryfall.py, don't fork.
+    key_findings:
+      - "Color naming = INTERSECTION of lands' colors and nonlands' colors (GetColors); NOT Scryfall colors, NOT color_identity."
+      - "Map to Scryfall: lands → produced_mana (minus C); nonlands → colors. color_identity would mis-name decks."
+      - "Name resolution: index full name + each face name; split/adventure use ' // '; DFC put per-face colors on card_faces[]."
+      - "Bulk file = oracle_cards (~173 MB, ~daily); bulk has no rate limit; REST ≤10/s with UA+Accept headers."
+      - "Legality should use a version-stamped blacklist, not Scryfall's legacy flag (which lags B&R)."
+      - "REUSE VERDICT: EXTEND, don't fork — index the FULL oracle pool (Legacy ≫ cEDH's 3,148 cards), add a Card model + colors-of-deck helper."
+      - "staple_role / is_free_spell / mana-base tags are derived (oracle-text/type_line patterns), not native to Scryfall."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md, relationship: parallel-to}
+      - {slug: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md, relationship: depends-on}
+      - {slug: docs/briefs/legacy-foundations.md, relationship: depends-on}
+
+  docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md:
+    summary: |
+      The operational + downstream-computation contract: source-layer fragility, the mirror-and-decouple
+      resilience plan, the three meta-% definitions, online/paper splitting, and the load-bearing finding
+      that the cache's Rounds object lets us compute our own matchup matrix.
+    key_findings:
+      - "Source layer is single-point-of-failure: fbettega (one maintainer) over an upstream WotC actively restricts."
+      - "Upstream is hostile-by-policy: MTGO publishes Top-32 + a selection of 5-0s since 2024-06-20; a Feb-2026 cut was rolled back in days."
+      - "LOAD-BEARING: cache JSON carries Rounds (player1/player2/result) + Standings → we CAN compute our own matchup matrix; no dependence on mtgdecks.net."
+      - "Coverage is bimodal: Challenges + paper carry Rounds; MTGO Leagues are decklist-only (raw-count only, no matchups)."
+      - "Meta-% has three non-comparable definitions (raw / top-cut / win-rate-weighted); MTGO data is itself success-filtered."
+      - "Online vs paper diverge materially — label each, offer a blend, never emit an unlabeled blended number."
+      - "Resilience: vendor both repos pinned under data/upstream/ with SHA + fetch date; staleness health-check; confidence-gate (<2% share, n<100 cells)."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md, relationship: depends-on}
+      - {slug: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md, relationship: depends-on}
+
+  docs/briefs/ingestion-archetype-contracts/prior-art-scan.md:
+    summary: |
+      Maps existing tooling to decide reuse vs build. Headline: no maintained standalone Python port of the
+      MTGOArchetypeParser rules engine exists — legacy-engine is genuinely building it. Adopt the rule DATA
+      + fbettega scraper; for cards, adopt Scrython / mtg_parser; learn-from videre nbac-worker and j6e/mtg-meta-analyzer.
+    key_findings:
+      - "HEADLINE: no maintained standalone Python port of the MTGOArchetypeParser rules engine — net-new code. Adopt the rule DATA, port the algorithm."
+      - "Canonical matcher = Badaro/MTGOArchetypeParser (C#, MIT, ARCHIVED 2025-09-24); authoritative as a spec, not a runtime dep."
+      - "De facto pipeline = MTGODecklistCache → MTGOArchetypeParser (C#) → Aliquanto3/Jiliac R reports; legacy-engine re-implements this in Python."
+      - "fbettega is the LIVE source (Python scraper) but still uses the C# parser for labeling — no Python classifier inside."
+      - "videre-project/nbac-worker (Python NB classifier) and j6e/mtg-meta-analyzer (TS, KNN + matchup viz) — LEARN-FROM, don't adopt."
+      - "CARD libs to ADOPT: Scrython (Scryfall wrapper) + mtg_parser (decklist parser) — the one place to break from edh-engine's hand-roll habit."
+      - "edh-engine used none of these (hand-rolled httpx+BS4+pydantic)."
+    related:
+      - {slug: docs/briefs/ingestion-archetype-contracts/parent.md, relationship: refines}
+      - {slug: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md, relationship: parallel-to}

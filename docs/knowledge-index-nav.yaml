@@ -5,25 +5,29 @@
 schema_version: 3
 generated_at: 2026-05-29T00:00:00Z
 generated_from: frontmatter
-total_docs: 7
+total_docs: 16
 
 by_kind:
   planning: 5
-  research: 2
-  historical: 0
+  research: 11
 
-# Top 15 most-recently-updated high-signal docs
+# Top high-signal docs (planning + research hubs; the 7 campaign specialist briefs
+# are reachable via their parent.md and omitted here to avoid flooding).
 recent:
   - path: docs/VISION.md
     title: "Vision: legacy-engine"
     kind: planning
     updated: 2026-05-29
-  - path: docs/SPEC.md
-    title: "Spec: legacy-engine"
-    kind: planning
+  - path: docs/briefs/ingestion-archetype-contracts/parent.md
+    title: "Ingestion + Archetype-Parser Data Contracts (campaign synthesis)"
+    kind: research
     updated: 2026-05-29
   - path: docs/ARCHITECTURE.md
     title: "Architecture: legacy-engine (high-level)"
+    kind: planning
+    updated: 2026-05-29
+  - path: docs/SPEC.md
+    title: "Spec: legacy-engine"
     kind: planning
     updated: 2026-05-29
   - path: docs/PRINCIPLES.md
@@ -40,6 +44,10 @@ recent:
     updated: 2026-05-29
   - path: docs/briefs/legacy-foundations.md
     title: "Brief: Legacy Format Foundations"
+    kind: research
+    updated: 2026-05-29
+  - path: docs/briefs/ingestion-archetype-contracts/campaign.md
+    title: "Campaign Report: Ingestion + Archetype-Parser Data Contracts"
     kind: research
     updated: 2026-05-29
 

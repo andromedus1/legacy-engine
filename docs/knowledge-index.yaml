@@ -7,7 +7,7 @@
 schema_version: 2
 generated_at: 2026-05-29T00:00:00Z
 generated_from: frontmatter
-total_docs: 7
+total_docs: 16
 
 documents:
   # ── Planning ──────────────────────────────────────────────────────────────
@@ -47,7 +47,16 @@ documents:
     updated: 2026-05-29
     consumer_hint: "Read when scoping what to build — the capabilities, domain entities, and non-functional requirements of legacy-engine. Pairs with VISION (why) and ARCHITECTURE (how)."
 
-  # ── Research ──────────────────────────────────────────────────────────────
+  # ── Research: grounding briefs ──────────────────────────────────────────────
+
+  - path: docs/briefs/legacy-foundations.md
+    title: "Brief: Legacy Format Foundations"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /research
+    consumer_hint: "What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation platform must encode? Read before designing the deck-as-data model, goldfish sim, or legality validation."
 
   - path: docs/briefs/legacy-metagame.md
     title: "Brief: Legacy Metagame (2026)"
@@ -58,11 +67,85 @@ documents:
     research_method: /research
     consumer_hint: "What is the current Legacy metagame (2026) — tier list, archetype mechanics & goldfish speeds, data sources, and how to attack the field? Read before designing meta-ingestion, the matchup model, or the meta-speed metric."
 
-  - path: docs/briefs/legacy-foundations.md
-    title: "Brief: Legacy Format Foundations"
+  # ── Research: ingestion-archetype-contracts campaign ────────────────────────
+
+  - path: docs/briefs/ingestion-archetype-contracts/parent.md
+    title: "Ingestion + Archetype-Parser Data Contracts (campaign synthesis)"
+    type: program-parent
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "Read first for the ingestion + archetype-parser data layer — the synthesized contracts and build plan for legacy-engine's ingestion/ and archetype/ modules. Navigation hub for the 7 specialist briefs."
+
+  - path: docs/briefs/ingestion-archetype-contracts/campaign.md
+    title: "Campaign Report: Ingestion + Archetype-Parser Data Contracts"
+    type: program-report
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "The quality report + metadata for the contracts campaign. Read to know how trustworthy the brief set is, the contradictions flagged, and what to verify before building."
+
+  - path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+    title: "fbettega Tournament-Data Cache Schema (INGEST)"
     type: brief
     kind: research
     updated: 2026-05-29
     status: draft
-    research_method: /research
-    consumer_hint: "What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation platform must encode? Read before designing the deck-as-data model, goldfish sim, or legality validation."
+    research_method: /deep-research
+    consumer_hint: "Read before designing the ingestion/ module — the exact JSON schema, repo layout, source/provenance encoding, update cadence, and consumption strategy for the fbettega tournament-data cache."
+
+  - path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
+    title: "MTGOFormatData Archetype-Rule Schema (RULES)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "The exact JSON rule schema of Badaro/MTGOFormatData (the archetype ruleset we WRAP). Read before designing the rule-loader and the matching algorithm — condition types, archetype/variant/fallback, color flags, Legacy taxonomy."
+
+  - path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
+    title: "MTGOArchetypeParser Matching Algorithm (CLASSIFY)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "The exact C# matching algorithm of MTGOArchetypeParser — how a decklist + rule set produces an archetype label — specified (with Python pseudocode) for a faithful reimplementation of the archetype/ module."
+
+  - path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
+    title: "C#→Python Port Strategy (PORT)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "The C#→Python port strategy for the archetype classifier — vendor MTGOFormatData JSON as pinned data, reimplement only the matcher, gate fidelity with a golden-test harness. Read before building archetype/."
+
+  - path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
+    title: "Scryfall Card-Data & Color Contract (CARD-CONTRACT)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "What Scryfall fields the classifier keys on, how deck colors are derived (intersection, NOT color_identity), how names resolve, and whether edh-engine's Scryfall layer can be reused. Read before designing the Card model / name index."
+
+  - path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
+    title: "Ingestion Ops & Meta-Share Computation (SERVE/OPS)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "The operational + downstream-computation contract — source fragility, mirror-and-decouple resilience, the three meta-% definitions, online/paper splitting, and whether we can compute our own matchup matrix (we can). Read before designing the ingestion boundary or meta-share."
+
+  - path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
+    title: "Prior-Art Scan: existing tools & reuse verdicts (PRIOR-ART)"
+    type: brief
+    kind: research
+    updated: 2026-05-29
+    status: draft
+    research_method: /deep-research
+    consumer_hint: "What already exists (ports, scrapers, classifiers, card libs) and the reuse verdict for each. Read before deciding adopt-vs-build on the MTGOArchetypeParser port."
