@@ -1,7 +1,7 @@
 ---
 id: epic-tournament-ingestion
 kind: epic
-stage: drafting
+stage: implementing
 tags: [ingestion]
 parent: null
 depends_on: [epic-foundations-card-data]
@@ -36,8 +36,18 @@ swappable without touching analytics. Does NOT cover archetype labeling (that's
 - `docs/ARCHITECTURE.md` — `ingestion/cache.py`, `ingestion/store.py`; the mirror-and-decouple data flow; DuckDB tables (tournaments/decks/deck_cards/rounds/standings).
 - `docs/SPEC.md` — Decklist, TournamentResult, Round, Standing entities; ingestion-resilience NFR.
 
-## Anticipated child features
-- fbettega cache mirror (git clone/sparse-checkout + incremental `git pull` + day-folder diff)
-- CacheItem parser → typed models (provenance derivation; League vs Challenge structural branch)
-- Card-name join to the dimension + unmatched-name bucket
-- DuckDB load (tournaments/decks/deck_cards/rounds/standings) behind the ingestion/ port
+## Decomposition
+
+Split by capability into 3 features. The parser (models + JSON parsing + provenance) is the
+foundation; the DuckDB tournament tables build on its models; the mirror integrates both into
+`seed cache`. Card-name resolution reuses the foundations Scryfall index (no new join feature needed —
+the parser keeps raw names, the analytics layer joins to the `cards` table).
+
+### Child features
+- `epic-tournament-ingestion-cache-parser` — models (TournamentResult/Deck/CardCount/RoundMatch/Standing) + `parse_cache_item` + provenance + League/Challenge handling — depends on: `[]`
+- `epic-tournament-ingestion-duckdb-tables` — extend `store.py` with tournaments/decks/deck_cards/rounds/standings + load — depends on: `[epic-tournament-ingestion-cache-parser]`
+- `epic-tournament-ingestion-cache-mirror` — git mirror + Legacy-event discovery + `seed cache` (mirror→parse→load) — depends on: `[epic-tournament-ingestion-cache-parser, epic-tournament-ingestion-duckdb-tables]`
+
+### Decomposition risks
+- Mirror/git operations must be isolated behind a thin function so tests drive discovery/load from fixtures, never a live clone.
+- The `decks`↔`rounds` player join keys on player name strings (the cache's only link) — tolerate missing/duplicate names gracefully.
