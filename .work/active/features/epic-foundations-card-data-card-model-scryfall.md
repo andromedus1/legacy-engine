@@ -1,7 +1,7 @@
 ---
 id: epic-foundations-card-data-card-model-scryfall
 kind: feature
-stage: drafting
+stage: implementing
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: [epic-foundations-card-data-package-skeleton]
@@ -48,3 +48,32 @@ ban-list.
 
 ## Decomposition risks
 - **Card model scope creep** — model only the fields the contract brief names (identity, colors, produced_mana, type_line, layout, card_faces, legalities), not all of Scryfall. Resist over-modeling.
+
+## Architectural choice (autopilot, judgment)
+Keep the in-memory index as **raw Scryfall dicts** (fast whole-pool load + face keys, ported from
+edh-engine's `load_card_index`) and **resolve to a typed `Card` on demand** via `Card.from_scryfall`.
+Resolving ~30k cards to Pydantic eagerly is wasteful when a run touches a few hundred; the hot path is
+name→dict O(1), and a typed `Card` is materialized only where needed (classifier, store). Satisfies the
+epic's "index whole pool, resolve on demand" + dual-storage decisions. (Eager-Card-index rejected on
+load cost; dicts-everywhere rejected — the epic locked a typed Card.)
+
+## Implementation Units
+
+### Unit 1: `Card` model — `src/legacy_engine/models/card.py`
+Typed Pydantic `Card(LegacyEngineModel)` with: `name`, `mana_cost`, `cmc`, `type_line`, `colors`
+(Scryfall `colors`), `produced_mana`, `oracle_text`, `layout`, `card_faces` (raw, for split/DFC),
+`legalities` (raw; NOT authoritative — see banlist). `is_land` property (`"Land" in type_line`);
+`from_scryfall(raw)` = `model_validate` (extra="ignore" drops unmodeled keys). Re-export from `models/__init__.py`.
+**Acceptance**: round-trips a real Scryfall dict; `is_land` true for a dual-land type line; split card keeps `card_faces`; unmodeled keys dropped.
+
+### Unit 2: Scryfall ingestion — `src/legacy_engine/ingestion/scryfall.py`
+Port edh-engine's `ScryfallClient` (bulk download + name index + `/cards/collection` batch fallback +
+`normalize_name`), adapted: index the **whole** oracle pool (name + each ` // ` face), drop the
+Moxfield-metadata filtering (no Moxfield), add `get_card(name) -> Card | None` resolving via
+`Card.from_scryfall`. Replace the `seed cards` CLI stub with a lazy import calling `download_bulk_data`
++ index build.
+**Acceptance**: `load_card_index` indexes a fixture by name AND face; `get_card("Fire")` resolves a "Fire // Ice"; `normalize_name` fixes curly apostrophes; `download_bulk_data` is HTTP-mocked (no network).
+
+## Testing
+- `tests/test_card.py` — `from_scryfall` mapping, `is_land`, split-card faces, extra-key drop (TestCard).
+- `tests/test_scryfall.py` — `load_card_index` from a small fixture (name+face keys); `get_card` → `Card`; `normalize_name`; monkeypatch `_fetch_bulk_metadata` + client GET so `download_bulk_data` does no network. Deterministic.
