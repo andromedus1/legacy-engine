@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-report
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory
 depends_on: [epic-advisory-positioning, epic-advisory-whattoplay, epic-advisory-sideboard]
@@ -296,3 +296,18 @@ House style (`:memory:` corpus with `store.load_cards` + labeled decks + a loade
 ### Parked items
 - Multi-card saturation (g(n) > 1) in sideboard is noted in sideboard.py as a future extension; not in scope here.
 - `advise positioning --candidates` ranking output could be enriched with pairwise P(S_a > S_b) table; left as an additive extension.
+
+## Review (2026-05-30)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**:
+- `_classify_deck` is exercised end-to-end only via the `--archetype` override path in CLI tests; the classifier-driven path is monkeypatched in unit tests (avoids depending on the vendored rules dir in CI). Acceptable — the real `classify` is already covered by the archetype epic's tests; this feature only wires it.
+
+**Notes**:
+- Pure composition, recomputes nothing: builds the matchup matrix once and feeds `positioning_score` + `best_deck_vs_best_call`; calls `proactivity_score`/`vulnerability_tags_for_deck`/`field_vulnerability_tags`/`hate_equity` and `recommend_sideboard`; gathers each component's own provenance (field_source, matrix provenance/n, positioning CI/tier, sideboard heuristic_note, hate-equity profile) into the audit trail. Every figure is labeled.
+- Graceful degradation verified: an unresolved archetype (Conflict/Unknown) skips positioning + best-deck-call with a warning + audit line, but proactivity/vulnerability/sideboard still run on composition; `--archetype` override available; positioning wrapped in try/except so an empty matrix degrades to a warning, not an abort.
+- `_parse_decklist` tolerant of `4 Name`/`4x Name`, `Sideboard` header or blank-line split, `#` comments; malformed→`ValueError`. The four `advise` leaves (positioning/sideboard/whattoplay/report) all implemented (the last `_not_implemented` stubs in the project), `--field` honored, `--deck` required (clean click error). `test_cli.py` stub list correctly updated (mirrors how report-group stubs were handled).
+- `advise whattoplay` renders just its section (skips the ILP solve) — sensible (each leaf prints its slice, not the full report). 37 tests; 577 total green.
