@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-hardening
 kind: epic
-stage: implementing
+stage: review
 tags: [advisory, hardening]
 parent: null
 depends_on: [epic-advisory]
@@ -46,3 +46,17 @@ judgment. The three `improve-*` items carry genuine directional choices worth pi
   to a risk-adjusted lower-quantile rank?
 - **sideboard coverage:** implement the full saturating `g(n)=1-(1-p)^n` objective (faithful, bigger) vs a
   simpler diminishing-duplicate fill to reach the 15-slot budget?
+
+## Children complete + epic review (2026-05-30, autopilot)
+All 4 children done: `improve-whattoplay-proactivity-threat-signal`, `fix-advisory-peer-review-bugs`,
+`improve-positioning-pbest-uneven-sample`, `improve-sideboard-realdata-quality`. Suite 581 → 651 (+70).
+
+**Verdict**: Approve (pending Phase 8 final peer review). Aggregate outcomes:
+- Proactivity now rates creature-tempo correctly (Izzet Delver 0.00→0.510; combo>tempo>control); `Card.power/
+  toughness` added (re-seed `seed cards` to backfill the real DB — tests use fresh `:memory:`).
+- 8 peer-review correctness bugs fixed (imputation centering, rank ties, exclude-mirror, sideboard coverage
+  keys + `_hate` weight, Surgical/Faerie color, best_deck n≥30 gate, NaN guard).
+- Positioning default ranking → risk-adjusted lower-quantile (P(best) secondary) + `data_coverage`; the
+  thin-data spiker artifact is gone.
+- Sideboard saturating `g(n)` fills the 15-slot budget (was 2).
+- Foundation-doc drift fixed: ARCHITECTURE positioning row now says risk-adjusted rank (P(best) secondary).
