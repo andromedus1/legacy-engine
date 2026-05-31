@@ -1076,6 +1076,98 @@ class TestTuneDeckIntegration:
         assert isinstance(result.matchup_plans, dict)
         con.close()
 
+    def test_final_legality_revert_path(self, make_rounds_corpus, monkeypatch):
+        """Final-legality revert path: when validate_deck fails after greedy, tune_deck
+        reverts to the consensus (input) maindeck + empty sideboard and returns
+        legality_errors == [].
+
+        Strategy:
+        1. Monkeypatch recommend_sideboard in legacy_engine.generation.tuning to
+           return a SideboardPackage containing a synthetic card "SYNTHETIC_BANNED"
+           in its cards dict.
+        2. Monkeypatch validate_deck in the same module to fail when it sees
+           "SYNTHETIC_BANNED" in the combined deck (simulating a banned card).
+           All other validation calls (including _legal_swap_maindeck during greedy)
+           pass through to the real implementation.
+        3. Assert:
+           - legality_errors == [] (guarantee always holds)
+           - "REVERTED" in result.reason (revert branch fired)
+           - result.maindeck == input_maindeck (consensus main returned)
+           - result.fell_back is False (greedy path ran → revert is non-vacuous)
+        """
+        import legacy_engine.generation.tuning as _tuning_mod
+        from legacy_engine.advisory.sideboard import SideboardPackage
+        from legacy_engine.ingestion.banlist import validate_deck as _real_validate_deck
+
+        con, _facts = make_rounds_corpus(n_repeats=15)  # n=30 → evolving, greedy fires
+        field = build_custom_field({"Combo": 1.0})
+        input_maindeck = {"Island": 59, "Dark Ritual": 1}
+
+        # Stub recommend_sideboard to return a sideboard with a synthetic bad card.
+        _SENTINEL = "SYNTHETIC_BANNED"
+
+        def _stub_recommend_sideboard(con_arg, field_arg, deck_arg, **kwargs):
+            return SideboardPackage(
+                cards={_SENTINEL: 1},
+                trace=[],
+                covered_weight=0.0,
+                budget=15,
+                reserved=0,
+                solver_used="greedy",
+                field_source=field_arg.field_source,
+                heuristic_note="stub",
+                warnings=(),
+                matchup_plans={},
+                value_informed=False,
+                plan_window=(None, None),
+            )
+
+        def _patched_validate_deck(maindeck_arg, sideboard_arg, snapshot_arg=None):
+            """Fail when the sentinel bad card appears anywhere."""
+            combined = dict(maindeck_arg)
+            for card, count in (sideboard_arg or {}).items():
+                combined[card] = combined.get(card, 0) + count
+            if _SENTINEL in combined:
+                return [f"{_SENTINEL} is banned (synthetic test error)"]
+            return _real_validate_deck(maindeck_arg, sideboard_arg, snapshot_arg)
+
+        monkeypatch.setattr(_tuning_mod, "recommend_sideboard", _stub_recommend_sideboard)
+        monkeypatch.setattr(_tuning_mod, "validate_deck", _patched_validate_deck)
+
+        result = tune_deck(
+            con, "Control", input_maindeck, {},
+            field=field,
+            since="2025-01-01",
+        )
+
+        try:
+            # Core guarantee: legality_errors must always be [] on return.
+            assert result.legality_errors == [], (
+                f"legality_errors must be [] after revert; got {result.legality_errors}"
+            )
+
+            # Revert assertion 1: reason must mention REVERTED.
+            assert "REVERTED" in result.reason, (
+                f"Expected 'REVERTED' in reason after legality failure; "
+                f"reason={result.reason!r}"
+            )
+
+            # Revert assertion 2: maindeck must equal the consensus input exactly.
+            assert result.maindeck == dict(input_maindeck), (
+                f"After revert, maindeck must be the consensus input; "
+                f"result.maindeck={result.maindeck}"
+            )
+
+            # Non-vacuousness: the corpus has evolving-tier per-card data, so the
+            # greedy path must have run (fell_back=False).  If fell_back=True here,
+            # the corpus shrank and the revert assertion is vacuous — fail loudly.
+            assert result.fell_back is False, (
+                f"Expected fell_back=False (greedy path ran) so the revert is "
+                f"non-vacuous; fell_back={result.fell_back}, reason={result.reason!r}"
+            )
+        finally:
+            con.close()
+
 
 # ---------------------------------------------------------------------------
 # CLI output tests — updated for rework output format

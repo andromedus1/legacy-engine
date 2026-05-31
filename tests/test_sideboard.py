@@ -2037,5 +2037,121 @@ class TestPlanMatchupsRealSwap:
 
         plan = plans[opp]
         assert "Brainstorm" not in plan.side_out, "locked-core staple must never be sided out"
-        assert "Off Meta Card" in plan.side_out, "the non-locked dead card should be the one sided out"
+        assert "Off Meta Card" in plan.side_out, "the non-locked dead card should be the one sized out"
         assert sum(plan.post_board.values()) == 60
+
+
+# ---------------------------------------------------------------------------
+# TestDeficitPressureEndToEnd — exercises deficit→matchup_pressure inside
+# recommend_sideboard (not via _build_coverage_model directly).
+# ---------------------------------------------------------------------------
+
+class TestDeficitPressureEndToEnd:
+    """End-to-end: poor maindeck performance vs a gate-clearing opponent causes
+    recommend_sideboard to upweight that opponent's elements relative to a
+    no-pressure baseline.
+
+    This test exercises the real path inside recommend_sideboard:
+        mean_lift → -mean_lift → clamp01(deficit) → 1 + MAX_PRESSURE * deficit
+    A sign inversion in that derivation (e.g. ``+mean_lift`` instead of
+    ``-mean_lift``) would zero the deficit for a poor performer and make this
+    test fail.
+    """
+
+    def test_poor_performer_upweights_opponent_elements(
+        self, make_rounds_corpus, monkeypatch
+    ):
+        """Dark Ritual loses every match vs Control (wins=0) → high deficit →
+        Control elements upweighted vs a rounds-less baseline.
+
+        Steps:
+        1. Build an evolving-tier corpus (n_repeats=15, n=30 → evolving).
+        2. Deck: maindeck = {"Dark Ritual": 4, "Island": 56}.
+           Dark Ritual is Combo's main card; it wins=0, losses=30 vs Control
+           in this corpus → mean_lift < 0 → deficit > 0 → pressure > 1.0.
+        3. Field: {"Control": 1.0}  (single threat archetype).
+        4. Monkeypatch field_vulnerability_tags to return {"Control": frozenset({"combo"})}
+           so _build_coverage_model creates a "Control|combo" element.
+           (No real card tags are loaded in the in-memory corpus.)
+        5. Also monkeypatch vulnerability_tags_for_deck to return frozenset()
+           (the test deck has no vulnerability tags of its own).
+        6. Run recommend_sideboard with since="2025-01-01" (evolving window).
+        7. Run a baseline call using a rounds-less corpus (n_repeats=0).
+        8. Assert that the pressured coverage model upweights "Control|combo"
+           relative to the baseline.
+        """
+        import legacy_engine.advisory.sideboard as _sb_mod
+
+        # ── Step 1: evolving corpus ───────────────────────────────────────────
+        con, _facts = make_rounds_corpus(n_repeats=15)  # n=30 → evolving
+
+        # ── Step 4-5: patch tag functions inside the sideboard module ─────────
+        def _patched_field_vuln_tags(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+
+        def _patched_deck_vuln_tags(con_arg, maindeck_arg):
+            return frozenset()
+
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_field_vuln_tags)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_deck_vuln_tags)
+
+        field = build_custom_field({"Control": 1.0})
+        # Dark Ritual is Combo's main card — it appears in decks that LOSE vs Control
+        # (Dark Ritual vs Control: wins=0, losses=30 in n_repeats=15 corpus).
+        maindeck = {"Dark Ritual": 4, "Island": 56}
+
+        # ── Step 6: pressured call (evolving data, real deficit path) ────────
+        pkg_pressure = recommend_sideboard(
+            con, field, maindeck,
+            solver="greedy",
+            since="2025-01-01",  # wide window includes 2026-01 fixture corpus
+        )
+
+        # ── Step 7: baseline call — rounds-less corpus → no pressure ─────────
+        con_no_rounds, _ = make_rounds_corpus(n_repeats=0)
+        pkg_baseline = recommend_sideboard(
+            con_no_rounds, field, maindeck,
+            solver="greedy",
+            since="2025-01-01",
+        )
+
+        try:
+            # ── Step 8: assert pressure upweights Control elements ────────────
+            # The pressured call must have observed per-card data (gate cleared)
+            # and must be value_informed (signalling that the pressure path ran).
+            assert pkg_pressure.value_informed, (
+                "Expected value_informed=True with n=30 corpus and Dark Ritual "
+                "vs Control — the gate must have cleared so the pressure path ran. "
+                f"pkg_pressure.warnings={pkg_pressure.warnings}"
+            )
+
+            # Baseline: no rounds → matchup_pressure=None → weights unmodified.
+            # We compare covered_weight: the pressured model should yield higher
+            # covered_weight for the same picks because the element weights are
+            # higher (pressure multiplier > 1.0 for the underperforming matchup).
+            # Both calls run with the same hoser catalog (default) and budget=15.
+            #
+            # Specifically: Control|combo weight in the pressured model must be
+            # STRICTLY greater than in the baseline model (which has no pressure).
+            # This directly tests the deficit → pressure → upweight chain.
+            assert pkg_pressure.covered_weight >= pkg_baseline.covered_weight, (
+                "Pressured run must produce covered_weight ≥ baseline "
+                "(same picks but upweighted elements mean each pick is worth more). "
+                f"pressure={pkg_pressure.covered_weight:.4f} "
+                f"baseline={pkg_baseline.covered_weight:.4f}"
+            )
+
+            # Non-vacuousness: the pressured covered_weight must be STRICTLY GREATER
+            # than the baseline, not equal, confirming the pressure multiplier fired.
+            # (If deficit=0, pressure=1.0, and weights are identical → test would
+            # catch a sign inversion where poor performers get no pressure.)
+            assert pkg_pressure.covered_weight > pkg_baseline.covered_weight, (
+                "Pressure must cause strictly higher covered_weight (non-vacuous). "
+                "A sign inversion in the deficit derivation would set deficit=0 "
+                "for a poor performer → pressure=1.0 → equal weights → this fails. "
+                f"pressure={pkg_pressure.covered_weight:.4f} "
+                f"baseline={pkg_baseline.covered_weight:.4f}"
+            )
+        finally:
+            con.close()
+            con_no_rounds.close()
