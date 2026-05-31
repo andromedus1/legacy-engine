@@ -312,6 +312,20 @@ def build_field_read_report(
     audit.append(f"sideboard heuristic note: {sideboard_pkg.heuristic_note}")
     if sideboard_pkg.warnings:
         audit.extend(f"sideboard warning: {w}" for w in sideboard_pkg.warnings)
+    audit.append(
+        f"sideboard value_informed={sideboard_pkg.value_informed}, "
+        f"plan_window={sideboard_pkg.plan_window}, "
+        f"matchup_plans_count={len(sideboard_pkg.matchup_plans)}"
+    )
+    if sideboard_pkg.matchup_plans:
+        for opp, plan in sorted(sideboard_pkg.matchup_plans.items()):
+            if plan.degraded:
+                audit.append(f"  matchup_plan[{opp}]: degraded — {plan.note}")
+            else:
+                audit.append(
+                    f"  matchup_plan[{opp}]: tier={plan.tier}, n_basis={plan.n_basis}, "
+                    f"out={plan.side_out}, in={plan.side_in}"
+                )
 
     return FieldReadReport(
         deck_archetype=resolved_archetype,
@@ -400,6 +414,31 @@ def _render_whattoplay(report: FieldReadReport) -> str:
     return "\n".join(lines)
 
 
+def _render_sideboard_plans(sb) -> list[str]:
+    """Render per-matchup OUT/IN plans as text lines (only when value_informed)."""
+    from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
+
+    if not sb.value_informed or not sb.matchup_plans:
+        return []
+    lines: list[str] = ["  Per-matchup plans (presence-correlational):"]
+    for opp, plan in sorted(sb.matchup_plans.items()):
+        if plan.degraded:
+            lines.append(f"    vs {opp}: thin data — no per-matchup plan (rely on 15 composition)")
+        else:
+            out_str = ", ".join(
+                f"{c}x {card}" for card, c in sorted(plan.side_out.items())
+            ) or "(none)"
+            in_str = ", ".join(
+                f"{c}x {card}" for card, c in sorted(plan.side_in.items())
+            ) or "(none)"
+            lines.append(
+                f"    vs {opp} [{plan.tier}, n≥{plan.n_basis}]: "
+                f"OUT {out_str} | IN {in_str}"
+            )
+    lines.append(f"  [disclaimer] {_VALUE_DISCLAIMER}")
+    return lines
+
+
 def _render_sideboard(report: FieldReadReport) -> str:
     """Render the sideboard section."""
     sb = report.sideboard
@@ -418,6 +457,8 @@ def _render_sideboard(report: FieldReadReport) -> str:
     if sb.warnings:
         for w in sb.warnings:
             lines.append(f"  [warn] {w}")
+    # Append per-matchup plans when value_informed
+    lines.extend(_render_sideboard_plans(sb))
     return "\n".join(lines)
 
 

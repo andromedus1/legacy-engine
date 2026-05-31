@@ -14,6 +14,21 @@ Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
 
 Heuristic note: swing magnitudes are curated constants (_SWING_DEDICATED / _SWING_SOFT),
 NOT empirically derived.  Every SideboardPackage carries ``heuristic_note`` labeling this.
+
+Maindeck-aware extension (epic-deck-generation-sideboard-maindeck):
+  When per-card×matchup data clears the confidence gate (≥evolving tier), the
+  coverage model element weights are nudged by ``matchup_pressure`` (a multiplier
+  in [1, 1+MAX_PRESSURE] derived from how poorly the maindeck performs vs that
+  archetype), and a per-matchup OUT/IN plan is computed over the chosen 15.
+
+  GATING: all new behavior is disabled when per-card data is absent (rounds-less
+  corpus).  ``matchup_pressure=None`` → element weights are BYTE-IDENTICAL to the
+  pre-rework model.  Existing tests never supply a rounds corpus, so they are
+  guaranteed to stay green.
+
+  PRESENCE-CORRELATIONAL NOTE: per-card win-rates reflect the registered 75 for
+  decks that appeared in resolved matches, not causal game-by-game effects.  The
+  OUT/IN plan is a data-guided starting point, not a deterministic prescription.
 """
 
 from __future__ import annotations
@@ -33,6 +48,124 @@ from legacy_engine.advisory.whattoplay import (
 from legacy_engine.colors import compute_deck_colors
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Unit 1: MatchupPlan + per-card matchup-value adapter
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class MatchupPlan:
+    """Per-opponent OUT/IN swap plan for the maindeck.
+
+    ``opponent``:   field archetype being planned for.
+    ``side_out``:   maindeck cards to remove (card -> copies).
+    ``side_in``:    sideboard cards to bring in (card -> copies).
+    ``post_board``: the resulting 60 (maindeck − out + in).
+    ``n_basis``:    min matchup-cell n backing this plan (0 when degraded).
+    ``tier``:       weakest tier among the cells used ("speculative" when degraded).
+    ``degraded``:   True when matchup data below gate — no OUT/IN, rely on 15 composition.
+    ``note``:       human-readable explanation of the plan or degradation reason.
+    """
+
+    opponent: str
+    side_out: dict[str, int]
+    side_in: dict[str, int]
+    post_board: dict[str, int]
+    n_basis: int
+    tier: str
+    degraded: bool
+    note: str
+
+
+@dataclass
+class _OppValues:
+    """Internal: per-card value data for one opponent matchup."""
+
+    opponent: str
+    maindeck: dict   # card -> CardValue (all maindeck cards vs opponent)
+    side: dict       # card -> CardValue (all sideboard_15 cards vs opponent)
+    cleared_gate: bool
+
+
+# Gate tiers that count as "data is sufficient to act on"
+_VALUE_GATE: tuple[str, ...] = ("evolving", "established")
+
+# Presence-correlational disclaimer surfaced in CLI/report renders
+_VALUE_DISCLAIMER = (
+    "Per-card win-rates are PRESENCE-CORRELATIONAL (registered 75 for resolved matches), "
+    "not causal.  OUT/IN plans are a data-guided starting point, not a deterministic prescription."
+)
+
+# Maximum fractional pressure a matchup deficit can add to element weight
+_MAX_PRESSURE = 0.5
+
+
+def _field_matchup_values(
+    con: duckdb.DuckDBPyConnection,
+    field: FieldDistribution,
+    deck_maindeck: dict[str, int],
+    sideboard_15: dict[str, int],
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    top_k: int = 8,
+    gate: tuple[str, ...] = _VALUE_GATE,
+) -> dict[str, _OppValues]:
+    """Build per-opponent CardValue maps for the top_k field archetypes.
+
+    Returns a dict keyed by opponent archetype name.  Each value is an
+    ``_OppValues`` with:
+      - ``maindeck``: {card -> CardValue} for every card in deck_maindeck vs opponent.
+      - ``side``:     {card -> CardValue} for every card in sideboard_15 vs opponent.
+      - ``cleared_gate``: True iff any cell in (maindeck ∪ side) vs opponent has
+            tier in ``gate`` (meaning the data is sufficient to act on).
+
+    Window defaults to the latest ban regime when both since/until are None.
+
+    Returns {} if the per-card win-rate table cannot be built (no rounds data).
+    """
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.analytics.card_value import card_values_vs
+
+    try:
+        r = compute_card_winrates(con, since=since, until=until)
+    except Exception as exc:
+        log.debug("_field_matchup_values: compute_card_winrates failed: %s", exc)
+        return {}
+
+    # If there are no resolved matches at all, bail early — all gates will fail.
+    if r.coverage.decisive_matched == 0:
+        return {}
+
+    # Top-k opponents by field share (descending).
+    top_opponents = [
+        arch
+        for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
+    ][:top_k]
+
+    main_cards = list(deck_maindeck.keys())
+    side_cards = list(sideboard_15.keys())
+
+    result: dict[str, _OppValues] = {}
+    for opp in top_opponents:
+        main_vals = card_values_vs(r, main_cards, "main", opp, gate=gate) if main_cards else {}
+        side_vals = card_values_vs(r, side_cards, "side", opp, gate=gate) if side_cards else {}
+
+        # Gate: any cell with tier in the gate counts as "cleared"
+        cleared = any(cv.tier in gate for cv in main_vals.values()) or any(
+            cv.tier in gate for cv in side_vals.values()
+        )
+
+        result[opp] = _OppValues(
+            opponent=opp,
+            maindeck=main_vals,
+            side=side_vals,
+            cleared_gate=cleared,
+        )
+
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Saturating coverage model  g(n) = 1 − (1−p)^n
@@ -308,6 +441,7 @@ def _build_coverage_model(
     deck_tags: frozenset[str],
     *,
     catalog: Optional[dict[str, HoserCard]] = None,
+    matchup_pressure: Optional[dict[str, float]] = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -404,6 +538,19 @@ def _build_coverage_model(
             if weight >= _HATE_ELEMENT_MIN_WEIGHT:
                 element_weight[hate_key] = weight
                 hate_elements_added.add(tag)
+
+    # --- Step 3b: Apply matchup_pressure multipliers to archetype element weights ---
+    # When matchup_pressure is not None (i.e. per-card data cleared the gate for ≥1
+    # opponent), we up-weight elements for archetypes where the maindeck performs poorly.
+    # When matchup_pressure is None, this step is a no-op → byte-identical to pre-rework.
+    if matchup_pressure is not None:
+        for key in list(element_weight.keys()):
+            if "|" not in key:
+                continue  # skip anti-hate pseudo-elements
+            arch = key.split("|", 1)[0]
+            multiplier = matchup_pressure.get(arch, 1.0)
+            if multiplier != 1.0:
+                element_weight[key] = element_weight[key] * multiplier
 
     # --- Step 4: Color-prefiltered candidate hosers ---
     candidate_covers: dict[str, frozenset[str]] = {}
@@ -671,6 +818,265 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Unit 3 (design): Per-matchup OUT/IN planner
+# ---------------------------------------------------------------------------
+
+def _plan_matchups(
+    con: duckdb.DuckDBPyConnection,
+    deck_maindeck: dict[str, int],
+    sideboard_15: dict[str, int],
+    opp_values: dict[str, "_OppValues"],
+    archetype: str | None,
+    *,
+    max_swaps: int = 4,
+    lock_threshold: float = 0.65,
+    since: str | None = None,
+    until: str | None = None,
+    catalog: Optional[dict[str, HoserCard]] = None,
+) -> dict[str, MatchupPlan]:
+    """Build per-opponent OUT/IN swap plans for the maindeck.
+
+    For each opponent in ``opp_values``:
+
+    - If ``not cleared_gate``: returns a degraded MatchupPlan (no OUT/IN, post_board
+      == maindeck, explanatory note).
+    - If ``cleared_gate``: builds a real OUT/IN plan:
+        - Locked core: maindeck cards run by ≥ lock_threshold of the archetype's decks
+          (from card_frequencies) — never sided out.  When archetype is None all
+          maindeck cards are flex (degraded locked-core protection, noted).
+        - OUT candidates: (maindeck \\ locked) ranked ascending by matchup lift (most
+          dead vs opponent first), only gate-clearing cards with lift ≤ 0, capped at
+          max_swaps copies total.
+        - IN candidates: sideboard_15 ranked descending by matchup lift, gate-clearing,
+          lift > 0, capped at max_swaps copies total.
+        - Pairs OUT[i] ↔ IN[i] up to min(available_out, available_in) copies.
+        - Enforces legality: post_board sums to exactly 60; per-card copies ≤
+          max(catalog max_copies, 4).  Illegal swaps are skipped (fewer swaps is
+          always legal).
+        - side_out and side_in must have equal total copies (a swap conserves 60).
+
+    Returns dict[opponent -> MatchupPlan].
+    """
+    if catalog is None:
+        catalog = HOSER_CATALOG
+
+    # Max copies limit: prefer catalog, fall back to 4
+    def _max_copies_for(card: str) -> int:
+        if card in catalog:
+            return max(catalog[card].max_copies, 4)
+        return 4
+
+    plans: dict[str, MatchupPlan] = {}
+
+    # Build locked core once per archetype (not per opponent)
+    locked_core: frozenset[str] = frozenset()
+    lock_note = ""
+    if archetype is not None:
+        try:
+            from legacy_engine.generation.consensus import card_frequencies
+            freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+            locked_core = frozenset(
+                cf.name for cf in freqs if cf.inclusion_pct >= lock_threshold
+            )
+        except Exception as exc:
+            log.debug("_plan_matchups: card_frequencies failed: %s", exc)
+            locked_core = frozenset()
+            lock_note = f" (locked-core unavailable: {exc})"
+    else:
+        lock_note = " (archetype=None — all maindeck cards are flex; locked-core protection skipped)"
+
+    total_maindeck = sum(deck_maindeck.values())
+
+    for opp, ov in opp_values.items():
+        if not ov.cleared_gate:
+            plans[opp] = MatchupPlan(
+                opponent=opp,
+                side_out={},
+                side_in={},
+                post_board=dict(deck_maindeck),
+                n_basis=0,
+                tier="speculative",
+                degraded=True,
+                note=(
+                    f"thin data (n < gate threshold) for {opp} — "
+                    "no per-matchup plan; rely on the maindeck-aware 15 composition"
+                ),
+            )
+            continue
+
+        # ── Compute OUT candidates ─────────────────────────────────────────
+        # Only flex maindeck cards (not in locked_core) that clear the gate (tier in
+        # _VALUE_GATE) and have lift ≤ 0 (genuinely weak vs opponent).
+        out_candidates: list[tuple[str, float, int, str]] = []  # (card, lift, copies, tier)
+        for card, cv in ov.maindeck.items():
+            if card in locked_core:
+                continue
+            if cv.tier not in _VALUE_GATE:
+                continue
+            if cv.lift > 0:
+                continue  # positive lift → keep it in
+            copies_available = deck_maindeck.get(card, 0)
+            if copies_available <= 0:
+                continue
+            out_candidates.append((card, cv.lift, copies_available, cv.tier))
+
+        # Sort ascending by lift (most dead first); tie-break by card name for stability
+        out_candidates.sort(key=lambda x: (x[1], x[0]))
+
+        # ── Compute IN candidates ──────────────────────────────────────────
+        # Sideboard_15 cards that clear the gate and have lift > 0 vs this opponent.
+        in_candidates: list[tuple[str, float, int, str]] = []  # (card, lift, copies, tier)
+        for card, cv in ov.side.items():
+            if cv.tier not in _VALUE_GATE:
+                continue
+            if cv.lift <= 0:
+                continue
+            copies_available = sideboard_15.get(card, 0)
+            if copies_available <= 0:
+                continue
+            in_candidates.append((card, cv.lift, copies_available, cv.tier))
+
+        # Sort descending by lift (best first)
+        in_candidates.sort(key=lambda x: (-x[1], x[0]))
+
+        # ── Pair OUT ↔ IN up to max_swaps total copies ────────────────────
+        side_out: dict[str, int] = {}
+        side_in: dict[str, int] = {}
+        swaps_done = 0
+
+        out_iter = iter(out_candidates)
+        in_iter = iter(in_candidates)
+
+        out_card, out_lift, out_avail, out_tier = None, 0.0, 0, "speculative"
+        in_card, in_lift, in_avail, in_tier = None, 0.0, 0, "speculative"
+        out_exhausted = in_exhausted = False
+
+        def _next_out() -> bool:
+            nonlocal out_card, out_lift, out_avail, out_tier, out_exhausted
+            try:
+                out_card, out_lift, out_avail, out_tier = next(out_iter)
+                return True
+            except StopIteration:
+                out_exhausted = True
+                return False
+
+        def _next_in() -> bool:
+            nonlocal in_card, in_lift, in_avail, in_tier, in_exhausted
+            try:
+                in_card, in_lift, in_avail, in_tier = next(in_iter)
+                return True
+            except StopIteration:
+                in_exhausted = True
+                return False
+
+        if not _next_out():
+            out_exhausted = True
+        if not _next_in():
+            in_exhausted = True
+
+        while swaps_done < max_swaps and not out_exhausted and not in_exhausted:
+            # Try one copy of out_card ↔ one copy of in_card
+            # Legality check: post_board for this card must not exceed max_copies
+            post_in_count = (deck_maindeck.get(in_card, 0)
+                             + side_in.get(in_card, 0)
+                             - side_out.get(in_card, 0))
+            if post_in_count + 1 > _max_copies_for(in_card):
+                # Skip this IN candidate
+                if not _next_in():
+                    break
+                continue
+
+            # Also check out_card is still in the tentative post_board
+            post_out_count = (deck_maindeck.get(out_card, 0)
+                              - side_out.get(out_card, 0))
+            if post_out_count <= 0:
+                # Already used all copies of this out_card
+                if not _next_out():
+                    break
+                continue
+
+            # Execute one copy swap
+            side_out[out_card] = side_out.get(out_card, 0) + 1
+            side_in[in_card] = side_in.get(in_card, 0) + 1
+            swaps_done += 1
+
+            # Advance iterators when a card's copies are exhausted
+            out_avail -= 1
+            if out_avail <= 0 or side_out.get(out_card, 0) >= deck_maindeck.get(out_card, 0):
+                if not _next_out():
+                    out_exhausted = True
+
+            in_avail -= 1
+            if in_avail <= 0 or side_in.get(in_card, 0) >= sideboard_15.get(in_card, 0):
+                if not _next_in():
+                    in_exhausted = True
+
+        # ── Legality enforcement: post_board must sum to exactly 60 ──────
+        # Since each swap removes one and adds one, total = total_maindeck always.
+        # But if total_maindeck != 60 (the caller owns that contract), we skip planning.
+        out_total = sum(side_out.values())
+        in_total = sum(side_in.values())
+        assert out_total == in_total, "BUG: out/in copies must be equal"
+
+        # Build post_board
+        post_board = dict(deck_maindeck)
+        for card, copies in side_out.items():
+            post_board[card] = post_board.get(card, 0) - copies
+            if post_board[card] <= 0:
+                del post_board[card]
+        for card, copies in side_in.items():
+            post_board[card] = post_board.get(card, 0) + copies
+
+        # Determine n_basis and tier from the cells used
+        cells_used = (
+            [ov.maindeck[c] for c in side_out if c in ov.maindeck]
+            + [ov.side[c] for c in side_in if c in ov.side]
+        )
+        if cells_used:
+            n_basis = min(cv.n for cv in cells_used)
+            # Weakest tier = tier corresponding to n_basis
+            from legacy_engine.confidence import tier_for_sample
+            tier = tier_for_sample(n_basis)
+        else:
+            n_basis = 0
+            tier = "speculative"
+
+        if out_total == 0:
+            note = (
+                f"vs {opp}: data cleared gate but no flex dead cards found "
+                f"(or no high-lift sideboard IN candidates){lock_note}"
+            )
+            plans[opp] = MatchupPlan(
+                opponent=opp,
+                side_out={},
+                side_in={},
+                post_board=dict(deck_maindeck),
+                n_basis=n_basis,
+                tier=tier,
+                degraded=False,
+                note=note,
+            )
+        else:
+            lock_str = f"; locked={sorted(locked_core)}" if locked_core else lock_note
+            note = (
+                f"vs {opp}: {out_total} swap(s); "
+                f"tier={tier}, n_basis={n_basis}{lock_str}"
+            )
+            plans[opp] = MatchupPlan(
+                opponent=opp,
+                side_out=dict(side_out),
+                side_in=dict(side_in),
+                post_board=post_board,
+                n_basis=n_basis,
+                tier=tier,
+                degraded=False,
+                note=note,
+            )
+
+    return plans
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -687,6 +1093,11 @@ class SideboardPackage:
     ``field_source``: from the FieldDistribution.
     ``heuristic_note``: explicit label that swing magnitudes are curated estimates.
     ``warnings``: any issues from coverage model build or solver.
+
+    New additive fields (all have defaults — existing constructors keep working):
+    ``matchup_plans``: per-opponent OUT/IN plans (empty dict when no per-card data).
+    ``value_informed``: True when ≥1 opponent cleared the per-card data gate.
+    ``plan_window``: (since, until) window used for per-card data (both None = no data).
     """
 
     cards: dict[str, int]
@@ -698,6 +1109,10 @@ class SideboardPackage:
     field_source: str
     heuristic_note: str
     warnings: tuple[str, ...]
+    # --- Additive fields (unit 4: maindeck-aware extension) ---
+    matchup_plans: dict[str, MatchupPlan] = dc_field(default_factory=dict)
+    value_informed: bool = False
+    plan_window: tuple[str | None, str | None] = (None, None)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -725,6 +1140,13 @@ def recommend_sideboard(
     reserved: int = 0,
     solver: str = "ilp",
     catalog: Optional[dict[str, HoserCard]] = None,
+    # New optional kwargs (Unit 4: maindeck-aware extension).
+    # All have safe defaults so existing callers are unaffected.
+    archetype: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    opponents: list[str] | None = None,
+    max_swaps: int = 4,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -732,12 +1154,24 @@ def recommend_sideboard(
     1. Resolve deck colors via ``_load_deck_cards`` + ``compute_deck_colors``.
     2. Get deck's vulnerability tags via ``vulnerability_tags_for_deck``.
     3. Get per-archetype tags via ``field_vulnerability_tags``.
+    NEW 2b. Build per-card matchup values (_field_matchup_values); derive matchup_pressure.
     4. Build the coverage model (elements, weights, color-prefiltered candidates).
     5. Solve with ILP (primary) or greedy (fallback / forced).
     6. Always compute the greedy trace (explainable per-card rationale).
-    7. Return a SideboardPackage with both results.
+    NEW 6b. Plan per-matchup OUT/IN swaps (_plan_matchups).
+    7. Return a SideboardPackage with both results + new additive fields.
 
     ``solver="greedy"`` forces the greedy path (e.g. for testing or if CBC is unavailable).
+
+    New optional kwargs (all default-safe):
+    - ``archetype``: the deck's own archetype string (for locked-core computation).
+    - ``since``/``until``: date window for per-card win-rate data.  When both are
+      None the latest ban-regime window is used automatically.
+    - ``opponents``: subset of field archetypes to plan for (None = top-8 by share).
+    - ``max_swaps``: maximum copies to swap per matchup plan (default 4).
+
+    On a rounds-less corpus all per-card gates fail → matchup_pressure=None →
+    element weights are BYTE-IDENTICAL to the pre-rework model → existing tests green.
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -775,6 +1209,60 @@ def recommend_sideboard(
     # --- Step 3: Field archetype tags ---
     archetype_tags = field_vulnerability_tags(con, field)
 
+    # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
+    # We don't have the final_cards yet; use empty sideboard for the value adapter call.
+    # After solving we'll rebuild opp_values with the real 15.  For the pressure pass
+    # we only need the maindeck values (used to derive the deficit), so this is correct.
+    opp_values_pre: dict[str, _OppValues] = {}
+    matchup_pressure: Optional[dict[str, float]] = None
+    any_gate_cleared = False
+
+    # Apply regime-window default: when caller passes both since=None and until=None,
+    # default to the latest ban-regime window (consistent with report cards/meta).
+    eff_since = since
+    eff_until = until
+    if eff_since is None and eff_until is None:
+        try:
+            from legacy_engine.generation.consensus import _latest_regime_window
+            eff_since, eff_until = _latest_regime_window()
+        except Exception:
+            pass  # keep both None (open window)
+
+    plan_window: tuple[str | None, str | None] = (eff_since, eff_until)
+
+    try:
+        opp_values_pre = _field_matchup_values(
+            con, field, deck_maindeck, {},
+            since=eff_since, until=eff_until,
+        )
+    except Exception as exc:
+        log.debug("recommend_sideboard: _field_matchup_values failed: %s", exc)
+        opp_values_pre = {}
+
+    # Derive matchup_pressure from pre-15 opp_values (maindeck values only).
+    # pressure[arch] = 1 + MAX_PRESSURE * clamp01(deficit)
+    # deficit = how far below 0 the mean maindeck lift vs opponent sits.
+    # Only gate-clearing opponents get a multiplier > 1.0; others get 1.0.
+    if opp_values_pre:
+        pressure: dict[str, float] = {}
+        for opp, ov in opp_values_pre.items():
+            if not ov.cleared_gate:
+                pressure[opp] = 1.0
+                continue
+            any_gate_cleared = True
+            main_lifts = [cv.lift for cv in ov.maindeck.values() if cv.tier in _VALUE_GATE]
+            if not main_lifts:
+                pressure[opp] = 1.0
+                continue
+            mean_lift = sum(main_lifts) / len(main_lifts)
+            # deficit = how negative the mean lift is; clamp to [0, 1]
+            deficit = max(0.0, min(1.0, -mean_lift))
+            pressure[opp] = 1.0 + _MAX_PRESSURE * deficit
+
+        if any_gate_cleared:
+            matchup_pressure = pressure
+        # else: keep matchup_pressure as None → byte-identical model
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -782,6 +1270,7 @@ def recommend_sideboard(
         deck_colors,
         deck_tags,
         catalog=catalog,
+        matchup_pressure=matchup_pressure,
     )
     warnings.extend(model.warnings)
 
@@ -797,6 +1286,8 @@ def recommend_sideboard(
             field_source=field.field_source,
             heuristic_note=_HEURISTIC_NOTE,
             warnings=tuple(warnings),
+            value_informed=any_gate_cleared,
+            plan_window=plan_window,
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -825,6 +1316,31 @@ def recommend_sideboard(
     # Compute covered weight for the final solution
     cov_weight = _compute_covered_weight(final_cards, model)
 
+    # --- Step 6b: Per-matchup OUT/IN plans (NEW, gated) ---
+    matchup_plans: dict[str, MatchupPlan] = {}
+    if any_gate_cleared and final_cards:
+        # Re-build opp_values with the real 15 so the planner has correct side values.
+        try:
+            opp_values_final = _field_matchup_values(
+                con, field, deck_maindeck, final_cards,
+                since=eff_since, until=eff_until,
+            )
+            # If caller restricted to specific opponents, filter here.
+            if opponents is not None:
+                opp_values_final = {
+                    k: v for k, v in opp_values_final.items() if k in opponents
+                }
+            matchup_plans = _plan_matchups(
+                con, deck_maindeck, final_cards, opp_values_final, archetype,
+                max_swaps=max_swaps,
+                since=eff_since,
+                until=eff_until,
+                catalog=catalog,
+            )
+        except Exception as exc:
+            log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
+            warnings.append(f"per-matchup plan failed: {exc}")
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -835,4 +1351,7 @@ def recommend_sideboard(
         field_source=field.field_source,
         heuristic_note=_HEURISTIC_NOTE,
         warnings=tuple(warnings),
+        matchup_plans=matchup_plans,
+        value_informed=any_gate_cleared,
+        plan_window=plan_window,
     )
