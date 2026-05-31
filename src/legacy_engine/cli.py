@@ -60,6 +60,9 @@ def seed_cards(verbose: bool) -> None:
     cards = [Card.from_scryfall(raw) for raw in unique.values()]
     con = store.connect()
     try:
+        # Rebuild (drop + recreate) so a re-seed is a clean full refresh — INSERT OR IGNORE
+        # face-alias rows otherwise can't be refreshed once present (stale aliases would persist).
+        store.rebuild(con)
         loaded = store.load_cards(con, cards)
     finally:
         con.close()
