@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS cards (
     produced_mana VARCHAR,
     oracle_text VARCHAR,
     layout VARCHAR,
-    is_land BOOLEAN
+    is_land BOOLEAN,
+    power VARCHAR,
+    toughness VARCHAR
 )
 """
 
@@ -84,11 +86,13 @@ def load_cards(con: duckdb.DuckDBPyConnection, cards: Iterable[Card]) -> int:
             c.oracle_text,
             c.layout,
             c.is_land,
+            c.power,
+            c.toughness,
         )
         for c in cards
     ]
     if rows:
-        con.executemany("INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        con.executemany("INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     return len(rows)
 
 
