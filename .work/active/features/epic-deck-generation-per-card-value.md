@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-per-card-value
 kind: feature
-stage: review
+stage: done
 tags: [generation, analytics]
 parent: epic-deck-generation
 depends_on: []
@@ -297,3 +297,34 @@ All new symbols exported via `src/legacy_engine/analytics/__init__.py`: `CardMat
 - New test files: `tests/test_card_winrates.py` (26 tests), `tests/test_card_value.py` (24 tests)
 - Extended: `tests/test_matchup.py` (+9 shrink delegation tests), `tests/test_cli.py` (+8 report cards tests)
 - Regressions: **0**
+
+
+## Review findings (deep review, 2026-05-31) — APPROVED
+
+Fresh-context deep review (same-model Claude, Opus; **cross-model deferred — Codex out of credits**, a true
+cross-model pass is owed before epic closure). Verdict: **Approve with comments — no blockers.** All six
+correctness-critical invariants verified by direct code tracing (not just the green suite):
+1. No cardinality fan-out — `compute_card_winrates` attributes 1 per (deck,match), never per `count`; the
+   `_DUP_UNIQ_CTE` constant is genuinely shared (SSOT), `parse_match_result` reused (no forked SQL parser).
+2. Coverage parity with `compute_match_results` (identical bye→ambiguous→unmatched→draw→mirror guard order).
+3. `beta_binomial_shrink` byte-identical after delegating to `beta_binomial_shrink_to`.
+4. Two-level empirical-Bayes sound; lift/tier/unseen-cell handling correct.
+5. Honesty bound upheld — values carry tiers, thin cells suppressed not fabricated.
+6. `since`/`until` window correct. Tests genuinely assert the invariants on the rounds-bearing fixture
+   (non-vacuous, n_repeats drives tier transitions).
+
+**Findings — all resolved in-session (no items filed):**
+- **[Important] CLI window mismatch** (`cli.py report cards`): `--archetype` scoped the card *list* to the
+  latest ban regime (via `card_frequencies` default) while values used the all-time corpus. FIXED — the
+  effective window is resolved once and passed to both `compute_card_winrates` and `card_frequencies`;
+  defaults to the latest regime (consistent with `report meta`); the active window is now printed in the
+  header. 5 CLI tests made window-explicit (`--since 2025-01-01`) so they're deterministic regardless of
+  real ban dates.
+- **[Nit] dead `total_decisive`/`total_wins` + misleading baseline comment** (`match_results.py`): FIXED —
+  removed; `baseline_winrate` set directly to the match-level symmetric prior 0.5 with an honest comment.
+- **[Nit] EB prior contains the cell's own signal** (`card_value.py`): FIXED — added a clarifying comment;
+  accepted EB simplification matching the locked design.
+- **[Nit] unused `gate` param** (`card_value.py card_values_vs`): KEPT — documented as the recommended
+  consumer trust-threshold; covered by a non-suppression test; in the locked design contract.
+
+Suite green at 913. Advanced review → done.

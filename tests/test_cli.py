@@ -115,13 +115,13 @@ class TestReportCards:
 
     def test_report_cards_happy_path_marginal(self, runner, db_with_corpus):
         """report cards on a real corpus prints a table with card names."""
-        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus, "--board", "main"])
+        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus, "--board", "main", "--since", "2025-01-01"])
         assert result.exit_code == 0, result.output
         assert "Brainstorm" in result.output or "Dark Ritual" in result.output
 
     def test_report_cards_vs_opponent(self, runner, db_with_corpus):
         """report cards --vs Combo shows Brainstorm (main) vs Combo."""
-        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus, "--vs", "Combo", "--board", "main"])
+        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus, "--vs", "Combo", "--board", "main", "--since", "2025-01-01"])
         assert result.exit_code == 0, result.output
         assert "Brainstorm" in result.output
 
@@ -129,7 +129,7 @@ class TestReportCards:
         """--min-tier established with n_repeats=5 (n=10) suppresses all rows + shows note."""
         result = runner.invoke(
             main,
-            ["report", "cards", "--db", db_with_corpus, "--board", "main", "--min-tier", "established"],
+            ["report", "cards", "--db", db_with_corpus, "--board", "main", "--min-tier", "established", "--since", "2025-01-01"],
         )
         assert result.exit_code == 0, result.output
         # n=10 for all cells (n_repeats=5) → speculative → suppressed
@@ -139,7 +139,7 @@ class TestReportCards:
         """--min-tier speculative (default) shows all rows including speculative."""
         result = runner.invoke(
             main,
-            ["report", "cards", "--db", db_with_corpus, "--board", "main", "--min-tier", "speculative"],
+            ["report", "cards", "--db", db_with_corpus, "--board", "main", "--min-tier", "speculative", "--since", "2025-01-01"],
         )
         assert result.exit_code == 0, result.output
         # No suppression note when everything is shown
@@ -147,7 +147,7 @@ class TestReportCards:
 
     def test_report_cards_presence_correlational_note(self, runner, db_with_corpus):
         """Report header always prints the NOT causal disclaimer."""
-        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus])
+        result = runner.invoke(main, ["report", "cards", "--db", db_with_corpus, "--since", "2025-01-01"])
         assert result.exit_code == 0, result.output
         assert "NOT causal" in result.output or "correlational" in result.output
 

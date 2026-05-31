@@ -115,7 +115,13 @@ def card_value_matchup(
     Presence-correlational: lift ≠ causal matchup delta.
     """
     marginal_cv = card_value_marginal(r, card, board)
-    prior_mean = marginal_cv.p_shrunk  # two-level: matchup shrinks toward shrunk marginal
+    # Two-level EB approximation: the matchup cell shrinks toward the card's shrunk
+    # marginal. Note the marginal is the sum over ALL of this card's matchup cells,
+    # so the prior is not strictly independent of this cell's data — a card with one
+    # dominant opponent shrinks toward a prior that already contains that opponent's
+    # signal, which slightly understates the matchup lift magnitude. This is a standard,
+    # accepted EB simplification (matches the locked design), not pure two-stage EB.
+    prior_mean = marginal_cv.p_shrunk
 
     rec = r.matchup.get((card, board, opponent))
     if rec is None or rec.n == 0:
