@@ -220,3 +220,33 @@ No forking; no duplication.
 
 ### Tests: 42 new in `tests/test_generation_tuning.py`; `tests/test_cli.py` updated (generate tune listed).
 ### Full suite: 844 passed.
+
+## Review findings (completion review, 2026-05-30) — BLOCKED on a design decision
+
+**Review path note:** the cross-model reviewer (Codex) was **out of credits** and Gemini (Antigravity CLI)
+is not installed, so this was a **local same-model fresh-context review (Opus), NOT cross-model.** Re-run a
+true cross-model pass once Codex credits are refilled before final sign-off.
+
+Findings (verified against source):
+- **[FORK / #4] The coverage objective is blind to proactive (non-hoser) maindeck cards.**
+  `advisory.sideboard._build_coverage_model` populates `candidate_covers` from `HOSER_CATALOG` only, so
+  `coverage_value(model, maindeck)` scores a proactive list (Brainstorm/Ponder/Murktide) ≈ 0 — only cards
+  that are also catalog hosers move the objective. Consequence on live data (currently hidden because the
+  test fixture has no rounds → always bimodal-fallback): the greedy loop would **cut unprotected proactive
+  *flex* cards (value 0) for hosers (value > 0) — hollowing the gameplan.** This is rooted in the deferred
+  per-card win-rate data. **Needs a scope decision** (see options below) before the greedy path should run.
+- **[#2] The greedy path is never exercised end-to-end + vacuous tests.** Because the DB fixture always hits
+  the fallback, `test_swaps_only_from_candidate_pool` / `test_locked_core_never_modified` loop over an empty
+  `swaps` list (pass vacuously) and `test_coverage_after_ge_coverage_before` asserts `>=` (trivially true).
+  The central AC (a weak slot vs a high-share threat gets swapped → coverage rises) is asserted nowhere
+  through the real pipeline. Fix requires a rounds-bearing fixture — and depends on resolving #4 (what the
+  *correct* greedy behavior is).
+- **[#3] Swap legality ignores catalog `max_copies` and validates maindeck-only.** `_legal_swap_maindeck`
+  enforces the generic 4-copy rule but not a candidate's `HoserCard.max_copies` (e.g. Surgical=2), and checks
+  `validate_deck(new_main, {}, ...)` (no sideboard), so the greedy loop can over-stack a hoser and the final
+  combined main+side check is non-blocking → a tuned deck can be returned with `legality_errors` populated.
+  Clean fix, but entangled with the #4 path decision.
+
+Consensus #1 (cross-board de-dupe undone by top-up) was a separate BLOCKER — already fixed + regression-tested.
+Export reviewed clean. `epic-deck-generation-{consensus,export}` are sound and ready to advance; this feature
+(tuning) is **held at `review` pending the #4 decision**, then #2/#3 fixed accordingly.
