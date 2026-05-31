@@ -48,3 +48,11 @@ candidate set mixes well-sampled and thinly-sampled decks (the normal case for a
 Route through `/feature-design`. Not a shipped-pillar blocker — meta-share + the matchup matrix (with its
 n/tier labels) are reliable; this is about making the *ranking* honest under uneven sample sizes. Workaround
 today: read the matchup matrix + S only for decks with dense cells (the analysis that surfaced this did so).
+
+## Design decisions (--only-questions, 2026-05-30)
+- **Default headline ranking = risk-adjusted lower-posterior-quantile (mean−variance)** (user-directed),
+  which naturally penalizes thin-data spikes. Keep raw `P(best)` as a *secondary* reported view, not the
+  headline. Still attach a `data_coverage` field (measured-cell fraction vs the field) to
+  `PositioningResult`/`DeckRanking` so consumers can see/condition on sufficiency. The existing
+  `risk_averse` lower-quantile path becomes the default sort; ties handled evenly (see the argmax-ties bug
+  in [[fix-advisory-peer-review-bugs]]).
