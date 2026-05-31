@@ -87,3 +87,56 @@ class TestStore:
         assert row["power"] is None
         assert row["toughness"] is None
         con.close()
+
+    def test_migration_old_9column_schema_gains_power_toughness(self):
+        """BLOCKER regression: an EXISTING 9-column cards table (pre-power/toughness) must be
+        migrated by init_schema() so load_cards() can store and retrieve power/toughness.
+
+        Simulates the real-DB scenario: table already exists without the new columns, then
+        init_schema is called (e.g. on next run) and the insert must succeed.
+        """
+        import duckdb
+
+        # Build an OLD-style 9-column table without power/toughness.
+        con = duckdb.connect(":memory:")
+        con.execute(
+            """CREATE TABLE cards (
+                name VARCHAR PRIMARY KEY,
+                mana_cost VARCHAR,
+                cmc DOUBLE,
+                type_line VARCHAR,
+                colors VARCHAR,
+                produced_mana VARCHAR,
+                oracle_text VARCHAR,
+                layout VARCHAR,
+                is_land BOOLEAN
+            )"""
+        )
+        # Verify it really only has 9 columns before migration.
+        cols_before = [d[0] for d in con.execute("DESCRIBE cards").fetchall()]
+        assert "power" not in cols_before, "Pre-condition: old schema should lack 'power'"
+        assert "toughness" not in cols_before, "Pre-condition: old schema should lack 'toughness'"
+
+        # Call init_schema — must add power/toughness idempotently.
+        store.init_schema(con)
+
+        cols_after = [d[0] for d in con.execute("DESCRIBE cards").fetchall()]
+        assert "power" in cols_after, "After migration 'power' column must exist"
+        assert "toughness" in cols_after, "After migration 'toughness' column must exist"
+
+        # load_cards must succeed and round-trip power/toughness correctly.
+        tarmogoyf = Card(
+            name="Tarmogoyf",
+            type_line="Creature — Lhurgoyf",
+            cmc=2.0,
+            power="*",
+            toughness="*+1",
+        )
+        count = store.load_cards(con, [tarmogoyf])
+        assert count == 1
+
+        row = store.fetch_card(con, "Tarmogoyf")
+        assert row is not None
+        assert row["power"] == "*"
+        assert row["toughness"] == "*+1"
+        con.close()

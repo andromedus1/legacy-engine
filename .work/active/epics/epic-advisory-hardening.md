@@ -60,3 +60,15 @@ All 4 children done: `improve-whattoplay-proactivity-threat-signal`, `fix-adviso
   thin-data spiker artifact is gone.
 - Sideboard saturating `g(n)` fills the 15-slot budget (was 2).
 - Foundation-doc drift fixed: ARCHITECTURE positioning row now says risk-adjusted rank (P(best) secondary).
+
+## Phase 8 fixes (2026-05-30, completion-review)
+
+Four findings from the cross-model completion review resolved. Suite 651 → 654 (+3 new tests; finding 4 replaced weak test with deterministic one).
+
+1. **BLOCKER — cards migration for power/toughness** (`src/legacy_engine/ingestion/store.py`): `init_schema()` now runs `ALTER TABLE cards ADD COLUMN IF NOT EXISTS power/toughness VARCHAR` after the CREATE, so existing 9-column DBs are upgraded without data loss. `load_cards` INSERT now uses an explicit column list to prevent silent column-count drift. Test: `test_migration_old_9column_schema_gains_power_toughness` — creates old 9-column table, calls `init_schema`, loads a creature with power/toughness, asserts round-trip.
+
+2. **BLOCKER — ILP underfills budget** (`src/legacy_engine/advisory/sideboard.py`): the hard `_ILP_T_CAP = 4` coverage-level cap was replaced with `_ILP_T_CAP = budget`. The old cap prevented the ILP from allocating more than 4 slots to any element, causing it to stop at ~12 slots on multi-copy models where greedy (using uncapped `g(n)`) correctly fills 15. With budget as the cap the ILP objective matches the uncapped `g(n)` objective. Test: `test_ilp_fills_budget_multi_copy_saturating` — 3-element / 3×8-copy model asserts ILP fills 15 slots and its objective ≥ greedy.
+
+3. **IMPORTANT — positioning `--candidates` display** (`src/legacy_engine/cli.py`): ranking output now shows `Q{quantile_level}=...` (the sort key) and `cov=...` (data coverage) per deck, plus `[low_coverage]` flag when triggered. The header also surfaces which quantile is the sort key. Test: `test_positioning_candidates_output_shows_quantile_and_coverage` — asserts `Q0.` and `cov=` appear in CLI output.
+
+4. **NIT — tie regression test was weak** (`tests/test_positioning.py`): `test_fix2_rank_decks_identical_candidates_split_pbest_evenly` replaced by `test_fix2_rank_decks_exact_tie_splits_pbest_exactly`. New test monkeypatches `_sample_S` to return identical arrays for both candidates, making every draw an exact tie. Without the fix (argmax → index-0 wins) P(best) would be 1.0/0.0; with the fix both get exactly 0.5 to floating-point precision.

@@ -694,12 +694,16 @@ def advise_positioning(
                 if ln.strip() and not ln.startswith("#")
             ]
             ranking = rank_decks(matrix, field, candidates, seed=seed)
-            click.echo(f"\n=== Deck Ranking (field_source={ranking.field_source}) ===")
+            q_label = f"Q{ranking.quantile_level:.2f}"
+            click.echo(f"\n=== Deck Ranking (field_source={ranking.field_source}, sort={q_label}) ===")
             for d in ranking.decks:
                 lo, hi = ranking.s_ci[d]
+                cov = ranking.data_coverage[d]
+                low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
                 click.echo(
                     f"  {d:<35}  S={ranking.s_mean[d]:.3f}  "
-                    f"CI=[{lo:.3f},{hi:.3f}]  P(best)={ranking.p_best[d]:.3f}"
+                    f"CI=[{lo:.3f},{hi:.3f}]  P(best)={ranking.p_best[d]:.3f}  "
+                    f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
                 )
         else:
             pos = positioning_score(matrix, field, resolved_archetype, seed=seed)

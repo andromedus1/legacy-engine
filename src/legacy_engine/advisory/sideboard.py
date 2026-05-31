@@ -569,8 +569,13 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
     except ImportError as exc:
         raise _ILPFailed("PuLP not installed") from exc
 
-    # Cap on coverage levels per element (diminishing returns make high t negligible)
-    _ILP_T_CAP = 4
+    # Cap on coverage levels per element: use the budget itself so the ILP can
+    # allocate up to budget answers for any element.  The old hard cap of 4 caused
+    # the ILP to under-fill the budget (12 vs 15 slots) on multi-copy models where
+    # greedy correctly uses the uncapped g(n) objective.  With budget as the cap the
+    # ILP objective matches the uncapped g(n) that greedy and _compute_covered_weight
+    # use, and all three agree on the correct budget-filling behaviour.
+    _ILP_T_CAP = budget
 
     def _safe(s: str) -> str:
         """Sanitize a string for use as a PuLP variable name."""

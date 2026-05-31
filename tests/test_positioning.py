@@ -795,31 +795,51 @@ class TestRegressionPeerReviewFixes:
 
     # --- Fix 2: rank_decks tie handling ---
 
-    def test_fix2_rank_decks_identical_candidates_split_pbest_evenly(self):
-        """Bug: argmax always awards tied-max draws to index 0.
-        Fix: split credit evenly; two identical candidates → P(best) ≈ 0.5 each.
+    def test_fix2_rank_decks_exact_tie_splits_pbest_exactly(self):
+        """NIT: old test used identical Beta inputs that still produce independent samples,
+        so argmax ≈50/50 even without the fix — it didn't prove anything.
+
+        Fix: monkeypatch _sample_S to return IDENTICAL arrays for both candidates so
+        every draw is an exact tie.  The tie-credit logic must award each deck exactly 0.5.
+
+        Without the fix (argmax → lowest index wins all ties) P(best) for index-0 candidate
+        would be 1.0 and index-1 would be 0.0.  With the fix both get exactly 0.5.
         """
-        _TOL = 0.05
-        # Two candidates with IDENTICAL matchup data → identical S distributions
+        import legacy_engine.advisory.positioning as _pos_mod
+
+        n_draws = 200
+        # Both X and Y return the SAME array (all draws are exact ties).
+        _shared_samples = np.linspace(0.4, 0.6, n_draws)
+
+        def _patched_sample_S(matrix, field, deck_archetype, *, n_draws, **kwargs):
+            return _shared_samples.copy()
+
         archetypes = ["X", "Y", "A"]
         winrates = {
             ("X", "A"): (60, 100),
-            ("Y", "A"): (60, 100),  # same win rate
+            ("Y", "A"): (60, 100),
             ("A", "X"): (40, 100),
             ("A", "Y"): (40, 100),
         }
         matrix = _simple_matrix(archetypes, winrates)
         field = _custom_field({"A": 1.0})
 
-        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=5_000, seed=SEED)
+        original = _pos_mod._sample_S
+        try:
+            _pos_mod._sample_S = _patched_sample_S
+            ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=n_draws, seed=SEED)
+        finally:
+            _pos_mod._sample_S = original
+
         p_x = ranking.p_best["X"]
         p_y = ranking.p_best["Y"]
 
-        assert abs(p_x - 0.5) < _TOL, (
-            f"Identical candidates should have P(best)≈0.5 each; X got {p_x:.4f}"
+        # With exact ties every draw, the credit must be split exactly 50/50.
+        assert abs(p_x - 0.5) < 1e-9, (
+            f"Exact-tie: X must get P(best)=0.5 exactly; got {p_x}"
         )
-        assert abs(p_y - 0.5) < _TOL, (
-            f"Identical candidates should have P(best)≈0.5 each; Y got {p_y:.4f}"
+        assert abs(p_y - 0.5) < 1e-9, (
+            f"Exact-tie: Y must get P(best)=0.5 exactly; got {p_y}"
         )
 
     # --- Fix 3: include_mirror=False on mirror-only field → 0.5 + warning ---
