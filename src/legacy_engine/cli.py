@@ -1345,7 +1345,17 @@ def generate_tune(
 
     # ── Header ───────────────────────────────────────────────────────────────
     click.echo(f"\n// Tuned deck: {tuned.archetype}")
-    click.echo(f"// Coverage: {tuned.coverage_before:.4f} → {tuned.coverage_after:.4f}")
+
+    # Primary objective: per-card field-weighted value (the real swap driver).
+    click.echo(
+        f"// Value (per-card field-weighted lift): "
+        f"{tuned.value_before:.4f} → {tuned.value_after:.4f}"
+        + (" [no-signal: no swaps made]" if tuned.objective == "no-signal-skip" else "")
+    )
+
+    # Coverage: audit context only (NOT the swap driver).
+    click.echo(f"// Coverage (audit): {tuned.coverage_before:.4f} → {tuned.coverage_after:.4f}")
+
     if tuned.positioning_s is not None:
         click.echo(
             f"// Positioning S(archetype)={tuned.positioning_s:.3f} "
@@ -1384,6 +1394,33 @@ def generate_tune(
             click.echo(f"//   {i}. CUT {cut}  →  ADD {added}")
     else:
         click.echo("\n// Swap log: (no swaps made)")
+
+    # ── Per-matchup OUT/IN plans (from reworked sideboard recommender) ────────
+    if tuned.matchup_plans:
+        click.echo("\n// Per-matchup sideboard plans:")
+        for opp, plan in sorted(tuned.matchup_plans.items()):
+            if plan.degraded:
+                click.echo(
+                    f"//   vs {opp}: thin data — no per-matchup plan "
+                    "(rely on 15 composition)"
+                )
+            else:
+                out_str = ", ".join(
+                    f"{c}x {card}" for card, c in sorted(plan.side_out.items())
+                ) or "(none)"
+                in_str = ", ".join(
+                    f"{c}x {card}" for card, c in sorted(plan.side_in.items())
+                ) or "(none)"
+                click.echo(
+                    f"//   vs {opp} [{plan.tier}, n>={plan.n_basis}]: "
+                    f"OUT {out_str} | IN {in_str}"
+                )
+        # Presence-correlational disclaimer
+        click.echo(
+            "// [disclaimer] Per-card win-rates are PRESENCE-CORRELATIONAL "
+            "(registered 75 for resolved matches), not causal. "
+            "OUT/IN plans are a data-guided starting point, not a deterministic prescription."
+        )
 
     # ── Legality ──────────────────────────────────────────────────────────────
     if tuned.legality_errors:
