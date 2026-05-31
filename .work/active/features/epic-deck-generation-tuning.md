@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: drafting
+stage: implementing
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus]
@@ -78,3 +78,101 @@ pass — do not re-decide.
   consider role/color/synergy-adjacent cards the deck has NOT run (discovery-flavored tuning); deferred
   because it needs the per-card win-rate extension + an adjacency model + confidence-gating, overlapping the
   deferred gap-discovery (mode 3) epic.
+
+## Architectural choice
+
+Single-stride feature in the existing `generation/` package (`generation/tuning.py` + a `generate tune` CLI
+leaf). The units are tightly coupled (the greedy loop needs flex-ID, candidate pool, and the coverage
+objective intimately), so no child stories — one coherent module.
+
+**Key grounding constraint:** `advisory.positioning.positioning_score(matrix, field, archetype)` is
+**archetype-level** — it scores by the archetype×archetype matchup matrix and does NOT see a decklist's
+cards. So swapping cards cannot change positioning S. Therefore the **optimization target and the audit
+metric are the field-weighted *coverage* value** (card-aware, from `advisory.sideboard`'s `CoverageModel` —
+Σ over field threat-elements of `weight_e · g(n_e)`, `g(n)=1−(1−p)^n`), NOT positioning S. Positioning S(of
+the archetype) is displayed as field *context* (the shell's standing), explicitly labeled as unchanged by
+card swaps. This is the honest reading of the locked "reuse the sideboard brain" decision.
+
+## Implementation Units
+
+### Unit 1: Flex/locked partition + candidate pool
+**File**: `src/legacy_engine/generation/tuning.py`
+```python
+def partition_flex(con, archetype, maindeck: dict[str,int], *, lock_threshold=0.65,
+                   since=None, until=None) -> tuple[dict[str,int], dict[str,int]]:
+    # returns (locked, flex) maindeck slices. A card is LOCKED if its consensus inclusion_pct
+    # (reuse generation.consensus.card_frequencies) >= lock_threshold; else flex.
+def candidate_pool(con, archetype, *, since=None, until=None) -> list[str]:
+    # archetype's observed maindeck card names (card_frequencies) not already locked — the swap-in pool.
+```
+**AC**: cards run by ≥65% of the archetype's decks are locked; flex = the rest; pool = observed archetype
+cards. Lands/core staples (high inclusion) land in `locked` automatically.
+
+### Unit 2: Field-weighted coverage objective (reuse sideboard CoverageModel)
+**File**: `src/legacy_engine/generation/tuning.py`
+```python
+def coverage_value(model: CoverageModel, cards: dict[str,int]) -> float:
+    # Σ_e weight_e · g(count of `cards` covering element e), using advisory.sideboard's CoverageModel
+    # (built from the field + matchup-weak matchups). Pure; reused for before/after + each greedy step.
+```
+**Notes**: build the `CoverageModel` from `build_global_field`/`build_custom_field` + `build_matrix`
+(reuse `advisory.sideboard._build_coverage_model` or its public path). **AC**: adding an answer that covers a
+high-weight field element raises the value with diminishing returns (saturating g(n)).
+
+### Unit 3: Greedy swap loop + legality + bimodal fallback (trickiest — build first)
+**File**: `src/legacy_engine/generation/tuning.py`
+```python
+@dataclass
+class TunedDeck:
+    archetype: str; maindeck: dict[str,int]; sideboard: dict[str,int]
+    swaps: list[tuple[str,str]]            # (cut, added) in order — the audit log
+    coverage_before: float; coverage_after: float
+    positioning_s: float | None            # archetype context (None if archetype absent from matrix)
+    fell_back: bool; reason: str           # bimodal/thin-data fallback flag + explanation
+    legality_errors: list[str]
+def tune_deck(con, archetype, maindeck, sideboard, *, field=None, since=None, until=None,
+              lock_threshold=0.65, max_swaps=8) -> TunedDeck:
+    # 1. build field + CoverageModel; coverage_before = coverage_value(model, maindeck).
+    # 2. BIMODAL FALLBACK: if the field's relevant matchups have n<30 (matrix gating), set fell_back=True,
+    #    skip maindeck swaps, keep consensus main, only run the sideboard recommender; say so in reason.
+    # 3. else greedy: each round, find the (flex_out, pool_in) swap that maximally raises coverage_value
+    #    while keeping copy-limit + exactly-60 legality; accept if it strictly improves; stop when none
+    #    improves or max_swaps hit. Record each swap.
+    # 4. re-run advisory.sideboard.recommend_sideboard for the 15 against the (possibly tuned) main+field.
+    # 5. validate_deck at the end; compute coverage_after + positioning_s (archetype context).
+```
+**AC**: a deck with a weak slot vs a high-share field threat gets that slot swapped toward a covering card
+and `coverage_after > coverage_before`; maindeck stays exactly 60 + legal; thin-field (n<30) path sets
+`fell_back=True`, leaves maindeck = consensus, still tunes the 15; the swap log reproduces the before→after.
+
+### Unit 4: `generate tune` CLI leaf
+**File**: `src/legacy_engine/cli.py`
+```python
+@generate.command("tune")
+@click.option("--deck", type=click.Path(exists=True), required=True)   # shell: consensus or user list
+@click.option("--archetype", default=None)  # else classify the deck
+@click.option("--field", "field_file", ...) --since --until --db --export --verbose
+# prints tuned list + swap log + coverage before/after + positioning-S context + fallback note.
+```
+**AC**: `generate tune --deck shell.txt --archetype X` prints the tuned 60+15, the ordered swap log, and the
+coverage before/after; `--export moxfield` emits import text; thin field prints the fallback note.
+
+## Implementation Order
+1. Unit 3 greedy loop skeleton against a stub objective (prove the swap/legality/stop logic), then
+2. Unit 2 (real coverage objective) + Unit 1 (flex/pool), wire in, then Unit 4 (CLI).
+
+## Testing
+- `tests/test_generation_tuning.py` — fixture field + matchup matrix where a known swap improves coverage:
+  assert the swap happens, `coverage_after > coverage_before`, exactly-60 + legal, locked core untouched,
+  candidate pool respected; thin-field → `fell_back=True` + maindeck unchanged + 15 still built; deterministic
+  (seeded). Reuse `tests/conftest.py` DuckDB fixtures + the sideboard/matchup test helpers.
+- `tests/test_cli.py` — `generate tune` happy path + thin-field fallback note.
+
+## Risks
+- **Coverage objective biases toward reactive answers** (could hollow the gameplan): mitigated by locking the
+  high-inclusion proactive core (Unit 1) + the saturating `g(n)` diminishing returns + `max_swaps` cap +
+  stopping when no strict improvement. **Fallback**: cap flex swaps; the locked core guarantees the plan survives.
+- **Archetype absent from matchup matrix** (thin data): `positioning_s=None`, bimodal fallback path. **Fallback**:
+  consensus + legality + sideboard-only, clearly flagged (`fell_back`, `reason`).
+- **CoverageModel reuse seam**: if `_build_coverage_model` isn't cleanly callable, add a thin public wrapper in
+  `advisory/sideboard.py` rather than duplicating the model. Keep it a one-line export, not a fork.
