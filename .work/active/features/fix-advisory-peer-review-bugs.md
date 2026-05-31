@@ -1,7 +1,7 @@
 ---
 id: fix-advisory-peer-review-bugs
 kind: feature
-stage: drafting
+stage: implementing
 tags: [advisory, bug]
 parent: epic-advisory-hardening
 depends_on: []
@@ -71,3 +71,9 @@ pillar's existing (test-green) behavior.
 Reviewer: peeragent → Codex (agent_session 019e7b60), effort xhigh, in-repo. Codex could not run pytest in
 its sandbox (a local `pydantic_core` import mismatch — environment-specific, NOT a project issue; our `.venv`
 suite is 581 green). Findings stand on code reading + line references, re-verified by the host.
+
+## Design (autopilot, 2026-05-30)
+Single-stride: apply each documented finding's specified fix with a focused regression test. No new
+architecture. Ordering note: this lands before `improve-positioning` (which builds on the #2 tie fix) and
+`improve-sideboard` (which builds on the #6 Surgical/Faerie color fix). Finding #7 applies to the
+just-reworked `whattoplay.best_deck_vs_best_call`.
