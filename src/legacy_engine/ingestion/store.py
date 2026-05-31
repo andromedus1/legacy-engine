@@ -82,31 +82,46 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def load_cards(con: duckdb.DuckDBPyConnection, cards: Iterable[Card]) -> int:
-    """Insert/replace cards into the cards table. Idempotent on ``name``. Returns the count loaded."""
+    """Insert/replace cards into the cards table. Idempotent on ``name``. Returns the count of cards loaded.
+
+    Multi-face cards (transform DFC / adventure / split / MDFC) carry a combined ``A // B`` name in the
+    Scryfall oracle pool, but decklists reference a single face (e.g. ``Brazen Borrower``,
+    ``Tamiyo, Inquisitive Student``). To make those lookups resolve, each face name is ALSO inserted as an
+    alias row mapped to the combined card's attributes — parity with the in-memory
+    ``scryfall.load_card_index``. Alias rows use INSERT OR IGNORE (after the full-name rows), so a genuine
+    standalone card that happens to share a face name is never clobbered.
+    """
     init_schema(con)
-    rows = [
-        (
-            c.name,
-            c.mana_cost,
-            c.cmc,
-            c.type_line,
-            "".join(c.colors),
-            "".join(c.produced_mana),
-            c.oracle_text,
-            c.layout,
-            c.is_land,
-            c.power,
-            c.toughness,
+    cards = list(cards)
+    _COLS = (
+        "(name, mana_cost, cmc, type_line, colors, produced_mana, oracle_text, layout, is_land, power, toughness)"
+    )
+
+    def _row(name: str, c: Card) -> tuple:
+        return (
+            name, c.mana_cost, c.cmc, c.type_line, "".join(c.colors), "".join(c.produced_mana),
+            c.oracle_text, c.layout, c.is_land, c.power, c.toughness,
         )
-        for c in cards
-    ]
+
+    rows = [_row(c.name, c) for c in cards]
     if rows:
         con.executemany(
-            "INSERT OR REPLACE INTO cards "
-            "(name, mana_cost, cmc, type_line, colors, produced_mana, oracle_text, layout, is_land, power, toughness) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            rows,
+            f"INSERT OR REPLACE INTO cards {_COLS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows,
         )
+
+    # Face aliases: insert AFTER the full-name rows so real cards are never overwritten (IGNORE).
+    alias_rows = [
+        _row(face.strip(), c)
+        for c in cards
+        if " // " in c.name
+        for face in c.name.split(" // ")
+        if face.strip() and face.strip() != c.name
+    ]
+    if alias_rows:
+        con.executemany(
+            f"INSERT OR IGNORE INTO cards {_COLS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", alias_rows,
+        )
+
     return len(rows)
 
 

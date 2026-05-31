@@ -222,3 +222,45 @@ class TestTournamentId:
         count = con.execute("SELECT count(*) FROM tournaments").fetchone()[0]
         assert count == 1
         con.close()
+
+
+class TestFaceAliases:
+    """Multi-face cards (A // B) resolve by each face name + the combined name.
+
+    Regression for the 2026-05-31 face-indexing bug: the DuckDB cards table only stored
+    the combined name, so front-face lookups (the names decklists use) missed.
+    """
+
+    def test_adventure_resolves_by_front_and_back_and_combined(self):
+        con = _con()
+        store.load_cards(con, [Card(
+            name="Brazen Borrower // Petty Theft",
+            type_line="Creature — Faerie Rogue // Instant — Adventure", cmc=3.0, colors=["U"],
+        )])
+        # combined + both faces all resolve to the same card data
+        assert store.fetch_card(con, "Brazen Borrower // Petty Theft") is not None
+        assert store.fetch_card(con, "Brazen Borrower")["colors"] == "U"
+        assert store.fetch_card(con, "Petty Theft")["colors"] == "U"
+        con.close()
+
+    def test_transform_dfc_front_face_resolves(self):
+        con = _con()
+        store.load_cards(con, [Card(
+            name="Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar",
+            type_line="Legendary Creature // Legendary Planeswalker", cmc=2.0, colors=["U"],
+        )])
+        assert store.fetch_card(con, "Tamiyo, Inquisitive Student") is not None
+        assert store.fetch_card(con, "Tamiyo, Seasoned Scholar") is not None
+        con.close()
+
+    def test_alias_never_clobbers_real_standalone_card(self):
+        con = _con()
+        # A genuine standalone card whose name collides with a would-be face alias must win.
+        store.load_cards(con, [
+            Card(name="Fire", type_line="Instant", cmc=1.0, colors=["R"], oracle_text="real Fire"),
+            Card(name="Fire // Ice", type_line="Instant // Instant", cmc=2.0, colors=["R", "U"]),
+        ])
+        # The standalone "Fire" (inserted in the full-name pass) is not overwritten by the alias.
+        assert store.fetch_card(con, "Fire")["oracle_text"] == "real Fire"
+        assert store.fetch_card(con, "Ice")["colors"] == "RU"  # alias created (no standalone Ice)
+        con.close()
