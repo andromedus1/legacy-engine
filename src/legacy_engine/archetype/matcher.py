@@ -37,27 +37,47 @@ def _present(cards: list[str], names: set[str]) -> int:
 
 
 def evaluate_condition(cond: Condition, main: set[str], side: set[str]) -> bool:
-    """Evaluate one condition against the deck's mainboard/sideboard name sets."""
+    """Evaluate one condition against the deck's mainboard/sideboard name sets.
+
+    Contract (rule-schema brief):
+    - Empty ``Cards`` list → ``True`` (non-constraining; skip).
+    - Single-card types (``In*`` / ``DoesNotContain*``) use ``Cards[0]`` only; additional list
+      entries are ignored per the Badaro contract (brief lines 92-103).
+    - ``OneOrMore*`` / ``TwoOrMore*`` keep whole-list semantics.
+    - ``TwoOrMoreInMainOrSideboard``: sums per-zone hit counts so a card in *both* zones counts
+      twice (brief lines 107-109).
+    """
     t, cards = cond.type, cond.cards
-    both = main | side
-    if t == "InMainboard" or t == "OneOrMoreInMainboard":
+    if not cards:
+        return True  # empty Cards: non-constraining / skip
+    c0 = cards[0]
+    # Single-card types — Cards[0] only
+    if t == "InMainboard":
+        return c0 in main
+    if t == "InSideboard":
+        return c0 in side
+    if t == "InMainOrSideboard":
+        return c0 in main or c0 in side
+    if t == "DoesNotContain":
+        return c0 not in main and c0 not in side
+    if t == "DoesNotContainMainboard":
+        return c0 not in main
+    if t == "DoesNotContainSideboard":
+        return c0 not in side
+    # Whole-list types
+    if t == "OneOrMoreInMainboard":
         return _present(cards, main) >= 1
-    if t == "InSideboard" or t == "OneOrMoreInSideboard":
+    if t == "OneOrMoreInSideboard":
         return _present(cards, side) >= 1
-    if t == "InMainOrSideboard" or t == "OneOrMoreInMainOrSideboard":
-        return _present(cards, both) >= 1
+    if t == "OneOrMoreInMainOrSideboard":
+        return _present(cards, main | side) >= 1
     if t == "TwoOrMoreInMainboard":
         return _present(cards, main) >= 2
     if t == "TwoOrMoreInSideboard":
         return _present(cards, side) >= 2
     if t == "TwoOrMoreInMainOrSideboard":
-        return _present(cards, both) >= 2
-    if t == "DoesNotContain":
-        return _present(cards, both) == 0
-    if t == "DoesNotContainMainboard":
-        return _present(cards, main) == 0
-    if t == "DoesNotContainSideboard":
-        return _present(cards, side) == 0
+        # Per-zone counts summed: a card present in both zones counts twice (brief lines 107-109).
+        return _present(cards, main) + _present(cards, side) >= 2
     raise UnknownConditionTypeError(t)  # defensive; loader already validated
 
 
@@ -87,7 +107,9 @@ def classify(
         passing_variants = [v for v in arch.variants if _all_pass(v.conditions, main, side)]
         if passing_variants:
             for v in passing_variants:
-                matches.append((v.name, v.name, v.include_color_in_name or arch.include_color_in_name))
+                # Finding #1: variant uses its OWN include_color_in_name flag (not OR'd with parent).
+                # Contract: label is color-prefixed iff the *matched* entry's flag is set (brief line 25).
+                matches.append((v.name, v.name, v.include_color_in_name))
         else:
             matches.append((arch.name, arch.name, arch.include_color_in_name))
 
@@ -98,10 +120,15 @@ def classify(
             archetype=_label(base, inc, deck_colors), base_archetype=base_name, color=deck_colors, kind=kind
         )
     if len(matches) > 1:
-        names = ",".join(sorted({m[0] for m in matches}))
-        return ArchetypeResult(archetype=f"Conflict({names})", color=deck_colors, kind="conflict")
+        # Finding #2: build Conflict from each match's final color-prefixed _label(...), in matcher
+        # (ruleset) order, no sort, no dedupe.  Mirrors Badaro's
+        # ``Conflict({String.Join(",", matches.Select(m => GetArchetype(m, color)))})`` (brief line 123).
+        # NOTE: this changes existing Conflict(...) analytics keys from raw-sorted to color-prefixed
+        # ruleset-order — downstream analytics reading old Conflict keys should expect the change.
+        label = ",".join(_label(base, inc, deck_colors) for base, _bn, inc in matches)
+        return ArchetypeResult(archetype=f"Conflict({label})", color=deck_colors, kind="conflict")
 
-    return _fallback(mainboard, ruleset, deck_colors)
+    return _fallback(mainboard, sideboard, ruleset, deck_colors)
 
 
 def _parent_of(ruleset: RuleSet, name: str) -> str:
@@ -114,19 +141,33 @@ def _parent_of(ruleset: RuleSet, name: str) -> str:
     return name
 
 
-def _fallback(mainboard: dict[str, int], ruleset: RuleSet, deck_colors: str) -> ArchetypeResult:
-    total = sum(mainboard.values())
+def _fallback(
+    mainboard: dict[str, int],
+    sideboard: dict[str, int],
+    ruleset: RuleSet,
+    deck_colors: str,
+) -> ArchetypeResult:
+    """Score each fallback pile against the combined deck and return the best match.
+
+    Finding #3 fix (Badaro contract, brief lines 201-204):
+    - Weight = sum of *copies* of distinct main+side entries present in a pile's ``common_cards``.
+    - Denominator = number of distinct deck entries (main rows + side rows), NOT total copies.
+    - Accept iff ``best_weight / total_entries > MIN_FALLBACK_SIMILARITY`` (strict ``>``).
+    """
+    total_entries = len(mainboard) + len(sideboard)
     best = None
     best_weight = -1
     for fb in ruleset.fallbacks:
         common = set(fb.common_cards)
-        weight = sum(cnt for name, cnt in mainboard.items() if name in common)
+        weight = sum(cnt for name, cnt in mainboard.items() if name in common) + sum(
+            cnt for name, cnt in sideboard.items() if name in common
+        )
         if weight > best_weight or (
             weight == best_weight and best is not None and len(fb.common_cards) < len(best.common_cards)
         ):
             best, best_weight = fb, weight
 
-    if best is not None and total > 0 and best_weight / total > MIN_FALLBACK_SIMILARITY:
+    if best is not None and total_entries > 0 and best_weight / total_entries > MIN_FALLBACK_SIMILARITY:
         return ArchetypeResult(
             archetype=_label(best.name, best.include_color_in_name, deck_colors),
             base_archetype=best.name,
