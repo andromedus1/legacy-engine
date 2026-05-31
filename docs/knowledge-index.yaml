@@ -1,11 +1,11 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-05-31T19:26:11Z'
+generated_at: '2026-05-31T19:27:10Z'
 generated_from: frontmatter
 total_docs: 18
 documents:
 - path: docs/ARCHITECTURE.md
-  title: docs/ARCHITECTURE.md
+  title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
   updated: '2026-05-31'
@@ -14,7 +14,7 @@ documents:
     and the built-vs-deferred split. The detailed architecture grounded in all four
     research streams.
 - path: docs/VISION.md
-  title: docs/VISION.md
+  title: 'Vision: legacy-engine'
   type: north-star
   kind: planning
   updated: '2026-05-29'
@@ -22,14 +22,14 @@ documents:
     principles pointer, and the four-pillar domain model for the Legacy analytics
     platform.
 - path: docs/PRINCIPLES.md
-  title: docs/PRINCIPLES.md
+  title: 'Principles: legacy-engine'
   type: principles
   kind: planning
   updated: '2026-05-29'
   consumer_hint: Read when making a design or modeling trade-off — the decision heuristics
     specific to legacy-engine (beyond generic best practice).
 - path: docs/research-plan.md
-  title: docs/research-plan.md
+  title: 'Research Plan: legacy-engine'
   type: research-plan
   kind: planning
   updated: '2026-05-29'
@@ -37,7 +37,7 @@ documents:
     deferred per-pillar. The routing plan for /research, /deep-research, and /brief
     invocations.
 - path: docs/SPEC.md
-  title: docs/SPEC.md
+  title: 'Spec: legacy-engine'
   type: spec
   kind: planning
   updated: '2026-05-29'
@@ -45,7 +45,7 @@ documents:
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).
 - path: docs/briefs/advisory-methods.md
-  title: docs/briefs/advisory-methods.md
+  title: 'Brief: Advisory Statistics & Optimization Methods'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -56,7 +56,7 @@ documents:
     recommender, and the what-to-play advisor? Read before designing the advisory/
     module.
 - path: docs/briefs/deck-generation-and-moxfield.md
-  title: docs/briefs/deck-generation-and-moxfield.md
+  title: 'Brief: Deck Generation & Moxfield Surfacing'
   type: brief
   kind: research
   updated: '2026-05-30'
@@ -66,7 +66,7 @@ documents:
   consumer_hint: How should legacy-engine generate/tune decklists from its meta +
     advisory layers, and surface them to Moxfield? Read before designing epic-deck-generation.
 - path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
-  title: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
+  title: 'Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -76,7 +76,7 @@ documents:
     a decklist + rule set produces an archetype label — specified for a faithful Python
     reimplementation of legacy-engine's archetype/ module.
 - path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
-  title: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
+  title: C#→Python Port Strategy for the Archetype Classifier
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -87,7 +87,7 @@ documents:
     the matcher in Python, and gate fidelity with a golden-test harness against the
     frozen C# parser's labels.
 - path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
-  title: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+  title: 'Brief: fbettega Tournament-Data Cache — Schema & Ingestion Contract'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -97,7 +97,7 @@ documents:
     repo layout, source/provenance encoding, update cadence, and consumption strategy
     for the fbettega tournament-data cache.
 - path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
-  title: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
+  title: 'Brief: Ingestion Operations & Meta-Share Computation'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -110,7 +110,7 @@ documents:
     JSON carries Rounds with pairings). Read before designing the ingestion boundary,
     the meta-share computation, or the matchup-matrix module.
 - path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
-  title: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
+  title: 'Brief: Badaro/MTGOFormatData — The Archetype Rule Schema (Legacy)'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -122,7 +122,7 @@ documents:
     color flags, and the Legacy taxonomy. Read before designing the rule-loader and
     the matching algorithm.
 - path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
-  title: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
+  title: 'Brief: Prior-Art Scan — Ingestion & Archetype Classification'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -133,7 +133,7 @@ documents:
     card libs) and the reuse verdict for each. Read before deciding adopt-vs-build
     on the MTGOArchetypeParser port.
 - path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
-  title: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
+  title: 'Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -144,7 +144,7 @@ documents:
     cards, and whether edh-engine's Scryfall layer can be reused as-is. Read before
     designing the Card model, the name index, or the color-prefix step of the classifier.
 - path: docs/briefs/legacy-foundations.md
-  title: docs/briefs/legacy-foundations.md
+  title: 'Brief: Legacy Format Foundations'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -154,7 +154,7 @@ documents:
     Legacy that an analytics/simulation platform must encode? Read before designing
     the deck-as-data model, goldfish sim, or legality validation.
 - path: docs/briefs/legacy-metagame.md
-  title: docs/briefs/legacy-metagame.md
+  title: 'Brief: Legacy Metagame (2026)'
   type: brief
   kind: research
   updated: '2026-05-29'
@@ -164,7 +164,7 @@ documents:
     mechanics & goldfish speeds, data sources, and how to attack the field? Read before
     designing meta-ingestion, the matchup model, or the meta-speed metric.
 - path: docs/briefs/ingestion-archetype-contracts/parent.md
-  title: docs/briefs/ingestion-archetype-contracts/parent.md
+  title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
   type: program-parent
   kind: research
   updated: '2026-05-29'
@@ -174,7 +174,7 @@ documents:
     synthesized contracts and build plan for legacy-engine's ingestion/ and archetype/
     modules. Navigation hub for the 7 specialist briefs.
 - path: docs/briefs/ingestion-archetype-contracts/campaign.md
-  title: docs/briefs/ingestion-archetype-contracts/campaign.md
+  title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
   type: program-report
   kind: research
   updated: '2026-05-29'
