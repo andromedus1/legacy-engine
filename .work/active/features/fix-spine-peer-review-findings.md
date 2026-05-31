@@ -1,7 +1,7 @@
 ---
 id: fix-spine-peer-review-findings
 kind: feature
-stage: drafting
+stage: implementing
 tags: [ingestion, archetype, bug]
 parent: null
 depends_on: []
@@ -96,6 +96,268 @@ full design + implement pass — autopilot inherits them and should not re-decid
   `tournament_id` collision). Declare `depends_on` only where real (likely none cross-group; classifier
   stories may share the matcher edit and should serialize). Trickiest unit = finding #3 (fallback denominator
   + main/side threading) — design it first in the full pass.
+
+## Architectural choice
+
+**Fix-in-place, contract-faithful, split by disjoint file-group into 3 independently-implementable stories.**
+The findings are localized corrections to existing functions, not new subsystems — so the architecture is
+"edit the cited functions to match the Badaro/rule-schema contract, with regression tests grounded in the
+briefs." The only non-trivial design choices are the contract semantics (locked in `## Design decisions`)
+and the two implementation hooks resolved below.
+
+The three story groups touch **disjoint files** and have no shared edits, so they carry `depends_on: []`
+and can be implemented in parallel:
+- **classifier** (1-4) → `archetype/matcher.py`
+- **correctness** (5,7) → `ingestion/rules_vendor.py` + `config.py` + `ingestion/banlist.py` + `models/banlist.py`
+- **hardening** (6,8,9) → `ingestion/cache.py` + `ingestion/scryfall.py` + `ingestion/store.py`
+
+Rejected alternative: one single-stride edit. Rejected because the three groups have genuinely different
+test surfaces (synthetic-ruleset matcher tests / git-runner + validation tests / normalization + id tests)
+and gate cleanly per-story; parallel implementation is faster with zero merge risk given disjoint files.
+
+Two implementation hooks (autopilot judgment, consistent with Ports & Adapters + Fail Fast):
+- **#7 category-ban enforcement** — domain `validate_deck` must not import the store/Scryfall. Enforce
+  ante + offensive bans via a name-enumerated `CATEGORY_BANNED_NAMES` frozenset in `models/banlist.py`
+  (these can't be derived from `type_line` and are mostly already Legacy-illegal); optionally flag
+  Conspiracy/Attraction/Sticker via an injected `type_line_of: Callable[[str], str | None] | None`
+  resolver (skipped, documented, when absent — those types never appear in real Legacy data).
+- **#4 empty `Cards`** — a condition with empty `Cards` is non-constraining (returns `True`, i.e. skipped
+  from the AND). Defensive only; real vendored rules never emit empty `Cards`.
+
+## Implementation Units
+
+### Unit 1: Matcher contract fidelity (findings 1-4)
+
+**File**: `src/legacy_engine/archetype/matcher.py`
+**Story**: `fix-spine-peer-review-findings-classifier`
+
+```python
+# Finding #1 — variant uses its OWN color flag (matcher.py:90)
+matches.append((v.name, v.name, v.include_color_in_name))          # was: v.include_color_in_name or arch.include_color_in_name
+
+# Finding #2 — Conflict from each match's final color-prefixed label, matcher order, no sort/dedupe
+if len(matches) > 1:
+    label = ",".join(_label(base, inc, deck_colors) for base, _bn, inc in matches)
+    return ArchetypeResult(archetype=f"Conflict({label})", color=deck_colors, kind="conflict")
+
+# Finding #3 — fallback weights main+side copies; denominator = # distinct entries (rows)
+def _fallback(mainboard, sideboard, ruleset, deck_colors) -> ArchetypeResult: ...
+    weight = (sum(c for n, c in mainboard.items() if n in common)
+              + sum(c for n, c in sideboard.items() if n in common))
+    total_entries = len(mainboard) + len(sideboard)
+    # accept iff best is not None and total_entries > 0 and best_weight / total_entries > MIN_FALLBACK_SIMILARITY
+# classify() call site: _fallback(mainboard, sideboard, ruleset, deck_colors)
+
+# Finding #4 — single-card types use Cards[0]; empty Cards -> True (skip); TwoOrMoreInMainOrSideboard double-counts both zones
+def evaluate_condition(cond, main, side) -> bool:
+    t, cards = cond.type, cond.cards
+    if not cards:
+        return True                                                 # empty Cards: non-constraining
+    c0 = cards[0]
+    if t in ("InMainboard",): return c0 in main
+    if t in ("InSideboard",): return c0 in side
+    if t in ("InMainOrSideboard",): return c0 in main or c0 in side
+    if t == "OneOrMoreInMainboard": return _present(cards, main) >= 1
+    if t == "OneOrMoreInSideboard": return _present(cards, side) >= 1
+    if t == "OneOrMoreInMainOrSideboard": return _present(cards, main | side) >= 1
+    if t == "TwoOrMoreInMainboard": return _present(cards, main) >= 2
+    if t == "TwoOrMoreInSideboard": return _present(cards, side) >= 2
+    if t == "TwoOrMoreInMainOrSideboard": return _present(cards, main) + _present(cards, side) >= 2
+    if t == "DoesNotContain": return c0 not in main and c0 not in side
+    if t == "DoesNotContainMainboard": return c0 not in main
+    if t == "DoesNotContainSideboard": return c0 not in side
+    raise UnknownConditionTypeError(t)
+```
+
+**Implementation Notes**:
+- `In*` single-card types are `Cards[0]` only per the rule-schema brief (lines 92-103); `OneOrMore*` and
+  `TwoOrMore*` keep whole-list semantics.
+- `TwoOrMoreInMainOrSideboard` sums per-zone hit counts so a card in both zones counts twice (brief 107-109).
+- Conflict labels now color-prefixed in matcher order — **changes existing `Conflict(...)` analytics keys**;
+  note this in the implementation summary so a downstream re-label is expected.
+
+**Acceptance Criteria**:
+- [ ] A variant with `IncludeColorInName=false` under a color-prefixed parent is labeled without a color prefix.
+- [ ] A two-match deck yields `Conflict(<colorlabelA>,<colorlabelB>)` in ruleset order, no dedupe/sort.
+- [ ] Fallback similarity = (main+side matching copies) / (main rows + side rows); sideboard cards count.
+- [ ] `TwoOrMoreInMainOrSideboard` passes when one matching card is in main and a different one in side, and when the *same* card is in both zones.
+- [ ] Single-card `In*`/`DoesNotContain*` use `Cards[0]`; a second card in the list is ignored.
+- [ ] Empty `Cards` condition evaluates `True` (non-constraining).
+
+### Unit 2: Rules SHA pinning (finding 5)
+
+**File**: `src/legacy_engine/ingestion/rules_vendor.py`, `src/legacy_engine/config.py`
+
+```python
+# config.py
+MTGOFORMATDATA_SHA = "e056bc7d63c0138091986ce1696c705bc7dee296"  # pinned current vendored rules
+
+# rules_vendor.py — refresh to a configured SHA and fail if unresolvable
+def refresh_rules(repo=MTGOFORMATDATA_REPO, dest=RULES_DIR, sha=MTGOFORMATDATA_SHA, runner=subprocess.run) -> str:
+    # clone (full, not --depth 1, so an arbitrary sha is reachable) or fetch; then:
+    runner(["git", "-C", str(dest), "checkout", sha], check=True)
+    resolved = _resolve_sha(dest, runner)
+    if resolved != sha:
+        raise RuntimeError(f"rules pin mismatch: wanted {sha}, got {resolved!r}")
+    # write manifest {repo, sha}
+```
+
+**Implementation Notes**:
+- Drop `--depth 1` (a shallow clone can't reach an arbitrary historical SHA) or use
+  `git fetch --depth 1 origin <sha>` then `git checkout FETCH_HEAD`. Prefer the fetch form to stay shallow.
+- Keep the injected `runner` so tests assert the git call sequence without the network.
+
+**Acceptance Criteria**:
+- [ ] `refresh_rules` checks out the configured SHA and writes it to the manifest.
+- [ ] If the post-checkout HEAD ≠ configured SHA, it raises (no silent drift).
+- [ ] Test asserts the checkout/verify call sequence via a fake runner.
+
+### Unit 3: validate_deck — counts + category bans (finding 7)
+
+**File**: `src/legacy_engine/ingestion/banlist.py`, `src/legacy_engine/models/banlist.py`
+
+```python
+# models/banlist.py — ante + offensive bans not derivable from type_line and not already in BASELINE_BANS
+CATEGORY_BANNED_NAMES: frozenset[str] = frozenset({
+    "Amulet of Quoz", "Bronze Tablet", "Contract from Below", "Darkpact", "Demonic Attorney",
+    "Jeweled Bird", "Rebirth", "Tempest Efreet", "Timmerian Fiends",          # ante
+    "Invoke Prejudice", "Cleanse", "Stone-Throwing Devils", "Pradesh Gypsies",
+    "Jihad", "Imprison", "Crusade",                                            # offensive
+})
+
+# banlist.py
+def validate_deck(maindeck, sideboard=None, snapshot=None,
+                  type_line_of: Callable[[str], str | None] | None = None) -> list[str]:
+    # counts must be positive integers
+    for name, count in combined.items():
+        if count <= 0:
+            errors.append(f"{name}: nonpositive count ({count})")
+        ...
+        if name in CATEGORY_BANNED_NAMES:
+            errors.append(f"{name} is banned by category (ante/offensive)")
+        if type_line_of is not None:
+            tl = type_line_of(name) or ""
+            if any(k in tl for k in ("Conspiracy", "Attraction", "Sticker")):
+                errors.append(f"{name} is not Legacy-legal (category: {tl})")
+```
+
+**Implementation Notes**:
+- `type_line_of` is optional and injected (Ports & Adapters — domain doesn't import Scryfall/store);
+  when `None`, type_line predicates are skipped (documented). Name-enumerated bans always fire.
+
+**Acceptance Criteria**:
+- [ ] `{"Brainstorm": -1}` and `{"Brainstorm": 0}` produce a nonpositive-count error.
+- [ ] A `CATEGORY_BANNED_NAMES` card (e.g. "Contract from Below") is flagged even if not name-listed in the snapshot.
+- [ ] With an injected `type_line_of` returning a Conspiracy/Attraction/Sticker line, the card is flagged; with `None`, no crash and no type-line error.
+
+### Unit 4: _coerce_format multi-format (finding 6)
+
+**File**: `src/legacy_engine/ingestion/cache.py`
+
+```python
+def _coerce_format(value) -> str:
+    if isinstance(value, list):
+        if "Legacy" in value:
+            return "Legacy"
+        return value[0] if value else ""
+    return value or ""
+```
+
+**Acceptance Criteria**:
+- [ ] `["Modern", "Legacy"]` → `"Legacy"` (event not skipped by Legacy discovery).
+- [ ] Single-format string and single-element list behavior unchanged.
+
+### Unit 5: Scryfall Unicode + face-name indexing (finding 8)
+
+**File**: `src/legacy_engine/ingestion/scryfall.py`
+
+```python
+import unicodedata
+def normalize_name(name: str) -> str:
+    return unicodedata.normalize("NFC", name.replace("’", "'").replace("‘", "'")).strip()
+
+def load_card_index(self) -> dict[str, dict]:
+    ...
+    for card in cards:
+        name = card.get("name", "")
+        if not name: continue
+        index[normalize_name(name)] = card
+        if " // " in name:
+            for face in name.split(" // "):
+                index.setdefault(normalize_name(face), card)
+        for face in card.get("card_faces", []) or []:
+            fname = face.get("name", "")
+            if fname:
+                index.setdefault(normalize_name(fname), card)
+```
+
+**Implementation Notes**:
+- Index keys AND the `get_card` query are both `normalize_name`-d so accented names (e.g. "Khazad-dûm")
+  resolve regardless of NFC/NFD encoding in the decklist source.
+
+**Acceptance Criteria**:
+- [ ] An NFD-encoded "Troll of Khazad-dûm" query resolves to the NFC index entry.
+- [ ] A DFC's individual `card_faces[].name` resolves to the parent card.
+- [ ] Curly-apostrophe behavior preserved.
+
+### Unit 6: tournament_id collision (finding 9)
+
+**File**: `src/legacy_engine/ingestion/store.py`
+
+```python
+import hashlib
+def tournament_id(tr: TournamentResult) -> str:
+    if tr.uri:
+        return tr.uri
+    players = "|".join(sorted(d.player for d in tr.decks))
+    digest = hashlib.sha1(players.encode()).hexdigest()[:8]
+    return f"{tr.source}:{tr.name}:{tr.date}:{digest}"
+```
+
+**Implementation Notes**:
+- Deterministic (sorted player set) so repeated full-refresh of the same event yields the same id —
+  preserves `load_tournament` idempotency (the delete-then-insert keys on this id).
+
+**Acceptance Criteria**:
+- [ ] Two no-URI events with identical source/name/date but different player sets get distinct ids.
+- [ ] The same no-URI event re-ingested yields the same id (idempotent refresh still works).
+- [ ] URI-bearing events are unchanged.
+
+## Implementation Order
+
+1. **Unit 1 (matcher, finding #3 first)** — trickiest: the fallback denominator + main/side threading. If
+   the row-count denominator interacts badly with the 0.10 floor on real data, revisit before the rest.
+2. **Units 2-3 (correctness story)** — independent of Unit 1.
+3. **Units 4-6 (hardening story)** — independent of both.
+
+(Units 1 / 2-3 / 4-6 are the three child stories; order within a story matters, across stories does not.)
+
+## Testing
+
+### Unit tests
+- `tests/test_matcher.py` — synthetic `RuleSet`s exercising: variant-own-color-flag; two-match conflict
+  ordering/no-dedupe; fallback with sideboard cards + row-count denominator; `TwoOrMore*` both-zone
+  double-count; `Cards[0]` single-card semantics; empty-`Cards` neutrality. Grounded in the rule-schema brief.
+- `tests/test_rules_vendor.py` — fake `runner` asserting fetch/checkout/verify sequence; mismatch raises.
+- `tests/test_banlist.py` — nonpositive counts; `CATEGORY_BANNED_NAMES`; injected `type_line_of`; `None` path.
+- `tests/test_cache_parser.py` — `_coerce_format(["Modern","Legacy"])` → `"Legacy"`.
+- `tests/test_scryfall.py` — NFD→NFC resolution; `card_faces[].name` indexing; curly apostrophe preserved.
+- `tests/test_store.py` — collision distinctness + idempotent re-ingest + URI passthrough.
+
+### Integration points
+- Matcher changes feed the labeler (`label` CLI) and analytics; the Conflict-key change is the only
+  cross-module ripple — flagged for downstream re-label. No schema change.
+
+## Risks
+
+- **Conflict analytics-key change** (finding #2): existing stored `Conflict(...)` labels differ from new
+  color-prefixed keys. **Fallback**: a re-label pass over stored decks picks up new keys; no migration needed
+  since labels are derived, not authored.
+- **Fallback denominator quirk** (finding #3): the row-count denominator shifts the effective 0.10 threshold;
+  a few decks may flip fallback↔Unknown. **Fallback**: this is the contract-faithful behavior by decision;
+  if it regresses real labels materially, surface as a follow-up rather than reverting (decision is locked).
+- **Full clone for SHA pin** (finding #5): dropping `--depth 1` increases clone size. **Fallback**: use
+  `git fetch --depth 1 origin <sha>` + `checkout FETCH_HEAD` to stay shallow.
 
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79db), effort xhigh, in-repo; ran the spine test subset
