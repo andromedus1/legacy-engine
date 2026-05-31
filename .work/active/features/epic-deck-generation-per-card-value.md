@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-per-card-value
 kind: feature
-stage: implementing
+stage: review
 tags: [generation, analytics]
 parent: epic-deck-generation
 depends_on: []
@@ -263,3 +263,37 @@ Gives the maintainer a way to eyeball the (correlational) numbers on real data �
   (golden table test pins the two parsers together) if it proves too slow.
 - **Sparsity of matchup cells**: most (card, opponent) cells will be speculative. **Mitigation**: the prior+
   signal design expects this — the marginal prior carries cells with thin matchup data; gate filters the rest.
+
+## Implementation discovery
+
+**All 5 units delivered as designed. No design flaws encountered.**
+
+### Units delivered
+
+1. **Unit 1 — `compute_card_winrates` + record types** (`match_results.py`): `CardMatchupRecord`, `CardMarginalRecord`, `CardWinRates` dataclasses added; `_DUP_UNIQ_CTE` extracted as a module constant so `_JOIN_SQL` and `_CARD_WINRATES_SQL` both reference one source. `compute_card_winrates` added with the two-query Python-accumulator pattern (option 2 from Architectural choice). Board normalized to `"main"`/`"side"` via `_BOARD_NORM` dict.
+
+2. **Unit 2 — `beta_binomial_shrink_to`** (`matchup.py`): `SHRINK_STRENGTH = 2 * SHRINK_ALPHA` constant added; `beta_binomial_shrink_to(wins, n, *, prior_mean, strength=SHRINK_STRENGTH)` added; `beta_binomial_shrink` refactored to delegate with `prior_mean=0.5` — outputs byte-identical.
+
+3. **Unit 3 — `card_value.py`** (NEW): `CardValue` frozen dataclass + `card_value_marginal`, `card_value_matchup`, `card_values_vs`. Two-level empirical-Bayes shrinkage implemented as designed.
+
+4. **Unit 4 — `make_rounds_corpus` fixture** (`conftest.py`): factory fixture returning `(con, facts)` with `n_repeats` knob; seeded Control vs Combo corpus with Surgical Extraction (side) as the tech card; `facts` dict pins expected wins/n at exact values.
+
+5. **Unit 5 — `report cards` CLI leaf** (`cli.py`): `--archetype`, `--vs`, `--board`, `--min-tier`, `--since`, `--until`, `--db`, `--verbose`; suppression note shown (never fabricates); presence-correlational disclaimer in header.
+
+### Exports registered
+
+All new symbols exported via `src/legacy_engine/analytics/__init__.py`: `CardMatchupRecord`, `CardMarginalRecord`, `CardWinRates`, `compute_card_winrates`, `beta_binomial_shrink_to`, `CardValue`, `card_value_marginal`, `card_value_matchup`, `card_values_vs`.
+
+### Deviations from design
+
+- **`baseline_winrate` computation**: the design says "≈0.5 by construction" — implementation computes it as `decisive_matched_wins / (decisive_matched * 2)` which is exactly 0.5 when all matches are decisive (one win + one loss attributed per match). Stored explicitly as specified.
+- **Empty corpus guard**: `compute_card_winrates` returns early with `baseline_winrate=0.5` and empty dicts when no resolved matches exist — clean sentinel values, no divide-by-zero.
+- **`_con()` in test_card_winrates.py**: the "empty corpus" test explicitly calls `store.init_schema()` first (the project idiom is to always load at least one tournament via `store.load_tournament` which calls `init_schema`; using a bare connection without schema causes a DuckDB catalog error, as confirmed by testing).
+
+### Test counts
+
+- Baseline: **846 passing**
+- After implementation: **913 passing** (+67 new)
+- New test files: `tests/test_card_winrates.py` (26 tests), `tests/test_card_value.py` (24 tests)
+- Extended: `tests/test_matchup.py` (+9 shrink delegation tests), `tests/test_cli.py` (+8 report cards tests)
+- Regressions: **0**
