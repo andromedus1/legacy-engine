@@ -27,6 +27,7 @@ from legacy_engine.models.matchup import MatchupCell
 
 SHRINK_ALPHA = 7.5  # Beta prior centered 0.5, strength α+β=15 (brief: α=β≈5–10)
 SHRINK_BETA = 7.5
+SHRINK_STRENGTH = 2 * SHRINK_ALPHA  # = 15; used by the generalized shrink primitive
 JEFFREYS_MAX_N = 40  # use Jeffreys for n<=40; Wilson for n>40
 DISPLAY_GATE_N = 30  # n<30 → speculative; hide the rate
 
@@ -58,6 +59,29 @@ def wilson_or_jeffreys_ci(
     return (max(0.0, float(low)), min(1.0, float(high)))
 
 
+def beta_binomial_shrink_to(
+    wins: int,
+    n: int,
+    *,
+    prior_mean: float,
+    strength: float = SHRINK_STRENGTH,
+) -> float:
+    """Posterior-mean shrinkage toward an arbitrary ``prior_mean``.
+
+    Prior is parameterized as ``a = prior_mean * strength``,
+    ``b = (1 - prior_mean) * strength``.  Posterior mean is
+    ``(a + wins) / (a + b + n)``.
+
+    ``n == 0`` → returns ``prior_mean`` (the prior, no data).
+    With ``prior_mean=0.5`` and ``strength=15`` this is byte-identical to
+    the original ``beta_binomial_shrink``.
+    """
+    a = prior_mean * strength
+    b = (1.0 - prior_mean) * strength
+    denom = a + b + n
+    return (a + wins) / denom if denom else prior_mean
+
+
 def beta_binomial_shrink(
     wins: int,
     n: int,
@@ -70,8 +94,11 @@ def beta_binomial_shrink(
     ``n==0`` → ``0.5`` (the prior mean, no data).  With the default prior
     (α=β=7.5, strength 15): a 3–1 cell reads ~0.553 (not 0.75); a 120–80
     cell reads ~0.558 (essentially unshrunk).
+
+    Delegates to ``beta_binomial_shrink_to`` with ``prior_mean=0.5`` so
+    outputs are byte-identical (regression-critical).
     """
-    return (a + wins) / (a + b + n)
+    return beta_binomial_shrink_to(wins, n, prior_mean=0.5, strength=a + b)
 
 
 # ---------------------------------------------------------------------------

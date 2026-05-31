@@ -591,6 +591,112 @@ def _print_tier_list(model: "TierModel") -> None:
                 click.echo(f"    {archetype:<30}  {share:>6.1%}  [{conf_tier}]")
 
 
+@report.command("cards")
+@click.option("--archetype", default=None, help="Restrict to cards an archetype plays (via card_frequencies).")
+@click.option("--vs", "opponent", default=None, help="Show per-matchup value vs this opponent; else shows marginal.")
+@click.option("--board", default="main", show_default=True, help="Board to query: main or side.")
+@click.option(
+    "--min-tier",
+    type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
+    default="speculative",
+    show_default=True,
+    help="Suppress rows below this confidence tier; prints a note when rows are hidden.",
+)
+@click.option("--since", default=None, help="ISO date lower bound (inclusive) for tournament window.")
+@click.option("--until", default=None, help="ISO date upper bound (inclusive) for tournament window.")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_cards(
+    archetype: str | None,
+    opponent: str | None,
+    board: str,
+    min_tier: str,
+    since: str | None,
+    until: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Per-card win-rate (presence-correlational — NOT causal).
+
+    Shows how a card's decks perform relative to the archetype's baseline win-rate.
+    Thin cells (below --min-tier) are suppressed with a note, never fabricated.
+    """
+    _setup_logging(verbose)
+
+    from legacy_engine.analytics.card_value import CardValue, card_value_marginal, card_value_matchup, card_values_vs
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.ingestion import store
+
+    _TIER_ORDER = {"speculative": 0, "evolving": 1, "established": 2}
+    min_tier_rank = _TIER_ORDER[min_tier.lower()]
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        r = compute_card_winrates(con, since=since, until=until)
+
+        # Determine the set of cards to report.
+        if archetype is not None:
+            from legacy_engine.generation.consensus import card_frequencies
+            card_freqs = card_frequencies(con, archetype, board=board, since=since, until=until)
+            cards = [cf.name for cf in card_freqs]
+            if not cards:
+                click.echo(f"No cards found for archetype={archetype!r} board={board!r} in the given window.")
+                return
+        else:
+            # All cards observed on the requested board in the corpus.
+            cards = sorted({card for card, brd in r.marginal if brd == board})
+
+        if not cards:
+            click.echo(f"No cards found for board={board!r}.")
+            return
+
+        # Build CardValue objects for each card.
+        if opponent is not None:
+            values = card_values_vs(r, cards, board, opponent)
+        else:
+            values = {card: card_value_marginal(r, card, board) for card in cards}
+
+        # Filter + render.
+        tier_label = "all" if min_tier == "speculative" else f">= {min_tier}"
+        vs_label = f" vs {opponent!r}" if opponent else " (marginal)"
+        click.echo(f"\n=== Card Win-Rates [board={board}{vs_label}, tier={tier_label}] ===")
+        click.echo("NOTE: presence-correlational — NOT causal. See registered 75, not game-by-game play.")
+        click.echo(f"Decisive matches in corpus: {r.coverage.decisive_matched}")
+        click.echo(f"{'Card':<35}  {'Board':<5}  {'n':>6}  {'p_raw':>7}  {'p_shrunk':>8}  {'lift':>7}  {'tier':<12}")
+        click.echo("-" * 90)
+
+        suppressed = 0
+        printed = 0
+        for card in sorted(values.keys()):
+            cv = values[card]
+            tier_rank = _TIER_ORDER[cv.tier]
+            if tier_rank < min_tier_rank:
+                suppressed += 1
+                continue
+            p_raw_str = f"{cv.p_raw:.3f}" if cv.p_raw is not None else "n/a"
+            lift_str = f"{cv.lift:+.3f}"
+            click.echo(
+                f"{card:<35}  {cv.board:<5}  {cv.n:>6}  {p_raw_str:>7}  "
+                f"{cv.p_shrunk:>8.3f}  {lift_str:>7}  {cv.tier:<12}"
+            )
+            printed += 1
+
+        if suppressed > 0:
+            click.echo(
+                f"\n  {suppressed} row(s) below {min_tier!r} gate — suppressed "
+                f"(use --min-tier speculative to show all). Data present; not fabricated."
+            )
+        if printed == 0 and suppressed == 0:
+            click.echo("(no card data for the specified slice)")
+    finally:
+        con.close()
+
+
 def _chart_filename(kind: str, definition: str, provenance: str | None) -> str:
     """Derive a chart filename from the kind, definition, and provenance basis.
 

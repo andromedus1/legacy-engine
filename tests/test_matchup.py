@@ -764,3 +764,86 @@ class TestReportMatchupsCLI:
         assert result.exit_code == 0, result.output
         # No archetypes case
         assert "no archetypes" in result.output.lower() or "Total decisive matches: 0" in result.output
+
+
+# ---------------------------------------------------------------------------
+# beta_binomial_shrink_to — Unit 2 of epic-deck-generation-per-card-value
+# ---------------------------------------------------------------------------
+
+
+class TestBetaBinomialShrinkTo:
+    """beta_binomial_shrink_to is a generalized shrink; beta_binomial_shrink
+    must delegate to it with byte-identical outputs (regression-critical)."""
+
+    def test_shrink_to_prior_mean_05_matches_legacy_shrink(self):
+        """beta_binomial_shrink_to(w, n, prior_mean=0.5) == beta_binomial_shrink(w, n)."""
+        from legacy_engine.analytics.matchup import SHRINK_STRENGTH, beta_binomial_shrink_to
+
+        test_cases = [
+            (3, 4),
+            (120, 200),
+            (0, 0),
+            (0, 10),
+            (10, 10),
+            (1, 100),
+            (99, 100),
+        ]
+        for wins, n in test_cases:
+            expected = beta_binomial_shrink(wins, n)
+            actual = beta_binomial_shrink_to(wins, n, prior_mean=0.5, strength=SHRINK_STRENGTH)
+            assert actual == pytest.approx(expected, rel=1e-12), (
+                f"Mismatch at wins={wins}, n={n}: "
+                f"shrink_to={actual} != legacy_shrink={expected}"
+            )
+
+    def test_n0_returns_prior_mean(self):
+        """n=0 → returns prior_mean for any prior_mean value."""
+        from legacy_engine.analytics.matchup import beta_binomial_shrink_to
+
+        for pm in (0.3, 0.5, 0.7, 0.9):
+            result = beta_binomial_shrink_to(0, 0, prior_mean=pm)
+            assert result == pytest.approx(pm), f"prior_mean={pm}: got {result}"
+
+    def test_custom_prior_mean_shrinks_toward_it(self):
+        """With prior_mean=0.7, a 0-win cell should land between 0.5 and 0.7."""
+        from legacy_engine.analytics.matchup import beta_binomial_shrink_to
+
+        result = beta_binomial_shrink_to(0, 4, prior_mean=0.7)
+        # All losses: raw = 0, prior = 0.7 → result between 0 and 0.7
+        assert 0.0 < result < 0.7
+
+    def test_prior_mean_0(self):
+        """prior_mean=0 → result approaches 0 (prior has no wins)."""
+        from legacy_engine.analytics.matchup import beta_binomial_shrink_to
+
+        # With strength=15, a=0, b=15: (0 + wins) / (15 + n)
+        result = beta_binomial_shrink_to(5, 10, prior_mean=0.0)
+        expected = 5 / (15 + 10)
+        assert result == pytest.approx(expected, rel=1e-9)
+
+    def test_prior_mean_1(self):
+        """prior_mean=1.0 → all prior weight on wins."""
+        from legacy_engine.analytics.matchup import beta_binomial_shrink_to
+
+        # a=15, b=0: (15 + wins) / (15 + n)
+        result = beta_binomial_shrink_to(0, 10, prior_mean=1.0)
+        expected = 15 / (15 + 10)
+        assert result == pytest.approx(expected, rel=1e-9)
+
+    def test_shrink_strength_constant(self):
+        """SHRINK_STRENGTH == 2 * SHRINK_ALPHA == 15."""
+        from legacy_engine.analytics.matchup import SHRINK_ALPHA, SHRINK_STRENGTH
+
+        assert SHRINK_STRENGTH == 2 * SHRINK_ALPHA
+        assert SHRINK_STRENGTH == pytest.approx(15.0)
+
+    def test_large_n_approaches_observed_rate(self):
+        """With very large n, shrinkage has negligible effect."""
+        from legacy_engine.analytics.matchup import beta_binomial_shrink_to
+
+        result = beta_binomial_shrink_to(700, 1000, prior_mean=0.3)
+        assert abs(result - 0.7) < 0.01  # should be close to 700/1000 = 0.7
+
+    def test_import_from_analytics_package(self):
+        """beta_binomial_shrink_to is exported via analytics __init__."""
+        from legacy_engine.analytics import beta_binomial_shrink_to  # noqa: F401
