@@ -3,15 +3,16 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-05-30
+updated: 2026-05-31
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
   for advisory and DuckDB as an embedded analytical store (the one justified divergence, driven by the
   matchup-matrix rounds-join workload). MVP arc: ingestion/ (Scryfall + fbettega cache + vendored
   MTGOFormatData rules + ban-list) → archetype/ (ported MTGOArchetypeParser matcher) → analytics/
-  (meta-share, matchup matrix) + advisory/ (positioning, sideboard recommender, what-to-play) → models/
-  → data/. goldfish/ and generation/ are deferred pillars.
+  (meta-share, matchup matrix, per-card value) + advisory/ (positioning, maindeck-aware sideboard, what-to-play)
+  + generation/ (consensus, export, field-tuning) → models/ → data/. goldfish/ is the deferred pillar;
+  generation's gap-discovery (mode 3) + goldfish-validation remain deferred behind it.
 decisions:
   - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, matplotlib, local files) + add scipy/numpy/statsmodels (advisory stats) and pulp/CBC (sideboard ILP)."
   - "STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/, data/scryfall/, data/rules/, data/banlist/); a rebuildable embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share + matchup-matrix joins. The one justified divergence from edh-engine's pure-files approach, driven by the rounds-join matchup workload."
@@ -20,7 +21,7 @@ decisions:
   - "Deck color = lands.produced_mana ∩ nonlands.colors (NOT color_identity); legality validated against a version-stamped BanListSnapshot blacklist (NOT Scryfall's lagging legacy flag)."
   - "Matchup matrix: computed ourselves from Rounds; Wilson CIs + Beta-Binomial shrinkage; confidence tiers (speculative n<30 hidden / evolving 30-99 / established >=100); matchup-n kept separate from metashare-n; meta-% computed 3 labeled ways with online/paper split."
   - "Ingestion mirror-and-decouple: consume the fbettega cache JSON (not mtgo.com), behind an ingestion/ port so a replacement source swaps in without touching analytics/advisory."
-  - "MVP = ingestion + archetype + analytics + advisory; goldfish/ (port edh-engine's mana solver + straight-London mulligan) and generation/ are deferred pillars with clear seams."
+  - "MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning); goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the deferred pillar; generation's gap-discovery (mode 3) + goldfish-validated candidate-validation remain deferred behind it."
 ---
 
 # Architecture: legacy-engine
@@ -44,15 +45,15 @@ observed → label → analytics → advisory arc.
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                                CLI  (cli.py)                                 │
 │  seed · refresh · label · report (meta|matchups|tiers) · advise (position|   │
-│  sideboard|whattoplay)            [later: goldfish · generate]               │
+│  sideboard|whattoplay · generate consensus|tune · export)   [later: goldfish] │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────┘
     │          │           │            │               │
 ┌───▼─────┐ ┌──▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
-│ingestion/│ │archetype/ │ │analytics/ │ │advisory/    │ │ (deferred:)   │
-│scryfall  │ │rules      │ │metashare  │ │positioning  │ │ goldfish/     │
-│cache     │ │matcher    │ │matchup    │ │sideboard    │ │ generation/   │
-│banlist   │ │colors     │ │trends     │ │whattoplay   │ │               │
-│rules_    │ │labeler    │ │charts     │ │report       │ │               │
+│ingestion/│ │archetype/ │ │analytics/ │ │advisory/    │ │generation/    │
+│scryfall  │ │rules      │ │metashare  │ │positioning  │ │consensus      │
+│cache     │ │matcher    │ │matchup    │ │sideboard    │ │export·tuning  │
+│banlist   │ │colors     │ │trends     │ │whattoplay   │ │(goldfish/     │
+│rules_    │ │labeler    │ │charts     │ │report       │ │ deferred)     │
 │ vendor   │ │golden_test│ │           │ │             │ │               │
 │store     │ │           │ │           │ │             │ │               │
 └───┬─────┘ └────┬──────┘ └─────┬─────┘ └──────┬──────┘ └───────────────┘
@@ -78,7 +79,7 @@ observed → label → analytics → advisory arc.
 |---|---|---|---|
 | **Observed** | fbettega tournament cache, Scryfall cards, ban-list, archetype labels | Meta & Performance | feeds advisory |
 | **Synthetic** | goldfish simulation (speed, consistency) | Deck Mechanics *(deferred)* | meta-speed metric |
-| **Generated** | positioning, sideboard packages, eventually deck candidates | Meta Attack/Advisory + Deck Generation *(gen deferred)* | — |
+| **Generated** | positioning, maindeck-aware sideboard packages, consensus + field-tuned deck candidates | Meta Attack/Advisory + Deck Generation | gap-discovery (mode 3) deferred |
 
 ---
 
@@ -105,9 +106,10 @@ observed → label → analytics → advisory arc.
 ### `analytics/` — Meta & Performance
 | File | Responsibility | Brief |
 |---|---|---|
-| `match_results.py` | Shared foundation: join `rounds` → archetype labels via `decks` (normalized player name within a tournament), parse the aggregate match-score string into match-level W/L, accumulate directed `(arch_a, arch_b)→{wins,losses,n}` cells + per-archetype marginal records; normalize names, drop byes/draws, surface unmatched-pairing coverage. Consumed by both `metashare` (§3c) and `matchup.py`. | ingestion-ops-and-metashare |
+| `match_results.py` | Shared foundation: join `rounds` → archetype labels via `decks` (normalized player name within a tournament), parse the aggregate match-score string into match-level W/L, accumulate directed `(arch_a, arch_b)→{wins,losses,n}` cells + per-archetype marginal records; normalize names, drop byes/draws, surface unmatched-pairing coverage. Consumed by `metashare` (§3c), `matchup.py`, and `card_value.py`. Also exposes `compute_card_winrates` — per-card `(card, board, opponent)→{wins,losses,n}` + per-card marginal aggregates joining `deck_cards`, reusing the same cardinality-safe CTEs (presence-correlational, NOT causal). | ingestion-ops-and-metashare |
+| `card_value.py` | Confidence-rated per-card value over `compute_card_winrates`: two-level empirical-Bayes (matchup cell shrinks toward the card's shrunk marginal, which shrinks toward the global baseline); `CardValue` carries `lift`/`p_shrunk`/`tier`/`n`; `card_values_vs(...)` returns gated values consumed by `advisory/sideboard` (maindeck-aware plans) and `generation/tuning` (swap objective). | advisory-methods |
 | `metashare.py` | Meta-% three labeled ways (raw count / top-cut presence / win-rate-weighted via `match_results`), split online/paper/blend; ≥2%-of-field inclusion. SQL over DuckDB. | ingestion-ops-and-metashare |
-| `matchup.py` | Build the matchup matrix from `match_results`' directed cells: per-cell `{wins, n, p_raw, p_shrunk(Wilson/Beta), ci, tier}`; mirror fixed 0.5; **matchup-n separate from metashare-n**. | advisory-methods |
+| `matchup.py` | Build the matchup matrix from `match_results`' directed cells: per-cell `{wins, n, p_raw, p_shrunk(Wilson/Beta), ci, tier}`; mirror fixed 0.5; **matchup-n separate from metashare-n**. Stats primitives (`beta_binomial_shrink_to`, `wilson_or_jeffreys_ci`) reused by `card_value`. | advisory-methods |
 | `trends.py` | Meta evolution across ban-list regimes (version-stamped). | legacy-metagame |
 | `charts.py` | matplotlib charts: tier list, meta share, matchup heatmap, trends. | (edh-engine pattern) |
 
@@ -116,7 +118,7 @@ observed → label → analytics → advisory arc.
 |---|---|---|
 | `field.py` | `FieldDistribution` (the SSOT for "what is the field"): global-from-`metashare` (with Dirichlet counts) + custom user field (normalize/impute/Other); consumed by positioning, sideboard, whattoplay. | advisory-methods |
 | `positioning.py` | `score(deck, field) = Σ w_a·winrate(D vs a)`; Bayesian Monte-Carlo (Beta cells + Dirichlet shares) primary, delta-method fast check; custom user field; rank by risk-adjusted lower-posterior-quantile from shared-field draws (P(best) reported as a secondary view) + a data-coverage flag; report S **and** unweighted aggregate. | advisory-methods |
-| `sideboard.py` | Weighted submodular max-coverage; ILP (PuLP/CBC) exact primary + greedy (1−1/e) explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements. | advisory-methods |
+| `sideboard.py` | **Maindeck-aware.** Weighted submodular max-coverage (ILP/CBC primary + greedy explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements) chooses the 15, additively **augmented** by per-card×matchup value (`card_value`): gate-clearing opponents up-weight elements, and a per-matchup **OUT/IN plan** (`matchup_plans`) sides the maindeck's dead cards out for the 15's best tech in (post-board exactly-60, copy-capped, locked-core protected). Degrades to pure coverage where per-card data is thin → byte-identical to the rounds-less baseline. | advisory-methods |
 | `whattoplay.py` | Composition-derived proactivity score; vulnerability tags (graveyard-reliant/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant); hate-equity (coverage not sum); best-deck vs best-call (matchup-spread variance). | advisory-methods |
 | `report.py` | The "Field Read & Deck Recommendation" surface: field composition + vulnerability profile + ranked decks + sideboard package + audit trail (every number with derivation, n, heuristic-vs-data label). | advisory-methods |
 
@@ -132,9 +134,16 @@ state), alongside the analytics records (`MetaShareReport`, `MatchupMatrix`, `Tr
 `cli.py` (Click nested groups per the project's CLI pattern), `config.py` (paths, URLs, rate limits,
 pinned SHAs), `confidence.py` (shared tiering + sample-size→tier mapping).
 
+### `generation/` — Deck Generation (built)
+| File | Responsibility | Brief |
+|---|---|---|
+| `consensus.py` | Modal-card aggregation over an archetype's in-window decks → legal exactly-60 + ≤15 de-duped consensus list; `card_frequencies` (per-card inclusion %, the flex/lock + candidate-pool primitive). | deck-generation-and-moxfield |
+| `export.py` | Portable multi-target import text (Moxfield/Archidekt/MTGGoldfish/`.dec`); pure, offline, zero network. | deck-generation-and-moxfield |
+| `tuning.py` | Field-tuning (mode 2): greedy maindeck-flex swaps driven **solely** by field-weighted per-card×matchup value (`card_value`) — proactive cards have real value, no gameplan hollowing; coverage is audit-only, never a swap driver. No per-card signal → no swaps (honest fallback). Re-runs the maindeck-aware `recommend_sideboard` for the 15 + per-matchup plans; combined main+side legality guaranteed; positioning S carried as archetype context. | deck-generation-and-moxfield |
+
 ### Deferred modules (clear seams, not built in MVP)
 - **`goldfish/`** — port edh-engine's bipartite-matching mana solver + role-dispatch engine; adapt the mulligan to **straight London (no free mull)**; deck-as-data YAML; calibrate clocks against the Oops-All-Spells anchor. Feeds the meta-speed distribution. (legacy-foundations)
-- **`generation/`** — gap discovery + build tuning against the (current/projected) meta, validated by simulation + matchup data.
+- **`generation/` — gap discovery (mode 3)** + goldfish-validated candidate-validation remain deferred (mode 3's card-gap half is now unblocked by `card_value`; goldfish-validation depends on the `goldfish/` pillar).
 
 ---
 
@@ -177,7 +186,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ---
 
 ## Conventions
-- **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/` (+ deferred `goldfish/ generation/`). Mirrors edh-engine layout.
+- **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/ generation/` (+ deferred `goldfish/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
 - **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends`, `advise positioning|sideboard|whattoplay|report`); lazy imports inside commands; `_setup_logging(verbose)` first.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
@@ -210,7 +219,7 @@ No web server. DuckDB is embedded (file-backed, no server) — keeps the "no ser
 | Capability | Why | Seam |
 |---|---|---|
 | **goldfish/** simulation (mana solver, London mulligan Monte-Carlo, clocks, meta-speed) | Deck Mechanics pillar; ports cleanly from edh-engine; not blocking meta+advisory | deck-as-data YAML + role dispatch; legacy-foundations brief |
-| **generation/** (gap discovery, build tuning) | needs simulation + matchups to validate candidates | consumes advisory + goldfish outputs |
+| **generation/** gap-discovery (mode 3) + goldfish-validated candidate-validation (consensus/export/field-tuning already built) | mode-3 card-gap half now unblocked by `card_value`; candidate-validation needs goldfish | consumes advisory + (later) goldfish outputs |
 | Full rules-correct game engine | Legacy is 1v1; goldfish suffices for speed/consistency | — |
 | Live/real-time event tooling | all data pre-fetched | — |
 | Non-Legacy formats | card/data layer is largely format-agnostic but out of scope | — |
