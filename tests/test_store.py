@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
+from legacy_engine.models.tournament import Deck, TournamentResult
 
 
 def _con():
@@ -139,4 +142,83 @@ class TestStore:
         assert row is not None
         assert row["power"] == "*"
         assert row["toughness"] == "*+1"
+        con.close()
+
+
+# ── tournament_id collision tests (finding #9) ─────────────────────────────
+
+
+@pytest.fixture
+def make_tournament():
+    """Factory fixture: build a TournamentResult with overridable fields."""
+
+    def _make(
+        *,
+        name="Eternal Weekend",
+        date="2026-05-30",
+        source="MTGmelee",
+        uri=None,
+        players=("alice", "bob"),
+    ) -> TournamentResult:
+        decks = [Deck(Player=p, Result="") for p in players]
+        return TournamentResult(
+            Name=name,
+            Date=date,
+            Uri=uri,
+            source=source,
+            provenance="paper",
+            decks=decks,
+        )
+
+    return _make
+
+
+class TestTournamentId:
+    """Finding #9 — fallback tournament_id uses a player-set hash to prevent collision."""
+
+    def test_uri_event_uses_uri(self, make_tournament):
+        """URI-bearing events use the URI as the id (unchanged)."""
+        tr = make_tournament(uri="https://melee.gg/Tournament/View/42")
+        assert store.tournament_id(tr) == "https://melee.gg/Tournament/View/42"
+
+    def test_no_uri_id_is_deterministic(self, make_tournament):
+        """The same no-URI event always produces the same id (idempotent refresh)."""
+        tr1 = make_tournament(players=("alice", "bob"))
+        tr2 = make_tournament(players=("alice", "bob"))
+        assert store.tournament_id(tr1) == store.tournament_id(tr2)
+
+    def test_distinct_player_sets_produce_distinct_ids(self, make_tournament):
+        """Two no-URI events with the same source/name/date but different players get distinct ids."""
+        tr_ab = make_tournament(players=("alice", "bob"))
+        tr_cd = make_tournament(players=("carol", "dave"))
+        assert store.tournament_id(tr_ab) != store.tournament_id(tr_cd)
+
+    def test_player_order_independent(self, make_tournament):
+        """Player ordering does not affect the id (digest sorts the set)."""
+        tr1 = make_tournament(players=("alice", "bob", "carol"))
+        tr2 = make_tournament(players=("carol", "alice", "bob"))
+        assert store.tournament_id(tr1) == store.tournament_id(tr2)
+
+    def test_no_uri_id_includes_source_name_date(self, make_tournament):
+        """Fallback id encodes source, name, and date for human readability."""
+        tr = make_tournament(source="MTGmelee", name="Eternal Weekend", date="2026-05-30")
+        tid = store.tournament_id(tr)
+        assert tid.startswith("MTGmelee:Eternal Weekend:2026-05-30:")
+
+    def test_no_uri_digest_is_8_chars(self, make_tournament):
+        """The player-set digest appended to the fallback id is exactly 8 hex characters."""
+        tr = make_tournament(players=("alice", "bob"))
+        tid = store.tournament_id(tr)
+        digest = tid.rsplit(":", 1)[-1]
+        assert len(digest) == 8
+        assert all(c in "0123456789abcdef" for c in digest)
+
+    def test_idempotent_load_with_no_uri(self, make_tournament):
+        """load_tournament is idempotent for no-URI events (re-ingest yields one row)."""
+        con = store.connect(":memory:")
+        tr = make_tournament(players=("alice", "bob"))
+        store.load_tournament(con, tr)
+        store.load_tournament(con, tr)
+        count = con.execute("SELECT count(*) FROM tournaments").fetchone()[0]
+        assert count == 1
         con.close()

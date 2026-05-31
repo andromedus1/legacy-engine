@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import unicodedata
 from pathlib import Path
 
 import httpx
@@ -32,8 +33,13 @@ METADATA_PATH = SCRYFALL_DIR / "metadata.json"
 
 
 def normalize_name(name: str) -> str:
-    """Normalize a card name — fix curly apostrophes and trim whitespace."""
-    return name.replace("’", "'").replace("‘", "'").strip()
+    """Normalize a card name — fix curly apostrophes, apply NFC Unicode normalization, and trim.
+
+    NFC normalization ensures accented characters (e.g. "û" in "Khazad-dûm", "Æ") resolve
+    consistently regardless of whether the decklist source encoded them in NFC or NFD form.
+    Curly-apostrophe replacement runs before normalization so smart-quote variants collapse too.
+    """
+    return unicodedata.normalize("NFC", name.replace("’", "'").replace("‘", "'")).strip()
 
 
 class ScryfallClient:
@@ -106,10 +112,18 @@ class ScryfallClient:
             name = card.get("name", "")
             if not name:
                 continue
-            index[name] = card
+            # Primary key is always normalized so accented names resolve regardless of NFC/NFD
+            # encoding in the source decklist.
+            index[normalize_name(name)] = card
+            # Split/adventure/aftermath cards: index each face from the combined name ("A // B").
             if " // " in name:
                 for face in name.split(" // "):
-                    index.setdefault(face, card)
+                    index.setdefault(normalize_name(face), card)
+            # DFC / meld / modal cards carry a card_faces list — index each face's name too.
+            for face in card.get("card_faces", []) or []:
+                fname = face.get("name", "")
+                if fname:
+                    index.setdefault(normalize_name(fname), card)
         self._card_index = index
         logger.info("Indexed %d card names (whole oracle pool)", len(index))
         return index

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from legacy_engine.ingestion.cache import derive_provenance, parse_cache_item, parse_rounds
+from legacy_engine.ingestion.cache import _coerce_format, derive_provenance, parse_cache_item, parse_rounds
 
 CHALLENGE = {
     "Tournament": {
@@ -102,3 +102,31 @@ class TestParseCacheItem:
         t = parse_cache_item(MELEE, "MTGmelee")
         assert t.provenance == "paper"
         assert len(t.rounds) == 1 and t.rounds[0].player1 == "dave"  # flattened from Matches
+
+
+class TestCoerceFormat:
+    """Finding #6 — _coerce_format multi-format list handling (hardening)."""
+
+    def test_multi_format_list_with_legacy_returns_legacy(self):
+        """["Modern", "Legacy"] must return "Legacy" so the event is not skipped."""
+        assert _coerce_format(["Modern", "Legacy"]) == "Legacy"
+
+    def test_multi_format_list_legacy_first_returns_legacy(self):
+        assert _coerce_format(["Legacy", "Modern"]) == "Legacy"
+
+    def test_single_element_list_non_legacy_returns_first(self):
+        assert _coerce_format(["Modern"]) == "Modern"
+
+    def test_single_element_list_legacy_returns_legacy(self):
+        assert _coerce_format(["Legacy"]) == "Legacy"
+
+    def test_empty_list_returns_empty_string(self):
+        assert _coerce_format([]) == ""
+
+    def test_bare_string_returned_as_is(self):
+        assert _coerce_format("Legacy") == "Legacy"
+        assert _coerce_format("Modern") == "Modern"
+
+    def test_falsy_string_returns_empty(self):
+        assert _coerce_format("") == ""
+        assert _coerce_format(None) == ""

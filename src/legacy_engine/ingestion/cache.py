@@ -74,8 +74,15 @@ def parse_cache_item(raw: dict, source: str) -> TournamentResult:
 
 
 def _coerce_format(value) -> str:
-    """Formats is a bare string in real files but typed as a list in the model — normalize."""
+    """Formats is a bare string in real files but typed as a list in the model — normalize.
+
+    When a list contains "Legacy" (e.g. ``["Modern", "Legacy"]``), return "Legacy" so the event
+    is not skipped by Legacy discovery. Otherwise return the first element (or "" if empty).
+    A bare string is returned as-is (or "" for falsy).
+    """
     if isinstance(value, list):
+        if "Legacy" in value:
+            return "Legacy"
         return value[0] if value else ""
     return value or ""
 
