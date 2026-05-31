@@ -1,7 +1,7 @@
 ---
 id: improve-whattoplay-proactivity-threat-signal
 kind: feature
-stage: drafting
+stage: implementing
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: []
@@ -70,3 +70,38 @@ advisory pillar; an accuracy improvement to the heuristic layer.
   (e.g. the spurious `storm-reliant`/`greedy-manabase=100%`).
 - Calibration target unchanged: assert *relative ordering* (combo > tempo > control) on real archetypes;
   Izzet Delver should land ~0.5–0.6.
+
+## Design (autopilot, 2026-05-30)
+
+**Architectural choice:** general threat signal from `Card.power` + a small curated override (the pinned
+"both" decision). Power/toughness are Scryfall string fields that thread through unchanged via
+`Card.model_validate`. Vulnerability tags move from presence to density thresholds.
+
+### Implementation Units
+1. **`models/card.py`** — add `power: str | None = None`, `toughness: str | None = None` (Scryfall keys
+   auto-populate via `model_validate`). Add a helper `power_int(self) -> int | None` (parse "2"→2; "*"/"1+*"/
+   None → None).
+2. **`ingestion/store.py`** — add `power VARCHAR, toughness VARCHAR` to the `cards` DDL (now 11 cols); add
+   `c.power, c.toughness` to the `load_cards` row tuple + the `INSERT OR REPLACE … VALUES` placeholders;
+   include them in `_card_from_row`/`fetch_card` consumers. Note: existing `data/legacy.duckdb` needs a
+   `seed cards` re-run to backfill the new columns (CREATE TABLE IF NOT EXISTS won't alter an existing table)
+   — flag in implementation notes; tests use fresh `:memory:` so they get the new schema.
+3. **`advisory/whattoplay.py` `_card_roles`** — add a `threat` role: `"Creature" in type_line and cmc <= 2
+   and (power_int >= 2)`, OR `name in _THREAT_CARDS` (curated override set seeded from current staples: Dragon's
+   Rage Channeler, Murktide Regent, Tarmogoyf, Goblin Guide, Death's Shadow, the Goyfs, etc., + proactive
+   non-creature threats like cheap planeswalkers). `_load_deck_cards` must carry power through.
+4. **proactivity** — add `threat` density to `proactive_mass`; reconcile `low_curve_score` so its
+   nonland-avg-MV computation matches the `low-curve` vulnerability-tag threshold (single shared helper).
+5. **vulnerability tags** — density/share thresholds (e.g. a tag fires only if its role density ≥ ~10-15% of
+   nonland cards), killing the presence-based false positives (`storm-reliant` on Brainstorm-adjacent
+   aggregates, `greedy-manabase` on everything).
+6. **exports/tests** — `tests/test_whattoplay.py`: threat-role detection (DRC/Murktide → threat; vanilla 5-drop
+   → not), proactivity **relative ordering** Izzet Delver ~0.5–0.6 > control, density-threshold tag tests
+   (no spurious storm-reliant), `Card.power_int` parsing. Update `tests/test_card.py`/`test_store*.py` for the
+   new fields.
+
+### Tests / acceptance
+- Izzet-Delver-like composition (DRC + Murktide + bolt + cantrips) scores **> 0.5** proactivity (was 0.00).
+- A control composition stays < 0.4; combo (rituals+tutors) stays high — ordering combo > tempo > control.
+- A deck with one stray storm card does NOT get `storm-reliant` (density gate).
+- All existing tests stay green (additive Card fields; defaults None).
