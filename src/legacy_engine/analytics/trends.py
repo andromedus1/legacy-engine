@@ -239,6 +239,19 @@ def compute_trends(
             until=until_str,
         )
 
+        # ── Finding #8: skip topcut regimes with no top-cut decks ───────────
+        # _window_event_stats counts all tournaments in the window, but a
+        # regime can have in-window events with zero standings rows (e.g. Leagues
+        # or paper events without standings data).  Using the report's total_decks
+        # (top-cut decks) as the skip guard prevents a zero-denominator regime
+        # from appearing in the topcut series.
+        if definition == "topcut" and report.total_decks == 0:
+            log.debug(
+                "compute_trends: skipping topcut regime %r (in-window events but total_decks=0)",
+                window.label,
+            )
+            continue
+
         for entry in report.entries:
             capped_tier = _cap_thin(entry.tier, thin=thin)
             cells[(populated_window.label, entry.archetype)] = TrendCell(

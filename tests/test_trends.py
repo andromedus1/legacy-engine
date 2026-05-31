@@ -870,3 +870,126 @@ class TestReportTrendsCLI:
         )
         assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
         assert "TOPCUT" in result.output or "topcut" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# Finding #8: Top-cut trends — skip regimes with in-window events but no
+#             top-cut decks (total_decks == 0 on the per-regime report).
+# ---------------------------------------------------------------------------
+
+
+class TestTopCutZeroDeckRegimeSkipped:
+    """Finding #8 — topcut regime with in-window events but zero top-cut decks is skipped.
+
+    ``_window_event_stats`` counts all tournaments in the window, including those
+    without standings rows.  Before the fix, such a regime would be kept with
+    ``total_decks=0``, producing a zero-denominator entry in the series.
+    After the fix, ``compute_trends`` checks the report's ``total_decks`` after
+    calling ``compute_metashare`` and skips the regime when it equals 0.
+    """
+
+    def _make_event_no_standings(self, name, date_str, players):
+        """Return a raw tournament dict with no standings entries."""
+        return {
+            "Tournament": {
+                "Name": name,
+                "Date": date_str,
+                "Uri": f"https://www.mtgo.com/decklist/{name}-{date_str}",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                {
+                    "Player": p,
+                    "Result": "",
+                    "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                    "Sideboard": [],
+                }
+                for p in players
+            ],
+            "Rounds": [],
+            "Standings": [],  # no standings → zero top-cut decks
+        }
+
+    def test_topcut_regime_with_no_standings_is_skipped(self):
+        """A regime that has in-window events but no standings rows is excluded
+        from the topcut TrendSeries (not kept as a zero-denominator regime).
+        """
+        con = _con()
+
+        # Load an event in regime C (2026-05-25) with NO standings.
+        # _window_event_stats will return event_count=1 (the event exists),
+        # but compute_metashare("topcut", ...) will return total_decks=0
+        # because there are no standings rows for this window.
+        raw = self._make_event_no_standings(
+            "no-standings-c1", "2026-05-25", ["p1", "p2", "p3"]
+        )
+        _load_and_label(con, raw, "MTGO", {"p1": "Delver", "p2": "Lands", "p3": "Delver"})
+
+        series = compute_trends(con, definition="topcut", min_share=0.0)
+
+        # The regime should be absent from the series because total_decks == 0.
+        assert series.regimes == [], (
+            f"Expected empty regimes for topcut with no standings, "
+            f"got: {[r.label for r in series.regimes]}"
+        )
+        assert series.cells == {}
+        con.close()
+
+    def test_topcut_regime_with_standings_is_kept(self):
+        """A topcut regime WITH standings rows is still kept (positive total_decks)."""
+        con = _con()
+
+        # Load regime A T1 which has standings
+        _load_and_label(
+            con, _REGIME_A_T1, "MTGO",
+            {"p1": "Delver", "p2": "Lands", "p3": "Reanimator",
+             "p4": "Control", "p5": "Delver", "p6": "Delver"},
+        )
+
+        series = compute_trends(con, definition="topcut", min_share=0.0)
+
+        # Should have at least one regime (the one containing 2024-09-01 with standings)
+        assert len(series.regimes) >= 1
+        # Every regime in the series must have at least one cell (non-empty)
+        for regime in series.regimes:
+            regime_cells = {k: v for k, v in series.cells.items() if k[0] == regime.label}
+            assert len(regime_cells) >= 1, (
+                f"Regime {regime.label!r} has no cells — should have been skipped"
+            )
+        con.close()
+
+    def test_mixed_regimes_only_zero_deck_regime_skipped(self):
+        """When one regime has standings and another has none (same topcut series),
+        only the zero-deck regime is excluded.
+        """
+        con = _con()
+
+        # Regime A T1: has standings (6 decks, rank 1-6)
+        _load_and_label(
+            con, _REGIME_A_T1, "MTGO",
+            {"p1": "Delver", "p2": "Lands", "p3": "Reanimator",
+             "p4": "Control", "p5": "Delver", "p6": "Delver"},
+        )
+        # Regime C (2026-05-25): event WITHOUT standings
+        raw_no_standings = self._make_event_no_standings(
+            "no-standings-c2", "2026-05-25", ["s1", "s2"]
+        )
+        _load_and_label(con, raw_no_standings, "MTGO", {"s1": "Delver", "s2": "Lands"})
+
+        series = compute_trends(con, definition="topcut", min_share=0.0)
+
+        regime_labels = {r.label for r in series.regimes}
+
+        # The regime containing 2026-05-25 (no standings) must NOT appear.
+        from datetime import date as date_cls
+        from legacy_engine.ingestion.banlist import BAN_EVENTS
+        # Find the ban date that opens the regime containing 2026-05-25
+        ban_dates = sorted({d for d, _c, _r in BAN_EVENTS})
+        # 2026-05-25 falls after the last ban date → it's in the "current" regime
+        assert not any("current" in lbl for lbl in regime_labels), (
+            f"The current regime (no standings) should be skipped, got labels: {regime_labels}"
+        )
+
+        # At least one regime (the one with standings) must appear.
+        assert len(series.regimes) >= 1
+        con.close()
