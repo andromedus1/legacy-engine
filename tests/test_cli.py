@@ -26,7 +26,7 @@ def test_top_level_help_lists_groups(runner):
         ("seed", ("cards", "cache", "rules", "banlist")),
         ("report", ("meta", "matchups", "tiers")),
         ("advise", ("positioning", "sideboard", "whattoplay", "report")),
-        ("generate", ("consensus",)),
+        ("generate", ("consensus", "tune")),
         ("export", ("deck",)),
     ],
 )

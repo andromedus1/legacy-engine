@@ -1083,6 +1083,179 @@ def generate_consensus(
         click.echo(format_decklist(deck.maindeck, deck.sideboard, fmt=export_fmt))
 
 
+@generate.command("tune")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file (consensus shell or user list).",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Archetype name; if omitted the deck is classified automatically.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--since",
+    default=None,
+    help="Start of corpus window (YYYY-MM-DD, inclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--until",
+    default=None,
+    help="End of corpus window (YYYY-MM-DD, exclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--lock-threshold",
+    type=float,
+    default=0.65,
+    show_default=True,
+    help="Inclusion fraction at or above which a maindeck card is locked (0..1).",
+)
+@click.option(
+    "--max-swaps",
+    type=int,
+    default=8,
+    show_default=True,
+    help="Maximum number of greedy maindeck swap rounds.",
+)
+@click.option(
+    "--export",
+    "export_fmt",
+    type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
+    default=None,
+    help="Also emit the tuned 60+15 in the specified import format.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def generate_tune(
+    deck: str,
+    archetype: str | None,
+    field_file: str | None,
+    since: str | None,
+    until: str | None,
+    lock_threshold: float,
+    max_swaps: int,
+    export_fmt: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Tune a deck shell against the current field (mode 2).
+
+    Reads a plain-text decklist (consensus or user-supplied), identifies the
+    archetype, partitions maindeck into locked-core and flex slots, then greedily
+    swaps flex cards toward better field-weighted coverage.  Re-runs the sideboard
+    recommender for the 15 after tuning.
+
+    Prints: tuned 60+15, ordered swap log, coverage before/after, positioning S
+    (archetype context — unchanged by card swaps), and a fallback note when the
+    field data is too thin to tune.
+
+    Example: legacy-engine generate tune --deck shell.txt --archetype "Izzet Delver"
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.generation.tuning import tune_deck
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    maindeck, starting_side = _parse_decklist(deck_text)
+    field_text = Path(field_file).read_text() if field_file else None
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, maindeck, starting_side)
+            resolved_archetype = result.archetype
+            click.echo(f"Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        tuned = tune_deck(
+            con,
+            resolved_archetype,
+            maindeck,
+            starting_side,
+            field=field,
+            since=since,
+            until=until,
+            lock_threshold=lock_threshold,
+            max_swaps=max_swaps,
+        )
+    finally:
+        con.close()
+
+    # ── Header ───────────────────────────────────────────────────────────────
+    click.echo(f"\n// Tuned deck: {tuned.archetype}")
+    click.echo(f"// Coverage: {tuned.coverage_before:.4f} → {tuned.coverage_after:.4f}")
+    if tuned.positioning_s is not None:
+        click.echo(
+            f"// Positioning S(archetype)={tuned.positioning_s:.3f} "
+            "[archetype context; unchanged by card swaps]"
+        )
+    else:
+        click.echo("// Positioning S: n/a (archetype absent from matchup matrix)")
+
+    if tuned.fell_back:
+        click.echo(f"// [FALLBACK] {tuned.reason}")
+    else:
+        click.echo(f"// {tuned.reason}")
+
+    click.echo("")
+
+    # ── Maindeck ─────────────────────────────────────────────────────────────
+    for name, count in sorted(tuned.maindeck.items(), key=lambda kv: (-kv[1], kv[0])):
+        click.echo(f"{count} {name}")
+
+    # ── Sideboard ─────────────────────────────────────────────────────────────
+    if tuned.sideboard:
+        click.echo("")
+        click.echo("Sideboard")
+        for name, count in sorted(tuned.sideboard.items(), key=lambda kv: (-kv[1], kv[0])):
+            click.echo(f"{count} {name}")
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    main_total = sum(tuned.maindeck.values())
+    side_total = sum(tuned.sideboard.values())
+    click.echo(f"\n// Maindeck: {main_total}  Sideboard: {side_total}")
+
+    # ── Swap log ──────────────────────────────────────────────────────────────
+    if tuned.swaps:
+        click.echo("\n// Swap log:")
+        for i, (cut, added) in enumerate(tuned.swaps, 1):
+            click.echo(f"//   {i}. CUT {cut}  →  ADD {added}")
+    else:
+        click.echo("\n// Swap log: (no swaps made)")
+
+    # ── Legality ──────────────────────────────────────────────────────────────
+    if tuned.legality_errors:
+        for err in tuned.legality_errors:
+            click.echo(f"// [LEGALITY] {err}", err=True)
+    else:
+        click.echo("// Legality: OK")
+
+    # ── Optional export format ────────────────────────────────────────────────
+    if export_fmt:
+        from legacy_engine.generation.export import format_decklist
+        click.echo("\n// --- Export ---")
+        click.echo(format_decklist(tuned.maindeck, tuned.sideboard, fmt=export_fmt))
+
+
 # ── export: decklist formatting ──
 @main.group()
 def export() -> None:
