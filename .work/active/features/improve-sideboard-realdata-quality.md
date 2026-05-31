@@ -3,7 +3,7 @@ id: improve-sideboard-realdata-quality
 kind: feature
 stage: drafting
 tags: [advisory]
-parent: null
+parent: epic-advisory-hardening
 depends_on: [improve-whattoplay-proactivity-threat-signal]
 release_binding: null
 gate_origin: null

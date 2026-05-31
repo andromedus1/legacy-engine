@@ -3,7 +3,7 @@ id: fix-advisory-peer-review-bugs
 kind: feature
 stage: drafting
 tags: [advisory, bug]
-parent: null
+parent: epic-advisory-hardening
 depends_on: []
 release_binding: null
 gate_origin: null
