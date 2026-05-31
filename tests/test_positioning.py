@@ -746,3 +746,94 @@ class TestDeltaVar:
         dv_large = delta_var_S(matrix_large, field, "X")
 
         assert dv_large < dv_small
+
+
+# ===========================================================================
+# Regression tests for peer-review bug fixes
+# ===========================================================================
+
+
+class TestRegressionPeerReviewFixes:
+    """One regression test per finding from the cross-model peer review (2026-05-30)."""
+
+    # --- Fix 1: No-data imputation centred on `center` ---
+
+    def test_fix1_nodata_imputation_centered_on_mean(self):
+        """Bug: a=(2c+0.5), b=(2(1-c)+0.5) → mean=(2c+0.5)/3, NOT c.
+        Fix: concentration-only params a=strength*c, b=strength*(1-c) → mean=c.
+        A row with known mean 0.8 must impute ≈0.8, not ≈0.70.
+
+        Setup: field contains BOTH A (known, 80%) AND B (no data).  A is in the field
+        so the known_mask fires; we weight A at ε so the S mean is dominated by the
+        imputed B cell, and check that it is centred on 0.8, not ~0.70.
+        """
+        _TOL = 0.05  # 5 000 draws, generous tolerance
+
+        # X vs A = 80% (known); X vs B = no data (imputed from A's mean)
+        archetypes = ["X", "A", "B"]
+        winrates = {
+            ("X", "A"): (80, 100),  # known 80%
+            ("A", "X"): (20, 100),
+            ("A", "B"): (50, 100),
+            ("B", "A"): (50, 100),
+            # X vs B: no data → imputed from known mean=0.80
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        # Give A a tiny share and B almost all the weight so S ≈ imputed(B)
+        field = _custom_field({"A": 0.01, "B": 0.99})
+
+        rng = np.random.default_rng(SEED)
+        samples = _sample_S(matrix, field, "X", n_draws=10_000, rng=rng)
+        # With B's weight at 0.99 and imputed from mean=0.80, S_mean should be ≈0.80
+        assert abs(samples.mean() - 0.80) < _TOL, (
+            f"Imputation should be centred on known mean 0.80, got {samples.mean():.4f}"
+        )
+
+    # --- Fix 2: rank_decks tie handling ---
+
+    def test_fix2_rank_decks_identical_candidates_split_pbest_evenly(self):
+        """Bug: argmax always awards tied-max draws to index 0.
+        Fix: split credit evenly; two identical candidates → P(best) ≈ 0.5 each.
+        """
+        _TOL = 0.05
+        # Two candidates with IDENTICAL matchup data → identical S distributions
+        archetypes = ["X", "Y", "A"]
+        winrates = {
+            ("X", "A"): (60, 100),
+            ("Y", "A"): (60, 100),  # same win rate
+            ("A", "X"): (40, 100),
+            ("A", "Y"): (40, 100),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 1.0})
+
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=5_000, seed=SEED)
+        p_x = ranking.p_best["X"]
+        p_y = ranking.p_best["Y"]
+
+        assert abs(p_x - 0.5) < _TOL, (
+            f"Identical candidates should have P(best)≈0.5 each; X got {p_x:.4f}"
+        )
+        assert abs(p_y - 0.5) < _TOL, (
+            f"Identical candidates should have P(best)≈0.5 each; Y got {p_y:.4f}"
+        )
+
+    # --- Fix 3: include_mirror=False on mirror-only field → 0.5 + warning ---
+
+    def test_fix3_include_mirror_false_mirror_only_field_returns_half(self):
+        """Bug: zeroing all mirror columns → safe_sums=1 → S=0 (misleading).
+        Fix: detect all-mirror case, warn via log.warning, return 0.5 (undefined view sentinel).
+        """
+        # Deck X in a field that is ONLY X (mirror-only)
+        archetypes = ["X"]
+        matrix = _simple_matrix(archetypes, {}, mirror_n={"X": 50})
+        field = _custom_field({"X": 1.0})  # field is entirely X's mirror
+
+        rng = np.random.default_rng(SEED)
+        samples = _sample_S(
+            matrix, field, "X", n_draws=100, rng=rng, include_mirror=False
+        )
+        # The fix returns 0.5 (not 0.0) when all columns are mirror columns
+        assert abs(samples.mean() - 0.5) < 1e-9, (
+            f"Mirror-only field with include_mirror=False should return S=0.5, got {samples.mean()}"
+        )

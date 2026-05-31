@@ -520,3 +520,39 @@ class TestFieldDistribution:
 
         fd_custom = build_custom_field({"A": 0.5, "B": 0.5})
         assert isinstance(fd_custom.no_data, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for peer-review bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionPeerReviewFixes:
+    """One regression test per field-related finding (2026-05-30 peer review)."""
+
+    # --- Fix 8: _normalize_shares rejects NaN and Inf ---
+
+    def test_fix8_nan_share_raises_value_error(self):
+        """Bug: float('nan') passes the <0 check and float() accepts it.
+        Fix: add math.isfinite() guard → ValueError on NaN inputs.
+        """
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"A": float("nan")})
+
+    def test_fix8_inf_share_raises_value_error(self):
+        """Bug: float('inf') passes the <0 check silently.
+        Fix: math.isfinite() catches +inf.
+        """
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"A": float("inf")})
+
+    def test_fix8_neg_inf_share_raises_value_error(self):
+        """-inf is also non-finite and must be rejected before the <0 check."""
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"A": float("-inf")})
+
+    def test_fix8_valid_shares_still_pass(self):
+        """Confirming valid finite shares are unaffected by the NaN/inf guard."""
+        result, warnings = _normalize_shares({"A": 0.6, "B": 0.4})
+        assert pytest.approx(result["A"]) == 0.6
+        assert pytest.approx(result["B"]) == 0.4

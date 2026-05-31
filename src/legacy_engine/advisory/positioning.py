@@ -159,9 +159,13 @@ def _sample_S(
             else:
                 # No information at all — use 0.5
                 center = 0.5
-            # Weak Beta: pseudo-strength _NODATA_STRENGTH, centred on `center`
-            a_imp = _NODATA_STRENGTH * center + _BETA_JEFFREYS
-            b_imp = _NODATA_STRENGTH * (1.0 - center) + _BETA_JEFFREYS
+            # Weak Beta: concentration-only params so the distribution is exactly
+            # centred on `center`.  a/b = strength * center / (1-center) so
+            # E[X] = a/(a+b) = center.  A small eps guard prevents a=0 when
+            # center∈{0,1} (which would be degenerate).
+            _eps = 1e-6
+            a_imp = max(_NODATA_STRENGTH * center, _eps)
+            b_imp = max(_NODATA_STRENGTH * (1.0 - center), _eps)
             P[:, i] = rng.beta(a_imp, b_imp, size=n_draws)
 
     # ── Build (n_draws, m) weight matrix W ──────────────────────────────────
@@ -185,7 +189,16 @@ def _sample_S(
         W = W.copy()
         W[:, mirror_mask] = 0.0
         row_sums = W.sum(axis=1, keepdims=True)
-        # Avoid division by zero (degenerate: no non-mirror archetypes)
+        # Degenerate case: all columns are mirror (mirror-only field).
+        # Returning 0.0 would be misleading; 0.5 is the correct undefined-view
+        # sentinel (same as the mirror cell itself).
+        if not (row_sums > 0).any():
+            log.warning(
+                "_sample_S: include_mirror=False but the field consists entirely of "
+                "mirror archetypes for %r — S is undefined; returning 0.5",
+                deck_archetype,
+            )
+            return np.full(n_draws, 0.5)
         safe_sums = np.where(row_sums > 0, row_sums, 1.0)
         W = W / safe_sums
 
@@ -445,10 +458,16 @@ def rank_decks(
         )
 
     # ── p_best: fraction of draws where each deck is the maximum ─────────
-    best_idx = np.argmax(all_S, axis=1)  # shape (n_draws,)
+    # Split tied-max credit evenly across all tied candidates per draw so that
+    # identical/equal-performing decks each receive P(best)=1/k rather than
+    # the first candidate receiving 1.0 (np.argmax breaks ties to lowest index).
+    row_max = all_S.max(axis=1, keepdims=True)          # shape (n_draws, 1)
+    is_max = (all_S == row_max)                          # shape (n_draws, k) bool
+    tie_counts = is_max.sum(axis=1, keepdims=True)       # shape (n_draws, 1) int
+    credit = is_max / tie_counts.astype(np.float64)      # shape (n_draws, k)
     p_best: dict[str, float] = {}
     for j, deck in enumerate(candidates):
-        p_best[deck] = float((best_idx == j).mean())
+        p_best[deck] = float(credit[:, j].mean())
 
     # ── s_mean + s_ci ─────────────────────────────────────────────────────
     s_mean_dict: dict[str, float] = {}
@@ -459,12 +478,18 @@ def rank_decks(
         lo, hi = np.percentile(col, [2.5, 97.5])
         s_ci_dict[deck] = (float(lo), float(hi))
 
-    # ── pairwise P(S_a > S_b) ────────────────────────────────────────────
+    # ── pairwise P(S_a ≥ S_b) with half-credit on exact ties ────────────
+    # Use (strict win) + 0.5 * (tie) so P(a>b) + P(b>a) = 1.0 even for
+    # identical candidates (pure ties give each side 0.5).
     pairwise: dict[tuple[str, str], float] = {}
     for j, a in enumerate(candidates):
         for l, b in enumerate(candidates):  # noqa: E741
             if a != b:
-                pairwise[(a, b)] = float((all_S[:, j] > all_S[:, l]).mean())
+                Sa = all_S[:, j]
+                Sb = all_S[:, l]
+                pairwise[(a, b)] = float(
+                    ((Sa > Sb).astype(np.float64) + 0.5 * (Sa == Sb).astype(np.float64)).mean()
+                )
 
     # ── Sort ──────────────────────────────────────────────────────────────
     if risk_averse:
