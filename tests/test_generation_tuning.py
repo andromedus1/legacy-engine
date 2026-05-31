@@ -1017,6 +1017,33 @@ class TestTuneDeckIntegration:
         assert isinstance(result.matchup_plans, dict)
         con.close()
 
+    def test_tune_deck_computes_card_winrates_exactly_once(self, make_rounds_corpus, monkeypatch):
+        """Perf guard (idea-tuning-sideboard-winrate-reuse): the heavy compute_card_winrates
+        full-corpus scan runs ONCE per tune_deck — threaded through field_weighted_values +
+        recommend_sideboard's two passes — not 3x. Regresses silently without this assertion."""
+        import legacy_engine.analytics.match_results as mr
+
+        con, _facts = make_rounds_corpus(n_repeats=15)  # gate-clearing → exercises the plan path too
+        field = build_custom_field({"Combo": 1.0})
+
+        real = mr.compute_card_winrates
+        calls = {"n": 0}
+
+        def _counting(*args, **kwargs):
+            calls["n"] += 1
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(mr, "compute_card_winrates", _counting)
+
+        result = tune_deck(con, "Control", {"Island": 59, "Dark Ritual": 1}, {}, field=field, since="2025-01-01")
+
+        assert result.fell_back is False  # ensure the gate-clearing path (which also plans) actually ran
+        assert calls["n"] == 1, (
+            f"compute_card_winrates must run exactly once per tune_deck (threaded aggregate); "
+            f"ran {calls['n']}x"
+        )
+        con.close()
+
     def test_tune_deck_no_signal_fallback_thin_corpus(self, make_rounds_corpus):
         """With n_repeats=1 (speculative, n=2 < 30), no gate-clearing signal -> fell_back=True."""
         con, facts = make_rounds_corpus(n_repeats=1)
