@@ -1,7 +1,7 @@
 ---
 id: fix-analytics-peer-review-findings
 kind: feature
-stage: review
+stage: done
 tags: [analytics, bug]
 parent: null
 depends_on: []
@@ -291,6 +291,17 @@ All 3 child stories implemented and at `stage: review` (2026-05-30, autopilot wa
 - **matchup-trends** (#2,8): row-inclusion denominator `2*(decisive_matched + mirror_matches)`; top-cut
   trends skip regimes with `report.total_decks == 0`; +6 tests.
 Verification: full `pytest` 745 passed. No cross-story integration issues.
+
+## Review
+Cross-model completion review (peeragent → Codex xhigh, 2 passes, converged 2026-05-30) over the whole
+run diff. Findings fixed: (1) **top-cut join still fanned out on duplicate STANDINGS names** (the dup CTE
+only watched the decks side) — added a `dup_s` CTE excluding names ambiguous in either decks or standings,
+on both `_TOPCUT_SQL` and `_TOPCUT_UNLABELED_SQL`, + regression test; (2) **WRW display_total test was
+weakened** (`!= 1`/`>= 1`) — tightened to `== 2`. Reviewer-raised mirror concern was evaluated and the code
+KEPT: a mirror-only archetype being included via the mirror-aware denominator is the intended consequence of
+the locked "count mirrors on both sides" decision (the "exclude mirror marginals" alternative was rejected);
+only the stale docstrings encoding the rejected interpretation were corrected. Pass 2 agreed, zero blockers.
+Final suite 747 passed. **Done.**
 
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79f6), effort xhigh, in-repo; ran the analytics test subset

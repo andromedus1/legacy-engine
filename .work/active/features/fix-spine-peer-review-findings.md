@@ -1,7 +1,7 @@
 ---
 id: fix-spine-peer-review-findings
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, archetype, bug]
 parent: null
 depends_on: []
@@ -369,6 +369,12 @@ All 3 child stories implemented and at `stage: review` (2026-05-30, autopilot wa
 - **hardening** (#6,8,9): `_coerce_format` Legacy-in-list; Scryfall NFC + `card_faces[]` indexing;
   `tournament_id` player-set hash for no-URI collisions; +~22 tests.
 Verification: full `pytest` 745 passed (was 654). No cross-story integration issues.
+
+## Review
+Cross-model completion review (peeragent → Codex xhigh, 2 passes, converged 2026-05-30) over the whole
+run diff. Pass 1 surfaced one spine-relevant finding: **validate_deck nonpositive guard ran on the merged
+deck**, so a negative sideboard count was masked by positive maindeck copies — fixed to check per-zone
+before merging, with a regression test. Pass 2 confirmed. No other spine findings. **Done.**
 
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79db), effort xhigh, in-repo; ran the spine test subset
