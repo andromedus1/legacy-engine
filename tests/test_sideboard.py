@@ -23,12 +23,15 @@ from legacy_engine.advisory.sideboard import (
     CoverageModel,
     PickTrace,
     SideboardPackage,
+    _COVERAGE_P,
     _SWING_DEDICATED,
     _SWING_SOFT,
     _build_coverage_model,
+    _g,
     _greedy_solve,
     _ilp_solve,
     _ILPFailed,
+    _marginal_g,
     recommend_sideboard,
 )
 from legacy_engine.ingestion import store
@@ -511,8 +514,15 @@ class TestGreedy:
         for pt in trace:
             assert pt.newly_covered.issubset(all_elements)
 
-    def test_second_copy_same_card_zero_gain_if_already_covered(self):
-        """After first GY-Hoser copy covers Reanimator, a 2nd copy gains 0 (binary coverage)."""
+    def test_second_copy_same_card_has_lower_marginal_gain(self):
+        """Saturating model: 2nd answer for same element earns less than the 1st (diminishing returns).
+
+        Under the old binary model the 2nd copy would gain 0 and greedy would stop.
+        Under the saturating model g(n)=1-(1-p)^n the 2nd copy earns positive but strictly
+        smaller marginal gain, so it IS picked (filling the budget) but the trace shows
+        descending marginal gains.
+        """
+        from legacy_engine.advisory.sideboard import _COVERAGE_P, _g
         # Single-element field: one element, one hoser.
         hoser = _minimal_hoser("GY-Hoser", frozenset({"Reanimator"}), max_copies=4)
         model = _make_model(
@@ -521,9 +531,16 @@ class TestGreedy:
             candidate_meta={"GY-Hoser": hoser},
         )
         picks, trace = _greedy_solve(model, budget=2)
-        # First copy has gain 0.14; second copy covers no NEW elements → gain=0 → greedy stops.
-        assert picks.get("GY-Hoser", 0) == 1
-        assert len(trace) == 1
+        # Both copies picked because each earns diminishing-but-positive value.
+        assert picks.get("GY-Hoser", 0) == 2
+        assert len(trace) == 2
+        # 2nd copy has strictly lower marginal gain than the 1st.
+        assert trace[1].marginal_gain < trace[0].marginal_gain
+        # Quantitative check: gain_1 = 0.14*(g(1)-g(0)), gain_2 = 0.14*(g(2)-g(1))
+        expected_gain_1 = 0.14 * _g(1)          # g(0)=0 so g(1)-g(0) = g(1)
+        expected_gain_2 = 0.14 * (_g(2) - _g(1))
+        assert trace[0].marginal_gain == pytest.approx(expected_gain_1, abs=1e-9)
+        assert trace[1].marginal_gain == pytest.approx(expected_gain_2, abs=1e-9)
 
     def test_multiple_hosers_in_trace_when_multi_element(self):
         """With multiple elements, greedy picks different hosers to cover each."""
@@ -1113,3 +1130,250 @@ class TestRegressionPeerReviewFixes:
         assert "Leyline of the Void" not in model.candidate_covers, (
             "Leyline of the Void (normal black mana) must NOT be available to non-black decks"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestSaturatingCoverage — new tests for the g(n) = 1-(1-p)^n objective
+# ---------------------------------------------------------------------------
+
+
+class TestSaturatingCoverageModel:
+    """Unit tests for the saturating value functions."""
+
+    def test_g_zero_is_zero(self):
+        assert _g(0) == pytest.approx(0.0)
+
+    def test_g_one_equals_p(self):
+        """g(1) = p (_COVERAGE_P)."""
+        assert _g(1) == pytest.approx(_COVERAGE_P, abs=1e-12)
+
+    def test_g_strictly_increasing(self):
+        """g(n) < g(n+1) for all n ≥ 0."""
+        for n in range(0, 6):
+            assert _g(n) < _g(n + 1)
+
+    def test_g_bounded_by_one(self):
+        """g(n) < 1 for finite n; approaches 1 as n grows."""
+        for n in range(1, 20):
+            assert _g(n) < 1.0
+
+    def test_marginal_g_positive(self):
+        """Marginal value is always positive for n ≥ 1."""
+        for n in range(1, 8):
+            assert _marginal_g(n) > 0.0
+
+    def test_marginal_g_strictly_decreasing(self):
+        """Marginal gains are strictly decreasing: g(2)-g(1) < g(1)-g(0)."""
+        for n in range(1, 6):
+            assert _marginal_g(n + 1) < _marginal_g(n), (
+                f"marginal_g({n+1})={_marginal_g(n+1)} should be < marginal_g({n})={_marginal_g(n)}"
+            )
+
+    def test_g_value_at_two(self):
+        """g(2) = 1 - (1-p)^2 = p*(2-p)."""
+        expected = 1.0 - (1.0 - _COVERAGE_P) ** 2
+        assert _g(2) == pytest.approx(expected, abs=1e-12)
+
+
+class TestSaturatingFill:
+    """The core regression: saturating model fills the budget instead of returning ~2 cards."""
+
+    def _many_distinct_hosers_model(self, budget: int = 15) -> CoverageModel:
+        """Model with 'budget' distinct single-copy hosers each covering a unique element.
+
+        Each hoser covers only its own element (no overlap), so the ILP must pick all
+        hosers to fill the budget.  With max_copies=1 per hoser, T_a=1, and the saturating
+        model reduces to binary coverage for these elements.  This tests that budget-fill
+        works when there are enough distinct answers.
+        """
+        element_weight: dict[str, float] = {}
+        candidate_covers: dict[str, frozenset[str]] = {}
+        candidate_meta: dict[str, HoserCard] = {}
+        for i in range(budget):
+            elem = f"E{i}"
+            card = f"Hoser{i}"
+            element_weight[elem] = 0.05  # uniform small weight
+            candidate_covers[card] = frozenset({elem})
+            candidate_meta[card] = HoserCard(
+                name=card,
+                attacks=frozenset({f"tag{i}"}),
+                colors=frozenset(),
+                max_copies=1,
+                swing=0.20,
+            )
+        return CoverageModel(
+            element_weight=element_weight,
+            candidate_covers=candidate_covers,
+            candidate_meta=candidate_meta,
+            warnings=(),
+        )
+
+    def _saturating_model(self) -> CoverageModel:
+        """Model with a few high-copy hosers over shared elements for diminishing-returns tests.
+
+        3 groups (GY, Combo, Mana) × 2 hosers each, max_copies=4.  The greedy fills
+        the budget by taking redundant copies; the ILP does too within T_a=4 constraints.
+        Designed so total max_copies (24) > budget (15), ensuring budget is the binding
+        constraint.
+        """
+        def _ch(name: str, elems: frozenset[str]) -> HoserCard:
+            return HoserCard(name=name, attacks=frozenset(), colors=frozenset(), max_copies=4, swing=0.20)
+
+        elements = {
+            "GY1": 0.04, "GY2": 0.04,
+            "Combo1": 0.04, "Combo2": 0.04,
+            "Mana1": 0.03, "Mana2": 0.03,
+        }
+        hosers = {
+            "GY-A": _ch("GY-A", frozenset({"GY1", "GY2"})),
+            "GY-B": _ch("GY-B", frozenset({"GY1", "GY2"})),
+            "Combo-A": _ch("Combo-A", frozenset({"Combo1", "Combo2"})),
+            "Combo-B": _ch("Combo-B", frozenset({"Combo1", "Combo2"})),
+            "Mana-A": _ch("Mana-A", frozenset({"Mana1", "Mana2"})),
+            "Mana-B": _ch("Mana-B", frozenset({"Mana1", "Mana2"})),
+        }
+        candidate_covers = {
+            "GY-A": frozenset({"GY1", "GY2"}),
+            "GY-B": frozenset({"GY1", "GY2"}),
+            "Combo-A": frozenset({"Combo1", "Combo2"}),
+            "Combo-B": frozenset({"Combo1", "Combo2"}),
+            "Mana-A": frozenset({"Mana1", "Mana2"}),
+            "Mana-B": frozenset({"Mana1", "Mana2"}),
+        }
+        return CoverageModel(
+            element_weight=elements,
+            candidate_covers=candidate_covers,
+            candidate_meta=hosers,
+            warnings=(),
+        )
+
+    def test_greedy_fills_budget_distinct_hosers(self):
+        """Greedy fills the full 15-slot budget when 15 distinct hosers each cover a unique element."""
+        budget = 15
+        model = self._many_distinct_hosers_model(budget=budget)
+        picks, trace = _greedy_solve(model, budget=budget)
+        total_slots = sum(picks.values())
+        assert total_slots == budget, (
+            f"Expected greedy to fill all {budget} slots; got {total_slots}. picks={picks}"
+        )
+
+    def test_greedy_fills_budget_saturating_model(self):
+        """Greedy fills the full 15-slot budget with the saturating multi-copy model.
+
+        With only 6 hosers, binary coverage would stop after ~3 picks (one per group).
+        Saturating coverage keeps picking because each additional copy earns positive value.
+        """
+        budget = 15
+        model = self._saturating_model()
+        picks, trace = _greedy_solve(model, budget=budget)
+        total_slots = sum(picks.values())
+        assert total_slots == budget, (
+            f"Expected greedy to fill all {budget} saturating slots; got {total_slots}. picks={picks}"
+        )
+
+    def test_ilp_fills_budget_distinct_hosers(self):
+        """ILP fills the full 15-slot budget when 15 distinct single-copy hosers cover unique elements."""
+        budget = 15
+        model = self._many_distinct_hosers_model(budget=budget)
+        picks = _ilp_solve(model, budget=budget)
+        total_slots = sum(picks.values())
+        assert total_slots == budget, (
+            f"Expected ILP to fill all {budget} slots; got {total_slots}. picks={picks}"
+        )
+
+    def test_ilp_objective_gte_greedy_on_distinct_hosers(self):
+        """ILP saturating objective ≥ greedy on the distinct-hosers model."""
+        budget = 15
+        model = self._many_distinct_hosers_model(budget=budget)
+
+        greedy_picks, _ = _greedy_solve(model, budget=budget)
+        greedy_obj = _compute_covered_weight_for_test(greedy_picks, model)
+
+        ilp_picks = _ilp_solve(model, budget=budget)
+        ilp_obj = _compute_covered_weight_for_test(ilp_picks, model)
+
+        assert ilp_obj >= greedy_obj - 1e-6, (
+            f"ILP objective {ilp_obj:.4f} < greedy objective {greedy_obj:.4f}"
+        )
+
+    def test_budget_respected_distinct_hosers(self):
+        """Both solvers respect budget and max_copies on the distinct-hosers model."""
+        budget = 15
+        model = self._many_distinct_hosers_model(budget=budget)
+
+        greedy_picks, _ = _greedy_solve(model, budget=budget)
+        assert sum(greedy_picks.values()) <= budget
+        for card, copies in greedy_picks.items():
+            assert copies <= model.candidate_meta[card].max_copies
+
+        ilp_picks = _ilp_solve(model, budget=budget)
+        assert sum(ilp_picks.values()) <= budget
+        for card, copies in ilp_picks.items():
+            assert copies <= model.candidate_meta[card].max_copies
+
+    def test_reserved_reduces_budget_in_recommend(self):
+        """reserved=3 → effective budget is 12; sum(cards) ≤ 12."""
+        con = _con()
+        field = _make_field({"Reanimator": 0.3, "Dredge": 0.3, "TES": 0.2, "Lands": 0.2})
+        pkg = recommend_sideboard(con, field, {}, reserved=3, solver="greedy")
+        assert pkg.budget == 12
+        assert sum(pkg.cards.values()) <= 12
+        con.close()
+
+    def test_diminishing_returns_in_greedy_trace(self):
+        """The 2nd answer covering the same element has strictly lower marginal gain than the 1st."""
+        # Single-element model so all copies cover the same one element.
+        hoser = _minimal_hoser("Hoser", frozenset({"E1"}), max_copies=4, swing=0.20)
+        model = _make_model(
+            element_weight={"E1": 0.20},
+            candidate_covers={"Hoser": frozenset({"E1"})},
+            candidate_meta={"Hoser": hoser},
+        )
+        _, trace = _greedy_solve(model, budget=3)
+        assert len(trace) == 3
+        # Gains must be strictly decreasing copy by copy
+        assert trace[0].marginal_gain > trace[1].marginal_gain > trace[2].marginal_gain
+
+    def test_g2_minus_g1_lt_g1_minus_g0(self):
+        """Explicit numeric check: g(2)-g(1) < g(1)-g(0)."""
+        delta1 = _g(1) - _g(0)
+        delta2 = _g(2) - _g(1)
+        assert delta2 < delta1, (
+            f"g(2)-g(1)={delta2} should be < g(1)-g(0)={delta1}"
+        )
+
+    def test_greedy_solver_path_works(self):
+        """solver='greedy' still returns a valid package on a known field with a real catalog.
+
+        Uses the GY corpus (Reanimator decks) so field_vulnerability_tags finds archetype tags,
+        and a colorless mini-catalog so color pre-filter always passes.
+        """
+        con = TestRecommendSideboard()._build_gy_corpus()
+        field = _make_field({"Reanimator": 0.7, "Delver": 0.3})
+        mini_catalog = {
+            "Grafdigger's Cage": HoserCard(
+                name="Grafdigger's Cage",
+                attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+        }
+        pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy", catalog=mini_catalog)
+        assert pkg.solver_used == "greedy"
+        assert isinstance(pkg.cards, dict)
+        assert isinstance(pkg.trace, list)
+        con.close()
+
+
+def _compute_covered_weight_for_test(cards: dict[str, int], model: CoverageModel) -> float:
+    """Compute saturating covered weight for test assertions (mirrors the production function)."""
+    cov_counts: dict[str, int] = {}
+    for card_name, copies in cards.items():
+        for e in model.candidate_covers.get(card_name, frozenset()):
+            cov_counts[e] = cov_counts.get(e, 0) + copies
+    return sum(
+        model.element_weight.get(e, 0.0) * _g(n)
+        for e, n in cov_counts.items()
+        if e in model.element_weight
+    )

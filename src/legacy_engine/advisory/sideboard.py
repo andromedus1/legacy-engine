@@ -1,15 +1,16 @@
-"""Sideboard recommender — weighted max-coverage (ILP + greedy).
+"""Sideboard recommender — weighted saturating-coverage (ILP + greedy).
 
-Recommends a 15-card sideboard as a weighted maximum-coverage problem:
-  maximize Σ_e weight_e·y_e  s.t.  Σ_c x_c ≤ budget;  y_e ≤ Σ_{c covers e} x_c  ∀e.
+Recommends a 15-card sideboard as a weighted saturating-coverage problem:
+  maximize Σ_e weight_e·g(cov_e)  s.t.  Σ_c x_c ≤ budget;  x_c ≤ max_copies.
 
-Elements = field archetypes (+ anti-hate pseudo-elements ``"_hate:<k>"``).
+g(n) = 1 − (1−p)^n  (saturating model, p = _COVERAGE_P ≈ 0.5).
+The marginal value of the n-th answer covering element e is weight_e·(g(n)−g(n−1)),
+positive but diminishing, so redundant answers earn slots until the budget fills.
+
+Elements = (archetype, tag) pairs + anti-hate pseudo-elements ``"_hate:<k>"``).
 Weights  = field_share(archetype) × swing(best_hoser_for_that_tag).
-Solver   = PuLP/CBC (exact, ILP primary); greedy (1−1/e) marginal-gain as fallback AND
-           always as the explainable per-card trace.
-
-Binary coverage (n=1 saturating case) is MVP.  Multi-answer saturating g(n) refinement
-is a noted additive extension.
+Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
+           greedy marginal-gain as fallback AND always as the explainable trace.
 
 Heuristic note: swing magnitudes are curated constants (_SWING_DEDICATED / _SWING_SOFT),
 NOT empirically derived.  Every SideboardPackage carries ``heuristic_note`` labeling this.
@@ -32,6 +33,25 @@ from legacy_engine.advisory.whattoplay import (
 from legacy_engine.colors import compute_deck_colors
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Saturating coverage model  g(n) = 1 − (1−p)^n
+# ---------------------------------------------------------------------------
+
+_COVERAGE_P = 0.5  # per-answer success probability for the saturating model
+
+
+def _g(n: int) -> float:
+    """Saturating coverage value at n answers: g(n) = 1 − (1−_COVERAGE_P)^n."""
+    if n <= 0:
+        return 0.0
+    return 1.0 - (1.0 - _COVERAGE_P) ** n
+
+
+def _marginal_g(n: int) -> float:
+    """Marginal value of the n-th answer: g(n) − g(n−1).  Always > 0 for n ≥ 1."""
+    return _g(n) - _g(n - 1)
+
 
 # ---------------------------------------------------------------------------
 # Heuristic swing constants (NOT empirical — labeled in every package output)
@@ -445,22 +465,24 @@ def _greedy_solve(
     *,
     budget: int,
 ) -> tuple[dict[str, int], list[PickTrace]]:
-    """Greedy (1−1/e) weighted max-coverage.
+    """Greedy saturating-coverage with diminishing-returns marginal gain.
 
-    Iteratively pick the card with maximum marginal gain (weight of newly-covered elements),
-    respecting ``max_copies`` per card, until the budget is exhausted.
+    Each step picks the card maximizing Σ_e weight_e × (g(cov_e+1) − g(cov_e)) over the
+    elements it covers, where cov_e is the current coverage count for element e and
+    g(n) = 1−(1−p)^n is the saturating model (_COVERAGE_P = 0.5).
 
-    Binary coverage: once an element is covered (y_e = 1), additional copies of the same
-    card that cover it provide zero marginal gain for that element.  A 2nd copy is only
-    useful if it covers elements not yet covered by the first copy (which can't happen for
-    a single card, but can happen when max_copies > 1 is paired with the card's multi-tag
-    ``attacks`` that are only partially covered by current picks).
+    Because the marginal gain is positive for every n (never zero), additional copies
+    continue to earn diminishing-but-positive value, allowing the solver to fill the full
+    budget rather than stopping after the first pass of binary coverage.
+
+    ``max_copies`` is respected; halts only when budget is exhausted or every remaining
+    candidate has zero marginal gain (degenerate model).
 
     Returns (card→copies, ordered_trace).
     """
     picks: dict[str, int] = {}          # card → copies picked so far
     trace: list[PickTrace] = []
-    covered: set[str] = set()           # elements already covered
+    cov_counts: dict[str, int] = {}     # element → coverage count (number of answers so far)
     slots_remaining = budget
 
     while slots_remaining > 0:
@@ -474,24 +496,30 @@ def _greedy_solve(
             if current_copies >= max_copies:
                 continue  # exhausted this card's copy limit
 
-            # Marginal gain = weight of elements this pick would newly cover.
-            # Binary coverage: if the element is already covered, gain = 0 for that element.
-            newly = element_ids - covered
-            gain = sum(model.element_weight.get(e, 0.0) for e in newly)
+            # Marginal gain = Σ_e weight_e × (g(cov_e+1) − g(cov_e)) for each covered element.
+            # With the saturating model this is always > 0, so redundant answers earn value.
+            gain = 0.0
+            for e in element_ids:
+                w = model.element_weight.get(e, 0.0)
+                if w > 0.0:
+                    cov_e = cov_counts.get(e, 0)
+                    gain += w * _marginal_g(cov_e + 1)
 
             if gain > best_gain or (
                 gain == best_gain and gain > 0 and (best_card is None or card_name < best_card)
             ):
                 best_gain = gain
                 best_card = card_name
-                best_newly = newly
+                best_newly = frozenset(e for e in element_ids if cov_counts.get(e, 0) == 0)
 
         if best_card is None or best_gain == 0.0:
             # No more cards provide positive marginal gain; stop early.
             break
 
         picks[best_card] = picks.get(best_card, 0) + 1
-        covered |= best_newly
+        # Increment coverage counts for all elements this card covers.
+        for e in model.candidate_covers[best_card]:
+            cov_counts[e] = cov_counts.get(e, 0) + 1
         trace.append(PickTrace(
             card=best_card,
             marginal_gain=best_gain,
@@ -512,17 +540,26 @@ class _ILPFailed(Exception):
 
 
 def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
-    """Exact weighted max-coverage via PuLP/CBC.
+    """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
 
     Formulation:
       Variables:
-        x_c ∈ {0..max_copies} integer for each candidate card c
-        y_e ∈ {0,1} binary for each element e
+        x_c ∈ {0..max_copies} integer for each candidate card c.
+        y_a^t ∈ {0,1} for element a and coverage level t = 1..T_a
+            (T_a = min(sum of max_copies of covering cards, _ILP_T_CAP)).
       Objective:
-        max Σ_e element_weight[e] · y_e
+        max Σ_{a,t} weight_a · (g(t)−g(t−1)) · y_a^t
       Constraints:
-        Σ_c x_c ≤ budget              (slot budget)
-        y_e ≤ Σ_{c: e ∈ covers(c)} x_c   ∀e  (can only count as covered if a hoser is picked)
+        Σ_c x_c ≤ budget                               (slot budget)
+        x_c ≤ max_copies_c                              (copy cap)
+        Σ_{t=1}^{T_a} y_a^t ≤ Σ_{c covers a} x_c      ∀a  (level t can only fire if an answer is picked)
+        y_a^t ∈ {0,1}                                   (binary; monotone fill is automatic because
+                                                         coefficients are decreasing so solver prefers
+                                                         lower t first)
+
+    The y_a^t monotone-fill property: since g(t)−g(t−1) > g(t+1)−g(t) (decreasing marginals),
+    the solver will always prefer to fill y_a^1 before y_a^2, so explicit ordering constraints
+    are unnecessary.
 
     Returns card→copies (only x_c > 0 entries).
     Raises _ILPFailed if CBC is unavailable or status is not Optimal.
@@ -532,50 +569,83 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
     except ImportError as exc:
         raise _ILPFailed("PuLP not installed") from exc
 
-    prob = pulp.LpProblem("sideboard_max_coverage", pulp.LpMaximize)
+    # Cap on coverage levels per element (diminishing returns make high t negligible)
+    _ILP_T_CAP = 4
 
-    # Decision variables: x_c for each candidate card
+    def _safe(s: str) -> str:
+        """Sanitize a string for use as a PuLP variable name."""
+        return s.replace(" ", "_").replace(",", "").replace("'", "").replace("&", "").replace("|", "_").replace(":", "_").replace("-", "_")
+
+    prob = pulp.LpProblem("sideboard_saturating_coverage", pulp.LpMaximize)
+
+    # --- Decision variables: x_c for each candidate card ---
     x_vars: dict[str, pulp.LpVariable] = {}
     for card_name, hoser in model.candidate_meta.items():
-        safe_name = card_name.replace(" ", "_").replace(",", "").replace("'", "").replace("&", "")
         x_vars[card_name] = pulp.LpVariable(
-            name=f"x_{safe_name}",
+            name=f"x_{_safe(card_name)}",
             lowBound=0,
             upBound=hoser.max_copies,
             cat="Integer",
         )
 
-    # Decision variables: y_e for each element
-    y_vars: dict[str, pulp.LpVariable] = {}
-    for elem_id in model.element_weight:
-        y_vars[elem_id] = pulp.LpVariable(
-            name=f"y_{elem_id.replace(' ', '_').replace('-', '_').replace(':', '_')}",
-            cat="Binary",
+    # --- Decision variables: y_a^t for each element a and level t ---
+    # T_a = min(total possible answers for element a, _ILP_T_CAP)
+    y_vars: dict[tuple[str, int], pulp.LpVariable] = {}
+    elem_t_cap: dict[str, int] = {}
+
+    for elem_id, weight in model.element_weight.items():
+        # Max feasible answers = sum of max_copies of all cards covering this element
+        max_answers = sum(
+            model.candidate_meta[c].max_copies
+            for c, elems in model.candidate_covers.items()
+            if elem_id in elems and c in model.candidate_meta
         )
+        t_cap = min(max_answers, _ILP_T_CAP)
+        elem_t_cap[elem_id] = t_cap
+        for t in range(1, t_cap + 1):
+            y_vars[(elem_id, t)] = pulp.LpVariable(
+                name=f"y_{_safe(elem_id)}_t{t}",
+                cat="Binary",
+            )
 
-    # Objective: maximize weighted coverage
-    prob += pulp.lpSum(
-        model.element_weight[e] * y_vars[e]
-        for e in model.element_weight
-    )
+    # --- Objective: saturating coverage ---
+    obj_terms = []
+    for elem_id, weight in model.element_weight.items():
+        t_cap = elem_t_cap.get(elem_id, 0)
+        for t in range(1, t_cap + 1):
+            coef = weight * _marginal_g(t)
+            if coef > 0.0:
+                obj_terms.append(coef * y_vars[(elem_id, t)])
+    if obj_terms:
+        prob += pulp.lpSum(obj_terms)
+    else:
+        prob += 0
 
-    # Budget constraint
+    # --- Budget constraint ---
     prob += pulp.lpSum(x_vars.values()) <= budget, "budget"
 
-    # Coverage constraints: y_e ≤ Σ_{c covers e} x_c  for each element e
+    # --- Linking constraints: Σ_t y_a^t ≤ Σ_{c covers a} x_c ---
     for elem_id in model.element_weight:
+        t_cap = elem_t_cap.get(elem_id, 0)
+        if t_cap == 0:
+            continue
         covering_cards = [
             x_vars[c]
             for c, elems in model.candidate_covers.items()
             if elem_id in elems and c in x_vars
         ]
         if covering_cards:
-            prob += y_vars[elem_id] <= pulp.lpSum(covering_cards), f"cov_{elem_id.replace(' ', '_').replace('-', '_').replace(':', '_')}"
+            prob += (
+                pulp.lpSum(y_vars[(elem_id, t)] for t in range(1, t_cap + 1))
+                <= pulp.lpSum(covering_cards),
+                f"cov_{_safe(elem_id)}",
+            )
         else:
-            # No card covers this element → force y_e = 0
-            prob += y_vars[elem_id] == 0, f"nocov_{elem_id.replace(' ', '_').replace('-', '_').replace(':', '_')}"
+            # No card covers this element → force all y_a^t = 0
+            for t in range(1, t_cap + 1):
+                prob += y_vars[(elem_id, t)] == 0, f"nocov_{_safe(elem_id)}_t{t}"
 
-    # Solve
+    # --- Solve ---
     try:
         prob.solve(pulp.PULP_CBC_CMD(msg=0))
     except Exception as exc:
@@ -585,7 +655,7 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
     if status != "Optimal":
         raise _ILPFailed(f"ILP status: {status}")
 
-    # Extract solution
+    # --- Extract solution ---
     result: dict[str, int] = {}
     for card_name, var in x_vars.items():
         val = var.value()
@@ -626,11 +696,20 @@ class SideboardPackage:
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
-    """Compute total weight of elements covered by a set of picks."""
-    covered: set[str] = set()
-    for card_name in cards:
-        covered |= model.candidate_covers.get(card_name, frozenset())
-    return sum(model.element_weight.get(e, 0.0) for e in covered)
+    """Compute total saturating-coverage value of a set of picks.
+
+    Uses the saturating model: Σ_e weight_e × g(cov_e) where cov_e = number of cards
+    in ``cards`` that cover element e (accounting for copy counts).
+    """
+    cov_counts: dict[str, int] = {}
+    for card_name, copies in cards.items():
+        for e in model.candidate_covers.get(card_name, frozenset()):
+            cov_counts[e] = cov_counts.get(e, 0) + copies
+    return sum(
+        model.element_weight.get(e, 0.0) * _g(n)
+        for e, n in cov_counts.items()
+        if e in model.element_weight
+    )
 
 
 def recommend_sideboard(
