@@ -1,7 +1,7 @@
 ---
 id: improve-whattoplay-proactivity-threat-signal
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: []
@@ -137,3 +137,12 @@ The existing `data/legacy.duckdb` was created with the old 9-column DDL. `CREATE
 ### Parked items
 - `greedy-manabase` tag is still presence-based (`fast_mana_cards >= 4` OR `nonbasic_land_count >= 8`). The spec's density threshold note focused on `storm-reliant`; greedy-manabase thresholds are absolute counts (not presence-of-one), so false positives are much less likely. Left as-is.
 - The `_vulnerability_from_composition` function does not call the new `_avg_nonland_mv` helper (DB-path vs in-memory-list path differ). Could be unified in a future refactor by materializing the composition into `(Card, count)` pairs first.
+
+## Review (2026-05-30, autopilot)
+**Verdict**: Approve. Threat signal works (curated staples + general `cmc<=2 & power>=2` rule; vanilla 5-drop
+excluded); `power_int` parses "2"/"*"/None correctly; proactivity ordering fixed (Izzet Delver 0.00→0.510 >
+0.5; combo 1.0 > delver 0.51 > control 0.004); `storm-reliant` density gate kills the stray-card false
+positive; 611 green (+30, all additive). Nits (deferred, non-blocking): threat weight 1.5× (justified —
+threats do double duty); `_avg_nonland_mv` not shared from the DB-backed vulnerability path (same formula, no
+divergence); `greedy-manabase` left absolute-count. Re-seed note carried: real DB needs `seed cards` to
+backfill power/toughness columns (tests unaffected — fresh `:memory:`).
