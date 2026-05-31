@@ -1,14 +1,14 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: review
+stage: drafting
 tags: [generation]
 parent: epic-deck-generation
-depends_on: [epic-deck-generation-consensus]
+depends_on: [epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]
 release_binding: null
 gate_origin: null
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-05-31
 ---
 
 # Field-tuning (optimize a shell against the field)
@@ -250,3 +250,28 @@ Findings (verified against source):
 Consensus #1 (cross-board de-dupe undone by top-up) was a separate BLOCKER — already fixed + regression-tested.
 Export reviewed clean. `epic-deck-generation-{consensus,export}` are sound and ready to advance; this feature
 (tuning) is **held at `review` pending the #4 decision**, then #2/#3 fixed accordingly.
+
+## Rework direction (2026-05-31) — SUPERSEDES the held design above; bounced review → drafting
+
+Andrew resolved the #4 fork: **option (a) — un-defer the per-card win-rate data** (now its own feature,
+`epic-deck-generation-per-card-value`), and the sideboard becomes **maindeck-aware**
+(`epic-deck-generation-sideboard-maindeck`). This feature is re-designed on top of both.
+
+What changes vs the held implementation:
+- **The coverage objective is no longer hoser-blind.** Swap value is driven by per-card×matchup value
+  (prior+signal, confidence-tiered) from `epic-deck-generation-per-card-value` — so proactive flex cards have
+  real value and the greedy loop no longer hollows the gameplan to cram hosers. The saturating coverage model
+  stays as the data-absent fallback (degrade where per-card signal is thin), not the only signal.
+- **Sideboard step calls the reworked maindeck-aware recommender** (`epic-deck-generation-sideboard-maindeck`),
+  emitting the per-matchup OUT/IN plan for the tuned 60+15.
+- **Fix #2** (greedy path never exercised end-to-end / vacuous tests): build on the **rounds-bearing fixture**
+  from `epic-deck-generation-per-card-value` so the real greedy swap path runs in tests and the central AC
+  (weak slot vs high-share threat → swap → value rises) is asserted through the real pipeline, not vacuously.
+- **Fix #3** (legality): enforce candidate `max_copies` (e.g. Surgical=2) in `_legal_swap_maindeck`, and run a
+  **combined main+side** `validate_deck` at the end; never return a deck with `legality_errors` populated.
+- Keep the audit-trail design: swap log + before/after objective value; positioning S stays archetype-level
+  field context, explicitly labeled unchanged by card swaps.
+
+Re-run `/feature-design` (or design inline during autopilot) to refresh the Implementation Units against the
+two new dependencies, then re-implement, then re-review (clean fresh-context Claude agent — Codex out of
+credits; true cross-model pass owed before epic closure).

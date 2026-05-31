@@ -181,11 +181,81 @@ class MatchResults:
 
 
 # ---------------------------------------------------------------------------
+# Per-card win-rate record types (Unit 1 of epic-deck-generation-per-card-value)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CardMatchupRecord:
+    """Directed per-(card, board, opponent-archetype) win/loss cell.
+
+    ``n`` = wins + losses (decisive non-mirror matches only; excludes
+    byes/draws/mirrors/ambiguous/unmatched in the same way
+    ``compute_match_results`` does).  Board is ``"main"`` or ``"side"``.
+    """
+
+    card: str
+    board: str
+    opponent: str
+    wins: int = 0
+    losses: int = 0
+
+    @property
+    def n(self) -> int:
+        """Total decisive matches (wins + losses) for this cell."""
+        return self.wins + self.losses
+
+
+@dataclass
+class CardMarginalRecord:
+    """Per-(card, board) win/loss aggregate across ALL opponent archetypes.
+
+    This is the denser prior used by the two-level empirical-Bayes shrinkage
+    in ``card_value.py``.  Mirrors and byes/draws/ambiguous are excluded
+    identically to ``CardMatchupRecord`` — the marginal is strictly the
+    sum over all ``CardMatchupRecord`` cells for the same (card, board).
+    """
+
+    card: str
+    board: str
+    wins: int = 0
+    losses: int = 0
+
+    @property
+    def n(self) -> int:
+        """Total decisive matches (wins + losses) for this card."""
+        return self.wins + self.losses
+
+
+@dataclass
+class CardWinRates:
+    """Raw per-card win-rate aggregates (presence-correlational, not causal).
+
+    ``matchup``: directed per-(card, board, opponent) cells.
+    ``marginal``: per-(card, board) aggregate across all opponents — the
+    empirical-Bayes prior for the two-level shrinkage.
+    ``baseline_winrate``: global decisive win-rate across all cards/matches
+    (≈ 0.5 by construction since every match credits one win + one loss
+    globally; stored explicitly as the grand prior for the marginal shrink).
+    ``coverage``: the same resolution counters as ``compute_match_results``
+    for the same corpus + window, so callers can audit parity.
+    ``provenance``: the filter applied (``"online"``/``"paper"``/``None``).
+    """
+
+    matchup: dict[tuple[str, str, str], CardMatchupRecord]  # (card, board, opponent)
+    marginal: dict[tuple[str, str], CardMarginalRecord]     # (card, board)
+    baseline_winrate: float
+    coverage: MatchCoverage
+    provenance: str | None
+
+
+# ---------------------------------------------------------------------------
 # Unit 4: Join query + accumulator
 # ---------------------------------------------------------------------------
 
-_JOIN_SQL = """
-WITH
+# Shared CTE fragment — used by both _JOIN_SQL and _CARD_WINRATES_SQL so there is
+# exactly ONE copy of the dup/uniq_decks guard logic (SSOT; no parser divergence).
+_DUP_UNIQ_CTE = """\
 -- dup: normalized player names that occur more than once within a tournament.
 -- A LEFT JOIN hit (du1.norm IS NOT NULL) means the pairing is ambiguous —
 -- we cannot safely attribute a single deck to that player.
@@ -205,7 +275,12 @@ uniq_decks AS (
            ANY_VALUE(archetype) AS archetype
     FROM decks
     GROUP BY tournament_id, lower(trim(player))
-)
+)\
+"""
+
+_JOIN_SQL = f"""
+WITH
+{_DUP_UNIQ_CTE}
 SELECT t.provenance, r.player1, r.player2, r.result,
        d1.archetype AS arch1, d2.archetype AS arch2,
        (du1.norm IS NOT NULL) AS amb1,
@@ -318,4 +393,223 @@ def compute_match_results(
         coverage=cov,
         provenance=provenance,
         mirror_n=mirror_n,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-card win-rate query + accumulator
+# (Unit 1 of epic-deck-generation-per-card-value)
+# ---------------------------------------------------------------------------
+
+# Reuses _DUP_UNIQ_CTE verbatim (SSOT).  Returns one row per pairing with the
+# same cardinality-safe guards as _JOIN_SQL; adds tournament_id + normalized
+# player names so the Python accumulator can attribute cards without re-joining.
+_CARD_WINRATES_SQL = f"""
+WITH
+{_DUP_UNIQ_CTE}
+SELECT
+    r.tournament_id,
+    lower(trim(r.player1)) AS p1_norm,
+    lower(trim(r.player2)) AS p2_norm,
+    r.result,
+    d1.archetype AS arch1,
+    d2.archetype AS arch2,
+    (du1.norm IS NOT NULL) AS amb1,
+    (du2.norm IS NOT NULL) AS amb2
+FROM rounds r
+JOIN tournaments t ON t.id = r.tournament_id
+LEFT JOIN uniq_decks d1 ON d1.tournament_id = r.tournament_id
+                       AND d1.norm = lower(trim(r.player1))
+LEFT JOIN uniq_decks d2 ON d2.tournament_id = r.tournament_id
+                       AND d2.norm = lower(trim(r.player2))
+LEFT JOIN dup du1 ON du1.tournament_id = r.tournament_id
+                 AND du1.norm = lower(trim(r.player1))
+LEFT JOIN dup du2 ON du2.tournament_id = r.tournament_id
+                 AND du2.norm = lower(trim(r.player2))
+WHERE (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date <= ?)
+"""
+
+# Board normalization: cache stores "Mainboard"/"Sideboard" but deck_cards stores
+# "main"/"side" (store.py inserts as "main"/"side" already — this map is a safety net
+# in case a data source produces the verbose form).
+_BOARD_NORM = {"mainboard": "main", "sideboard": "side", "main": "main", "side": "side"}
+
+
+def compute_card_winrates(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> CardWinRates:
+    """Compute per-card win-rate aggregates (presence-correlational, not causal).
+
+    **Design (option 2 from epic-deck-generation-per-card-value):** two queries —
+    (a) the cardinality-safe dup/uniq_decks rounds join (shared CTE, zero parser
+    divergence) to get resolved decisive non-mirror matches; (b) a deck_cards→decks
+    map restricted to players appearing in those resolved matches.  Attribution is a
+    Python loop: each match credits a win to each card in the winner's deck vs the
+    loser's archetype, and a loss to each card in the loser's deck vs the winner's.
+
+    **Invariant**: a card in a deck contributes exactly 1 to a (card, board, opponent)
+    cell's ``n`` per resolved match — no fan-out double-count.  Verified by the
+    no-fan-out invariant test in test_card_winrates.py.
+
+    ``since``/``until`` window by ``tournaments.date`` (ISO string comparison, same
+    collation that DuckDB uses for VARCHAR date columns in this schema).
+
+    ``provenance`` filters to ``"online"``/``"paper"``; ``None`` = all.
+    """
+    cov = MatchCoverage()
+    matchup: dict[tuple[str, str, str], CardMatchupRecord] = {}
+    marginal: dict[tuple[str, str], CardMarginalRecord] = {}
+
+    # ── Step 1: Resolve decisive matches (reusing _DUP_UNIQ_CTE guards) ──────
+    rows = con.execute(
+        _CARD_WINRATES_SQL,
+        [provenance, provenance, since, since, until, until],
+    ).fetchall()
+
+    # Collect resolved (tournament_id, winner_norm, loser_norm, winner_arch, loser_arch)
+    resolved: list[tuple[str, str, str, str, str]] = []
+
+    for tid, p1_norm, p2_norm, result, arch1, arch2, amb1, amb2 in rows:
+        cov.total_pairings += 1
+
+        # ── Blank-opponent bye ───────────────────────────────────────────────
+        if not (p2_norm and p2_norm.strip()):
+            cov.dropped_byes_draws += 1
+            continue
+
+        # ── Ambiguous normalized name ────────────────────────────────────────
+        if amb1 or amb2:
+            cov.ambiguous_player_names += 1
+            continue
+
+        # ── Unmatched: at least one player has no labeled deck ───────────────
+        if arch1 is None or arch2 is None:
+            cov.unmatched += 1
+            continue
+
+        # ── Parse result; drop byes/forfeits/draws ───────────────────────────
+        outcome = parse_match_result(result)
+        if outcome is None or outcome.winner is None:
+            cov.dropped_byes_draws += 1
+            continue
+
+        # ── Mirror match ─────────────────────────────────────────────────────
+        if arch1 == arch2:
+            cov.mirror_matches += 1
+            continue
+
+        # ── Decisive non-mirror ──────────────────────────────────────────────
+        if outcome.winner == "p1":
+            winner_norm, loser_norm = p1_norm, p2_norm
+            winner_arch, loser_arch = arch1, arch2
+        else:
+            winner_norm, loser_norm = p2_norm, p1_norm
+            winner_arch, loser_arch = arch2, arch1
+
+        resolved.append((tid, winner_norm, loser_norm, winner_arch, loser_arch))
+        cov.decisive_matched += 1
+
+    if not resolved:
+        return CardWinRates(
+            matchup=matchup,
+            marginal=marginal,
+            baseline_winrate=0.5,
+            coverage=cov,
+            provenance=provenance,
+        )
+
+    # ── Step 2: Build deck_cards map restricted to resolved players ───────────
+    # Key: (tournament_id, norm_player) → list of (board, card_name)
+    # Restricting to resolved players bounds memory: we only load cards for decks
+    # that appear in at least one resolved match.
+    resolved_players: set[tuple[str, str]] = set()
+    for tid, w_norm, l_norm, _wa, _la in resolved:
+        resolved_players.add((tid, w_norm))
+        resolved_players.add((tid, l_norm))
+
+    # Fetch deck_cards joined to decks for all relevant (tournament_id, norm) pairs.
+    # board values from deck_cards are already "main"/"side" (see store.py), but we
+    # normalise defensively via _BOARD_NORM.
+    deck_cards_rows = con.execute(
+        """
+        SELECT dc.tournament_id,
+               lower(trim(d.player)) AS norm,
+               dc.board,
+               dc.name
+        FROM deck_cards dc
+        JOIN decks d ON d.tournament_id = dc.tournament_id
+                    AND d.deck_idx = dc.deck_idx
+        """
+    ).fetchall()
+
+    # deck_map[(tournament_id, norm)] = list of (board, card_name)
+    # Multiple rows for the same card (different count) are still one card presence.
+    deck_map: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    seen_card: dict[tuple[str, str, str], None] = {}  # dedup within a deck
+
+    for dc_tid, dc_norm, dc_board, dc_name in deck_cards_rows:
+        key = (dc_tid, dc_norm)
+        if key not in resolved_players:
+            continue  # skip players not in any resolved match (memory bound)
+        board = _BOARD_NORM.get(dc_board.lower() if dc_board else "", dc_board or "main")
+        dedup_key = (dc_tid, dc_norm, dc_board, dc_name)
+        if dedup_key in seen_card:
+            continue  # same card appears in multiple deck_cards rows (different count rows)
+        seen_card[dedup_key] = None
+        deck_map.setdefault(key, []).append((board, dc_name))
+
+    # ── Step 3: Attribute wins/losses per resolved match ─────────────────────
+    total_decisive = 0
+    total_wins = 0
+
+    for tid, winner_norm, loser_norm, winner_arch, loser_arch in resolved:
+        winner_cards = deck_map.get((tid, winner_norm), [])
+        loser_cards = deck_map.get((tid, loser_norm), [])
+
+        # Winner's cards vs loser's archetype
+        for board, card in winner_cards:
+            mkey = (card, board, loser_arch)
+            if mkey not in matchup:
+                matchup[mkey] = CardMatchupRecord(card=card, board=board, opponent=loser_arch)
+            matchup[mkey].wins += 1
+
+            mgkey = (card, board)
+            if mgkey not in marginal:
+                marginal[mgkey] = CardMarginalRecord(card=card, board=board)
+            marginal[mgkey].wins += 1
+
+        # Loser's cards vs winner's archetype
+        for board, card in loser_cards:
+            mkey = (card, board, winner_arch)
+            if mkey not in matchup:
+                matchup[mkey] = CardMatchupRecord(card=card, board=board, opponent=winner_arch)
+            matchup[mkey].losses += 1
+
+            mgkey = (card, board)
+            if mgkey not in marginal:
+                marginal[mgkey] = CardMarginalRecord(card=card, board=board)
+            marginal[mgkey].losses += 1
+
+        total_decisive += 1
+        total_wins += 1  # every match has exactly one winner; global win-rate ≈ 0.5
+
+    # baseline_winrate: by construction every decisive match contributes +1 win and
+    # +1 loss globally (one to winner's cards, one to loser's cards), so the grand
+    # win-rate across all card attributions is exactly 0.5.  We compute it from the
+    # resolved count to be explicit; any deviation would indicate a bug.
+    total_n = cov.decisive_matched * 2  # each match contributes to two decks
+    baseline_winrate = total_wins / total_n if total_n else 0.5
+
+    return CardWinRates(
+        matchup=matchup,
+        marginal=marginal,
+        baseline_winrate=baseline_winrate,
+        coverage=cov,
+        provenance=provenance,
     )
