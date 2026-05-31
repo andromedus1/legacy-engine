@@ -18,6 +18,10 @@ class Card(LegacyEngineModel):
     is what it taps for (Scryfall ``produced_mana``) — the two inputs the archetype
     color computation intersects. ``legalities`` is kept for reference but is NOT the
     authoritative legality source (the version-stamped ban-list blacklist is).
+
+    ``power`` and ``toughness`` are the Scryfall string fields (e.g. "2", "*", "1+*");
+    they auto-populate via ``model_validate`` when the Scryfall bulk data includes them.
+    Use ``power_int()`` to get a numeric value where meaningful.
     """
 
     name: str
@@ -30,10 +34,26 @@ class Card(LegacyEngineModel):
     layout: str = "normal"
     card_faces: list[dict] = []
     legalities: dict[str, str] = {}
+    power: str | None = None
+    toughness: str | None = None
 
     @property
     def is_land(self) -> bool:
         return "Land" in self.type_line
+
+    def power_int(self) -> int | None:
+        """Return power as an integer, or None for non-numeric values ("*", "1+*", None).
+
+        Scryfall power is a string that may contain "*", "1+*", or similar. Only
+        plain numeric strings (e.g. "2", "10") return an integer; everything else
+        returns None so callers don't need to special-case variable-power cards.
+        """
+        if self.power is None:
+            return None
+        try:
+            return int(self.power)
+        except ValueError:
+            return None
 
     @classmethod
     def from_scryfall(cls, raw: dict) -> "Card":

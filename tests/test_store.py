@@ -49,3 +49,41 @@ class TestStore:
         store.rebuild(con)
         assert con.execute("SELECT count(*) FROM cards").fetchone()[0] == 0
         con.close()
+
+    def test_power_toughness_round_trip(self):
+        """Cards with power/toughness survive a load→fetch round-trip with values intact."""
+        con = _con()
+        goyf = Card(
+            name="Tarmogoyf",
+            type_line="Creature — Lhurgoyf",
+            cmc=2.0,
+            power="*",
+            toughness="*+1",
+        )
+        goblin = Card(
+            name="Goblin Guide",
+            type_line="Creature — Goblin Scout",
+            cmc=1.0,
+            power="2",
+            toughness="2",
+        )
+        store.load_cards(con, [goyf, goblin])
+
+        row_goyf = store.fetch_card(con, "Tarmogoyf")
+        assert row_goyf["power"] == "*"
+        assert row_goyf["toughness"] == "*+1"
+
+        row_goblin = store.fetch_card(con, "Goblin Guide")
+        assert row_goblin["power"] == "2"
+        assert row_goblin["toughness"] == "2"
+
+        con.close()
+
+    def test_power_toughness_none_stored_as_null(self):
+        """Cards without power/toughness store NULL and fetch back as None."""
+        con = _con()
+        store.load_cards(con, [Card(name="Brainstorm", type_line="Instant", cmc=1.0)])
+        row = store.fetch_card(con, "Brainstorm")
+        assert row["power"] is None
+        assert row["toughness"] is None
+        con.close()

@@ -246,6 +246,128 @@ class TestCardRoles:
         )
         assert _card_roles(bs) == _card_roles(bs)
 
+    # ------------------------------------------------------------------
+    # Threat role — new signal (Unit 3)
+    # ------------------------------------------------------------------
+
+    def test_drc_has_threat_role(self):
+        """Dragon's Rage Channeler is a curated threat (even though P=1 before delirium)."""
+        drc = Card(
+            name="Dragon's Rage Channeler",
+            type_line="Creature — Human Wizard",
+            oracle_text="Delirium — Dragon's Rage Channeler has flying and +2/+0.",
+            cmc=1.0,
+            power="1",
+            toughness="1",
+        )
+        assert "threat" in _card_roles(drc)
+
+    def test_murktide_has_threat_role(self):
+        """Murktide Regent is a curated threat (P=3+ once on board, raw P is 3)."""
+        murktide = Card(
+            name="Murktide Regent",
+            type_line="Creature — Dragon",
+            oracle_text="Delve. Flying.",
+            cmc=5.0,
+            power="3",
+            toughness="3",
+        )
+        assert "threat" in _card_roles(murktide)
+
+    def test_generic_cmc2_power2_creature_has_threat(self):
+        """Any Creature with cmc ≤ 2 and power ≥ 2 gets the threat role."""
+        bear = Card(
+            name="Bear Cub",
+            type_line="Creature — Bear",
+            oracle_text="",
+            cmc=2.0,
+            power="2",
+            toughness="2",
+        )
+        assert "threat" in _card_roles(bear)
+
+    def test_generic_cmc1_power3_creature_has_threat(self):
+        """Creature at cmc=1 with power=3 (e.g. boosted by effects) gets threat role."""
+        goblin = Card(
+            name="Hyped Goblin",
+            type_line="Creature — Goblin",
+            oracle_text="",
+            cmc=1.0,
+            power="3",
+            toughness="1",
+        )
+        assert "threat" in _card_roles(goblin)
+
+    def test_vanilla_5drop_no_threat(self):
+        """A vanilla 5-drop is NOT a threat (cmc > 2)."""
+        bigcreature = Card(
+            name="Big Vanilla Beast",
+            type_line="Creature — Beast",
+            oracle_text="",
+            cmc=5.0,
+            power="5",
+            toughness="5",
+        )
+        assert "threat" not in _card_roles(bigcreature)
+
+    def test_one_power_one_drop_no_threat(self):
+        """A 1/1 for 1 is NOT a threat (power < 2)."""
+        onedrop = Card(
+            name="Tiny Scout",
+            type_line="Creature — Human Scout",
+            oracle_text="",
+            cmc=1.0,
+            power="1",
+            toughness="1",
+        )
+        assert "threat" not in _card_roles(onedrop)
+
+    def test_cmc2_power1_no_threat(self):
+        """A 1/3 for 2 is NOT a threat (power < 2, not in curated list)."""
+        wall = Card(
+            name="Wall Thing",
+            type_line="Creature — Wall",
+            oracle_text="Defender.",
+            cmc=2.0,
+            power="1",
+            toughness="3",
+        )
+        assert "threat" not in _card_roles(wall)
+
+    def test_tarmogoyf_threat_via_curated_list(self):
+        """Tarmogoyf (variable power '*') gets threat via the curated override."""
+        goyf = Card(
+            name="Tarmogoyf",
+            type_line="Creature — Lhurgoyf",
+            oracle_text="Tarmogoyf's power is equal to the number of card types.",
+            cmc=2.0,
+            power="*",
+            toughness="*+1",
+        )
+        assert "threat" in _card_roles(goyf)
+
+    def test_goblin_guide_threat_via_general_rule(self):
+        """Goblin Guide (2/2 haste for 1) gets threat via the general rule (cmc=1, power=2)."""
+        goblin_guide = Card(
+            name="Goblin Guide",
+            type_line="Creature — Goblin Scout",
+            oracle_text="Haste. Whenever Goblin Guide attacks, defending player reveals the top card of their library.",
+            cmc=1.0,
+            power="2",
+            toughness="2",
+        )
+        assert "threat" in _card_roles(goblin_guide)
+
+    def test_non_creature_spell_no_threat(self):
+        """A non-creature instant with no oracle roles doesn't get threat."""
+        giant_growth = Card(
+            name="Giant Growth",
+            type_line="Instant",
+            oracle_text="Target creature gets +3/+3 until end of turn.",
+            cmc=1.0,
+        )
+        assert "threat" not in _card_roles(giant_growth)
+
 
 # ---------------------------------------------------------------------------
 # TestProactivity
@@ -372,6 +494,64 @@ class TestProactivity:
             (_make_card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0), 16),
         ]
 
+    def _izzet_delver_cards(self) -> list[tuple[Card, int]]:
+        """Izzet Delver-style composition: DRC + Murktide + Lightning Bolt + Daze + Brainstorm.
+
+        Cards are constructed with power/toughness so the threat signal fires on DRC and Murktide
+        via the curated _THREAT_CARDS set.
+        """
+        drc = Card(
+            name="Dragon's Rage Channeler",
+            type_line="Creature — Human Wizard",
+            oracle_text="Delirium — Dragon's Rage Channeler has flying and +2/+0.",
+            cmc=1.0,
+            power="1",
+            toughness="1",
+        )
+        murktide = Card(
+            name="Murktide Regent",
+            type_line="Creature — Dragon",
+            oracle_text="Delve. Flying.",
+            cmc=5.0,
+            power="3",
+            toughness="3",
+        )
+        bolt = Card(
+            name="Lightning Bolt",
+            type_line="Instant",
+            oracle_text="Lightning Bolt deals 3 damage to any target.",
+            cmc=1.0,
+        )
+        daze = Card(
+            name="Daze",
+            type_line="Instant",
+            oracle_text=(
+                "You may return an Island you control to its owner's hand rather than pay "
+                "this spell's mana cost.\nCounter target spell unless its controller pays {1}."
+            ),
+            cmc=2.0,
+        )
+        brainstorm = Card(
+            name="Brainstorm",
+            type_line="Instant",
+            oracle_text="Draw three cards, then put two cards from your hand on top of your library.",
+            cmc=1.0,
+        )
+        island = _make_card(
+            name="Island",
+            type_line="Basic Land — Island",
+            oracle_text="{T}: Add {U}.",
+            cmc=0.0,
+        )
+        return [
+            (drc, 4),
+            (murktide, 4),
+            (bolt, 4),
+            (daze, 4),
+            (brainstorm, 4),
+            (island, 20),
+        ]
+
     def test_combo_more_proactive_than_control(self):
         storm_profile = _proactivity_from_cards(self._storm_cards())
         control_profile = _proactivity_from_cards(self._control_cards())
@@ -391,6 +571,53 @@ class TestProactivity:
         control_profile = _proactivity_from_cards(self._control_cards())
         assert tempo_profile.score > control_profile.score, (
             f"Expected tempo ({tempo_profile.score:.3f}) > control ({control_profile.score:.3f})"
+        )
+
+    def test_izzet_delver_score_above_half(self):
+        """An Izzet Delver-style composition (DRC + Murktide + bolt + cantrips) scores > 0.5.
+
+        Root-cause fix: before this change, efficient creature threats carried no proactive
+        role and the composition scored 0.0. The threat signal + 1.5× weighting should
+        push a 4×DRC + 4×Murktide deck above 0.5.
+        """
+        profile = _proactivity_from_cards(self._izzet_delver_cards())
+        assert profile.score > 0.5, (
+            f"Izzet Delver should score >0.5 proactivity but got {profile.score:.3f}; "
+            "check threat role detection and 1.5× weight in _proactivity_from_cards"
+        )
+
+    def test_izzet_delver_above_control(self):
+        """Izzet Delver (creature tempo) scores higher than control."""
+        delver_profile = _proactivity_from_cards(self._izzet_delver_cards())
+        control_profile = _proactivity_from_cards(self._control_cards())
+        assert delver_profile.score > control_profile.score, (
+            f"Expected Izzet Delver ({delver_profile.score:.3f}) > control ({control_profile.score:.3f})"
+        )
+
+    def test_combo_above_izzet_delver(self):
+        """Combo (rituals + tutors) scores higher than Izzet Delver tempo."""
+        storm_profile = _proactivity_from_cards(self._storm_cards())
+        delver_profile = _proactivity_from_cards(self._izzet_delver_cards())
+        assert storm_profile.score > delver_profile.score, (
+            f"Expected combo ({storm_profile.score:.3f}) > Izzet Delver ({delver_profile.score:.3f})"
+        )
+
+    def test_proactivity_full_ordering_combo_gt_tempo_gt_control(self):
+        """Overall ordering assertion: combo > Izzet Delver (tempo) > control."""
+        storm_profile = _proactivity_from_cards(self._storm_cards())
+        delver_profile = _proactivity_from_cards(self._izzet_delver_cards())
+        control_profile = _proactivity_from_cards(self._control_cards())
+        assert storm_profile.score > delver_profile.score > control_profile.score, (
+            f"Expected combo({storm_profile.score:.3f}) > "
+            f"tempo({delver_profile.score:.3f}) > "
+            f"control({control_profile.score:.3f})"
+        )
+
+    def test_control_score_below_0_4(self):
+        """Control composition stays below 0.4 proactivity."""
+        profile = _proactivity_from_cards(self._control_cards())
+        assert profile.score < 0.4, (
+            f"Control should score < 0.4 but got {profile.score:.3f}"
         )
 
     def test_both_zero_composition_returns_half(self):
@@ -634,6 +861,84 @@ class TestVulnerabilityTags:
         con = _con()
         tags = vulnerability_tags(con, "NonExistentArchetype")
         assert tags == frozenset()
+        con.close()
+
+    def _build_mostly_control_with_stray_storm(self) -> tuple:
+        """Build a control deck corpus with exactly ONE stray storm card in the aggregate.
+
+        This tests the density gate: a single Tendrils in a 16-card aggregate (6.25%
+        of nonland slots) must NOT trigger storm-reliant if it falls below the
+        _STORM_DENSITY threshold. With STORM_DENSITY=0.08 and 1/13 nonland ≈ 7.7%, this
+        is just under the threshold for this particular composition.
+        """
+        con = _con()
+        cards = [
+            Card(
+                name="Force of Will",
+                type_line="Instant",
+                oracle_text="You may pay 1 life and exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target spell.",
+                cmc=5.0,
+            ),
+            Card(
+                name="Counterspell",
+                type_line="Instant",
+                oracle_text="Counter target spell.",
+                cmc=2.0,
+            ),
+            Card(
+                name="Brainstorm",
+                type_line="Instant",
+                oracle_text="Draw three cards, then put two cards from your hand on top of your library.",
+                cmc=1.0,
+            ),
+            Card(
+                name="Tendrils of Agony",
+                type_line="Sorcery",
+                oracle_text="Target player loses 2 life and you gain 2 life.\nStorm.",
+                cmc=4.0,
+            ),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        import uuid
+
+        tid = str(uuid.uuid4())
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
+        )
+        # One deck with 4×FoW, 4×Counterspell, 4×Brainstorm, 1×Tendrils (stray), 12×Island
+        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?)", [tid, 0, "p0", "1st", "Izzet Control"])
+        for name, count in [
+            ("Force of Will", 4),
+            ("Counterspell", 4),
+            ("Brainstorm", 4),
+            ("Tendrils of Agony", 1),
+            ("Island", 12),
+        ]:
+            con.execute(
+                "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                [tid, 0, "main", name, count],
+            )
+        return con
+
+    def test_stray_storm_card_does_not_trigger_storm_reliant(self):
+        """A single stray storm card in an otherwise non-storm deck does NOT get storm-reliant.
+
+        Presence-based check would falsely fire; density gate prevents it.
+        """
+        con = self._build_mostly_control_with_stray_storm()
+        tags = vulnerability_tags(con, "Izzet Control")
+        assert "storm-reliant" not in tags, (
+            f"A single stray storm card should not trigger storm-reliant; got tags={tags}"
+        )
+        con.close()
+
+    def test_real_storm_deck_has_storm_reliant(self):
+        """A real storm deck (4x Tendrils in a 26-card non-land shell) IS storm-reliant."""
+        con = self._build_storm_corpus()
+        tags = vulnerability_tags(con, "ANT Storm")
+        assert "storm-reliant" in tags, f"Expected storm-reliant in {tags}"
         con.close()
 
     def test_vulnerability_tags_for_deck_direct(self):
