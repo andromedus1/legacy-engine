@@ -21,8 +21,8 @@ All four draw from the same data layers; they answer different questions.
    archetype trends across banned-list regimes, online-vs-paper splits.
 2. **Deck Mechanics** *(planned)* — how a deck functions internally: goldfish speed, consistency,
    London-mulligan modeling, and a format meta-speed distribution.
-3. **Deck Generation** *(planned)* — finding under-explored shells and tuning builds against the
-   current or projected meta.
+3. **Deck Generation** — consensus baseline + field-tuning (mode 2) + export built; gap-discovery
+   (mode 3) and goldfish-validated candidate-validation are deferred pending the `goldfish/` pillar.
 4. **Meta Attack / Advisory** *(the Legacy-specific differentiator)* — *how to attack the field*: a
    meta-positioning score (expected win rate vs the weighted field), a sideboard recommender, and a
    what-to-play advisor (proactive/reactive, best-deck vs best-call).
@@ -48,7 +48,12 @@ MVP — the **observed-data spine, meta analytics, and the advisory differentiat
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate) | ✅ built |
 | What-to-play (proactivity, vulnerability tags, hate-equity, best-deck/best-call) | ✅ built |
 | Field Read & Deck Recommendation report (the `advise` surface) | ✅ built |
-| Goldfish simulation, deck generation | 📋 deferred pillars |
+| Per-card win-rate analytics (`report cards`) | ✅ built |
+| Consensus baseline decklist (`generate consensus`) | ✅ built |
+| Field-tuned decklist (`generate tune`) | ✅ built |
+| Decklist export (`export deck`) | ✅ built |
+| Goldfish simulation | 📋 deferred pillar |
+| Deck generation gap-discovery (mode 3) + goldfish-validated candidate-validation | 📋 deferred (needs goldfish/) |
 
 ## Architecture in one breath
 
@@ -97,12 +102,22 @@ legacy-engine report tiers      # S/A/B tier list over meta-share
 legacy-engine report trends     # meta-share evolution across ban-list regimes
 # any report command takes --chart-dir DIR to also emit matplotlib PNGs
 
+# Per-card win-rate report
+legacy-engine report cards                       # per-card presence-correlational win-rate (vs field)
+
 # Meta attack / advisory — "how to attack the field"
 legacy-engine advise positioning --deck my.txt   # expected WR vs the weighted field (P(best) ranking)
 legacy-engine advise sideboard   --deck my.txt   # recommended 15-card sideboard (ILP + greedy "why")
 legacy-engine advise whattoplay  --deck my.txt   # proactivity, vulnerability tags, best-deck/best-call
 legacy-engine advise report      --deck my.txt   # the full Field Read & Deck Recommendation + audit trail
 # advise commands take --field FILE (a custom "<share> <archetype>" field) and --db
+
+# Deck generation
+legacy-engine generate consensus --archetype "Dimir Tempo"  # consensus baseline decklist (mode 1)
+legacy-engine generate tune      --archetype "Dimir Tempo" --deck my.txt  # field-tuned list (mode 2)
+
+# Decklist export
+legacy-engine export deck --deck my.txt          # format for Moxfield / Archidekt / MTGGoldfish import
 ```
 
 Each leaf takes `-v/--verbose`; `report` commands take `--provenance [online|paper|all]`, `--chart-dir`,
@@ -131,8 +146,9 @@ This project is built with a research-grounded, substrate-driven workflow:
 src/legacy_engine/
   ingestion/   # Scryfall, fbettega cache, MTGOFormatData rules, banlist, DuckDB store
   archetype/   # rules loader, matcher (ported Detect), colors, labeler
-  analytics/   # match_results, matchup, metashare, trends, charts
+  analytics/   # match_results, matchup, metashare, trends, charts, card_value
   advisory/    # field, positioning, sideboard, whattoplay, report
+  generation/  # consensus, export, tuning (modes 1+2; gap-discovery deferred)
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, ...)
   cli.py · config.py · confidence.py
 docs/          # vision, spec, architecture, principles, briefs, knowledge index

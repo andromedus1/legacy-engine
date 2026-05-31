@@ -12,11 +12,11 @@ decisions:
   - "Four analytical pillars — Meta & Performance, Deck Mechanics (goldfish), Deck Generation, and Meta Attack/Advisory (the Legacy-specific differentiator: matchup positioning, sideboard recommender, what-to-play)."
   - "Sibling-of-edh-engine: reuse its 3-data-layer → pillar architecture, deck-as-data model, goldfish/mana/mulligan engines wherever the domain overlaps; diverge only where Legacy demands it."
   - "Key architectural delta: an explicit archetype-parser layer (no commander to key on) — labels decklists into the community taxonomy."
-  - "MVP arc = ingestion + meta analytics + advisory shipped together; goldfish simulation and deck generation come in later pillars."
+  - "MVP arc = ingestion + meta analytics + advisory + deck generation (consensus baseline, field-tuning mode 2, export) shipped together; goldfish simulation and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation come in later pillars."
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-31
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
