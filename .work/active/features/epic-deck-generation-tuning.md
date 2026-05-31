@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: drafting
+stage: implementing
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]
@@ -275,3 +275,148 @@ What changes vs the held implementation:
 Re-run `/feature-design` (or design inline during autopilot) to refresh the Implementation Units against the
 two new dependencies, then re-implement, then re-review (clean fresh-context Claude agent — Codex out of
 credits; true cross-model pass owed before epic closure).
+
+## Rework design (2026-05-31) — SUPERSEDES the original "## Implementation Units" above (those are history)
+
+Dependencies `epic-deck-generation-per-card-value` + `epic-deck-generation-sideboard-maindeck` are DONE.
+
+### Architectural choice
+**Phase 5a — options for the swap objective:**
+1. **Blended per-opponent objective** (per-card lift where data clears the gate, coverage where thin, per
+   opponent). Rejected: the coverage portion still drives maindeck cuts of proactive flex for hosers on thin
+   opponents — reintroduces the gameplan-hollowing BLOCKER for the thin-opponent fraction.
+2. **Per-card-value is the SOLE maindeck-swap driver; coverage is NOT a maindeck driver (CHOSEN).** The greedy
+   loop swaps maindeck flex purely by field-weighted per-card matchup lift (gated by tier). Coverage stays
+   where it belongs — the SIDEBOARD's objective (via the reworked `recommend_sideboard`) — plus an audit
+   metric we still report. When there is NO gate-clearing per-card signal for the field, the tuner makes **no
+   maindeck swaps** (keeps the consensus maindeck) and only re-runs the sideboard. This *fully* prevents
+   hollowing (coverage can never cut a proactive maindeck card) and is the honest reading of the locked
+   "coverage = data-absent fallback": absent data → don't tune the maindeck, don't fabricate an edge.
+3. Keep the old coverage objective for maindeck swaps. Rejected — it IS the hollowing BLOCKER (#4).
+
+**Chosen: option 2.** Deviation from the literal "coverage as fallback OBJECTIVE": coverage does not drive
+maindeck swaps (doing so is what hollowed the gameplan). Coverage remains the sideboard objective + a reported
+audit metric; the maindeck-swap fallback is "no swaps." Documented here as the resolution of the #4 root cause.
+
+**Key structural refactor (enables testing — fixes #2):** split the heavy, data-dependent **value
+computation** from the pure, deterministic **greedy search**. `compute_card_winrates` is the ~5-6M-iteration
+heavy path — it runs ONCE; the greedy loop then operates on a precomputed `dict[card -> field-weighted value]`
+so each evaluation is O(1), and the greedy unit is testable with a hand-built value lookup (the non-vacuous
+guarantee — the same fix applied to the sideboard feature's planner).
+
+**5b — trickiest: the pure greedy tuner + combined legality (Units 2+3).** Designed first.
+
+### Implementation Units
+
+#### Unit 1: Field-weighted per-card value — `generation/tuning.py`
+```python
+def field_weighted_values(con, field, cards: list[str], *, since=None, until=None,
+                          gate=("evolving","established")) -> dict[str, float]:
+    # rates = compute_card_winrates(con, since, until)  # ONCE (heavy path; window defaults to latest regime)
+    # fwv[card] = Σ_opp field.shares[opp] * card_values_vs(rates, cards, "main", opp)[card].lift
+    #             summed only over (card,opp) cells whose tier in `gate`; else contributes 0.
+    # Returns {card -> field-weighted matchup lift}. Cards with no gate-clearing cell anywhere -> 0.0.
+def has_value_signal(fwv: dict[str, float]) -> bool:
+    # True iff any |fwv[card]| > 0 — i.e. the field has actionable per-card data.
+```
+**Notes**: reuses `card_values_vs`/`compute_card_winrates` — no re-derivation. `cards` = maindeck ∪ candidate
+pool (value every card the greedy loop might touch). Window default = `_latest_regime_window()`.
+**AC**: a card with proven positive lift vs high-share opponents gets a high fwv; a card dead vs the field gets
+a low/negative fwv; a card with only speculative cells gets 0.0.
+
+#### Unit 2: Pure greedy tuner (trickiest) — `generation/tuning.py`
+```python
+def _greedy_tune(fwv: dict[str, float], maindeck: dict[str,int], locked: dict[str,int],
+                 flex: dict[str,int], pool: list[str], *, max_swaps: int,
+                 legal_swap) -> tuple[dict[str,int], list[tuple[str,str]], float, float]:
+    # value(cards) = Σ copies * fwv.get(card, 0.0).
+    # each round: among legal (cut in flex with current copy>0, add in pool, add != cut, add not locked-in-deck)
+    #   pick the swap maximizing (fwv[add] - fwv[cut]); accept iff > 0 (strict); apply; update flex; record.
+    #   stop at convergence or max_swaps. legal_swap(current, cut, add) -> (ok, new_main) is INJECTED.
+    # returns (final_main, swaps, value_before, value_after).
+```
+**Notes**: locked core never cut (not in `flex`). Deterministic tie-break by (cut, add) name. Pure except for
+the injected `legal_swap` — tests pass a hand-built `fwv` + a trivial legal_swap to exercise a real swap
+**without any DB** (kills the vacuous-test problem at the unit level).
+**AC**: given an fwv where a flex card scores low and a pool card scores high, exactly that swap is made and
+`value_after > value_before`; locked core never appears in `swaps`; no strictly-improving swap left at stop.
+
+#### Unit 3: Combined-legality swap + final guarantee — `generation/tuning.py`
+```python
+def _legal_swap_maindeck(current, cut, add, sideboard, *, banlist_snapshot) -> tuple[bool, dict[str,int]]:
+    # FIX #3: validate COMBINED main+side (pass `sideboard`, not {}), enforce 4-copy + COPY_LIMIT_OVERRIDES +
+    # UNLIMITED/BASIC exemptions, exactly-60. Reject swaps that violate combined legality.
+```
+**Notes**: the maindeck candidate pool is the archetype's observed *maindeck* cards, bound by the 4-copy rule
+(+ overrides) — the correct maindeck constraint. (Catalog `max_copies` like Surgical=2 is a SIDEBOARD rule,
+enforced inside the reworked `recommend_sideboard`; it does not apply to maindeck staples.) `tune_deck` runs a
+**blocking** final combined `validate_deck(final_main, recommended_sb, snapshot)`; **the returned TunedDeck
+must have `legality_errors == []`** — if the final check somehow fails, revert that swap / trim the offending
+copies and re-validate, never return populated errors.
+**AC**: every accepted swap keeps combined main+side legal; a returned `TunedDeck` always has
+`legality_errors == []`; a candidate that would exceed 4 copies (combined) is rejected.
+
+#### Unit 4: TunedDeck + tune_deck rewire — `generation/tuning.py`
+```python
+@dataclass
+class TunedDeck:
+    archetype: str; maindeck: dict[str,int]; sideboard: dict[str,int]
+    swaps: list[tuple[str,str]]
+    value_before: float; value_after: float          # NEW: per-card field-weighted value (the real objective)
+    coverage_before: float; coverage_after: float     # audit context (coverage of final main; NOT the driver)
+    positioning_s: float | None                        # archetype context; unchanged by swaps (labeled)
+    matchup_plans: dict                                # NEW: from recommend_sideboard (per-matchup OUT/IN)
+    objective: str                                     # "per-card-value" | "no-signal-skip"
+    fell_back: bool; reason: str                       # fell_back=True ⇔ no per-card signal ⇒ no maindeck swaps
+    legality_errors: list[str]                         # ALWAYS [] on return (Unit 3)
+```
+`tune_deck` orchestration: resolve window/field → `pool=candidate_pool`, `(locked,flex)=partition_flex` →
+`fwv=field_weighted_values(con, field, maindeck∪pool, ...)` → if `has_value_signal(fwv)`: run `_greedy_tune`
+(objective="per-card-value"); else: no swaps, `fell_back=True`, objective="no-signal-skip", reason explains
+thin per-card data → rely on consensus main. Always: `recommend_sideboard(con, field, final_main,
+solver="greedy", archetype=archetype, since=eff_since, until=eff_until)` (NEW kwargs → per-matchup plans);
+carry `matchup_plans`. Compute `coverage_before/after` via the existing `coverage_value` (audit only) and
+positioning S context. Final combined legality (Unit 3).
+**AC**: signal present → maindeck swaps raise `value_after`; no signal → `fell_back=True`, maindeck == consensus,
+sideboard still built with `matchup_plans`; `legality_errors==[]`; positioning_s carried as context.
+
+#### Unit 5: `generate tune` CLI render — `cli.py`
+**Notes**: print value before/after (the objective), the swap log, the per-matchup OUT/IN plans from
+`matchup_plans` (degraded note where thin), positioning-S context (labeled "unchanged by card swaps"), and the
+fallback note + the presence-correlational disclaimer. Keep `--export`.
+**AC**: `generate tune --deck shell.txt --archetype X` on a rounds-bearing DB prints swaps + value rise + plans;
+on a thin DB prints the no-signal note and an unchanged maindeck.
+
+### Implementation Order
+1. Unit 1 (value) + Unit 2 (greedy) together — the objective/search split.
+2. Unit 3 (combined legality).
+3. Unit 4 (TunedDeck + tune_deck rewire).
+4. Unit 5 (CLI render).
+5. Tests (below) — co-developed; the hand-built-fwv greedy test lands with Unit 2.
+
+### Testing (FIXES #2 — no vacuous passes)
+- `tests/test_generation_tuning.py` (REWORK — old vacuous/`>=` assertions replaced):
+  - **Unit-level (no DB):** `_greedy_tune` with a hand-built `fwv` + trivial `legal_swap` → asserts the real
+    swap happens, `value_after > value_before` (strict), locked core untouched, converges. THE non-vacuous
+    guarantee for the central AC.
+  - **Integration on `make_rounds_corpus`:** a maindeck with a dead-vs-field flex card + a pool card with
+    proven lift → `tune_deck` actually swaps it through the REAL pipeline; assert `value_after > value_before`,
+    `swaps` non-empty, `legality_errors == []`, sideboard `matchup_plans` populated.
+  - **No-signal fallback:** rounds-less / thin corpus → `fell_back=True`, `objective="no-signal-skip"`,
+    maindeck unchanged, sideboard still built.
+  - **Combined legality:** a returned `TunedDeck` always has `legality_errors == []`; a swap that would exceed
+    4 combined copies is rejected.
+- `tests/test_cli.py` (extend) — `generate tune` happy path (swaps + value + plans) + thin-corpus no-signal note.
+- **Regression**: `test_sideboard.py`, `test_card_value.py`, `test_card_winrates.py`, `test_advise_report.py`
+  stay green (tuning consumes them; doesn't change them).
+
+### Risks
+- **Own-test rework churn**: this feature's existing tests encode the OLD coverage objective + old fell_back
+  semantics; they're rewritten, not preserved (the held impl's greedy tests were vacuous). Other modules'
+  tests must stay green. **Mitigation**: the objective/search split makes the new tests deterministic.
+- **Perf**: `compute_card_winrates` runs once (heavy) then greedy is O(1)/eval. **Fallback**: cache rates on
+  the connection if a caller tunes many decks (not needed for single-deck CLI).
+- **No-signal is common on sparse fields** (most per-card×matchup cells speculative): then tuning makes no
+  maindeck swaps and says so. **This is correct/honest**, not a failure — surfaced via `fell_back`/`reason`.
+- **Combined-legality reversion**: if the final check fails, revert the last swap / trim and re-validate.
+  **Fallback**: worst case return the consensus main + recommended side (always legal).
