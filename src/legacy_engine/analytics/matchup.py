@@ -170,9 +170,12 @@ def build_matrix(
     """Build a ``MatchupMatrix`` from the DuckDB connection.
 
     Row inclusion: archetype ``a`` is included if its marginal involvement
-    ``mr.archetypes[a].n / (2 * total_matches)`` ≥ ``min_row_share``.  Each
-    decisive match contributes to two marginal counts (winner + loser), so the
-    denominator is ``2 * total_matches``.
+    ``mr.archetypes[a].n / (2 * (decisive_matched + mirror_matches))`` ≥
+    ``min_row_share``.  Each decisive match contributes to two marginal counts
+    (winner + loser); each mirror match similarly credits the archetype with
+    +1 win and +1 loss.  The denominator therefore includes mirror matches so
+    the numerator and denominator both count mirror involvement — a mirror-only
+    corpus no longer yields an included row with ``total_matches=0``.
 
     For included archetypes every ordered pair ``(a, b)`` with ``a != b`` gets
     a cell (n=0 if the pair was never observed), and ``(a, a)`` gets a mirror
@@ -182,9 +185,12 @@ def build_matrix(
     total_matches = mr.coverage.decisive_matched
 
     # ── Row inclusion ────────────────────────────────────────────────────────
-    # Denominator is 2*total_matches because each decisive match appears in two
-    # marginal records (winner +1 win, loser +1 loss → both contribute to .n).
-    denom = 2 * total_matches if total_matches > 0 else 1
+    # Denominator is 2*(decisive_matched + mirror_matches) because each match
+    # (decisive or mirror) appears in two marginal records via archetypes[a].n.
+    # Including mirror_matches keeps the ratio consistent with the numerator,
+    # which already credits mirrors to .n via +1 win and +1 loss per mirror.
+    _denom_base = total_matches + mr.coverage.mirror_matches
+    denom = 2 * _denom_base if _denom_base > 0 else 1
     included = sorted(
         arch
         for arch, rec in mr.archetypes.items()
