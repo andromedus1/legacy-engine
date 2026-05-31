@@ -1,7 +1,7 @@
 ---
 id: fix-analytics-peer-review-findings
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, bug]
 parent: null
 depends_on: []
@@ -279,6 +279,18 @@ denom = 2 * (total_matches + mr.coverage.mirror_matches) if (total_matches + mr.
 - **Shared models in same file**: `MatchCoverage` (Unit 1) and `MetaShareReport` (Unit 2) live in their
   respective analytics modules — disjoint, so the three stories never edit the same file. Orchestrator can
   run them in parallel.
+
+## Implementation run summary
+All 3 child stories implemented and at `stage: review` (2026-05-30, autopilot wave). Full suite green.
+- **data-integrity** (#1 rounds, #7): cardinality-safe `_JOIN_SQL` via `dup` + `uniq_decks` CTEs (the
+  worker added `uniq_decks` to also collapse the fan-out, not just flag it — sound improvement on the
+  sketch); new `MatchCoverage.ambiguous_player_names`; blank-opponent byes classified before unmatched; +12 tests.
+- **metashare** (#1 topcut, #3,4,5,6): topcut dup-exclusion + `_topcut_unlabeled`; `_assemble` non-grouped
+  path honors `display_total`; `_wrw_weights` now 3-tuple surfacing `MetaShareReport.excluded_no_match_data`;
+  `blend_shares` keeps "Other" + zero-weight `ValueError` guard; +13 tests (4 stale 2-tuple unpacks fixed).
+- **matchup-trends** (#2,8): row-inclusion denominator `2*(decisive_matched + mirror_matches)`; top-cut
+  trends skip regimes with `report.total_decks == 0`; +6 tests.
+Verification: full `pytest` 745 passed. No cross-story integration issues.
 
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79f6), effort xhigh, in-repo; ran the analytics test subset
