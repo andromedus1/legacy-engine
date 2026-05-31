@@ -61,6 +61,39 @@ date windowing (incl. full timestamps), chart low-n masking + empty-input handli
 1 (cardinality) and 2 (mirror inclusion) first — they affect the matchup data's accuracy. Route concrete
 bugs (1,2,3,4,6,7) through `/agile-workflow:fix` with regression tests; 5 + 8 are coverage/edge refinements.
 
+## Design decisions
+Captured via `/feature-design --only-questions` (interactive, 2026-05-30). Fixed inputs for the full design +
+implement pass — autopilot inherits them and should not re-decide.
+
+- **Finding #1 (cardinality-safe join) → Skip the confusing ones.** Join rounds↔decks only where the
+  normalized player name (`lower(trim(...))`) is **unique within the tournament**: build a per-tournament
+  unique-normalized-player CTE and join through it; pairings whose name is ambiguous drop out of the matchup
+  data and are counted in coverage (e.g. `ambiguous_player_names` / surfaced count). No mis-attribution; n's
+  fall slightly where collisions occur (~13% of events). Apply the **same fix to the top-cut player join**.
+- **Finding #2 (mirror row inclusion) → Count mirrors on both sides.** Make the inclusion denominator
+  `2 * (decisive_matched + mirror_matches)` so the numerator (which already includes each archetype's mirror
+  credits in `.n`) and the denominator both count mirror involvement. Aligns with the existing design that
+  credits mirrors to `.n` for honest marginal win-rate. Mirror-only corpus no longer yields an included row
+  with `total_matches=0`.
+- **Finding #3 (top-cut NULL-archetype) → fold in (no fork).** Add a top-cut-specific unlabeled count over
+  the same standings/rank/window join, instead of forcing `unlabeled=0` (`metashare.py:359`).
+- **Finding #4 (`_assemble` ignores `display_total`) → fold in (no fork).** Honor `display_total` in the
+  `group_other=False` return path (`metashare.py:259`).
+- **Finding #5 (WRW drops zero-match archetypes silently) → fold in.** Surface the excluded share as
+  coverage metadata (`excluded_no_match_data`) consistent with the bimodal-coverage contract, rather than
+  only a debug log (`metashare.py:149`).
+- **Finding #6 (`blend_shares`) → Keep 'Other' in the mix.** Preserve the 'Other' bucket in the share vector
+  and renormalize including it, so named shares aren't inflated (`metashare.py:459`). **Also** guard
+  weight-sum `> 0` to fix the divide-by-zero (`metashare.py:451`). Caller contract unchanged.
+- **Finding #7 (byes miscategorized) → fold in (no fork).** Classify blank-opponent byes
+  (`player2="", result="2-0"`) as `dropped_byes_draws` before the join-failure/unmatched coverage branch
+  (`match_results.py:224`). Follows [[fix-roundmatch-null-player2]].
+- **Finding #8 (top-cut trends zero-denominator) → fold in (no fork).** For topcut trends, skip regimes whose
+  report `total_decks == 0` (`trends.py:213`).
+- **Scope → All 8 findings, split into child stories.** Group as **data-integrity** (1), **correctness/contract**
+  (2-7), **nit** (8), with `depends_on` only where real. Trickiest unit = **#1** (unique-player CTE + threading
+  it through both the rounds join and the top-cut join) — design it first in the full pass.
+
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79f6), effort xhigh, in-repo; ran the analytics test subset
 (219 passed). Companion: [[fix-spine-peer-review-findings]], [[fix-advisory-peer-review-bugs]].
