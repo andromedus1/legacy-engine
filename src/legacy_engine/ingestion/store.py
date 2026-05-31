@@ -81,48 +81,97 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
         con.execute(ddl)
 
 
+# Multi-face layout classes — determine how a face name inherits attributes.
+#   FRONT-cast (you cast the front; the back is reached by transform/flip in play, never paid for):
+#     a face row gets THAT face's own colors (you commit only to the front's colors to cast it).
+#   BOTH-castable (you may cast either face from hand, or both): color identity = UNION of faces, and
+#     the card is land-capable if ANY face is a land (modal-DFC lands are run as flex lands).
+_FRONT_CAST_LAYOUTS = frozenset({"transform", "flip", "meld"})
+_BOTH_CASTABLE_LAYOUTS = frozenset({"modal_dfc", "split", "adventure", "aftermath"})
+# Non-gameplay objects (art cards, tokens, emblems, etc.). Their faces must NOT generate
+# face aliases — an "art_series" card shares the real card's face name and would otherwise
+# shadow the genuine front face (e.g. the Tamiyo, Inquisitive Student art card colliding with
+# the real transform card).
+_NON_GAMEPLAY_LAYOUTS = frozenset(
+    {"art_series", "token", "double_faced_token", "emblem", "planar", "scheme", "vanguard"}
+)
+
+
+def _union_colors(c: Card) -> list[str]:
+    """Color identity = union of the combined card's colors and every face's colors."""
+    s = set(c.colors)
+    for f in c.card_faces:
+        s.update(f.get("colors") or [])
+    return sorted(s)
+
+
 def load_cards(con: duckdb.DuckDBPyConnection, cards: Iterable[Card]) -> int:
     """Insert/replace cards into the cards table. Idempotent on ``name``. Returns the count of cards loaded.
 
-    Multi-face cards (transform DFC / adventure / split / MDFC) carry a combined ``A // B`` name in the
-    Scryfall oracle pool, but decklists reference a single face (e.g. ``Brazen Borrower``,
-    ``Tamiyo, Inquisitive Student``). To make those lookups resolve, each face name is ALSO inserted as an
-    alias row mapped to the combined card's attributes — parity with the in-memory
-    ``scryfall.load_card_index``. Alias rows use INSERT OR IGNORE (after the full-name rows), so a genuine
-    standalone card that happens to share a face name is never clobbered.
+    Multi-face cards (transform DFC / flip / adventure / split / modal-DFC) carry a combined ``A // B`` name
+    in the Scryfall oracle pool, but decklists reference a single face (``Brazen Borrower``,
+    ``Tamiyo, Inquisitive Student``). Each face name is ALSO inserted as an alias row, **layout-aware** so the
+    front face you actually cast carries the right attributes rather than a blended blob:
+
+    - **type_line / cmc / mana_cost / power / toughness**: the FACE's own values (the front face is what you
+      cast; for adventure, the creature face is the permanent).
+    - **colors**: front-cast layouts (transform/flip/meld) use the face's own colors (you only pay the front to
+      cast it; the back is reached in play). Both-castable layouts (modal-DFC/split/adventure/aftermath) use
+      the UNION color identity (either/both faces are castable, so the deck commits to all their colors).
+    - **is_land**: the face's own land-ness, EXCEPT both-castable cards are land-capable if ANY face is a land
+      (a modal-DFC land counts toward the mana base under its front-face name).
+
+    The combined ``A // B`` row also gets the union color identity (so it is never empty-colored). Alias rows
+    use INSERT OR IGNORE after the full-name rows, so a genuine standalone card sharing a face name always wins.
     """
     init_schema(con)
     cards = list(cards)
     _COLS = (
         "(name, mana_cost, cmc, type_line, colors, produced_mana, oracle_text, layout, is_land, power, toughness)"
     )
+    _VALUES = "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
-    def _row(name: str, c: Card) -> tuple:
-        return (
-            name, c.mana_cost, c.cmc, c.type_line, "".join(c.colors), "".join(c.produced_mana),
-            c.oracle_text, c.layout, c.is_land, c.power, c.toughness,
-        )
+    def _tuple(name, mana_cost, cmc, type_line, colors, produced, oracle, layout, is_land, power, tough):
+        return (name, mana_cost, cmc, type_line, "".join(colors), "".join(produced),
+                oracle, layout, is_land, power, tough)
 
-    rows = [_row(c.name, c) for c in cards]
-    if rows:
-        con.executemany(
-            f"INSERT OR REPLACE INTO cards {_COLS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows,
-        )
-
-    # Face aliases: insert AFTER the full-name rows so real cards are never overwritten (IGNORE).
-    alias_rows = [
-        _row(face.strip(), c)
+    # Full-name rows: combined card keeps its attrs but gets the UNION color identity (fixes the
+    # empty-colors-on-DFC case where Scryfall's top-level `colors` is absent for multi-face cards).
+    full_rows = [
+        _tuple(c.name, c.mana_cost, c.cmc, c.type_line,
+               _union_colors(c) if c.card_faces else c.colors,
+               c.produced_mana, c.oracle_text, c.layout, c.is_land, c.power, c.toughness)
         for c in cards
-        if " // " in c.name
-        for face in c.name.split(" // ")
-        if face.strip() and face.strip() != c.name
     ]
-    if alias_rows:
-        con.executemany(
-            f"INSERT OR IGNORE INTO cards {_COLS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", alias_rows,
-        )
+    if full_rows:
+        con.executemany(f"INSERT OR REPLACE INTO cards {_COLS} {_VALUES}", full_rows)
 
-    return len(rows)
+    # Layout-aware face-alias rows.
+    alias_rows: list[tuple] = []
+    for c in cards:
+        if " // " not in c.name or not c.card_faces or c.layout in _NON_GAMEPLAY_LAYOUTS:
+            continue
+        both_castable = c.layout in _BOTH_CASTABLE_LAYOUTS
+        union = _union_colors(c)
+        any_face_land = c.is_land or any("Land" in (f.get("type_line") or "") for f in c.card_faces)
+        # produced_mana: union across faces (a modal-DFC land produces under its front-face name).
+        produced = sorted({*c.produced_mana, *(m for f in c.card_faces for m in (f.get("produced_mana") or []))})
+        for f in c.card_faces:
+            fname = (f.get("name") or "").strip()
+            if not fname or fname == c.name:
+                continue
+            ftype = f.get("type_line") or c.type_line
+            face_is_land = ("Land" in ftype) or (both_castable and any_face_land)
+            fcolors = union if both_castable else (f.get("colors") or [])
+            alias_rows.append(_tuple(
+                fname, f.get("mana_cost") or c.mana_cost, f.get("cmc", c.cmc), ftype,
+                fcolors, produced, f.get("oracle_text") or c.oracle_text, c.layout,
+                face_is_land, f.get("power"), f.get("toughness"),
+            ))
+    if alias_rows:
+        con.executemany(f"INSERT OR IGNORE INTO cards {_COLS} {_VALUES}", alias_rows)
+
+    return len(full_rows)
 
 
 def fetch_card(con: duckdb.DuckDBPyConnection, name: str) -> dict | None:

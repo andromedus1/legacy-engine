@@ -225,42 +225,101 @@ class TestTournamentId:
 
 
 class TestFaceAliases:
-    """Multi-face cards (A // B) resolve by each face name + the combined name.
+    """Multi-face cards (A // B) resolve by each face name + the combined name, with
+    LAYOUT-AWARE per-face attributes (2026-05-31).
 
-    Regression for the 2026-05-31 face-indexing bug: the DuckDB cards table only stored
-    the combined name, so front-face lookups (the names decklists use) missed.
+    The front face you cast carries its own type/cmc/P-T. Colors: front-cast layouts
+    (transform/flip) use the front face's own colors (you only pay the front to cast it,
+    the back is reached in play); both-castable layouts (adventure/split/modal_dfc) use
+    the union color identity. Modal-DFC with a land face is land-capable under its front name.
     """
 
-    def test_adventure_resolves_by_front_and_back_and_combined(self):
+    def test_transform_front_face_uses_own_attrs_and_own_colors(self):
         con = _con()
+        # Synthetic transform with DIFFERENT face colors to prove front-only (not union) colors.
         store.load_cards(con, [Card(
-            name="Brazen Borrower // Petty Theft",
-            type_line="Creature — Faerie Rogue // Instant — Adventure", cmc=3.0, colors=["U"],
+            name="Front Caster // Back Beast", layout="transform", cmc=1.0, colors=[],
+            type_line="Legendary Creature — Frog // Legendary Planeswalker",
+            card_faces=[
+                {"name": "Front Caster", "colors": ["U"], "type_line": "Legendary Creature — Frog",
+                 "mana_cost": "{U}", "cmc": 1.0, "power": "1", "toughness": "1"},
+                {"name": "Back Beast", "colors": ["R"], "type_line": "Legendary Planeswalker"},
+            ],
         )])
-        # combined + both faces all resolve to the same card data
-        assert store.fetch_card(con, "Brazen Borrower // Petty Theft") is not None
-        assert store.fetch_card(con, "Brazen Borrower")["colors"] == "U"
-        assert store.fetch_card(con, "Petty Theft")["colors"] == "U"
-        con.close()
+        front = store.fetch_card(con, "Front Caster")
+        assert front is not None
+        assert front["colors"] == "U"          # front-cast → front face's OWN colors, NOT union "RU"
+        assert "Creature" in front["type_line"]
+        assert front["power"] == "1"
+        assert front["is_land"] is False
+        # Combined row carries the UNION color identity (never empty-colored).
+        assert sorted(store.fetch_card(con, "Front Caster // Back Beast")["colors"]) == ["R", "U"]
 
-    def test_transform_dfc_front_face_resolves(self):
+    def test_adventure_uses_union_colors_for_both_faces(self):
         con = _con()
         store.load_cards(con, [Card(
-            name="Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar",
-            type_line="Legendary Creature // Legendary Planeswalker", cmc=2.0, colors=["U"],
+            name="Brazen Borrower // Petty Theft", layout="adventure", cmc=3.0, colors=["U"],
+            type_line="Creature — Faerie Rogue // Instant — Adventure",
+            card_faces=[
+                {"name": "Brazen Borrower", "colors": ["U"], "type_line": "Creature — Faerie Rogue",
+                 "mana_cost": "{1}{U}{U}", "power": "3", "toughness": "1"},
+                {"name": "Petty Theft", "colors": ["U"], "type_line": "Instant — Adventure", "mana_cost": "{1}{U}"},
+            ],
         )])
-        assert store.fetch_card(con, "Tamiyo, Inquisitive Student") is not None
-        assert store.fetch_card(con, "Tamiyo, Seasoned Scholar") is not None
-        con.close()
+        assert store.fetch_card(con, "Brazen Borrower")["colors"] == "U"  # union (both castable)
+        assert store.fetch_card(con, "Brazen Borrower")["is_land"] is False
+        assert store.fetch_card(con, "Petty Theft") is not None
+
+    def test_modal_dfc_with_land_face_is_land_capable_under_front_name(self):
+        con = _con()
+        # Front = spell (U), back = land that taps U. Modal-DFC → either side castable.
+        store.load_cards(con, [Card(
+            name="Sea Gate Restoration // Sea Gate, Reborn", layout="modal_dfc", cmc=7.0, colors=["U"],
+            type_line="Sorcery // Land",
+            card_faces=[
+                {"name": "Sea Gate Restoration", "colors": ["U"], "type_line": "Sorcery", "mana_cost": "{5}{U}{U}"},
+                {"name": "Sea Gate, Reborn", "colors": [], "type_line": "Land", "produced_mana": ["U"]},
+            ],
+        )])
+        front = store.fetch_card(con, "Sea Gate Restoration")
+        assert front["is_land"] is True            # land-capable: a face is a land (modal-DFC flex land)
+        assert front["colors"] == "U"              # union identity
+        assert "U" in front["produced_mana"]       # the land face's production surfaces under the front name
+        assert store.fetch_card(con, "Sea Gate, Reborn")["is_land"] is True
+
+    def test_art_series_face_does_not_shadow_real_front_face(self):
+        con = _con()
+        # An art card shares the real transform card's face name; it must NOT generate an alias
+        # (regression: the Tamiyo art_series card was shadowing the real front face with empty attrs).
+        # Art card listed FIRST to prove order-independence of the exclusion.
+        store.load_cards(con, [
+            Card(name="Tamiyo, Inquisitive Student // Tamiyo, Inquisitive Student", layout="art_series",
+                 type_line="Card // Card", colors=[],
+                 card_faces=[{"name": "Tamiyo, Inquisitive Student", "colors": [], "type_line": "Card"},
+                             {"name": "Tamiyo, Inquisitive Student", "colors": [], "type_line": "Card"}]),
+            Card(name="Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar", layout="transform", cmc=1.0,
+                 colors=[], type_line="Legendary Creature — Moonfolk Wizard // Legendary Planeswalker — Tamiyo",
+                 card_faces=[
+                     {"name": "Tamiyo, Inquisitive Student", "colors": ["U"],
+                      "type_line": "Legendary Creature — Moonfolk Wizard", "mana_cost": "{U}", "power": "0", "toughness": "3"},
+                     {"name": "Tamiyo, Seasoned Scholar", "colors": ["G", "U"], "type_line": "Legendary Planeswalker — Tamiyo"},
+                 ]),
+        ])
+        front = store.fetch_card(con, "Tamiyo, Inquisitive Student")
+        assert front["colors"] == "U"                       # the REAL transform front face, not the art card's ""
+        assert "Creature" in front["type_line"]
+        assert front["layout"] == "transform"
 
     def test_alias_never_clobbers_real_standalone_card(self):
         con = _con()
-        # A genuine standalone card whose name collides with a would-be face alias must win.
+        # A genuine standalone card whose name collides with a face alias must win.
         store.load_cards(con, [
             Card(name="Fire", type_line="Instant", cmc=1.0, colors=["R"], oracle_text="real Fire"),
-            Card(name="Fire // Ice", type_line="Instant // Instant", cmc=2.0, colors=["R", "U"]),
+            Card(name="Fire // Ice", layout="split", type_line="Instant // Instant", cmc=2.0, colors=["R", "U"],
+                 card_faces=[
+                     {"name": "Fire", "colors": ["R"], "type_line": "Instant", "mana_cost": "{1}{R}"},
+                     {"name": "Ice", "colors": ["U"], "type_line": "Instant", "mana_cost": "{1}{U}"},
+                 ]),
         ])
-        # The standalone "Fire" (inserted in the full-name pass) is not overwritten by the alias.
-        assert store.fetch_card(con, "Fire")["oracle_text"] == "real Fire"
-        assert store.fetch_card(con, "Ice")["colors"] == "RU"  # alias created (no standalone Ice)
-        con.close()
+        assert store.fetch_card(con, "Fire")["oracle_text"] == "real Fire"  # standalone not clobbered
+        assert store.fetch_card(con, "Ice")["colors"] == "RU"              # split alias → union identity

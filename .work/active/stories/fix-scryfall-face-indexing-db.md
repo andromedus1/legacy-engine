@@ -37,3 +37,17 @@ resolve; `generate tune` on real Dimir Tempo no longer emits "unknown card". Sui
 Follow-up nice-to-have (NOT done): transform-DFC top-level `colors` is empty in the Scryfall oracle pool
 (colors live on `card_faces`), so the front-face alias inherits empty colors — deck-color computation is
 unaffected in practice (other sources), but per-face attribute extraction would be more faithful.
+
+## Layout-aware extension (2026-05-31, prompted by the maintainer)
+the maintainer flagged that crude combined-attribute aliasing is wrong for multi-face cards ("you play the front,
+then trigger the back"). Reworked `load_cards` to be LAYOUT-AWARE: face rows carry the FACE's own
+type/cmc/power/toughness; colors = front-face's own for front-cast layouts (transform/flip/meld — you only
+pay the front; the back is reached in play) vs UNION color identity for both-castable layouts
+(adventure/split/modal_dfc); modal-DFC with a land face is land-capable under its front name; the combined
+A//B row gets the union identity (no more empty-colored DFCs). Also: (1) `seed cards` now `rebuild()`s the
+table so re-seeds are a clean refresh (INSERT OR IGNORE aliases couldn't otherwise be refreshed — stale
+rows persisted); (2) non-gameplay layouts (art_series/token/emblem/…) are excluded from aliasing (the Tamiyo
+art_series card was shadowing the real transform front face with empty attrs). Verified on real DB: Tamiyo,
+Inquisitive Student → colors=U, power=0, front-face type; Brazen Borrower → colors=U, power=3. 968 tests.
+MDFC is_land call (land-capable if any face is a land) per the maintainer's chosen option — flag if you want it
+narrower.
