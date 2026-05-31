@@ -228,8 +228,13 @@ def field_weighted_values(
     since: str | None = None,
     until: str | None = None,
     gate: tuple[str, ...] = _VALUE_GATE,
+    card_winrates=None,
 ) -> dict[str, float]:
     """Compute field-weighted per-card matchup lift for a list of cards.
+
+    Pass a precomputed ``card_winrates`` (``CardWinRates`` over the same window) to reuse
+    the heavy full-corpus scan instead of recomputing it; ``tune_deck`` threads one through
+    here and into ``recommend_sideboard``. When None it is computed here.
 
     Runs ``compute_card_winrates`` ONCE (heavy path) then:
 
@@ -262,11 +267,14 @@ def field_weighted_values(
         since, until = _latest_regime_window()
 
     # Heavy path: runs once; greedy loop then works on precomputed floats.
-    try:
-        r = compute_card_winrates(con, since=since, until=until)
-    except Exception as exc:
-        log.debug("field_weighted_values: compute_card_winrates failed: %s", exc)
-        return {card: 0.0 for card in cards}
+    if card_winrates is not None:
+        r = card_winrates
+    else:
+        try:
+            r = compute_card_winrates(con, since=since, until=until)
+        except Exception as exc:
+            log.debug("field_weighted_values: compute_card_winrates failed: %s", exc)
+            return {card: 0.0 for card in cards}
 
     if r.coverage.decisive_matched == 0:
         return {card: 0.0 for card in cards}
@@ -664,11 +672,22 @@ def tune_deck(
     pool = candidate_pool(con, archetype, since=eff_since, until=eff_until)
     snapshot = current_banlist()
 
-    # ── Compute field-weighted per-card values (heavy path, runs ONCE) ───────
+    # ── Per-card win-rate aggregate: compute ONCE, thread everywhere ─────────
+    # The heavy full-corpus scan runs a single time and is reused by both
+    # field_weighted_values (the swap objective) and recommend_sideboard (the
+    # value-aware weighting + per-matchup plans), rather than 3x per tune.
+    try:
+        from legacy_engine.analytics.match_results import compute_card_winrates
+        card_winrates = compute_card_winrates(con, since=eff_since, until=eff_until)
+    except Exception as exc:
+        log.debug("tune_deck: compute_card_winrates failed: %s", exc)
+        card_winrates = None
+
+    # ── Compute field-weighted per-card values (reuses the aggregate above) ──
     all_cards = list(set(list(maindeck.keys()) + pool))
     fwv = field_weighted_values(
         con, field, all_cards,
-        since=eff_since, until=eff_until,
+        since=eff_since, until=eff_until, card_winrates=card_winrates,
     )
 
     log.debug(
@@ -697,6 +716,7 @@ def tune_deck(
         sb_pkg = recommend_sideboard(
             con, field, maindeck, solver="greedy",
             archetype=archetype, since=eff_since, until=eff_until,
+            card_winrates=card_winrates,
         )
         recommended_sb = dict(sb_pkg.cards)
 
@@ -756,6 +776,7 @@ def tune_deck(
     sb_pkg = recommend_sideboard(
         con, field, final_main, solver="greedy",
         archetype=archetype, since=eff_since, until=eff_until,
+        card_winrates=card_winrates,
     )
     recommended_sb = dict(sb_pkg.cards)
 
