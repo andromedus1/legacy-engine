@@ -150,6 +150,68 @@ _MULTI = {
 }
 
 
+# A tournament where two distinct deck-level players share the same normalized
+# name ("alice" and "  Alice " both normalize to "alice").  The rounds join
+# would produce a cartesian fanout without the dup-CTE fix; the pairing must
+# land in ambiguous_player_names, not double-counted or labeled unmatched.
+_DUP_NAMES = {
+    "Tournament": {
+        "Name": "Dup Names Test",
+        "Date": "2026-05-29",
+        "Uri": "https://www.mtgo.com/decklist/dup-names-2026-05-29",
+        "Formats": "Legacy",
+    },
+    "Decks": [
+        {
+            "Player": "alice",
+            "Result": "1st",
+            "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+            "Sideboard": [],
+        },
+        {
+            "Player": "bob",
+            "Result": "2nd",
+            "Mainboard": [{"Count": 4, "CardName": "Force of Will"}],
+            "Sideboard": [],
+        },
+    ],
+    "Rounds": [{"Player1": "alice", "Player2": "bob", "Result": "2-1"}],
+    "Standings": [],
+}
+
+# A tournament with a bye round: player2 is empty — the pairing has no real
+# opponent and should be classified dropped_byes_draws, not unmatched.
+_BYE_ROUND = {
+    "Tournament": {
+        "Name": "Bye Round Test",
+        "Date": "2026-05-29",
+        "Uri": "https://www.mtgo.com/decklist/bye-round-2026-05-29",
+        "Formats": "Legacy",
+    },
+    "Decks": [
+        {
+            "Player": "alice",
+            "Result": "1st",
+            "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+            "Sideboard": [],
+        },
+        {
+            "Player": "bob",
+            "Result": "2nd",
+            "Mainboard": [{"Count": 4, "CardName": "Force of Will"}],
+            "Sideboard": [],
+        },
+    ],
+    "Rounds": [
+        # Real decisive round
+        {"Player1": "alice", "Player2": "bob", "Result": "2-1"},
+        # Bye: player2 empty — no real opponent
+        {"Player1": "alice", "Player2": "", "Result": "2-0"},
+    ],
+    "Standings": [],
+}
+
+
 def _con() -> store.DuckDBPyConnection:  # type: ignore[name-defined]
     return store.connect(":memory:")
 
@@ -708,4 +770,184 @@ class TestComputeMatchResults:
         self._load_online_challenge(con)
         res = compute_match_results(con)
         assert res.mirror_n == {}
+        con.close()
+
+    # ── #1 Ambiguous player names → ambiguous_player_names counter ───────────
+
+    def test_ambiguous_player_names_classified_not_unmatched(self):
+        """Two deck rows sharing the same normalized name → pairing goes to
+        ambiguous_player_names, not unmatched, and is not double-counted."""
+        con = _con()
+        tid = store.load_tournament(con, parse_cache_item(_DUP_NAMES, "MTGO"))
+        # Inject a second deck row for "alice" with a different raw player
+        # string that normalizes to the same key ("alice"), simulating the
+        # real-world scenario where two distinct decks share a normalized name.
+        con.execute(
+            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver')",
+            [tid],
+        )
+        # Label alice and bob so the pairing is not trivially unmatched
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player = 'alice'",
+            [tid],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'bob'",
+            [tid],
+        )
+
+        res = compute_match_results(con)
+        cov = res.coverage
+
+        # The pairing alice→bob is ambiguous (alice name is non-unique): one
+        # entry in ambiguous_player_names, zero in unmatched, zero decisive.
+        assert cov.total_pairings == 1
+        assert cov.ambiguous_player_names == 1
+        assert cov.unmatched == 0
+        assert cov.decisive_matched == 0
+        # No matchup tallies emitted for ambiguous pairings
+        assert res.matchups == {}
+        con.close()
+
+    def test_ambiguous_player_on_one_side_also_excluded(self):
+        """Ambiguity on player2's side also flags the pairing correctly."""
+        con = _con()
+        tid = store.load_tournament(con, parse_cache_item(_DUP_NAMES, "MTGO"))
+        # Make bob's name non-unique (two decks normalize to "bob")
+        con.execute(
+            "INSERT INTO decks VALUES (?, 99, 'BOB', '3rd', 'Combo')",
+            [tid],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player = 'alice'",
+            [tid],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'bob'",
+            [tid],
+        )
+
+        res = compute_match_results(con)
+        cov = res.coverage
+
+        assert cov.total_pairings == 1
+        assert cov.ambiguous_player_names == 1
+        assert cov.unmatched == 0
+        assert cov.decisive_matched == 0
+        con.close()
+
+    # ── #7 Blank-opponent bye → dropped_byes_draws ───────────────────────────
+
+    def test_blank_opponent_bye_counted_dropped_not_unmatched(self):
+        """A round with player2="" is a bye: goes to dropped_byes_draws, not unmatched."""
+        con = _con()
+        tid = store.load_tournament(con, parse_cache_item(_BYE_ROUND, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player = 'alice'",
+            [tid],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'bob'",
+            [tid],
+        )
+
+        res = compute_match_results(con)
+        cov = res.coverage
+
+        # 2 rounds: 1 decisive + 1 bye
+        assert cov.total_pairings == 2
+        assert cov.decisive_matched == 1
+        assert cov.dropped_byes_draws == 1
+        assert cov.unmatched == 0
+        assert cov.ambiguous_player_names == 0
+        con.close()
+
+    # ── Full coverage-sum invariant with all five counters ───────────────────
+
+    def test_coverage_sum_invariant_five_counters(self):
+        """total_pairings == decisive_matched + unmatched + dropped_byes_draws
+        + mirror_matches + ambiguous_player_names across a synthetic tournament
+        that exercises every bucket."""
+        con = _con()
+
+        # Load _MULTI (mirror + decisive + draw + unmatched) and the basic
+        # online challenge (decisive), then assert the invariant holds across
+        # both tournaments combined.
+        tid_multi = store.load_tournament(con, parse_cache_item(_MULTI, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player IN ('p1', 'p2')",
+            [tid_multi],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'p3'",
+            [tid_multi],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Combo' "
+            "WHERE tournament_id = ? AND player = 'p4'",
+            [tid_multi],
+        )
+
+        # Load the bye-round tournament to exercise dropped_byes_draws via bye
+        tid_bye = store.load_tournament(con, parse_cache_item(_BYE_ROUND, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player = 'alice'",
+            [tid_bye],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'bob'",
+            [tid_bye],
+        )
+
+        # Load a dup-names tournament to exercise ambiguous_player_names
+        tid_dup = store.load_tournament(con, parse_cache_item(_DUP_NAMES, "MTGO"))
+        con.execute(
+            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver')",
+            [tid_dup],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' "
+            "WHERE tournament_id = ? AND player = 'alice'",
+            [tid_dup],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Lands' "
+            "WHERE tournament_id = ? AND player = 'bob'",
+            [tid_dup],
+        )
+
+        res = compute_match_results(con)
+        cov = res.coverage
+
+        # Verify the invariant holds regardless of individual counts
+        assert cov.total_pairings == (
+            cov.decisive_matched
+            + cov.unmatched
+            + cov.dropped_byes_draws
+            + cov.mirror_matches
+            + cov.ambiguous_player_names
+        ), (
+            f"Invariant broken: total={cov.total_pairings} != "
+            f"decisive={cov.decisive_matched} + unmatched={cov.unmatched} + "
+            f"dropped={cov.dropped_byes_draws} + mirror={cov.mirror_matches} + "
+            f"ambiguous={cov.ambiguous_player_names}"
+        )
+
+        # Spot-check: every non-zero bucket is represented
+        assert cov.decisive_matched >= 1   # from _MULTI and _BYE_ROUND
+        assert cov.mirror_matches >= 1     # from _MULTI (p1 vs p2 mirror)
+        assert cov.dropped_byes_draws >= 1  # draw in _MULTI + bye in _BYE_ROUND
+        assert cov.unmatched >= 1          # from _MULTI (p5 has no deck)
+        assert cov.ambiguous_player_names >= 1  # from _DUP_NAMES
+
         con.close()

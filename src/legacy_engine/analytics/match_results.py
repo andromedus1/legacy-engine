@@ -135,14 +135,16 @@ class MatchCoverage:
 
     Every counter is incremented exactly once per pairing row so that
     ``total_pairings == decisive_matched + unmatched + dropped_byes_draws
-    + mirror_matches``.
+    + mirror_matches + ambiguous_player_names``.
     """
 
     total_pairings: int = 0
-    decisive_matched: int = 0   # both players resolved + decisive non-mirror winner
-    unmatched: int = 0          # ≥1 player did not resolve to a labeled deck
-    dropped_byes_draws: int = 0  # parsed to None or winner is None
-    mirror_matches: int = 0     # both resolved archetypes equal
+    decisive_matched: int = 0        # both players resolved + decisive non-mirror winner
+    unmatched: int = 0               # ≥1 player did not resolve to a labeled deck
+    dropped_byes_draws: int = 0      # parsed to None or winner is None
+    mirror_matches: int = 0          # both resolved archetypes equal
+    ambiguous_player_names: int = 0  # pairing excluded: a player's normalized name is
+                                     # non-unique within its tournament (dup-CTE hit)
 
     @property
     def match_rate(self) -> float:
@@ -183,14 +185,41 @@ class MatchResults:
 # ---------------------------------------------------------------------------
 
 _JOIN_SQL = """
+WITH
+-- dup: normalized player names that occur more than once within a tournament.
+-- A LEFT JOIN hit (du1.norm IS NOT NULL) means the pairing is ambiguous —
+-- we cannot safely attribute a single deck to that player.
+dup AS (
+    SELECT tournament_id, lower(trim(player)) AS norm
+    FROM decks
+    GROUP BY tournament_id, lower(trim(player))
+    HAVING count(*) > 1
+),
+-- uniq_decks: one row per (tournament_id, normalized-player), collapsing any
+-- duplicate deck rows so the rounds LEFT JOIN stays cardinality-safe.  For
+-- unique players this is identical to the raw decks row; for duplicates we
+-- return one arbitrary archetype — but those rows are flagged by the dup CTE
+-- and dropped before the archetype is ever used.
+uniq_decks AS (
+    SELECT tournament_id, lower(trim(player)) AS norm,
+           ANY_VALUE(archetype) AS archetype
+    FROM decks
+    GROUP BY tournament_id, lower(trim(player))
+)
 SELECT t.provenance, r.player1, r.player2, r.result,
-       d1.archetype AS arch1, d2.archetype AS arch2
+       d1.archetype AS arch1, d2.archetype AS arch2,
+       (du1.norm IS NOT NULL) AS amb1,
+       (du2.norm IS NOT NULL) AS amb2
 FROM rounds r
 JOIN tournaments t ON t.id = r.tournament_id
-LEFT JOIN decks d1 ON d1.tournament_id = r.tournament_id
-                  AND lower(trim(d1.player)) = lower(trim(r.player1))
-LEFT JOIN decks d2 ON d2.tournament_id = r.tournament_id
-                  AND lower(trim(d2.player)) = lower(trim(r.player2))
+LEFT JOIN uniq_decks d1 ON d1.tournament_id = r.tournament_id
+                       AND d1.norm = lower(trim(r.player1))
+LEFT JOIN uniq_decks d2 ON d2.tournament_id = r.tournament_id
+                       AND d2.norm = lower(trim(r.player2))
+LEFT JOIN dup du1 ON du1.tournament_id = r.tournament_id
+                 AND du1.norm = lower(trim(r.player1))
+LEFT JOIN dup du2 ON du2.tournament_id = r.tournament_id
+                 AND du2.norm = lower(trim(r.player2))
 WHERE (? IS NULL OR t.provenance = ?)
 """
 
@@ -218,8 +247,25 @@ def compute_match_results(
 
     rows = con.execute(_JOIN_SQL, [provenance, provenance]).fetchall()
 
-    for _prov, _p1, _p2, result, arch1, arch2 in rows:
+    for _prov, _p1, p2, result, arch1, arch2, amb1, amb2 in rows:
         cov.total_pairings += 1
+
+        # ── #7 Blank-opponent bye: not a real pairing ───────────────────────
+        # A bye row has an empty/None player2; classifying it here prevents the
+        # blank player2 from falling through to unmatched (arch2 would be NULL).
+        if not (p2 and str(p2).strip()):
+            cov.dropped_byes_draws += 1
+            continue
+
+        # ── #1 Ambiguous normalized name: cannot safely attribute a deck ────
+        # When a player's normalized name (lower(trim(...))) is non-unique
+        # within the tournament the LEFT JOIN to decks can produce multiple
+        # rows (cardinality explosion).  The dup-CTE flags these; we surface
+        # them in ambiguous_player_names rather than silently inflating n's or
+        # mislabeling the pairing as unmatched.
+        if amb1 or amb2:
+            cov.ambiguous_player_names += 1
+            continue
 
         # ── Unmatched: at least one player has no labeled deck ──────────────
         if arch1 is None or arch2 is None:
