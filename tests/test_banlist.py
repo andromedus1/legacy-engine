@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from legacy_engine.ingestion.banlist import banlist_as_of, current_banlist, validate_deck
+from legacy_engine.models.banlist import CATEGORY_BANNED_NAMES
 
 
 class TestAsOfDate:
@@ -73,3 +74,96 @@ class TestValidateDeck:
         assert validate_deck(deck, snapshot=banlist_as_of(date(2024, 6, 1))) == []
         # ...banned now.
         assert any("Psychic Frog is banned" in e for e in validate_deck(deck))
+
+
+class TestNonpositiveCounts:
+    """Finding #7 — nonpositive counts must be flagged (finding #7)."""
+
+    def test_negative_count_flagged(self):
+        errors = validate_deck({"Brainstorm": -1})
+        assert any("nonpositive count" in e for e in errors), errors
+
+    def test_zero_count_flagged(self):
+        errors = validate_deck({"Brainstorm": 0})
+        assert any("nonpositive count" in e for e in errors), errors
+
+    def test_positive_count_not_flagged(self):
+        # No nonpositive-count error for a normal deck.
+        errors = validate_deck({"Island": 60})
+        assert not any("nonpositive count" in e for e in errors)
+
+
+class TestCategoryBans:
+    """Finding #7 — CATEGORY_BANNED_NAMES are flagged regardless of snapshot contents."""
+
+    def _bare_snapshot(self):
+        """A snapshot with an empty banned set (category names not present in it)."""
+        from legacy_engine.models.banlist import BanListSnapshot
+        return BanListSnapshot(as_of=date(2024, 1, 1), banned=frozenset())
+
+    def test_ante_card_flagged_even_when_not_in_snapshot(self):
+        # "Contract from Below" is in CATEGORY_BANNED_NAMES but NOT in the bare snapshot.
+        deck = {"Island": 59, "Contract from Below": 1}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot())
+        assert any("Contract from Below" in e and "ante/offensive" in e for e in errors), errors
+
+    def test_offensive_card_flagged(self):
+        deck = {"Island": 59, "Invoke Prejudice": 1}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot())
+        assert any("Invoke Prejudice" in e and "ante/offensive" in e for e in errors), errors
+
+    def test_category_banned_names_non_empty(self):
+        # Sanity check: the set has exactly the expected 16 cards.
+        assert len(CATEGORY_BANNED_NAMES) == 16
+
+    def test_all_expected_names_present(self):
+        expected = {
+            "Amulet of Quoz", "Bronze Tablet", "Contract from Below", "Darkpact",
+            "Demonic Attorney", "Jeweled Bird", "Rebirth", "Tempest Efreet", "Timmerian Fiends",
+            "Invoke Prejudice", "Cleanse", "Stone-Throwing Devils", "Pradesh Gypsies",
+            "Jihad", "Imprison", "Crusade",
+        }
+        assert expected == CATEGORY_BANNED_NAMES
+
+
+class TestTypeLineInjection:
+    """Finding #7 — optional type_line_of resolver for Conspiracy/Attraction/Sticker."""
+
+    def _bare_snapshot(self):
+        from legacy_engine.models.banlist import BanListSnapshot
+        return BanListSnapshot(as_of=date(2024, 1, 1), banned=frozenset())
+
+    def test_conspiracy_card_flagged_with_injected_resolver(self):
+        def type_line_of(name: str) -> str | None:
+            return "Conspiracy" if name == "Lurker" else None
+
+        deck = {"Island": 59, "Lurker": 1}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot(), type_line_of=type_line_of)
+        assert any("Lurker" in e and "not Legacy-legal" in e for e in errors), errors
+
+    def test_attraction_card_flagged_with_injected_resolver(self):
+        def type_line_of(name: str) -> str | None:
+            return "Artifact — Attraction" if name == "Dart Throw" else None
+
+        deck = {"Island": 59, "Dart Throw": 1}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot(), type_line_of=type_line_of)
+        assert any("Dart Throw" in e and "not Legacy-legal" in e for e in errors), errors
+
+    def test_sticker_card_flagged_with_injected_resolver(self):
+        def type_line_of(name: str) -> str | None:
+            return "Enchantment — Sticker" if name == "_____ Bird Gets the Worm" else None
+
+        deck = {"Island": 59, "_____ Bird Gets the Worm": 1}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot(), type_line_of=type_line_of)
+        assert any("not Legacy-legal" in e for e in errors), errors
+
+    def test_none_resolver_does_not_crash_or_add_type_line_error(self):
+        """When type_line_of is None, no type-line errors and no exception."""
+        deck = {"Island": 60}
+        errors = validate_deck(deck, snapshot=self._bare_snapshot(), type_line_of=None)
+        assert not any("not Legacy-legal" in e for e in errors)
+
+    def test_none_resolver_is_the_default(self):
+        """Default call (no type_line_of arg) must not crash."""
+        errors = validate_deck({"Island": 60})
+        assert not any("not Legacy-legal" in e for e in errors)
