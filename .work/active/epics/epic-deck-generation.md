@@ -8,7 +8,7 @@ depends_on: [epic-advisory, epic-goldfish-simulation]
 release_binding: null
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-30
 ---
 
 # Deck Generation (deferred pillar)
@@ -44,3 +44,32 @@ enhancement, not a blocker for consensus+export+field-tuning).
 - Meta-gap discovery (structural gaps in the archetype/card space)
 - Constrained build search (mana/role/consistency constraints)
 - Candidate validation (positioning + goldfish clock + consistency floor)
+
+## Design decisions
+Captured via `/epic-design --only-questions` (interactive, 2026-05-30). Fixed inputs for the full
+decomposition + per-feature design passes — autopilot and `/feature-design` inherit these and should not
+re-decide.
+
+- **Goldfish dependency → RELAX.** Rewrite `depends_on` to drop `epic-goldfish-simulation`; keep only
+  `epic-advisory` (done). The advisory-heuristic prerequisites from the brief
+  (`improve-whattoplay-proactivity-threat-signal`, `improve-positioning-pbest-uneven-sample`,
+  `improve-sideboard-realdata-quality`) all landed in `epic-advisory-hardening` (done), so modes 1–2 are
+  unblocked now. Goldfish-validation of candidates is a later cross-pillar enhancement, not a blocker
+  (per brief §2.5).
+- **Mode scope → Consensus + field-tuning + export; DEFER gap-discovery.** This epic decomposes into
+  (1) consensus baseline (mode 1, pure aggregation, reconciles to a legal exactly-60 + de-duped list),
+  (2) field-tuning (mode 2, the core — optimize 60+15 vs the windowed field via matchup×field-share, run
+  the sideboard recommender, report before/after positioning `S`), and (3) the portable export surface.
+  **Gap discovery (mode 3) is deferred to a follow-up epic** — its card-gap half needs a new per-card
+  win-rate match-results extension that doesn't exist yet, and its output is the most speculative. (Update
+  the "Anticipated child features" sketch accordingly during decomposition: gap-discovery / candidate-
+  validation move out of this epic's realized scope.)
+- **Export breadth → Portable multi-target text.** One exporter emitting the standard
+  `<qty> <Card Name>` + `Sideboard` text that imports into Moxfield, Archidekt, MTGGoldfish, `.dec`, etc.,
+  plus an optional Moxfield deep-link/copy block. Pure, offline, **zero network calls**, reuses the existing
+  decklist representation. **No native push, no sanctioned Moxfield read in this epic** (both post-MVP /
+  product decisions per brief §1.2).
+- **Generation field default → Windowed latest ban-regime.** Default the generation corpus to the current
+  post-latest-ban regime window (reuse the `trends` regime windowing); the user may override the window.
+  Bimodal-coverage fallback applies: where matchup-n < 30 the tuner falls back to consensus + legality and
+  says so (no fabricated tuned edge). Always `validate_deck` against the as-of-date ban snapshot.
