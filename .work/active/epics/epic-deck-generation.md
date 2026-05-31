@@ -1,14 +1,14 @@
 ---
 id: epic-deck-generation
 kind: epic
-stage: implementing
+stage: done
 tags: [generation]
 parent: null
 depends_on: [epic-advisory]
 release_binding: null
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-30
+updated: 2026-05-31
 ---
 
 # Deck Generation (deferred pillar)
@@ -41,20 +41,23 @@ enhancement, not a blocker for consensus+export+field-tuning).
 
 ## Decomposition
 
-Split by capability into 3 child features, scoped per the `## Design decisions` to **consensus + field-tuning
-+ export** (gap-discovery / candidate-validation deferred to a follow-up epic — the former needs a per-card
-win-rate data extension, the latter needs the goldfish pillar). `consensus` and `export` are independent
-(parallel wave 1); `tuning` depends on `consensus` because consensus establishes the `generation/` module and
-the `generate` CLI group, and tuning optimizes a consensus (or user) shell.
+Realized as **5 child features** (decomposed into 3 initially; the tuning #4 fork — see below — un-deferred the
+per-card win-rate data and added a maindeck-aware sideboard rework as prerequisites, per the maintainer's 2026-05-31
+decision). `consensus` and `export` were independent (parallel wave 1); the tuning arc is a strict dependency
+chain `per-card-value → sideboard-maindeck → tuning`, with `tuning` also depending on `consensus` (which
+establishes the `generation/` module + `generate` CLI group).
 
-### Child features
+### Child features (all done 2026-05-31)
 - `epic-deck-generation-consensus` — mode 1: modal-card aggregation → legal exactly-60 + ≤15 de-duped list; establishes `generation/` + `generate` CLI group — depends on: `[]`
 - `epic-deck-generation-export` — portable multi-target import-text exporter (Moxfield/Archidekt/MTGGoldfish/.dec) + deep-link; pure/offline — depends on: `[]`
-- `epic-deck-generation-tuning` — mode 2: optimize 60+15 vs the windowed field (matchup×field-share + sideboard recommender), before/after positioning `S`, bimodal fallback — depends on: `[epic-deck-generation-consensus]`
+- `epic-deck-generation-per-card-value` — **(net-new, un-deferred)** per-card + per-card×matchup win-rate analytics (`analytics/match_results.compute_card_winrates` + `analytics/card_value.py`), confidence-tiered, presence-correlational; `report cards` CLI; the rounds-bearing test fixture — depends on: `[]`
+- `epic-deck-generation-sideboard-maindeck` — **(net-new)** reworked `advisory/sideboard.py` to be maindeck-aware: per-matchup OUT/IN plans + value-aware weighting, additive/gated (coverage preserved as the data-absent fallback) — depends on: `[epic-deck-generation-per-card-value]`
+- `epic-deck-generation-tuning` — mode 2: optimize 60+15 vs the windowed field; reworked so per-card×matchup value is the **sole** maindeck-swap driver (no gameplan hollowing), coverage is audit-only; re-runs the maindeck-aware sideboard for the 15 + per-matchup plans; combined-legality guaranteed — depends on: `[epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]`
 
 ### Deferred to a follow-up epic
-- **Gap discovery (mode 3)** — archetype-gaps (high `S`, low share) + card-gaps; the card-gap half needs a new per-card win-rate match-results extension.
+- **Gap discovery (mode 3)** — archetype-gaps (high `S`, low share) + card-gaps. The card-gap half is now **unblocked** by `epic-deck-generation-per-card-value` (the per-card win-rate extension shipped); archetype-gaps + the discovery surface remain for a follow-up epic.
 - **Goldfish-validated candidate validation** — depends on the `epic-goldfish-simulation` pillar (cross-pillar enhancement).
+- **Joint main+sideboard ILP co-optimization** + **tuning adjacent-card discovery** ([[idea-tuning-adjacent-card-discovery]]) — deferred enhancements.
 
 ### Decomposition risks
 - **Tuning is the largest feature** (~8–10 units: flex-slot ID, field-weighted equity, swap search, sideboard integration, before/after `S`, regime windowing, bimodal fallback). Its `/feature-design` pass should spawn child stories.
@@ -88,3 +91,26 @@ re-decide.
   post-latest-ban regime window (reuse the `trends` regime windowing); the user may override the window.
   Bimodal-coverage fallback applies: where matchup-n < 30 the tuner falls back to consensus + legality and
   says so (no fabricated tuned edge). Always `validate_deck` against the as-of-date ban snapshot.
+
+
+## Epic completion (2026-05-31)
+
+All 5 child features are `stage: done`. The Deck Generation pillar (consensus + export + maindeck-aware
+field-tuning) ships; only gap-discovery (mode 3) + goldfish-validated candidate-validation remain deferred.
+
+**Arc summary** (resolves the held tuning #4 fork — the maintainer chose to un-defer per-card win-rate data + make the
+sideboard maindeck-aware): `per-card-value` (new per-card×matchup win-rate analytics + `card_value` +
+`report cards`) → `sideboard-maindeck` (advisory SSOT rework: per-matchup OUT/IN plans, value-aware, additive
++ gated so rounds-less behavior is byte-identical) → `tuning` rework (per-card value the sole maindeck-swap
+driver — no gameplan hollowing; coverage audit-only; combined legality; fixes the prior vacuous-test gap).
+
+**Verification:** 961 tests green. Each feature got a fresh-context deep review (all Approve); a Phase-8
+holistic completion review verified cross-feature contracts + ran the full chain end-to-end on the real
+seeded DB (Dimir Tempo + Dimir Reanimator → legal 60/15, honest thin-data degradation, no fabricated edges).
+Foundation-doc drift fixed (ARCHITECTURE.md generation/analytics/sideboard). Perf nit parked:
+[[idea-tuning-sideboard-winrate-reuse]].
+
+**OWED before this epic is *fully* signed off:** a true **cross-model** review of `src/legacy_engine/`
+(generation/ + advisory/sideboard.py + analytics/card_value.py + match_results per-card). All reviews this
+arc were same-model fresh-context Claude because **Codex was out of credits**. Re-run cross-model when credits
+return.
