@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-export
 kind: feature
-stage: review
+stage: done
 tags: [generation]
 parent: epic-deck-generation
 depends_on: []
@@ -127,3 +127,9 @@ piping a generated list through export produces Moxfield-importable text.
 - **Parser grammar drift**: if export and the `advise --deck` parser disagree on annotations, round-trip
   breaks. **Fallback**: the round-trip test is the guard; mirror the parser exactly, keep set/collector
   annotations optional.
+
+## Review
+Completion review 2026-05-30 (local fresh-context Opus — NOT cross-model; Codex out of credits, Gemini
+absent). Reviewed clean: `parse(format(deck)) == deck` round-trip holds for moxfield/archidekt/mtggoldfish/
+text; `.dec` `SB:` convention correct; empty-sideboard header omission; zero network. **Approve → done.**
+(A cross-model re-run is recommended when Codex credits are refilled.)
