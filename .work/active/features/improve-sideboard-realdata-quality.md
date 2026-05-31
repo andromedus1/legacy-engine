@@ -48,3 +48,12 @@ exposed three compounding issues that make the output non-actionable today:
 Discovered via real-data use 2026-05-30. The shipped pillar's *structure* is sound (meta-share + matchup
 matrix are reliable); these are accuracy/usability gaps in the advisory heuristic + coverage layers. Route
 through `/feature-design` (greenfield-ish: new saturating objective + threshold changes + recalibration).
+
+## Design decisions (--only-questions, 2026-05-30)
+- **Coverage model = full saturating `g(n)=1−(1−p)^n`** (user-directed) — diminishing-but-positive value
+  for redundant answers, so the ILP/greedy fills the 15-slot budget principledly (the binary-coverage
+  underfill that returned only 2/15 is the n=1 degenerate case). Implement the incremental-`y_a^t`
+  linearization for the ILP per advisory-methods §3; greedy uses the same saturating marginal gain.
+- Still depends on [[improve-whattoplay-proactivity-threat-signal]] (density-threshold vulnerability tags)
+  to fix the `greedy-manabase=100%` tag inflation feeding the weights, and on the catalog color-gating fix
+  in [[fix-advisory-peer-review-bugs]] (Surgical/Faerie castable in any deck).

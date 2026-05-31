@@ -57,3 +57,16 @@ narrative) is misled. The meta-share + matchup layers are unaffected (data-drive
 Greenfield-ish calibration of an existing module — route through `/feature-design` when picked up
 (net-new threat-signal logic + threshold changes + recalibration tests). Not a blocker for the shipped
 advisory pillar; an accuracy improvement to the heuristic layer.
+
+## Design decisions (--only-questions, 2026-05-30)
+- **Threat signal = BOTH, layered** (user-directed). Primary: add `power`/`toughness` to the `Card` model
+  + Scryfall ingestion (Scryfall already provides these — small additive change), and derive a general
+  proactive-threat signal (low-MV creature with a real body, e.g. `cmc <= 2 and power >= 2`). Supplement:
+  a small curated `THREAT_CARDS`/override set for proactive threats raw stats miss (cheap planeswalkers,
+  evasive/payoff cards, creatures whose text understates them). The general signal does the heavy lifting;
+  the curated list is a targeted override — not a standalone heuristic. This adds a (small) ingestion-layer
+  dependency: the `Card.power/toughness` fields + seed must land before the proactivity recalibration.
+- **Vulnerability tags → density/share threshold** (not mere presence) to kill the aggregate false positives
+  (e.g. the spurious `storm-reliant`/`greedy-manabase=100%`).
+- Calibration target unchanged: assert *relative ordering* (combo > tempo > control) on real archetypes;
+  Izzet Delver should land ~0.5–0.6.
