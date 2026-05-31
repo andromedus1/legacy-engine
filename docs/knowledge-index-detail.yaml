@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-05-31T20:19:46Z'
+generated_at: '2026-05-31T20:42:45Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -278,6 +278,42 @@ documents:
       relationship: depends-on
     - slug: docs/ARCHITECTURE.md
       relationship: refines
+  docs/briefs/card-adjacency-and-discovery.md:
+    summary: 'Curates the approach for "discovery" deck tuning (deck-generation mode
+      3, card-gap half): an adjacency
+
+      model that nominates cards a shell does NOT already run (role/color/CMC + decklist
+      co-occurrence), a
+
+      cross-archetype transfer of the shipped per-card×matchup value so the nominations
+      are evidence-backed, and
+
+      a confidence-gating scheme that keeps exploratory picks honest without the (deferred)
+      goldfish pillar.
+
+      '
+    key_findings:
+    - All adjacency inputs already exist in-repo — reuse whattoplay._card_roles (oracle-text
+      role classifier), card_tags (staple roles + mana-base tags), Card.colors/cmc/type_line,
+      and deck_cards for co-occurrence. No new NLP needed for v1.
+    - Recommended v1 adjacency = role-match ∩ color-legal ∩ CMC-band, RANKED by decklist
+      co-occurrence lift (PMI over the 63k-deck corpus). It is the heuristic, auditable
+      analogue of card2vec — embeddings are a later upgrade, not a v1 requirement.
+    - 'Cross-archetype value transfer is valid for ANSWER/HOSER roles (a card''s lift
+      vs a combo deck is largely pilot-independent) and INVALID for synergy/engine
+      cards (value is deck-context-dependent). Gate transfer by role: transfer answers,
+      never transfer engine pieces.'
+    - 'Discovery is exploratory: gate on the EXISTING ConfidenceMetadata tiers but
+      require cross-field n at the established tier (≥100) for a transferred recommendation,
+      and ALWAYS label it presence-correlational + not-yet-goldfish-validated. A confidence-gated
+      v1 ships without goldfish.'
+    - 'The archetype-gap half (high positioning-S, low meta-share) is mechanical:
+      rank archetypes by S − f(share); no research needed beyond the existing positioning
+      + metashare surfaces.'
+    - Prior art (card2vec, 17Lands generalised representations, oracle-text sentence-transformer
+      clustering) confirms decklist co-occurrence alone yields strong similarity,
+      but is archetype-confounded — which is exactly why our role/color gating + value-transfer-by-role
+      is the honest layer on top.
   docs/briefs/deck-generation-and-moxfield.md:
     summary: 'Unblocks the deferred deck-generation pillar. Two halves: (1) the Moxfield
       integration path — there is
