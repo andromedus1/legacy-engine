@@ -1,7 +1,7 @@
 ---
 id: fix-advisory-peer-review-bugs
 kind: feature
-stage: review
+stage: done
 tags: [advisory, bug]
 parent: epic-advisory-hardening
 depends_on: []
@@ -102,3 +102,11 @@ just-reworked `whattoplay.best_deck_vs_best_call`.
 6. **Done.** Added `castable_any_color: bool = False` field to `HoserCard`; set `True` for Surgical Extraction (Phyrexian mana) and Faerie Macabre (free activation). Color pre-filter bypassed when `castable_any_color=True`. Tested: all-white deck includes both cards.
 7. **Done.** Added `cell.display` guard (n≥30) before including a cell in `best_deck_vs_best_call` classification. Low-n cells are counted but skipped with `log.debug`. Tested: row with only n=10 cells → "neither", row with n=100 → classifies correctly.
 8. **Done.** Added `math.isfinite(share)` check before the `<0` check in `_normalize_shares`. Tested: nan, +inf, -inf each raise `ValueError` with "non-finite".
+
+## Review (2026-05-30, autopilot)
+**Verdict**: Approve. All 8 findings fixed with a regression test each (623 green, +12). Host-verified:
+imputation now centers correctly (known-0.8 row → S=0.799, was de-centering ~0.70); `castable_any_color`
+True for Surgical/Faerie, False for normal-cost Leyline; rank_decks ties split evenly; `_normalize_shares`
+rejects NaN/inf; sideboard coverage keys are now `(archetype, tag)`-specific; `_hate` weight tied to
+interactive field-share; best_deck_vs_best_call gated to n>=30. Provides the tie fix (#2) and catalog
+color fix (#6) that improve-positioning and improve-sideboard build on.
