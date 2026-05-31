@@ -1,7 +1,7 @@
 ---
 id: improve-positioning-pbest-uneven-sample
 kind: feature
-stage: drafting
+stage: implementing
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: []
@@ -56,3 +56,20 @@ today: read the matchup matrix + S only for decks with dense cells (the analysis
   `PositioningResult`/`DeckRanking` so consumers can see/condition on sufficiency. The existing
   `risk_averse` lower-quantile path becomes the default sort; ties handled evenly (see the argmax-ties bug
   in [[fix-advisory-peer-review-bugs]]).
+
+## Design (autopilot, 2026-05-30)
+Builds on the rank_decks tie fix already landed in [[fix-advisory-peer-review-bugs]].
+### Units
+1. **`PositioningResult` + `DeckRanking`**: add `data_coverage: float` (fraction of the field's mass, or of
+   field archetypes, the deck has measured n>=30 cells against). Compute in `positioning_score`/`rank_decks`.
+2. **`rank_decks` default headline = risk-adjusted lower-posterior-quantile** of each deck's S samples
+   (e.g. `risk_quantile=0.25` default, configurable). `DeckRanking.decks` sorts by this quantile descending
+   by default; keep raw `P(best)` computed + reported as a secondary dict (no longer the sort key). Keep the
+   existing `risk_averse` flag meaning (or fold it in: default already risk-adjusted; a `q` param tunes it).
+3. **Optional gate**: expose `min_coverage` so callers can down-weight/exclude decks whose `data_coverage`
+   is below a floor (don't silently drop — flag them).
+### Tests (`tests/test_positioning.py`)
+- A thin-data, high-variance deck no longer tops the ranking over a well-measured ~50% deck (the artifact
+  that crowned Death & Taxes). Assert the well-measured deck outranks the sparse spiker by lower-quantile.
+- `data_coverage` is 1.0 for a deck with all-n>=30 cells, lower for a sparse row.
+- `P(best)` still present as a secondary field; ties already even (regression from fix-advisory).
