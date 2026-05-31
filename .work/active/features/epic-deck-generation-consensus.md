@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-consensus
 kind: feature
-stage: review
+stage: done
 tags: [generation]
 parent: epic-deck-generation
 depends_on: []
@@ -156,3 +156,10 @@ corpus-window + sample-size footer; unknown archetype → clean `ClickException`
   inclusion cards and flag low `sample_n`. **Fallback**: return best-effort legal list + surface `sample_n`.
 - **Window with too few decks**: `sample_n` surfaced; consensus still returns (gated downstream by tuning's
   bimodal fallback).
+
+## Review
+Completion review 2026-05-30 (local fresh-context Opus — NOT cross-model; Codex out of credits, Gemini
+absent). Caught one BLOCKER: cross-board de-dupe was undone by the top-up pass (a card de-duped to the
+sideboard could be re-added to the maindeck) — **fixed + regression-tested** (`TestCrossBoardDedupeTopupRegression`).
+Exactly-60 fill, `sample_n` reconstruction, CLI errors verified sound. Suite 846 green. **Approve → done.**
+(A cross-model re-run is recommended when Codex credits are refilled.)
