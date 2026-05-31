@@ -1,8 +1,9 @@
 """Vendor the MTGOFormatData archetype rules as a pinned, versioned data dependency.
 
-`refresh_rules` clones/pulls the upstream repo into RULES_DIR and records the resolved commit SHA in
-a manifest, so the classifier always runs against a known rules version. The git call is injected so
-tests don't hit the network.
+``refresh_rules`` clones/fetches the upstream repo into RULES_DIR, checks out a
+specific commit SHA, and records it in a manifest so the classifier always runs
+against a known rules version.  The git runner is injected so tests can assert
+the call sequence without hitting the network.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from legacy_engine.config import MTGOFORMATDATA_REPO, RULES_DIR
+from legacy_engine.config import MTGOFORMATDATA_REPO, MTGOFORMATDATA_SHA, RULES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +24,46 @@ MANIFEST_NAME = "RULES_MANIFEST.json"
 def refresh_rules(
     repo: str = MTGOFORMATDATA_REPO,
     dest: Path = RULES_DIR,
+    sha: str = MTGOFORMATDATA_SHA,
     runner: Callable = subprocess.run,
 ) -> str:
-    """Clone/pull the rules repo and pin its commit SHA in a manifest. Returns the SHA."""
+    """Clone/fetch the rules repo, check out ``sha``, and pin it in the manifest.
+
+    Strategy: stay shallow throughout.  For a fresh destination we clone first
+    (to establish the remote), then fetch and checkout the pinned SHA via
+    FETCH_HEAD.  For an existing repo we skip the clone and go straight to the
+    fetch.  After checkout we resolve HEAD and raise if it doesn't match ``sha``
+    — any drift (network error, wrong remote, ref rewrite) is surfaced immediately
+    rather than silently recorded.
+
+    Returns the verified SHA.
+    """
     dest = Path(dest)
-    if (dest / ".git").exists():
-        logger.info("Updating rules at %s", dest)
-        runner(["git", "-C", str(dest), "pull", "--ff-only"], check=True)
-    else:
+
+    if not (dest / ".git").exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Cloning rules %s -> %s", repo, dest)
+        # Shallow clone to establish the remote; we'll fetch the exact sha next.
         runner(["git", "clone", "--depth", "1", repo, str(dest)], check=True)
+    else:
+        logger.info("Rules repo already present at %s; fetching sha %s", dest, sha)
 
-    sha = _resolve_sha(dest, runner)
-    dest.mkdir(parents=True, exist_ok=True)  # git clone normally creates it; be robust regardless
+    # Fetch the pinned SHA into FETCH_HEAD (stays shallow) then check it out.
+    runner(
+        ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha],
+        check=True,
+    )
+    runner(["git", "-C", str(dest), "checkout", "FETCH_HEAD"], check=True)
+
+    resolved = _resolve_sha(dest, runner)
+    if resolved != sha:
+        raise RuntimeError(
+            f"rules pin mismatch: wanted {sha!r}, got {resolved!r}"
+        )
+
+    dest.mkdir(parents=True, exist_ok=True)  # robust: clone normally creates it
     (dest / MANIFEST_NAME).write_text(json.dumps({"repo": repo, "sha": sha}, indent=2))
+    logger.info("Rules pinned at %s", sha)
     return sha
 
 

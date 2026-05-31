@@ -12,6 +12,31 @@ from datetime import date
 
 from legacy_engine.models.base import LegacyEngineModel
 
+# Ante + offensive cards not derivable from type_line and not already in BASELINE_BANS.
+# These are banned in Legacy by category regardless of the dated B&R snapshot.
+# Name-enumerated so validate_deck can check them without importing Scryfall or the store
+# (Ports & Adapters — domain must stay infrastructure-free).
+CATEGORY_BANNED_NAMES: frozenset[str] = frozenset({
+    # Ante cards
+    "Amulet of Quoz",
+    "Bronze Tablet",
+    "Contract from Below",
+    "Darkpact",
+    "Demonic Attorney",
+    "Jeweled Bird",
+    "Rebirth",
+    "Tempest Efreet",
+    "Timmerian Fiends",
+    # Offensive cards
+    "Invoke Prejudice",
+    "Cleanse",
+    "Stone-Throwing Devils",
+    "Pradesh Gypsies",
+    "Jihad",
+    "Imprison",
+    "Crusade",
+})
+
 # Cards whose copy limit exceeds 4 (explicit text overrides). Basics are unlimited separately.
 COPY_LIMIT_OVERRIDES: dict[str, int] = {
     "Seven Dwarves": 7,
