@@ -16,7 +16,7 @@ def runner():
 def test_top_level_help_lists_groups(runner):
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0
-    for group in ("seed", "refresh", "label", "report", "advise"):
+    for group in ("seed", "refresh", "label", "report", "advise", "generate", "export"):
         assert group in result.output
 
 
@@ -26,6 +26,8 @@ def test_top_level_help_lists_groups(runner):
         ("seed", ("cards", "cache", "rules", "banlist")),
         ("report", ("meta", "matchups", "tiers")),
         ("advise", ("positioning", "sideboard", "whattoplay", "report")),
+        ("generate", ("consensus",)),
+        ("export", ("deck",)),
     ],
 )
 def test_group_help_lists_subcommands(runner, group, subcommands):
@@ -33,6 +35,18 @@ def test_group_help_lists_subcommands(runner, group, subcommands):
     assert result.exit_code == 0
     for sub in subcommands:
         assert sub in result.output
+
+
+def test_generate_consensus_requires_archetype(runner):
+    """generate consensus exits non-zero when --archetype is missing."""
+    result = runner.invoke(main, ["generate", "consensus"])
+    assert result.exit_code != 0
+
+
+def test_export_deck_requires_deck(runner):
+    """export deck exits non-zero when --deck is missing."""
+    result = runner.invoke(main, ["export", "deck"])
+    assert result.exit_code != 0
 
 
 @pytest.mark.parametrize(
