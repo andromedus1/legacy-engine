@@ -13,7 +13,7 @@ or render charts (``charts``).  The win-rate input for §3c comes from
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import duckdb
 
@@ -26,17 +26,45 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _TOPCUT_SQL = """
+WITH dup AS (
+    SELECT tournament_id, lower(trim(player)) AS norm
+    FROM decks
+    GROUP BY tournament_id, lower(trim(player))
+    HAVING count(*) > 1
+)
 SELECT d.archetype AS archetype, count(*) AS n
 FROM decks d
 JOIN tournaments t ON t.id = d.tournament_id
 JOIN standings s ON s.tournament_id = d.tournament_id
                AND lower(trim(s.player)) = lower(trim(d.player))
-WHERE d.archetype IS NOT NULL
+LEFT JOIN dup du ON du.tournament_id = d.tournament_id AND du.norm = lower(trim(d.player))
+WHERE d.archetype IS NOT NULL AND du.norm IS NULL    -- exclude ambiguous normalized names
   AND s.rank <= ?
   AND (? IS NULL OR t.provenance = ?)
   AND (? IS NULL OR t.date >= ?)
   AND (? IS NULL OR t.date < ?)
 GROUP BY d.archetype
+"""
+
+# Same join structure but counts NULL-archetype decks for finding #3.
+_TOPCUT_UNLABELED_SQL = """
+WITH dup AS (
+    SELECT tournament_id, lower(trim(player)) AS norm
+    FROM decks
+    GROUP BY tournament_id, lower(trim(player))
+    HAVING count(*) > 1
+)
+SELECT count(*) AS n
+FROM decks d
+JOIN tournaments t ON t.id = d.tournament_id
+JOIN standings s ON s.tournament_id = d.tournament_id
+               AND lower(trim(s.player)) = lower(trim(d.player))
+LEFT JOIN dup du ON du.tournament_id = d.tournament_id AND du.norm = lower(trim(d.player))
+WHERE d.archetype IS NULL AND du.norm IS NULL    -- unlabeled, non-ambiguous, in standings
+  AND s.rank <= ?
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
 """
 
 
@@ -52,11 +80,32 @@ def _topcut_counts(
 
     Decks with no standings row (e.g. MTGO League 5-0 dumps) are excluded from
     definition (b)'s numerator AND denominator — top-cut is undefined for them.
+    Decks whose normalized player name is non-unique within the tournament are
+    excluded to avoid ambiguous deck-standings attribution (finding #1 top-cut half).
     """
     rows = con.execute(
         _TOPCUT_SQL, [cut_size, provenance, provenance, since, since, until, until]
     ).fetchall()
     return {archetype: n for archetype, n in rows}
+
+
+def _topcut_unlabeled(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    cut_size: int,
+    since: str | None = None,
+    until: str | None = None,
+) -> int:
+    """Count of NULL-archetype decks in the top-cut window (finding #3).
+
+    Uses the same dup-CTE exclusion and standings join as ``_topcut_counts`` so
+    the labeled + unlabeled total is consistent with what the report shows.
+    """
+    row = con.execute(
+        _TOPCUT_UNLABELED_SQL, [cut_size, provenance, provenance, since, since, until, until]
+    ).fetchone()
+    return int(row[0]) if row else 0
 
 
 # ---------------------------------------------------------------------------
@@ -120,14 +169,19 @@ def _unlabeled_count(
 
 def _wrw_weights(
     con: duckdb.DuckDBPyConnection, *, provenance: str | None
-) -> tuple[dict[str, float], dict[str, int]]:
-    """Return (weight_by_archetype, matchup_n_by_archetype).
+) -> tuple[dict[str, float], dict[str, int], list[str]]:
+    """Return (weight_by_archetype, matchup_n_by_archetype, excluded_no_match_data).
 
     weight(a) = share_raw(a) * wr(a), where wr(a) = wins/(wins+losses) from
     match_results' per-archetype marginal.  Only archetypes with match data
     (n>0) get a weight — archetypes that appear in deck counts but have zero
-    rounds (the bimodal-coverage gap) are dropped from the weighted numerator
-    and reported via matchup_n=0.  The caller renormalises weights to sum to 1.
+    rounds (the bimodal-coverage gap) are dropped from the weighted numerator.
+
+    finding #5: excluded archetype names (deck-count-but-no-match-data) are returned
+    as the third element so callers can surface them as ``excluded_no_match_data``
+    coverage metadata rather than silently dropping them with only a debug log.
+
+    The caller renormalises weights to sum to 1.
     """
     # Import here to avoid circular deps at module load time
     from legacy_engine.analytics.match_results import compute_match_results
@@ -136,12 +190,13 @@ def _wrw_weights(
     total_decks = sum(raw.values())
 
     if total_decks == 0:
-        return {}, {}
+        return {}, {}, []
 
     match_res = compute_match_results(con, provenance=provenance)
 
     weights: dict[str, float] = {}
     matchup_n: dict[str, int] = {}
+    excluded: list[str] = []
 
     for archetype, deck_count in raw.items():
         share_raw = deck_count / total_decks
@@ -149,6 +204,7 @@ def _wrw_weights(
         if rec is None or rec.n == 0:
             # Bimodal-coverage gap: archetype has deck count but zero match data
             matchup_n[archetype] = 0
+            excluded.append(archetype)
             log.debug(
                 "wrw: %s has deck count but no match data — excluded from weighted numerator",
                 archetype,
@@ -158,7 +214,7 @@ def _wrw_weights(
         weights[archetype] = share_raw * wr
         matchup_n[archetype] = rec.n
 
-    return weights, matchup_n
+    return weights, matchup_n, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +248,9 @@ class MetaShareReport:
     total_decks: int  # denominator basis (labeled decks / top-cut decks)
     unlabeled: int  # NULL-archetype decks (coverage, raw/topcut only)
     min_share: float  # the inclusion floor applied (default 0.02)
+    excluded_no_match_data: list[str] = field(default_factory=list)
+    # finding #5: wrw archetypes that have a deck count but zero match data — surfaced
+    # as coverage metadata rather than only a debug log.  Empty for raw/topcut.
 
 
 # Labels that must never be folded into the "Other" fringe bucket
@@ -252,11 +311,12 @@ def _assemble(
     entries_raw.sort(key=lambda e: e.share, reverse=True)
 
     if not group_other:
+        # finding #4: honor display_total in the non-grouped path (parity with grouped path)
         return MetaShareReport(
             definition=definition,
             provenance=provenance,
             entries=entries_raw,
-            total_decks=total,
+            total_decks=display_total if display_total is not None else int(total),
             unlabeled=unlabeled,
             min_share=min_share,
         )
@@ -350,19 +410,23 @@ def compute_metashare(
         counts = _topcut_counts(con, provenance=provenance, cut_size=cut_size, since=since, until=until)
         total = sum(counts.values())
         n_by_arch = dict(counts)
+        # finding #3: compute actual unlabeled count over the same dup-excluded standings join
+        tc_unlabeled = _topcut_unlabeled(
+            con, provenance=provenance, cut_size=cut_size, since=since, until=until
+        )
         return _assemble(
             {k: float(v) for k, v in counts.items()},
             definition=definition,
             provenance=provenance,
             n_by_arch=n_by_arch,
             total=total,
-            unlabeled=0,  # top-cut: no standings row → excluded, not "unlabeled"
+            unlabeled=tc_unlabeled,
             min_share=min_share,
             group_other=group_other,
         )
 
     elif definition == "wrw":
-        weights, matchup_n = _wrw_weights(con, provenance=provenance)
+        weights, matchup_n, excluded = _wrw_weights(con, provenance=provenance)
         # Renormalise weights to sum to 1.0
         weight_total = sum(weights.values())
         if weight_total == 0:
@@ -373,12 +437,13 @@ def compute_metashare(
                 total_decks=0,
                 unlabeled=unlabeled,
                 min_share=min_share,
+                excluded_no_match_data=excluded,
             )
         normalised = {k: v / weight_total for k, v in weights.items()}
         # n_by_arch for wrw is matchup-n (honest: confidence bounded by smaller match sample)
         # total_decks on the report is the sum of matchup-n for archetypes in the weighted set
         total_matchup_n = sum(matchup_n[a] for a in weights)
-        return _assemble(
+        report = _assemble(
             normalised,
             definition=definition,
             provenance=provenance,
@@ -389,6 +454,9 @@ def compute_metashare(
             group_other=group_other,
             display_total=total_matchup_n,
         )
+        # finding #5: thread excluded names onto the report
+        report.excluded_no_match_data = excluded
+        return report
 
     else:
         raise ValueError(f"Unknown definition {definition!r}; must be 'raw', 'topcut', or 'wrw'")
@@ -442,6 +510,11 @@ def blend_shares(
     definition = next(iter(definitions))
 
     weight_sum = sum(weights.values())
+    # finding #6a: guard against zero weight-sum before the rescale division
+    if weight_sum <= 0:
+        raise ValueError(
+            f"blend_shares: weights sum to {weight_sum}; need a positive total to rescale"
+        )
     if abs(weight_sum - 1.0) > 1e-9:
         log.warning(
             "blend_shares: weights sum to %.6f (expected 1.0) — result will be rescaled",
@@ -450,14 +523,15 @@ def blend_shares(
         # Rescale to sum to 1
         weights = {k: v / weight_sum for k, v in weights.items()}
 
-    # Collect all archetypes that appear in any report
+    # Collect all archetypes that appear in any report.
+    # finding #6b: keep "Other" in the blend — include it like any archetype so named
+    # shares are not inflated by the dropped "Other" mass.
     all_archetypes: set[str] = set()
     for prov, report in reports.items():
         if prov not in weights:
             continue
         for entry in report.entries:
-            if entry.archetype != "Other":
-                all_archetypes.add(entry.archetype)
+            all_archetypes.add(entry.archetype)  # was: if entry.archetype != "Other"
 
     # Compute blended share per archetype
     blended: dict[str, float] = {}
