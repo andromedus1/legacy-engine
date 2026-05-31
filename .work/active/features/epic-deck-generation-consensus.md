@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-consensus
 kind: feature
-stage: implementing
+stage: review
 tags: [generation]
 parent: epic-deck-generation
 depends_on: []
@@ -12,6 +12,27 @@ updated: 2026-05-30
 ---
 
 # Consensus baseline deck generation
+
+## Implementation notes
+
+**Units delivered (2026-05-30):**
+
+- **Unit 1** (`generation/__init__.py`, `generation/models.py`): `GeneratedDeck` dataclass with archetype, maindeck, sideboard, window, sample_n, legality_errors. Importable via `from legacy_engine.generation import GeneratedDeck`.
+
+- **Unit 2** (`generation/consensus.py::card_frequencies`): Per-archetype card-frequency query over `decks` JOIN `deck_cards` with window/provenance filters. Uses a window CTE to compute modal_count via DuckDB's `first_value` analytic. Returns `list[CardFreq]` sorted by inclusion_pct DESC, modal_count DESC. Default window reuses `trends.regime_windows()` SSOT. AC verified: 8/10 decks → inclusion_pct=0.8.
+
+- **Unit 3** (`generation/consensus.py::build_consensus` + `_fill_board` + `_dedupe_cross_board`): The trickiest unit. Greedy-fill partial-last-stack reconciliation to exactly 60 maindeck + ≤15 sideboard. Cross-board de-dupe removes a card from the board with lower inclusion_pct (tie → keep in main). Top-up pass after de-dupe replenishes any slots freed by the de-dupe step. Validates via `validate_deck(current_banlist())`.
+
+- **Unit 4** (`cli.py::generate` group + `generate consensus` leaf): `--archetype` (required), `--since`, `--until`, `--provenance`, `--export`, `--db`, `--verbose`. Prints `<qty> <name>` list with Sideboard header + audit footer. Unknown archetype → ClickException. `--export <fmt>` delegates to `generation.export.format_decklist`.
+
+**Also created** `generation/export.py` early (needed by CLI `--export` flag in Unit 4, and as the foundation for Feature 2).
+
+**Tests** (`tests/test_generation_consensus.py`): 26 tests covering Units 1-4. Fixture: 10 Delver decks in the current ban-regime (2026-05-25) with calibrated inclusion_pcts. All tests pass.
+
+**Deviations / implementation choices:**
+- `sample_n` is reconstructed from `decks_running / inclusion_pct` of the most-played card (avoids a second DB round-trip). The result is an integer approximation that is always exact for our integer-count pool.
+- `_latest_regime_window()` explicitly calls `regime_windows()[-1]` — the last entry is always the current (open-ended) regime.
+- `card_frequencies` passes `since`/`until` as explicit `None`/`None` to trigger the default-window path in `build_consensus`, so callers passing explicit windows always take precedence.
 
 ## Brief
 

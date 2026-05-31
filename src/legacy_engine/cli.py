@@ -971,5 +971,180 @@ def advise_report(
         con.close()
 
 
+# ── generate: deck generation ──
+@main.group()
+def generate() -> None:
+    """Deck generation — consensus baseline and field-tuned decklists."""
+
+
+@generate.command("consensus")
+@click.option("--archetype", required=True, help="Archetype name to generate a consensus deck for.")
+@click.option(
+    "--since",
+    default=None,
+    help="Start of corpus window (YYYY-MM-DD, inclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--until",
+    default=None,
+    help="End of corpus window (YYYY-MM-DD, exclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper"], case_sensitive=False),
+    default=None,
+    help="Filter to online or paper events (default: all).",
+)
+@click.option(
+    "--export",
+    "export_fmt",
+    type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
+    default=None,
+    help="Also emit the decklist in the specified import format.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def generate_consensus(
+    archetype: str,
+    since: str | None,
+    until: str | None,
+    provenance: str | None,
+    export_fmt: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Generate a consensus baseline decklist for an archetype.
+
+    Aggregates modal card choices across all archetype decks in the corpus window
+    and reconciles to a legal, exactly-60 maindeck + ≤15 sideboard.
+
+    Example: legacy-engine generate consensus --archetype "Izzet Delver"
+    """
+    _setup_logging(verbose)
+
+    from legacy_engine.generation.consensus import build_consensus
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        deck = build_consensus(
+            con,
+            archetype,
+            since=since,
+            until=until,
+            provenance=provenance,
+        )
+    finally:
+        con.close()
+
+    if deck.sample_n == 0:
+        raise click.ClickException(
+            f"No decks found for archetype {archetype!r} in the window "
+            f"[{deck.window[0] or 'open'}, {deck.window[1] or 'open'})."
+        )
+
+    # Print the decklist in the default readable format.
+    click.echo(f"// Consensus deck: {deck.archetype}")
+    window_since = deck.window[0] or "open"
+    window_until = deck.window[1] or "current"
+    click.echo(f"// Window: [{window_since}, {window_until})  sample_n={deck.sample_n}")
+    click.echo("")
+
+    # Maindeck — sorted by count desc, then name for stable output.
+    for name, count in sorted(deck.maindeck.items(), key=lambda kv: (-kv[1], kv[0])):
+        click.echo(f"{count} {name}")
+
+    if deck.sideboard:
+        click.echo("")
+        click.echo("Sideboard")
+        for name, count in sorted(deck.sideboard.items(), key=lambda kv: (-kv[1], kv[0])):
+            click.echo(f"{count} {name}")
+
+    # Footer.
+    main_total = sum(deck.maindeck.values())
+    side_total = sum(deck.sideboard.values())
+    click.echo(f"\n// Maindeck: {main_total}  Sideboard: {side_total}")
+
+    if deck.legality_errors:
+        for err in deck.legality_errors:
+            click.echo(f"// [LEGALITY] {err}", err=True)
+    else:
+        click.echo("// Legality: OK")
+
+    # Optional export format output.
+    if export_fmt:
+        from legacy_engine.generation.export import format_decklist
+        click.echo("\n// --- Export ---")
+        click.echo(format_decklist(deck.maindeck, deck.sideboard, fmt=export_fmt))
+
+
+# ── export: decklist formatting ──
+@main.group()
+def export() -> None:
+    """Decklist export — format any decklist for import into Moxfield, Archidekt, etc."""
+
+
+@export.command("deck")
+@click.option(
+    "--deck",
+    "deck_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
+    default="moxfield",
+    show_default=True,
+    help="Export format.",
+)
+@click.option(
+    "--out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Write output to a file instead of stdout.",
+)
+@_verbose
+def export_deck(
+    deck_file: str,
+    fmt: str,
+    out: str | None,
+    verbose: bool,
+) -> None:
+    """Export a decklist file as standard import text.
+
+    Reads a ``<qty> <Card Name>`` decklist and emits it in the target format,
+    suitable for import into Moxfield, Archidekt, MTGGoldfish, or .dec tools.
+
+    Example: legacy-engine export deck --deck list.txt --format archidekt
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _parse_decklist
+    from legacy_engine.generation.export import format_decklist
+
+    deck_text = Path(deck_file).read_text()
+    try:
+        maindeck, sideboard = _parse_decklist(deck_text)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    output = format_decklist(maindeck, sideboard, fmt=fmt)
+
+    if out:
+        Path(out).write_text(output)
+        click.echo(f"Written to {out}")
+    else:
+        click.echo(output)
+
+
 if __name__ == "__main__":
     main()
