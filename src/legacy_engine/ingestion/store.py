@@ -9,6 +9,7 @@ A thin functional API establishes the SQL access pattern the analytics and advis
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -126,8 +127,19 @@ def rebuild(con: duckdb.DuckDBPyConnection) -> None:
 
 
 def tournament_id(tr: TournamentResult) -> str:
-    """Stable id for a tournament — its Uri if present, else source:name:date."""
-    return tr.uri or f"{tr.source}:{tr.name}:{tr.date}"
+    """Stable id for a tournament — its Uri if present, else a content-derived fallback.
+
+    For URI-bearing events the URI is the id (unchanged).
+    For no-URI events (e.g. paper tournaments without a canonical URL), a deterministic 8-char
+    SHA-1 digest of the sorted player-name set is appended so two events sharing the same
+    source/name/date but with different player pools get distinct ids, while re-ingesting the
+    same event always produces the same id (preserves load_tournament idempotency).
+    """
+    if tr.uri:
+        return tr.uri
+    players = "|".join(sorted(d.player for d in tr.decks))
+    digest = hashlib.sha1(players.encode()).hexdigest()[:8]
+    return f"{tr.source}:{tr.name}:{tr.date}:{digest}"
 
 
 def load_tournament(con: duckdb.DuckDBPyConnection, tr: TournamentResult) -> str:
