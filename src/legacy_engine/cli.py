@@ -914,6 +914,25 @@ def advise_sideboard(
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")
+        # --- Per-matchup OUT/IN plans (only when value_informed) ---
+        if pkg.value_informed and pkg.matchup_plans:
+            click.echo("\n  Per-matchup plans (presence-correlational — see disclaimer):")
+            for opp, plan in sorted(pkg.matchup_plans.items()):
+                if plan.degraded:
+                    click.echo(f"    vs {opp}: thin data — no per-matchup plan (rely on 15 composition)")
+                else:
+                    out_str = ", ".join(
+                        f"{c}x {card}" for card, c in sorted(plan.side_out.items())
+                    ) or "(none)"
+                    in_str = ", ".join(
+                        f"{c}x {card}" for card, c in sorted(plan.side_in.items())
+                    ) or "(none)"
+                    click.echo(
+                        f"    vs {opp} [{plan.tier}, n≥{plan.n_basis}]: "
+                        f"OUT {out_str} | IN {in_str}"
+                    )
+            from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
+            click.echo(f"\n  [disclaimer] {_VALUE_DISCLAIMER}")
     finally:
         con.close()
 
