@@ -16,6 +16,15 @@ Both ``positioning_score`` and ``rank_decks`` build on the vectorised MC core
 ``_sample_S`` so all decks in a ranking see the same per-draw sampled field
 (giving an honest P(best) that captures share-uncertainty correlation).
 
+**Ranking headline:** ``rank_decks`` sorts by a risk-adjusted lower-posterior-
+quantile of each deck's S samples (``risk_quantile=0.25`` default).  This
+penalises thin-data, high-variance decks whose P(best) could spike spuriously
+in the shared-field MC.  ``p_best`` is kept as a secondary reported dict.
+
+**data_coverage:** fraction of field share-mass the deck has a *measured* cell
+against (``cell.display``, i.e. n≥30, non-mirror).  Consumers and the report
+layer can condition on this to label or exclude low-data decks.
+
 Units:
   1  ``_row_winrate_inputs`` + ``_sample_S``          — vectorised core
   2  ``PositioningResult``                             — result dataclass
@@ -46,6 +55,8 @@ _DIRICHLET_GAMMA: float = 0.5      # Jeffreys pseudo-count for Dirichlet
 _BETA_JEFFREYS: float = 0.5        # Jeffreys prior pseudo-count for Beta cells
 _NODATA_STRENGTH: float = 2.0      # weak pseudo-count for no-data imputation
 _THIN_ROW_THRESHOLD: float = 0.5   # warn when >50% of field archetypes are imputed
+_DEFAULT_RISK_QUANTILE: float = 0.25   # default lower-quantile for risk-adjusted ranking
+_RISK_AVERSE_QUANTILE: float = 0.05   # quantile used when risk_averse=True
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +219,48 @@ def _sample_S(
 
 
 # ---------------------------------------------------------------------------
+# Internal helper — data_coverage
+# ---------------------------------------------------------------------------
+
+
+def _compute_data_coverage(
+    matrix: MatchupMatrix,
+    field: FieldDistribution,
+    deck_archetype: str,
+) -> float:
+    """Fraction of field share-mass the deck has a *measured* cell against.
+
+    A cell is measured when ``cell.display`` is True (n ≥ DISPLAY_GATE_N) and
+    the opponent is not the deck itself (non-mirror).  Share-mass weighting
+    means a deck fully covered against the top-50% opponent gets ~0.5, not a
+    binary count fraction — matching the decision-relevant question "what share
+    of a random opponent does this deck have honest data for?".
+
+    Returns 1.0 when the field is empty (degenerate; no coverage needed).
+    """
+    field_archetypes = list(field.shares)
+    if not field_archetypes:
+        return 1.0
+
+    covered_mass = 0.0
+    total_non_mirror_mass = 0.0
+
+    for opp in field_archetypes:
+        if opp == deck_archetype:
+            continue  # skip mirror
+        share = field.shares[opp]
+        total_non_mirror_mass += share
+        cell = matrix.cells.get((deck_archetype, opp))
+        if cell is not None and cell.display and not cell.is_mirror:
+            covered_mass += share
+
+    if total_non_mirror_mass <= 0.0:
+        return 1.0  # field is all self-mirror; coverage is vacuously 1.0
+
+    return covered_mass / total_non_mirror_mass
+
+
+# ---------------------------------------------------------------------------
 # Unit 2 — PositioningResult
 # ---------------------------------------------------------------------------
 
@@ -235,6 +288,11 @@ class PositioningResult:
         Archetypes imputed (no matchup data in the row).
     warnings
         Ordered informational warnings (thin row, provenance, etc.).
+    data_coverage
+        Fraction of non-mirror field share-mass the deck has a *measured*
+        cell against (``cell.display``, i.e. n≥30).  1.0 = fully covered;
+        0.0 = all cells are imputed.  Use to condition on data sufficiency
+        before trusting S or the ranking.
     s_samples
         Raw (n_draws,) sample array; ``None`` unless ``keep_samples=True``.
     """
@@ -247,6 +305,7 @@ class PositioningResult:
     n_draws: int
     imputed: frozenset[str]
     warnings: tuple[str, ...]
+    data_coverage: float = 1.0
     s_samples: np.ndarray | None = None
 
 
@@ -348,6 +407,9 @@ def positioning_score(
                 "S is dominated by the imputation prior"
             )
 
+    # ── data_coverage — share-mass fraction with measured (n≥30) cells ────────
+    data_coverage = _compute_data_coverage(matrix, field, deck_archetype)
+
     return PositioningResult(
         deck_archetype=deck_archetype,
         s_mean=s_mean,
@@ -357,6 +419,7 @@ def positioning_score(
         n_draws=n_draws,
         imputed=all_imputed,
         warnings=tuple(warnings_list),
+        data_coverage=data_coverage,
         s_samples=samples if keep_samples else None,
     )
 
@@ -373,14 +436,28 @@ class DeckRanking:
     Fields
     ------
     decks
-        Candidates sorted best→worst by ``p_best`` (or 5th-percentile S if
-        ``risk_averse=True``).
+        Candidates sorted best→worst by the risk-adjusted lower-quantile of S
+        (controlled by ``risk_quantile`` in ``rank_decks``; default q=0.25).
+        This penalises thin-data, high-variance decks that would otherwise
+        spike to the top of a raw P(best) ranking.
     p_best
-        P(S_D = max) across shared-field draws.
+        Secondary field: P(S_D = max) across shared-field draws.  Kept for
+        diagnostics and display — no longer the sort key.
     s_mean
         Posterior mean S per deck.
     s_ci
         (2.5th, 97.5th) credible interval per deck.
+    s_quantile
+        The lower-quantile value used as the headline sort key (keyed by deck).
+        ``quantile_level`` records which quantile was used.
+    quantile_level
+        The quantile used for sorting (matches ``risk_quantile`` param).
+    data_coverage
+        Fraction of non-mirror field share-mass the deck has a measured cell
+        against (n≥30).  Keyed by deck archetype.
+    low_coverage
+        Set of deck archetypes whose ``data_coverage < min_coverage``.  These
+        are flagged, not silently dropped — they remain in ``decks``.
     pairwise
         P(S_a > S_b) for every ordered pair (a, b).
     field_source
@@ -391,6 +468,10 @@ class DeckRanking:
     p_best: dict[str, float]
     s_mean: dict[str, float]
     s_ci: dict[str, tuple[float, float]]
+    s_quantile: dict[str, float]
+    quantile_level: float
+    data_coverage: dict[str, float]
+    low_coverage: set[str]
     pairwise: dict[tuple[str, str], float]
     field_source: str
 
@@ -404,6 +485,8 @@ def rank_decks(
     gamma: float = _DIRICHLET_GAMMA,
     robust: bool = False,
     risk_averse: bool = False,
+    risk_quantile: float = _DEFAULT_RISK_QUANTILE,
+    min_coverage: float = 0.0,
     seed: int | None = None,
 ) -> DeckRanking:
     """Rank candidate decks under shared-field MC.
@@ -412,17 +495,41 @@ def rank_decks(
     candidate decks against that same sampled field — giving an honest
     P(best) that respects the Dirichlet Σw=1 constraint across decks.
 
+    The headline ranking sort key is the **risk-adjusted lower-posterior-
+    quantile** of each deck's S samples (default q=0.25).  This penalises
+    thin-data, high-variance decks that spike spuriously in the argmax MC
+    but have genuinely unreliable positioning estimates.  ``p_best`` is
+    still computed and returned as a secondary field.
+
     Parameters
     ----------
     risk_averse
-        Sort by 5th-percentile S (conservative ranking) instead of p_best.
+        Convenience flag: forces ``risk_quantile = _RISK_AVERSE_QUANTILE``
+        (0.05) for a more conservative sort.  Mutually consistent with
+        ``risk_quantile`` — if both are provided, ``risk_averse=True``
+        overrides to 0.05.
+    risk_quantile
+        The quantile of the S posterior used as the headline sort key.
+        Default 0.25 (lower quartile).  Lower values are more conservative.
+        ``risk_averse=True`` overrides this to 0.05.
+    min_coverage
+        Decks with ``data_coverage < min_coverage`` are added to
+        ``DeckRanking.low_coverage`` and flagged — they are NOT dropped
+        from ``decks``.  Default 0.0 (no flagging).
     """
+    # Reconcile risk_averse / risk_quantile: risk_averse=True → use 0.05
+    effective_q = _RISK_AVERSE_QUANTILE if risk_averse else risk_quantile
+
     if not candidates:
         return DeckRanking(
             decks=[],
             p_best={},
             s_mean={},
             s_ci={},
+            s_quantile={},
+            quantile_level=effective_q,
+            data_coverage={},
+            low_coverage=set(),
             pairwise={},
             field_source=field.field_source,
         )
@@ -478,6 +585,30 @@ def rank_decks(
         lo, hi = np.percentile(col, [2.5, 97.5])
         s_ci_dict[deck] = (float(lo), float(hi))
 
+    # ── s_quantile — lower-posterior-quantile headline sort key ──────────
+    # Computed at effective_q (default 0.25); penalises thin-data high-
+    # variance decks whose S spikes in the argmax MC but is unreliable.
+    s_quantile_dict: dict[str, float] = {}
+    for j, deck in enumerate(candidates):
+        s_quantile_dict[deck] = float(np.percentile(all_S[:, j], effective_q * 100))
+
+    # ── data_coverage per deck ────────────────────────────────────────────
+    coverage_dict: dict[str, float] = {
+        deck: _compute_data_coverage(matrix, field, deck) for deck in candidates
+    }
+
+    # ── low_coverage flag set ─────────────────────────────────────────────
+    low_coverage: set[str] = {
+        deck for deck, cov in coverage_dict.items() if cov < min_coverage
+    }
+    if low_coverage:
+        log.warning(
+            "rank_decks: %d deck(s) below min_coverage=%.2f: %s",
+            len(low_coverage),
+            min_coverage,
+            ", ".join(sorted(low_coverage)),
+        )
+
     # ── pairwise P(S_a ≥ S_b) with half-credit on exact ties ────────────
     # Use (strict win) + 0.5 * (tie) so P(a>b) + P(b>a) = 1.0 even for
     # identical candidates (pure ties give each side 0.5).
@@ -491,19 +622,18 @@ def rank_decks(
                     ((Sa > Sb).astype(np.float64) + 0.5 * (Sa == Sb).astype(np.float64)).mean()
                 )
 
-    # ── Sort ──────────────────────────────────────────────────────────────
-    if risk_averse:
-        # Sort by 5th-percentile S descending
-        p5 = {deck: float(np.percentile(all_S[:, j], 5)) for j, deck in enumerate(candidates)}
-        sorted_decks = sorted(candidates, key=lambda d: p5[d], reverse=True)
-    else:
-        sorted_decks = sorted(candidates, key=lambda d: p_best[d], reverse=True)
+    # ── Sort by risk-adjusted lower-quantile (headline ranking) ──────────
+    sorted_decks = sorted(candidates, key=lambda d: s_quantile_dict[d], reverse=True)
 
     return DeckRanking(
         decks=sorted_decks,
         p_best=p_best,
         s_mean=s_mean_dict,
         s_ci=s_ci_dict,
+        s_quantile=s_quantile_dict,
+        quantile_level=effective_q,
+        data_coverage=coverage_dict,
+        low_coverage=low_coverage,
         pairwise=pairwise,
         field_source=field.field_source,
     )
