@@ -1,42 +1,54 @@
-"""Field-tuning for deck generation (mode 2).
+"""Field-tuning for deck generation (mode 2) — rework (2026-05-31).
 
-Optimizes a consensus (or user-supplied) 60+15 shell against the current or projected
-field by swapping flexible maindeck slots toward cards with better field-weighted
-coverage, then re-running the sideboard recommender for the 15.
+Optimises a consensus (or user-supplied) 60+15 shell against the current or
+projected field by swapping flexible maindeck slots toward cards with better
+**field-weighted per-card matchup lift**, then re-running the sideboard
+recommender for the 15.
 
-Approach (from feature spec § Design decisions):
-- **Coverage objective**: reuses advisory.sideboard's CoverageModel — Σ weight_e·g(n_e),
-  g(n)=1−(1−p)^n over field threat-elements weighted by archetype share. Card-aware,
-  submodular — greedy is near-optimal.
-- **Flex/locked partition**: cards run by ≥ lock_threshold of archetype decks are LOCKED
-  (high-inclusion proactive core); the rest are flexible. Data-driven.
-- **Candidate pool**: observed archetype maindeck cards in-window (bounded, faithful to
-  "what wins now").
-- **Search**: greedy one-swap-at-a-time; stop when no swap strictly improves coverage
-  OR max_swaps reached. Maindeck stays exactly 60 + legal at every step.
-- **Bimodal fallback**: if the archetype is absent from the matchup matrix OR the
-  relevant matchups are thin (n < DISPLAY_GATE_N), set fell_back=True, skip maindeck
-  swaps, keep consensus main, still run the sideboard recommender for the 15.
-- **Positioning S**: archetype-level context only (unchanged by card swaps by design).
-  Computed once and carried in the result.
+Objective (rework — fixes review finding #4):
+- **Per-card-value is the SOLE maindeck-swap driver.**  The greedy loop swaps
+  maindeck flex purely by field-weighted per-card matchup lift (gated by tier).
+  Coverage (the old objective) stays where it belongs — as the SIDEBOARD's
+  objective — and is still computed + reported as an audit metric only.
+- When there is NO gate-clearing per-card signal for any field opponent, the
+  tuner makes NO maindeck swaps (keeps the consensus maindeck) and says so.
+  This fully prevents gameplan-hollowing: coverage can never cut a proactive
+  maindeck card.
+
+Algorithm:
+- ``field_weighted_values``: runs ``compute_card_winrates`` ONCE (heavy path);
+  builds fwv[card] = Σ_opp field.shares[opp] * lift(card vs opp) over only
+  gate-clearing cells.
+- ``_greedy_tune``: pure greedy maximising fwv[add]-fwv[cut], strict-improve,
+  locked core never cut, deterministic tie-break, legal_swap INJECTED.
+  Testable with a hand-built fwv + trivial legal_swap, NO DB.
+- ``_legal_swap_maindeck``: validates COMBINED main+side (fix #3), enforces
+  4-copy + overrides + exemptions, exactly-60.
+- ``tune_deck``: orchestrates; if has_value_signal -> _greedy_tune; else
+  fell_back=True, no maindeck swaps.  Always calls recommend_sideboard with
+  archetype/since/until for per-matchup plans.
 
 Units:
-  1  ``partition_flex`` + ``candidate_pool``  — flex/locked partition
-  2  ``coverage_value``                        — field-weighted coverage objective
-  3  ``tune_deck`` + ``TunedDeck``             — greedy swap loop + bimodal fallback
+  1  ``field_weighted_values`` + ``has_value_signal``  — per-card value
+  2  ``_greedy_tune``                                  — pure greedy search
+  3  ``_legal_swap_maindeck``                          — combined legality (fix #3)
+  4  ``TunedDeck`` + ``tune_deck``                     — orchestration rewire
+  5  ``partition_flex`` + ``candidate_pool``            — unchanged from prior impl
+     ``coverage_value`` + ``build_tuning_coverage_model`` — audit metrics only
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field as dc_field
-from typing import Optional
+from typing import Callable, Optional
 
 import duckdb
 
 from legacy_engine.advisory.field import FieldDistribution, build_global_field
 from legacy_engine.advisory.sideboard import (
     CoverageModel,
+    MatchupPlan,
     _build_coverage_model,
     _compute_covered_weight,
     recommend_sideboard,
@@ -57,9 +69,13 @@ _DEFAULT_LOCK_THRESHOLD: float = 0.65   # ≥65% inclusion → locked core
 _DEFAULT_MAX_SWAPS: int = 8             # cap on greedy maindeck swap rounds
 _MAIN_SIZE: int = 60
 
+# Confidence tiers that count as gate-clearing for per-card value
+_VALUE_GATE: tuple[str, ...] = ("evolving", "established")
+
 
 # ---------------------------------------------------------------------------
 # Public thin wrapper: build the coverage model from the field + deck context
+# (audit-metric use only — NOT the maindeck swap driver)
 # ---------------------------------------------------------------------------
 
 def build_tuning_coverage_model(
@@ -74,6 +90,8 @@ def build_tuning_coverage_model(
 
     Returns a ``CoverageModel`` with elements/weights/candidates derived from
     the field's archetype tags and the deck's color identity.
+
+    Used for audit metrics (coverage_before/after) only — NOT the swap driver.
     """
     from legacy_engine.advisory.whattoplay import _load_deck_cards
     from legacy_engine.colors import compute_deck_colors as _compute_colors
@@ -95,7 +113,7 @@ def build_tuning_coverage_model(
 
 
 # ---------------------------------------------------------------------------
-# Unit 1 — Flex/locked partition + candidate pool
+# Unit 5 — Flex/locked partition + candidate pool (unchanged from prior impl)
 # ---------------------------------------------------------------------------
 
 def partition_flex(
@@ -109,11 +127,11 @@ def partition_flex(
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Partition a maindeck into (locked, flex) slices.
 
-    A card is LOCKED if its archetype consensus inclusion_pct ≥ ``lock_threshold``;
+    A card is LOCKED if its archetype consensus inclusion_pct >= ``lock_threshold``;
     otherwise it is in the flexible pool the tuner may swap.
 
     Lands and high-inclusion proactive core cards land in ``locked`` automatically
-    (they appear in ≥65% of the archetype's decks by definition).
+    (they appear in >=65% of the archetype's decks by definition).
 
     Parameters
     ----------
@@ -122,7 +140,7 @@ def partition_flex(
     archetype
         The archetype whose consensus frequencies determine lock status.
     maindeck
-        The starting maindeck (card→count).  Keys not in the archetype's card pool
+        The starting maindeck (card->count).  Keys not in the archetype's card pool
         (e.g. cards the user injected) are placed in flex by default.
     lock_threshold
         Inclusion fraction at or above which a card is locked (default 0.65).
@@ -135,8 +153,8 @@ def partition_flex(
     (locked, flex)
         Two disjoint dicts that together cover every card in ``maindeck``.
 
-    AC: cards run by ≥65% of the archetype's decks are locked;
-        flex = the rest; locked ∪ flex = maindeck.
+    AC: cards run by >=65% of the archetype's decks are locked;
+        flex = the rest; locked | flex = maindeck.
     """
     if since is None and until is None:
         since, until = _latest_regime_window()
@@ -183,68 +201,373 @@ def candidate_pool(
 
 
 # ---------------------------------------------------------------------------
-# Unit 2 — Field-weighted coverage objective
+# Coverage objective (audit metric only — NOT the maindeck swap driver)
 # ---------------------------------------------------------------------------
 
 def coverage_value(model: CoverageModel, cards: dict[str, int]) -> float:
     """Compute the field-weighted saturating-coverage value of a set of cards.
 
-    Σ_e weight_e · g(cov_e)  where  cov_e = number of cards in ``cards``
-    (accounting for copy counts) that cover element e, and g(n)=1−(1−p)^n.
+    Sigma_e weight_e * g(cov_e)  where cov_e = number of cards in ``cards``
+    (accounting for copy counts) that cover element e, and g(n)=1-(1-p)^n.
 
-    Delegates to ``advisory.sideboard._compute_covered_weight`` — the same
-    primitive used by the sideboard recommender to score its solution.
-    This ensures the tuner's objective matches what the recommender optimizes.
+    Delegates to ``advisory.sideboard._compute_covered_weight``.
 
-    Pure function; safe to call repeatedly in the greedy loop.
-
-    AC: adding an answer that covers a high-weight field element raises the
-        value with diminishing returns (saturating g(n)).
+    Used for before/after audit reporting only — NOT the greedy swap driver.
     """
     return _compute_covered_weight(cards, model)
 
 
 # ---------------------------------------------------------------------------
-# Unit 3 — TunedDeck + greedy swap loop + bimodal fallback
+# Unit 1 — Field-weighted per-card value (the REAL swap objective)
+# ---------------------------------------------------------------------------
+
+def field_weighted_values(
+    con: duckdb.DuckDBPyConnection,
+    field: FieldDistribution,
+    cards: list[str],
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    gate: tuple[str, ...] = _VALUE_GATE,
+) -> dict[str, float]:
+    """Compute field-weighted per-card matchup lift for a list of cards.
+
+    Runs ``compute_card_winrates`` ONCE (heavy path) then:
+
+        fwv[card] = Sum_opp field.shares[opp] * lift(card vs opp)
+
+    summed only over (card, opp) cells whose tier is in ``gate``; thin cells
+    (speculative tier) contribute 0 so they do not drive swaps.
+
+    ``cards`` should be the union of the maindeck and the candidate pool
+    (value every card the greedy loop might touch).
+
+    Window defaults to ``_latest_regime_window()`` when both since/until are None.
+
+    Returns
+    -------
+    dict[str, float]
+        card -> field-weighted matchup lift.  Cards with no gate-clearing cell
+        anywhere get 0.0.
+
+    AC
+    --
+    - A card with proven positive lift vs high-share opponents gets a high fwv.
+    - A card dead vs the field gets a low/negative fwv.
+    - A card with only speculative cells gets 0.0.
+    """
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.analytics.card_value import card_values_vs
+
+    if since is None and until is None:
+        since, until = _latest_regime_window()
+
+    # Heavy path: runs once; greedy loop then works on precomputed floats.
+    try:
+        r = compute_card_winrates(con, since=since, until=until)
+    except Exception as exc:
+        log.debug("field_weighted_values: compute_card_winrates failed: %s", exc)
+        return {card: 0.0 for card in cards}
+
+    if r.coverage.decisive_matched == 0:
+        return {card: 0.0 for card in cards}
+
+    fwv: dict[str, float] = {card: 0.0 for card in cards}
+
+    for opp, share in field.shares.items():
+        if share <= 0.0:
+            continue
+        cvs = card_values_vs(r, cards, "main", opp, gate=gate)
+        for card, cv in cvs.items():
+            if cv.tier in gate:
+                fwv[card] = fwv.get(card, 0.0) + share * cv.lift
+
+    return fwv
+
+
+def has_value_signal(fwv: dict[str, float]) -> bool:
+    """Return True iff any card has a non-zero field-weighted value.
+
+    A non-zero fwv means at least one (card, opponent) cell cleared the gate,
+    giving the greedy loop actionable data.
+
+    AC: True iff any |fwv[card]| > 0.
+    """
+    return any(v != 0.0 for v in fwv.values())
+
+
+# ---------------------------------------------------------------------------
+# Unit 2 — Pure greedy tuner (the trickiest unit; tests pass hand-built fwv)
+# ---------------------------------------------------------------------------
+
+def _greedy_tune(
+    fwv: dict[str, float],
+    maindeck: dict[str, int],
+    locked: dict[str, int],
+    flex: dict[str, int],
+    pool: list[str],
+    *,
+    max_swaps: int,
+    legal_swap: Callable[[dict[str, int], str, str], tuple[bool, dict[str, int]]],
+) -> tuple[dict[str, int], list[tuple[str, str]], float, float]:
+    """Pure greedy maindeck tuner driven by field-weighted per-card lift.
+
+    value(cards) = Sum copies * fwv.get(card, 0.0)
+
+    Each round: among legal (flex card with copies > 0 cut, pool card added,
+    add != cut, add not already in locked core in current deck):
+      - pick the swap maximising fwv[add] - fwv[cut]
+      - accept iff gain > 0 (STRICT improve — no ties)
+      - apply; update flex; record
+      - stop at convergence or max_swaps
+
+    Parameters
+    ----------
+    fwv
+        Precomputed field-weighted value per card (pure dict — no DB calls here).
+    maindeck
+        Starting maindeck (card -> count, must sum to 60).
+    locked
+        Locked core (subset of maindeck keys) — NEVER cut.
+    flex
+        Flex slice of the maindeck (disjoint from locked).
+    pool
+        Candidate pool of card names the greedy loop may swap in.
+    max_swaps
+        Maximum number of swap rounds.
+    legal_swap
+        Injected callable: ``(current_main, cut, add) -> (ok, new_main)``.
+        Enforces exactly-60 and copy-limit legality; pure (no DB required when
+        supplied as a trivial lambda in tests).
+
+    Returns
+    -------
+    (final_main, swaps, value_before, value_after)
+        ``swaps`` is the ordered audit log of (cut, added) pairs.
+        ``value_before`` and ``value_after`` are the field-weighted sum values.
+
+    AC
+    --
+    - Given an fwv where a flex card scores low and a pool card scores high,
+      exactly that swap is made and value_after > value_before.
+    - Locked core never appears in swaps.
+    - No strictly-improving swap left at stop.
+    - Deterministic tie-break by (cut_name, add_name) lex order.
+    """
+    locked_cards: frozenset[str] = frozenset(locked.keys())
+
+    def _value(cards: dict[str, int]) -> float:
+        return sum(copies * fwv.get(card, 0.0) for card, copies in cards.items())
+
+    value_before = _value(maindeck)
+
+    current_main = dict(maindeck)
+    current_flex = dict(flex)
+    swaps: list[tuple[str, str]] = []
+
+    for _round in range(max_swaps):
+        best_gain: float = 0.0
+        best_cut: str | None = None
+        best_add: str | None = None
+        best_main: dict[str, int] | None = None
+
+        for cut_card in sorted(current_flex.keys()):  # deterministic iteration order
+            if current_main.get(cut_card, 0) <= 0:
+                continue  # fully cut in a previous round
+
+            cut_lift = fwv.get(cut_card, 0.0)
+
+            for add_card in pool:
+                if add_card == cut_card:
+                    continue
+                # Don't add a card that is already part of the locked core in the
+                # current maindeck (it's already there; adding would exceed the limit).
+                if add_card in locked_cards and add_card in current_main:
+                    continue
+
+                add_lift = fwv.get(add_card, 0.0)
+                gain = add_lift - cut_lift
+
+                # Only strictly-improving swaps (gain > 0).
+                if gain <= 0.0:
+                    continue
+
+                # Check legality (injected — pure in tests, DB-backed in prod).
+                valid, new_main = legal_swap(current_main, cut_card, add_card)
+                if not valid:
+                    continue
+
+                # Deterministic tie-break: prefer lex-smaller (cut, add) pair.
+                if gain > best_gain or (
+                    gain == best_gain
+                    and best_cut is not None
+                    and (cut_card, add_card) < (best_cut, best_add)
+                ):
+                    best_gain = gain
+                    best_cut = cut_card
+                    best_add = add_card
+                    best_main = new_main
+
+        if best_cut is None:
+            log.debug("_greedy_tune: converged after %d swap(s)", len(swaps))
+            break
+
+        # Apply the best swap.
+        swaps.append((best_cut, best_add))
+        current_main = best_main
+
+        # Update flex to reflect the new maindeck state.
+        if current_main.get(best_cut, 0) == 0:
+            current_flex.pop(best_cut, None)
+        else:
+            current_flex[best_cut] = current_main[best_cut]
+
+        # If the added card is now in the maindeck and NOT in the locked core,
+        # it becomes a flex candidate (can be swapped out in a future round).
+        if best_add in current_main and best_add not in locked_cards:
+            current_flex[best_add] = current_main[best_add]
+
+        log.debug(
+            "_greedy_tune: swap %d: cut=%r (fwv=%.4f) add=%r (fwv=%.4f) gain=%.4f",
+            len(swaps), best_cut, fwv.get(best_cut, 0.0),
+            best_add, fwv.get(best_add, 0.0), best_gain,
+        )
+
+    value_after = _value(current_main)
+    return current_main, swaps, value_before, value_after
+
+
+# ---------------------------------------------------------------------------
+# Unit 3 — Combined-legality swap (fix #3: validate main+side together)
+# ---------------------------------------------------------------------------
+
+def _legal_swap_maindeck(
+    current: dict[str, int],
+    cut: str,
+    add: str,
+    sideboard: dict[str, int],
+    *,
+    banlist_snapshot,
+) -> tuple[bool, dict[str, int]]:
+    """Attempt to apply a (cut, add) swap to ``current`` and validate legality.
+
+    FIX #3: validates COMBINED main+side (pass the sideboard, not {}).
+    Enforces the 4-copy limit + COPY_LIMIT_OVERRIDES + UNLIMITED/BASIC exemptions
+    against the COMBINED deck (main + side) so the greedy loop cannot over-stack
+    a card across both boards.
+
+    Returns (valid, new_maindeck).  ``valid=False`` when the swap would:
+    - Remove more copies than currently held (cut > current[cut]).
+    - Add a banned card.
+    - Exceed the combined copy limit for the added card (main + side).
+    - Cause the maindeck to differ from exactly 60 cards.
+
+    NOTE: Catalog ``max_copies`` (e.g. Surgical Extraction = 2) is a SIDEBOARD
+    rule enforced inside ``recommend_sideboard``.  The maindeck candidate pool
+    is the archetype's observed maindeck cards, bound by the standard 4-copy rule
+    (+ overrides + unlimited exemptions) — catalog max_copies does not apply here.
+    """
+    from legacy_engine.models.banlist import BASIC_LAND_NAMES, COPY_LIMIT_OVERRIDES, UNLIMITED_COPIES
+
+    cut_count = current.get(cut, 0)
+    if cut_count <= 0:
+        return False, current
+
+    # Build the new maindeck (never mutate current).
+    new_main = dict(current)
+    if new_main[cut] == 1:
+        del new_main[cut]
+    else:
+        new_main[cut] -= 1
+
+    # Exactly-60 check BEFORE adding (avoids building a dict for an illegal state).
+    # After swap: remove 1 copy of cut, add 1 copy of add — net zero.
+    # Verify current sum is 60 first (caller's contract).
+    if sum(new_main.values()) + 1 != _MAIN_SIZE:  # +1 because we haven't added yet
+        return False, current
+
+    # Combined copy-limit check for the added card.
+    if add not in BASIC_LAND_NAMES and add not in UNLIMITED_COPIES:
+        limit = COPY_LIMIT_OVERRIDES.get(add, 4)
+        main_copies = new_main.get(add, 0)
+        side_copies = sideboard.get(add, 0)
+        combined_after_add = main_copies + 1 + side_copies
+        if combined_after_add > limit:
+            return False, current
+
+    new_main[add] = new_main.get(add, 0) + 1
+
+    # Final combined legality via validate_deck.
+    errors = validate_deck(new_main, sideboard, banlist_snapshot)
+    if errors:
+        return False, current
+
+    return True, new_main
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 — TunedDeck + tune_deck rewire
 # ---------------------------------------------------------------------------
 
 @dataclass
 class TunedDeck:
-    """Output of ``tune_deck``.
+    """Output of ``tune_deck`` (rework 2026-05-31).
 
-    ``swaps`` is the ordered audit log of (cut, added) pairs made during tuning.
-    ``coverage_before`` is the coverage value of the starting maindeck.
-    ``coverage_after`` is the coverage value of the final maindeck (= before when
-    ``fell_back=True`` — no swaps were made).
-    ``positioning_s`` is the archetype's positioning score S (field context only;
-    unchanged by card swaps by design — see spec § Architectural choice).
-    ``fell_back=True`` means the archetype was absent from the matchup matrix or
-    the relevant matchups were too thin (n < DISPLAY_GATE_N), so no maindeck swaps
-    were made.  The sideboard is still recommended in both paths.
-    ``legality_errors`` mirrors ``ingestion.banlist.validate_deck``.
+    ``value_before`` / ``value_after``: field-weighted per-card matchup lift sum
+    for the maindeck before and after tuning.  This is the REAL optimization
+    objective that drove maindeck swaps (or was absent, triggering fell_back).
+
+    ``coverage_before`` / ``coverage_after``: saturating-coverage value of the
+    maindeck before and after.  Kept as AUDIT context — NOT the swap driver.
+
+    ``matchup_plans``: per-opponent OUT/IN plans from ``recommend_sideboard``
+    (populated when per-card data cleared the gate for >= 1 opponent).
+
+    ``objective``: ``"per-card-value"`` when swaps were driven by per-card lift;
+    ``"no-signal-skip"`` when no gate-clearing signal was found (fell_back=True).
+
+    ``fell_back=True`` <=> no per-card signal => no maindeck swaps; the consensus
+    maindeck is returned unchanged.  The sideboard recommender is still called.
+
+    ``legality_errors`` is ALWAYS [] on return (Unit 3 guarantee).
     """
 
     archetype: str
     maindeck: dict[str, int]
     sideboard: dict[str, int]
     swaps: list[tuple[str, str]]             # (cut, added) in order — audit log
+
+    # Per-card value objective (new — the REAL driver)
+    value_before: float
+    value_after: float
+
+    # Saturating coverage (audit context only — NOT the driver)
     coverage_before: float
     coverage_after: float
+
     positioning_s: float | None              # archetype S (None if absent from matrix)
-    fell_back: bool
-    reason: str                              # fallback explanation or "greedy converged"
-    legality_errors: list[str]
+
+    # Per-matchup OUT/IN plans (new; from recommend_sideboard)
+    matchup_plans: dict[str, MatchupPlan] = dc_field(default_factory=dict)
+
+    # Objective label
+    objective: str = "no-signal-skip"        # "per-card-value" | "no-signal-skip"
+
+    fell_back: bool = False
+    reason: str = ""                         # explanation of objective/fallback
+    legality_errors: list[str] = dc_field(default_factory=list)  # ALWAYS [] on return
 
 
 def _is_thin_field(matrix: MatchupMatrix, archetype: str) -> bool:
-    """Return True if the archetype has no displayable (n≥30) matchup cells.
+    """Return True if the archetype has no displayable (n>=30) matchup cells.
 
-    A field is "thin" for bimodal fallback purposes when:
+    A field is "thin" for the old bimodal-fallback purposes when:
     - the archetype is absent from the matrix altogether, OR
     - the archetype is in the matrix but EVERY non-mirror cell has n < DISPLAY_GATE_N.
 
-    This maps directly to the "matchup-n < 30 / archetype absent from the matrix"
-    gating in the feature spec § Bimodal fallback.
+    Note: with the rework, this is no longer the primary fallback trigger —
+    ``has_value_signal(fwv)`` is.  This function is kept for
+    positioning_s computation and for backward-compat with existing tests.
     """
     if archetype not in matrix.archetypes:
         return True
@@ -260,59 +583,6 @@ def _is_thin_field(matrix: MatchupMatrix, archetype: str) -> bool:
     return True
 
 
-def _legal_swap_maindeck(
-    current: dict[str, int],
-    cut: str,
-    add: str,
-    *,
-    banlist_snapshot,
-) -> tuple[bool, dict[str, int]]:
-    """Attempt to apply a (cut, add) swap to ``current`` and validate legality.
-
-    Returns (valid, new_maindeck).  ``valid=False`` when the swap would:
-    - Remove more copies than currently held (cut > current[cut]).
-    - Add a banned card.
-    - Exceed the 4-copy limit for the added card (combined main count).
-    - Cause the maindeck to differ from exactly 60 cards.
-
-    Does NOT re-check the sideboard — the caller passes the combined snapshot.
-    """
-    # The swap: cut 1 copy of ``cut``, add 1 copy of ``add``.
-    cut_count = current.get(cut, 0)
-    if cut_count <= 0:
-        return False, current
-
-    # Build the new maindeck (don't mutate current).
-    new_main = dict(current)
-    if new_main[cut] == 1:
-        del new_main[cut]
-    else:
-        new_main[cut] -= 1
-
-    add_count = new_main.get(add, 0)
-    # Check the copy limit for ``add`` in the maindeck alone.
-    # validate_deck checks combined main+side, but here we keep it conservative:
-    # maindeck-only 4-copy rule (basic lands / overrides handled by validate_deck).
-    from legacy_engine.models.banlist import BASIC_LAND_NAMES, COPY_LIMIT_OVERRIDES, UNLIMITED_COPIES
-    if add not in BASIC_LAND_NAMES and add not in UNLIMITED_COPIES:
-        limit = COPY_LIMIT_OVERRIDES.get(add, 4)
-        if add_count + 1 > limit:
-            return False, current
-
-    new_main[add] = add_count + 1
-
-    # Exactly-60 check.
-    if sum(new_main.values()) != _MAIN_SIZE:
-        return False, current
-
-    # Legality check (main only; sideboard is kept from the caller's context).
-    errors = validate_deck(new_main, {}, banlist_snapshot)
-    if errors:
-        return False, current
-
-    return True, new_main
-
-
 def tune_deck(
     con: duckdb.DuckDBPyConnection,
     archetype: str,
@@ -325,20 +595,25 @@ def tune_deck(
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     max_swaps: int = _DEFAULT_MAX_SWAPS,
 ) -> TunedDeck:
-    """Optimize a maindeck against the field using greedy coverage-swap tuning.
+    """Optimise a maindeck against the field using greedy per-card-value tuning.
+
+    Rework (2026-05-31): per-card field-weighted matchup lift is now the SOLE
+    maindeck swap driver (fixes review finding #4 — coverage objective was
+    hoser-blind and would hollow the gameplan by cutting proactive flex cards).
 
     Algorithm
     ---------
-    1. Build the field (global or supplied) + CoverageModel.  Compute coverage_before.
-    2. Bimodal fallback: if the archetype is absent from the matchup matrix OR all
-       matchups are thin (n < DISPLAY_GATE_N), set ``fell_back=True``, skip maindeck
-       swaps, run the sideboard recommender for the 15, and return early.
-    3. Greedy loop: each round, find the (flex_out, pool_in) swap that maximally
-       raises ``coverage_value`` while keeping exactly-60 + legality; accept if it
-       strictly improves; stop when none improves or ``max_swaps`` hit.
-    4. Re-run ``recommend_sideboard`` for the 15 against the (possibly tuned) maindeck.
-    5. Compute coverage_after + positioning_s (archetype context only).
-    6. Final legality validation.
+    1. Resolve window + field.
+    2. Build partition_flex + candidate_pool.
+    3. Compute fwv = field_weighted_values(con, field, maindeck|pool, ...).
+    4. If has_value_signal(fwv): run _greedy_tune (objective="per-card-value").
+       Else: no maindeck swaps, fell_back=True, objective="no-signal-skip".
+    5. Build legal_swap closure with the current sideboard for combined validation.
+    6. Re-run recommend_sideboard(archetype=archetype, since/until) for the 15 +
+       per-matchup plans.
+    7. Final combined validate_deck; guarantee legality_errors == [] (revert if
+       needed — worst case return consensus main + recommended side).
+    8. Compute coverage_before/after (audit metric) + positioning_s (context).
 
     Parameters
     ----------
@@ -347,9 +622,9 @@ def tune_deck(
     archetype
         Target archetype (used for consensus frequencies + positioning context).
     maindeck
-        Starting maindeck (dict card→count, must sum to 60).
+        Starting maindeck (dict card->count, should sum to 60).
     sideboard
-        Starting sideboard (dict card→count).  Will be replaced by the recommender.
+        Starting sideboard (dict card->count). Will be replaced by the recommender.
     field
         Pre-built FieldDistribution; ``None`` uses the global field.
     since / until
@@ -362,18 +637,16 @@ def tune_deck(
 
     Returns
     -------
-    TunedDeck
+    TunedDeck (legality_errors is always [])
 
     AC
     --
-    - A deck with a weak slot vs a high-share threat gets that slot swapped toward a
-      covering card: ``coverage_after > coverage_before``.
-    - Maindeck stays exactly 60 + legal at every step.
-    - Locked core is never modified.
-    - Thin-field (bimodal fallback): ``fell_back=True``, maindeck unchanged, sideboard
-      still built.
-    - Swap log reproduces the before→after transition.
-    - Deterministic given a seeded field + fixed archetype data.
+    - Per-card signal present: value_after > value_before, swaps non-empty,
+      locked core untouched, maindeck stays exactly 60 + legal.
+    - No per-card signal: fell_back=True, objective="no-signal-skip",
+      maindeck == consensus input, sideboard still built with matchup_plans.
+    - legality_errors == [] on return (always).
+    - positioning_s carried as archetype context; unchanged by card swaps (labeled).
     """
     # ── Resolve window + field ────────────────────────────────────────────────
     if since is None and until is None:
@@ -384,16 +657,7 @@ def tune_deck(
     if field is None:
         field = build_global_field(con)
 
-    # ── Build coverage model + baseline score ────────────────────────────────
-    model = build_tuning_coverage_model(con, field, maindeck)
-    cov_before = coverage_value(model, maindeck)
-
-    log.debug(
-        "tune_deck: archetype=%r coverage_before=%.4f model_elements=%d candidates=%d",
-        archetype, cov_before, len(model.element_weight), len(model.candidate_covers),
-    )
-
-    # ── Build matchup matrix for thin-field check + positioning_s ────────────
+    # ── Build matchup matrix for positioning_s ────────────────────────────────
     matrix = build_matrix(con)
 
     # ── Positioning S (archetype context; unchanged by card swaps) ───────────
@@ -406,37 +670,17 @@ def tune_deck(
         except Exception as exc:
             log.warning("tune_deck: positioning_score failed for %r: %s", archetype, exc)
 
-    # ── Bimodal fallback check ────────────────────────────────────────────────
-    thin = _is_thin_field(matrix, archetype)
-    if thin:
-        reason = (
-            f"bimodal fallback: archetype {archetype!r} is absent from the matchup "
-            "matrix or all relevant matchups have n < 30 (DISPLAY_GATE_N). "
-            "Maindeck kept as-is; sideboard recommender still applied."
-        )
-        log.info("tune_deck: %s", reason)
+    # ── Coverage model for audit metrics ────────────────────────────────────
+    # Build once up front; used for coverage_before/after (NOT the swap driver).
+    try:
+        model = build_tuning_coverage_model(con, field, maindeck)
+        cov_before = coverage_value(model, maindeck)
+    except Exception as exc:
+        log.debug("tune_deck: coverage model build failed: %s", exc)
+        model = None
+        cov_before = 0.0
 
-        # Still run the sideboard recommender for the 15.
-        sb_pkg = recommend_sideboard(con, field, maindeck, solver="greedy")
-        recommended_sb = dict(sb_pkg.cards)
-
-        snapshot = current_banlist()
-        legality_errors = validate_deck(maindeck, recommended_sb, snapshot)
-
-        return TunedDeck(
-            archetype=archetype,
-            maindeck=dict(maindeck),
-            sideboard=recommended_sb,
-            swaps=[],
-            coverage_before=cov_before,
-            coverage_after=cov_before,      # no maindeck swaps
-            positioning_s=positioning_s,
-            fell_back=True,
-            reason=reason,
-            legality_errors=legality_errors,
-        )
-
-    # ── Greedy swap loop ──────────────────────────────────────────────────────
+    # ── Build flex/locked partition + candidate pool ─────────────────────────
     locked, flex = partition_flex(
         con, archetype, maindeck,
         lock_threshold=lock_threshold,
@@ -445,102 +689,135 @@ def tune_deck(
     pool = candidate_pool(con, archetype, since=eff_since, until=eff_until)
     snapshot = current_banlist()
 
-    current_main = dict(maindeck)
-    swaps: list[tuple[str, str]] = []
-    current_coverage = cov_before
+    # ── Compute field-weighted per-card values (heavy path, runs ONCE) ───────
+    all_cards = list(set(list(maindeck.keys()) + pool))
+    fwv = field_weighted_values(
+        con, field, all_cards,
+        since=eff_since, until=eff_until,
+    )
 
-    for _round in range(max_swaps):
-        # Find the best (flex_out, pool_in) swap that strictly improves coverage.
-        best_gain: float = 0.0
-        best_cut: str | None = None
-        best_add: str | None = None
-        best_main: dict[str, int] | None = None
+    log.debug(
+        "tune_deck: archetype=%r signal=%s non_zero_cards=%d pool=%d",
+        archetype, has_value_signal(fwv),
+        sum(1 for v in fwv.values() if v != 0.0), len(pool),
+    )
 
-        for cut_card in list(flex):
-            if cut_card not in current_main:
-                continue  # already fully cut in a previous round
+    # ── Per-card value objective: greedy or no-signal fallback ───────────────
+    if not has_value_signal(fwv):
+        # No gate-clearing per-card signal → no maindeck swaps.
+        # This is the honest response to absent data (not fabricating an edge).
+        reason = (
+            "no-signal-skip: no gate-clearing per-card matchup data found for "
+            f"archetype {archetype!r} vs the current field in window "
+            f"[{eff_since}, {eff_until}]. "
+            "Maindeck kept as-is (consensus); sideboard recommender still applied."
+        )
+        log.info("tune_deck: %s", reason)
 
-            for add_card in pool:
-                if add_card == cut_card:
-                    continue
-                # Don't add a card already in the locked core (it's already there).
-                if add_card in locked and add_card in current_main:
-                    # Already in maindeck as part of locked core — skip.
-                    continue
+        # Compute value_before on the input maindeck (will equal value_after since
+        # no swaps are made; both are 0.0 when there's no signal).
+        v_before = sum(copies * fwv.get(card, 0.0) for card, copies in maindeck.items())
 
-                valid, new_main = _legal_swap_maindeck(
-                    current_main, cut_card, add_card, banlist_snapshot=snapshot
-                )
-                if not valid:
-                    continue
+        # Still run the sideboard recommender for the 15.
+        sb_pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            archetype=archetype, since=eff_since, until=eff_until,
+        )
+        recommended_sb = dict(sb_pkg.cards)
 
-                # Rebuild coverage model against the new maindeck (colors/tags may
-                # differ slightly; reuse same field for speed — model rebuild is cheap).
-                new_cov = coverage_value(model, new_main)
-                gain = new_cov - current_coverage
+        # Final combined legality.
+        legality_errors = validate_deck(maindeck, recommended_sb, snapshot)
+        if legality_errors:
+            log.warning("tune_deck: legality errors (no-signal path): %s", legality_errors)
+            # Worst-case: return with empty sideboard (always legal).
+            recommended_sb = {}
+            legality_errors = validate_deck(maindeck, recommended_sb, snapshot)
 
-                if gain > best_gain or (
-                    gain == best_gain and gain > 0.0
-                    and (best_cut is None or (cut_card, add_card) < (best_cut, best_add))
-                ):
-                    best_gain = gain
-                    best_cut = cut_card
-                    best_add = add_card
-                    best_main = new_main
+        cov_after = coverage_value(model, maindeck) if model else cov_before
 
-        if best_cut is None or best_gain <= 0.0:
-            # No more improving swaps.
-            log.debug("tune_deck: greedy converged after %d swap(s)", len(swaps))
-            break
-
-        # Apply the best swap.
-        swaps.append((best_cut, best_add))
-        current_main = best_main
-        current_coverage = coverage_value(model, current_main)
-
-        # Update flex to reflect the new maindeck state.
-        # If we fully cut the cut_card, remove it from flex.
-        if best_cut not in current_main:
-            del flex[best_cut]
-        else:
-            flex[best_cut] = current_main[best_cut]
-
-        # If we added a card that was in the pool but not in flex, add it to flex
-        # (so it can be cut in a future round if a better option appears).
-        # Check it isn't now locked.
-        if best_add in current_main and best_add not in locked:
-            flex[best_add] = current_main[best_add]
-
-        log.debug(
-            "tune_deck: swap %d: cut=%r add=%r cov=%.4f → %.4f",
-            len(swaps), best_cut, best_add,
-            current_coverage - best_gain, current_coverage,
+        return TunedDeck(
+            archetype=archetype,
+            maindeck=dict(maindeck),
+            sideboard=recommended_sb,
+            swaps=[],
+            value_before=v_before,
+            value_after=v_before,      # no swaps
+            coverage_before=cov_before,
+            coverage_after=cov_after,
+            positioning_s=positioning_s,
+            matchup_plans=dict(sb_pkg.matchup_plans),
+            objective="no-signal-skip",
+            fell_back=True,
+            reason=reason,
+            legality_errors=legality_errors,
         )
 
-    cov_after = current_coverage
+    # ── Greedy swap loop (per-card-value objective) ───────────────────────────
+    # Build the legal_swap closure: captures `snapshot` + a mutable sideboard
+    # reference.  The sideboard changes after the greedy loop (re-run recommender),
+    # but during the greedy loop we use the STARTING sideboard for combined checks
+    # (conservative: ensures the greedy picks stay legal even before the re-run).
+    starting_sideboard = dict(sideboard)
+
+    def _legal_swap_closure(current_main: dict[str, int], cut: str, add: str) -> tuple[bool, dict[str, int]]:
+        return _legal_swap_maindeck(
+            current_main, cut, add, starting_sideboard,
+            banlist_snapshot=snapshot,
+        )
+
+    final_main, swaps, v_before, v_after = _greedy_tune(
+        fwv, maindeck, locked, flex, pool,
+        max_swaps=max_swaps,
+        legal_swap=_legal_swap_closure,
+    )
+
     reason = (
-        f"greedy converged after {len(swaps)} swap(s)"
+        f"per-card-value greedy converged after {len(swaps)} swap(s)"
         if len(swaps) < max_swaps
-        else f"max_swaps={max_swaps} reached"
+        else f"per-card-value greedy: max_swaps={max_swaps} reached"
     )
 
     # ── Re-run sideboard recommender for the tuned maindeck ──────────────────
-    sb_pkg = recommend_sideboard(con, field, current_main, solver="greedy")
+    sb_pkg = recommend_sideboard(
+        con, field, final_main, solver="greedy",
+        archetype=archetype, since=eff_since, until=eff_until,
+    )
     recommended_sb = dict(sb_pkg.cards)
 
-    # ── Final legality validation ─────────────────────────────────────────────
-    legality_errors = validate_deck(current_main, recommended_sb, snapshot)
+    # ── Coverage audit (NOT the driver) ──────────────────────────────────────
+    if model is not None:
+        cov_after = coverage_value(model, final_main)
+    else:
+        cov_after = cov_before
+
+    # ── Final combined legality guarantee ─────────────────────────────────────
+    legality_errors = validate_deck(final_main, recommended_sb, snapshot)
     if legality_errors:
-        log.warning("tune_deck: legality errors after tuning: %s", legality_errors)
+        log.warning(
+            "tune_deck: final legality errors after greedy: %s — reverting to consensus main",
+            legality_errors,
+        )
+        # Revert: return the input (consensus) main + recommended side.
+        # Worst case trim the sideboard to empty.
+        final_main = dict(maindeck)
+        recommended_sb = {}
+        legality_errors = validate_deck(final_main, recommended_sb, snapshot)
+        swaps = []
+        v_after = v_before  # no swaps applied
+        reason += " [REVERTED: final legality failed; returned consensus main]"
 
     return TunedDeck(
         archetype=archetype,
-        maindeck=current_main,
+        maindeck=final_main,
         sideboard=recommended_sb,
         swaps=swaps,
+        value_before=v_before,
+        value_after=v_after,
         coverage_before=cov_before,
         coverage_after=cov_after,
         positioning_s=positioning_s,
+        matchup_plans=dict(sb_pkg.matchup_plans),
+        objective="per-card-value",
         fell_back=False,
         reason=reason,
         legality_errors=legality_errors,
