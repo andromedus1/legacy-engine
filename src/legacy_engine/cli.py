@@ -637,12 +637,25 @@ def report_cards(
 
     con = store.connect(db) if db else store.connect()
     try:
-        r = compute_card_winrates(con, since=since, until=until)
+        # Resolve the effective window ONCE so the card list and the win-rate
+        # values share the same window. card_frequencies defaults None -> latest
+        # ban regime; compute_card_winrates treats None as the full corpus — so
+        # we must pin both sides to the same window or an --archetype report
+        # would scope the card list to one window and the values to another.
+        if since is None and until is None:
+            from legacy_engine.generation.consensus import _latest_regime_window
+            effective_since, effective_until = _latest_regime_window()
+        else:
+            effective_since, effective_until = since, until
+
+        r = compute_card_winrates(con, since=effective_since, until=effective_until)
 
         # Determine the set of cards to report.
         if archetype is not None:
             from legacy_engine.generation.consensus import card_frequencies
-            card_freqs = card_frequencies(con, archetype, board=board, since=since, until=until)
+            card_freqs = card_frequencies(
+                con, archetype, board=board, since=effective_since, until=effective_until
+            )
             cards = [cf.name for cf in card_freqs]
             if not cards:
                 click.echo(f"No cards found for archetype={archetype!r} board={board!r} in the given window.")
@@ -666,7 +679,12 @@ def report_cards(
         vs_label = f" vs {opponent!r}" if opponent else " (marginal)"
         click.echo(f"\n=== Card Win-Rates [board={board}{vs_label}, tier={tier_label}] ===")
         click.echo("NOTE: presence-correlational — NOT causal. See registered 75, not game-by-game play.")
-        click.echo(f"Decisive matches in corpus: {r.coverage.decisive_matched}")
+        window_label = (
+            f"{effective_since or 'start'} → {effective_until or 'now'}"
+            if (effective_since or effective_until)
+            else "all dates"
+        )
+        click.echo(f"Window: {window_label}  |  decisive matches in window: {r.coverage.decisive_matched}")
         click.echo(f"{'Card':<35}  {'Board':<5}  {'n':>6}  {'p_raw':>7}  {'p_shrunk':>8}  {'lift':>7}  {'tier':<12}")
         click.echo("-" * 90)
 

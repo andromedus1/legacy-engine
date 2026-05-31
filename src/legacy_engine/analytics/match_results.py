@@ -565,9 +565,6 @@ def compute_card_winrates(
         deck_map.setdefault(key, []).append((board, dc_name))
 
     # ── Step 3: Attribute wins/losses per resolved match ─────────────────────
-    total_decisive = 0
-    total_wins = 0
-
     for tid, winner_norm, loser_norm, winner_arch, loser_arch in resolved:
         winner_cards = deck_map.get((tid, winner_norm), [])
         loser_cards = deck_map.get((tid, loser_norm), [])
@@ -596,15 +593,13 @@ def compute_card_winrates(
                 marginal[mgkey] = CardMarginalRecord(card=card, board=board)
             marginal[mgkey].losses += 1
 
-        total_decisive += 1
-        total_wins += 1  # every match has exactly one winner; global win-rate ≈ 0.5
-
-    # baseline_winrate: by construction every decisive match contributes +1 win and
-    # +1 loss globally (one to winner's cards, one to loser's cards), so the grand
-    # win-rate across all card attributions is exactly 0.5.  We compute it from the
-    # resolved count to be explicit; any deviation would indicate a bug.
-    total_n = cov.decisive_matched * 2  # each match contributes to two decks
-    baseline_winrate = total_wins / total_n if total_n else 0.5
+    # baseline_winrate is the MATCH-level grand prior: every decisive match is one
+    # win and one loss at the match level, so the symmetric prior is exactly 0.5.
+    # This is what the marginal card-value shrinks toward (a card with no signal
+    # regresses to "an even match"). Note this is the match-level prior, NOT the
+    # card-attribution win-rate (which would only equal 0.5 if winner and loser
+    # decks always had identical card counts).
+    baseline_winrate = 0.5
 
     return CardWinRates(
         matchup=matchup,
