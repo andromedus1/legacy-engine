@@ -64,6 +64,39 @@ Classifier faithfulness (1–4) most affects label quality; route through `/agil
 regression tests grounded in the rule-schema brief. 5 (SHA pinning) and 7 (validate_deck) are correctness;
 6/8/9 are latent/edge hardening.
 
+## Design decisions
+Captured via `/feature-design --only-questions` (interactive, 2026-05-30). These are fixed inputs for the
+full design + implement pass — autopilot inherits them and should not re-decide.
+
+- **Finding #1 (variant color flag)** — no fork; straight contract fix. When a variant matches, use the
+  variant's own `include_color_in_name` (replace `v.include_color_in_name or arch.include_color_in_name`
+  at `matcher.py:90` with `v.include_color_in_name`). Contract: label is color-prefixed iff the *matched*
+  entry's flag is set (matching-algorithm brief line 25).
+- **Finding #2 (Conflict label) → Contract-faithful.** Build `Conflict(...)` from each match's final
+  color-prefixed `_label(...)`, in matcher (ruleset) order, **no sort, no dedupe** — exactly Badaro's
+  `Conflict({String.Join(",", matches.Select(m => GetArchetype(m, color)))})` (brief line 123).
+  *Implication:* existing `Conflict(...)` analytics keys change (raw sorted → color-prefixed ruleset-order).
+  Acceptable — faithfulness is the feature's purpose. A re-label of stored data picks up the new keys; flag
+  in implementation notes that downstream analytics reading old Conflict keys should expect the change.
+- **Finding #3 (fallback math) → Full fidelity, including the quirk.** Pass sideboard into `_fallback`;
+  weight = sum of *copies* of distinct main+side entries present in a pile's `common_cards`; **denominator =
+  number of distinct deck entries (main+side rows), NOT total copies** (brief lines 201-204). This replicates
+  Badaro's row-count denominator and shifts the effective 0.10 threshold semantics. `> MIN_FALLBACK_SIMILARITY`
+  stays strict `>`.
+- **Finding #4 (latent condition semantics) → Fix now, with regression tests.** Align all of
+  `evaluate_condition` to the rule-schema brief even though no current vendored rule exercises these:
+  single-card types (`InMainboard`/`InSideboard`/`InMainOrSideboard`/`DoesNotContain*`) use `Cards[0]` only;
+  empty `Cards` lists are skipped (treated as non-constraining / no match per brief); `TwoOrMoreInMainOrSideboard`
+  counts a card present in both zones as **two** hits (sum main-entry count + side-entry count, brief lines
+  107-109) rather than `>= 2` over `main | side`. Cover with synthetic-ruleset regression tests grounded in
+  the rule-schema brief.
+- **Scope → All 9 findings, split into child stories.** Group as: **classifier** (1-4, the label-accuracy
+  core), **correctness** (5 SHA-pinning `rules_vendor.py`, 7 `validate_deck` counts>0 + CATEGORY_BANS), and
+  **hardening** (6 multi-format `_coerce_format`, 8 Scryfall Unicode/face-name normalization, 9 fallback
+  `tournament_id` collision). Declare `depends_on` only where real (likely none cross-group; classifier
+  stories may share the matcher edit and should serialize). Trickiest unit = finding #3 (fallback denominator
+  + main/side threading) — design it first in the full pass.
+
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79db), effort xhigh, in-repo; ran the spine test subset
 (92 passed). Companion: [[fix-analytics-peer-review-findings]], [[fix-advisory-peer-review-bugs]].
