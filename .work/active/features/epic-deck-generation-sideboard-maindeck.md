@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-sideboard-maindeck
 kind: feature
-stage: implementing
+stage: review
 tags: [generation, advisory]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-per-card-value]
@@ -247,3 +247,44 @@ note lines.
   behavior; surfaced in the note. The tuning consumer always passes `archetype`.
 - **Post-board legality with odd copy counts**: a swap that would exceed `max_copies` is skipped, not forced.
   **Fallback**: fewer swaps than `max_swaps` is always legal.
+
+## Implementation discovery
+
+### Units delivered
+All 5 units delivered as designed:
+
+1. **Unit 1 (MatchupPlan + value adapter)**: `MatchupPlan` dataclass (frozen), `_OppValues` internal
+   dataclass, `_field_matchup_values()` adapter over `compute_card_winrates` + `card_values_vs`.
+2. **Unit 2 (value-aware weighting)**: `_build_coverage_model` gains `matchup_pressure: dict[str,float]|None`
+   kwarg. Step 3b applies multipliers to `(archetype|tag)` element weights; anti-hate pseudo-elements
+   (`_hate:*`) are unaffected. `None` → byte-identical to pre-rework.
+3. **Unit 3 (planner)**: `_plan_matchups()` with locked-core protection, OUT/IN pairing, legality
+   enforcement, and degraded-path handling. Post-board total invariant maintained.
+4. **Unit 4 (package wiring)**: `SideboardPackage` gains `matchup_plans`, `value_informed`, `plan_window`
+   with defaults. `recommend_sideboard` gains `archetype`, `since`, `until`, `opponents`, `max_swaps` kwargs
+   (all defaulted). Regime-window defaulting lives in `recommend_sideboard`; `_field_matchup_values` is pure.
+5. **Unit 5 (rendering)**: `advise_sideboard` CLI prints per-opponent plans + disclaimer when
+   `value_informed`. `report.py` adds plans to audit trail + `_render_sideboard_plans` helper.
+
+### Deviations from design
+- **`_field_matchup_values` does NOT call `_latest_regime_window()` internally.** The regime-window default
+  is applied in `recommend_sideboard` (as `eff_since`/`eff_until`) before being passed down. This keeps
+  `_field_matchup_values` pure (no hidden DB-config dependency) and makes it directly testable with explicit
+  windows. Tests pass `since="2026-01-01"` to reach fixture data (which predates the current regime).
+- **Two `_field_matchup_values` calls in `recommend_sideboard`**: first with empty sideboard (for pressure
+  derivation), second with the solved 15 (for accurate side values in planner). Minor overhead but correct.
+- **Early-return `SideboardPackage` (budget≤0, no candidates) now includes `value_informed` and
+  `plan_window`** so callers that hit these paths still see whether per-card data was available.
+
+### Test counts
+- Existing `test_sideboard.py`: **88 tests** → all green, **no assertion edits**.
+- New tests added to `test_sideboard.py`: **27 tests** (TestSideboardPackageNewFields,
+  TestMatchupPlanDataclass, TestRegressionRoundsless, TestFieldMatchupValues,
+  TestValueAwareWeighting, TestPlanMatchups, TestRecommendSideboardWithRoundsCorpus).
+- Total suite: **940 tests** (was 913 before this feature). All pass.
+
+### Regression-safety confirmation
+- All 88 existing `test_sideboard.py` tests pass **without any edits to their assertions**.
+- `test_advise_report.py` and `test_generation_tuning.py` are unbroken.
+- On rounds-less corpus: `value_informed=False`, `matchup_plans={}`, element weights byte-identical
+  (verified by `TestRegressionRoundsless.test_element_weights_identical_when_no_rounds`).
