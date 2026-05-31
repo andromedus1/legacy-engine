@@ -562,3 +562,32 @@ class TestAdviseCLI:
         ])
         assert result.exit_code == 0, result.output
         assert "Ranking" in result.output or "Control" in result.output
+
+    def test_positioning_candidates_output_shows_quantile_and_coverage(self, runner, tmp_path):
+        """IMPORTANT: --candidates output must display Q{level} and cov= columns.
+
+        Sorts by s_quantile but previously only printed S, CI, P(best) — so the sort key
+        was invisible and the display looked like it was sorted by the displayed metric.
+        Fix: output also includes Q{quantile_level}=... and cov=... per deck.
+        """
+        deck_path = _write_deck(tmp_path, _BRAINSTORM_DECKLIST)
+        candidates_path = tmp_path / "candidates.txt"
+        candidates_path.write_text("Control\nCombo\n")
+        db_path = _setup_db(tmp_path)
+
+        result = runner.invoke(main, [
+            "advise", "positioning",
+            "--deck", deck_path,
+            "--candidates", str(candidates_path),
+            "--db", db_path,
+            "--seed", "42",
+        ])
+        assert result.exit_code == 0, result.output
+        # The quantile column (e.g. "Q0.25=0.412") must appear in the ranking output
+        assert "Q0." in result.output, (
+            f"Expected quantile column 'Q0.xx=...' in output; got:\n{result.output}"
+        )
+        # The coverage column (e.g. "cov=0.00") must appear
+        assert "cov=" in result.output, (
+            f"Expected coverage column 'cov=...' in output; got:\n{result.output}"
+        )
