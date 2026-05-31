@@ -8,3 +8,6 @@ venv/
 
 # Project data (raw mirrors + derived DuckDB are rebuildable, not committed)
 /data/
+
+# peeragent cross-model review session scratch
+.peeragent/
