@@ -13,6 +13,7 @@ re-derive the field independently.  ``field_source`` is ALWAYS set (PRINCIPLES #
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -41,6 +42,10 @@ def _normalize_shares(raw: dict[str, float]) -> tuple[dict[str, float], list[str
         raise ValueError("_normalize_shares: share map must not be empty")
 
     for archetype, share in raw.items():
+        if not math.isfinite(share):
+            raise ValueError(
+                f"_normalize_shares: non-finite share {share!r} for archetype {archetype!r}"
+            )
         if share < 0:
             raise ValueError(
                 f"_normalize_shares: negative share {share!r} for archetype {archetype!r}"

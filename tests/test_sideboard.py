@@ -214,7 +214,10 @@ class TestCoverageModel:
         return field, archetype_tags, catalog
 
     def test_graveyard_archetype_weight_is_share_times_swing(self):
-        """Reanimator (0.6) with graveyard-reliant + Surgical (swing=0.20) → weight=0.12."""
+        """Reanimator (0.6) with graveyard-reliant + Surgical (swing=0.20) → weight=0.12.
+
+        Elements are now (archetype, tag) keyed as "Reanimator|graveyard-reliant".
+        """
         field, archetype_tags, catalog = self._gy_field_and_catalog()
         model = _build_coverage_model(
             field,
@@ -226,10 +229,15 @@ class TestCoverageModel:
         # Reanimator normalized share ≈ 0.6 (after build_custom_field normalization)
         reanimator_share = field.shares["Reanimator"]
         expected_weight = reanimator_share * _SWING_DEDICATED
-        assert pytest.approx(model.element_weight["Reanimator"], abs=1e-6) == expected_weight
+        # Elements are now (archetype, tag) pairs
+        elem_key = "Reanimator|graveyard-reliant"
+        assert elem_key in model.element_weight, (
+            f"Expected element key {elem_key!r} in element_weight; got {list(model.element_weight)}"
+        )
+        assert pytest.approx(model.element_weight[elem_key], abs=1e-6) == expected_weight
 
     def test_graveyard_archetype_covered_by_surgical(self):
-        """Surgical Extraction covers Reanimator (graveyard-reliant ∩ attacks)."""
+        """Surgical Extraction covers the Reanimator|graveyard-reliant element."""
         field, archetype_tags, catalog = self._gy_field_and_catalog()
         model = _build_coverage_model(
             field,
@@ -239,7 +247,8 @@ class TestCoverageModel:
             catalog=catalog,
         )
         assert "Surgical Extraction" in model.candidate_covers
-        assert "Reanimator" in model.candidate_covers["Surgical Extraction"]
+        # Elements are now (archetype, tag) keyed as "Reanimator|graveyard-reliant"
+        assert "Reanimator|graveyard-reliant" in model.candidate_covers["Surgical Extraction"]
 
     def test_combo_archetype_not_covered_by_graveyard_hoser(self):
         """Surgical Extraction does NOT cover Combo (different tag)."""
@@ -349,7 +358,11 @@ class TestCoverageModel:
             assert "_hate:combo" in model.candidate_covers["Veil of Summer"]
 
     def test_archetype_with_no_catalog_answer_gets_warning(self):
-        """An archetype no catalog hoser covers gets weight=0 and a warning."""
+        """An archetype no catalog hoser covers gets no element keys and a warning.
+
+        With (archetype, tag) elements, archetypes whose tags have no swing entry
+        generate no element_weight keys (not a weight=0 entry).  The warning still fires.
+        """
         field = _make_field({"UniqueArchetype": 0.5, "Reanimator": 0.5})
         archetype_tags = {
             "UniqueArchetype": frozenset({"some-unknown-tag"}),
@@ -369,13 +382,14 @@ class TestCoverageModel:
             deck_tags=frozenset(),
             catalog=catalog,
         )
-        assert model.element_weight.get("UniqueArchetype", -1.0) == 0.0
+        # UniqueArchetype's unknown tag produces no element_weight entry (swing=0)
+        assert not any(k.startswith("UniqueArchetype|") for k in model.element_weight)
         # Should have a warning about uncoverable archetype
         assert any("UniqueArchetype" in w or "some-unknown-tag" in w or "no catalog" in w.lower()
                    for w in model.warnings)
 
     def test_archetype_with_no_tags_gets_warning(self):
-        """An archetype with no tags gets weight=0 and a warning."""
+        """An archetype with no tags produces no element_weight entries and a warning."""
         field = _make_field({"NoTags": 0.4, "Reanimator": 0.6})
         archetype_tags = {
             "NoTags": frozenset(),
@@ -395,11 +409,15 @@ class TestCoverageModel:
             deck_tags=frozenset(),
             catalog=catalog,
         )
-        assert model.element_weight.get("NoTags", -1.0) == 0.0
+        # NoTags has no tags → no (archetype, tag) keys in element_weight
+        assert not any(k.startswith("NoTags|") for k in model.element_weight)
         assert any("NoTags" in w for w in model.warnings)
 
-    def test_all_field_archetypes_present_in_element_weight(self):
-        """Every archetype in the field appears in element_weight (even if weight=0)."""
+    def test_covered_archetypes_have_element_keys(self):
+        """Archetypes with known-swing tags appear as 'archetype|tag' keys in element_weight.
+
+        Archetypes with no tags (B) or no catalog swing produce no keys (warning only).
+        """
         field = _make_field({"A": 0.5, "B": 0.3, "C": 0.2})
         archetype_tags = {
             "A": frozenset({"graveyard-reliant"}),
@@ -416,8 +434,12 @@ class TestCoverageModel:
             deck_tags=frozenset(),
             catalog=catalog,
         )
-        for arch in ["A", "B", "C"]:
-            assert arch in model.element_weight
+        # A and C have known-swing tags → present as (archetype, tag) keys
+        assert "A|graveyard-reliant" in model.element_weight
+        assert "C|combo" in model.element_weight
+        # B has no tags → no keys, but a warning
+        assert not any(k.startswith("B|") for k in model.element_weight)
+        assert any("B" in w for w in model.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -959,4 +981,135 @@ class TestILPvsGreedyObjective:
 
         assert ilp_obj >= greedy_obj - 1e-6, (
             f"ILP objective {ilp_obj:.4f} should be ≥ greedy {greedy_obj:.4f}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for peer-review bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionPeerReviewFixes:
+    """One regression test per sideboard-related finding (2026-05-30 peer review)."""
+
+    # --- Fix 4: soft hoser covering tag X does NOT capture dedicated-hate (tag Y) weight ---
+
+    def test_fix4_soft_hoser_does_not_capture_dedicated_hate_weight(self):
+        """Bug: flat-archetype element weight = share × best_swing across ALL tags.
+        A soft hoser overlapping only tag X captured the full best-swing weight (which
+        came from dedicated tag Y).
+        Fix: elements are (archetype, tag) pairs; each hoser covers only the tags it attacks.
+        """
+        # Archetype "Alpha" has two tags: "graveyard-reliant" (dedicated swing=0.20)
+        # and "low-interaction" (soft swing=0.10).
+        # Soft hoser: attacks only "low-interaction".
+        # It should NOT see the weight for "graveyard-reliant".
+        field = _make_field({"Alpha": 1.0})
+        archetype_tags = {"Alpha": frozenset({"graveyard-reliant", "low-interaction"})}
+        dedicated_hoser = _minimal_hoser(
+            "DedicatedHater",
+            frozenset({"graveyard-reliant"}),
+            swing=_SWING_DEDICATED,
+        )
+        soft_hoser = _minimal_hoser(
+            "SoftHater",
+            frozenset({"low-interaction"}),
+            swing=_SWING_SOFT,
+        )
+        catalog = {"DedicatedHater": dedicated_hoser, "SoftHater": soft_hoser}
+
+        model = _build_coverage_model(
+            field,
+            archetype_tags,
+            deck_colors=frozenset(),  # colorless hosers
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+
+        # SoftHater must NOT cover the "graveyard-reliant" element of Alpha
+        soft_covered = model.candidate_covers.get("SoftHater", frozenset())
+        assert "Alpha|graveyard-reliant" not in soft_covered, (
+            "Soft hoser (attacks=low-interaction) must NOT cover the graveyard-reliant element"
+        )
+
+        # DedicatedHater DOES cover it
+        dedicated_covered = model.candidate_covers.get("DedicatedHater", frozenset())
+        assert "Alpha|graveyard-reliant" in dedicated_covered
+
+    # --- Fix 5: counter-hoser covers only hate categories with appropriate weight ---
+
+    def test_fix5_hate_element_weight_based_on_interactive_field_share(self):
+        """Bug: _hate pseudo-elements were weighted at near-total field share × swing.
+        Fix: weight = interactive-field-share (non-low-interaction archetypes) × _SWING_SOFT.
+        A field where half is low-interaction → hate weight ≈ half field share × _SWING_SOFT.
+        """
+        # Field: Aggro (low-interaction, 50%) + Control (NOT low-interaction, 50%)
+        field = _make_field({"Aggro": 0.5, "Control": 0.5})
+        archetype_tags = {
+            "Aggro": frozenset({"low-interaction", "creature-based"}),
+            "Control": frozenset({"combo"}),
+        }
+        catalog = {
+            "Veil of Summer": _minimal_hoser(
+                "Veil of Summer",
+                frozenset({"_hate"}),
+                colors=frozenset({"G"}),
+            ),
+        }
+        # Deck is combo-vulnerable (may get hate from the field)
+        model = _build_coverage_model(
+            field,
+            archetype_tags,
+            deck_colors=frozenset({"U", "G"}),
+            deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+        )
+
+        hate_key = "_hate:combo"
+        assert hate_key in model.element_weight, "Expected _hate:combo pseudo-element"
+
+        # Interactive share = Control only (Aggro is low-interaction) → 0.5 normalized
+        # Weight should be ≈ 0.5 × _SWING_SOFT, NOT full field share × _SWING_SOFT
+        interactive_share = field.shares["Control"]  # ~0.5
+        expected_weight = interactive_share * _SWING_SOFT
+        actual_weight = model.element_weight[hate_key]
+        # Allow ±10% relative tolerance
+        assert abs(actual_weight - expected_weight) / max(expected_weight, 1e-9) < 0.1, (
+            f"Hate element weight {actual_weight:.4f} should ≈ interactive share {expected_weight:.4f}"
+        )
+
+    # --- Fix 6: all-white deck receives Surgical Extraction + Faerie Macabre ---
+
+    def test_fix6_all_white_deck_gets_surgical_extraction_and_faerie_macabre(self):
+        """Bug: Surgical Extraction and Faerie Macabre were marked black-only (colors={'B'}).
+        Non-black decks could not receive them.
+        Fix: castable_any_color=True so the color pre-filter is bypassed.
+        """
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        catalog = {
+            "Surgical Extraction": HOSER_CATALOG["Surgical Extraction"],
+            "Faerie Macabre": HOSER_CATALOG["Faerie Macabre"],
+            "Leyline of the Void": HOSER_CATALOG["Leyline of the Void"],
+        }
+
+        # All-white deck: no black in colors
+        model = _build_coverage_model(
+            field,
+            archetype_tags,
+            deck_colors=frozenset({"W"}),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+
+        # Surgical + Faerie must be in the candidate set for an all-white deck
+        assert "Surgical Extraction" in model.candidate_covers, (
+            "Surgical Extraction (Phyrexian mana) must be available to non-black decks"
+        )
+        assert "Faerie Macabre" in model.candidate_covers, (
+            "Faerie Macabre (free discard activation) must be available to non-black decks"
+        )
+        # Leyline of the Void (normal black cost) must NOT be available
+        assert "Leyline of the Void" not in model.candidate_covers, (
+            "Leyline of the Void (normal black mana) must NOT be available to non-black decks"
         )

@@ -691,10 +691,13 @@ def best_deck_vs_best_call(
             unweighted_mean=0.0,
         )
 
-    # Collect known non-mirror cells
+    # Collect known non-mirror cells — restrict to display-grade (n>=30) so the
+    # BEST_DECK / BEST_CALL classification is data-driven (n<30 speculative cells
+    # are not eligible to drive the label).
     winrates: list[float] = []
     weighted_sum = 0.0
     weight_total = 0.0
+    low_n_skipped: int = 0
 
     for opp in matrix.archetypes:
         if opp == archetype:
@@ -702,10 +705,20 @@ def best_deck_vs_best_call(
         cell = matrix.cells.get((archetype, opp))
         if cell is None or cell.n == 0 or cell.p_shrunk is None:
             continue
+        if not cell.display:
+            # n < 30 — speculative; exclude from classification
+            low_n_skipped += 1
+            continue
         winrates.append(cell.p_shrunk)
         w = field.shares.get(opp, 0.0)
         weighted_sum += w * cell.p_shrunk
         weight_total += w
+
+    if low_n_skipped:
+        log.debug(
+            "best_deck_vs_best_call(%r): skipped %d cell(s) with n<30 (speculative)",
+            archetype, low_n_skipped,
+        )
 
     if not winrates:
         return BestDeckCall(
