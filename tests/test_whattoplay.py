@@ -1226,3 +1226,71 @@ class TestPlanClash:
         why, disagreement = plan_clash(deck, opp, None, hate_present=False)
         assert isinstance(why, str)
         assert isinstance(disagreement, bool)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for peer-review bug fixes
+# ---------------------------------------------------------------------------
+
+
+class TestRegressionPeerReviewFixes:
+    """One regression test per whattoplay-related finding (2026-05-30 peer review)."""
+
+    # --- Fix 7: best_deck_vs_best_call uses only n>=30 cells ---
+
+    def _make_matrix(self, cells, archetypes):
+        return MatchupMatrix(
+            cells=cells,
+            provenance=None,
+            total_matches=sum(c.n for c in cells.values()),
+            archetypes=archetypes,
+            caveat="regression test",
+        )
+
+    def test_fix7_low_n_cells_excluded_from_best_deck_classification(self):
+        """Bug: cells with n<30 could drive BEST_DECK / BEST_CALL classification.
+        Fix: only cells with cell.display (n>=30) are used for classification.
+        A row whose ONLY strong cells are n<30 must NOT be classified BEST_DECK.
+        """
+        from legacy_engine.analytics.matchup import DISPLAY_GATE_N
+
+        # Build a matrix where Archetype A has:
+        #   - One cell vs B with n=5 (< 30, speculative), very high winrate 90%
+        #   - No other non-mirror data
+        archetypes = ["A", "B"]
+        cells = {
+            ("A", "A"): build_mirror_cell("A", 50),
+            ("B", "B"): build_mirror_cell("B", 50),
+            ("A", "B"): build_cell("A", "B", 9, 10),    # n=10 < 30, WR=90%
+            ("B", "A"): build_cell("B", "A", 1, 10),
+        }
+        assert not cells[("A", "B")].display, "Sanity: n=10 cell should not be display-grade"
+
+        matrix = self._make_matrix(cells, archetypes)
+        field = _make_field({"B": 1.0})
+
+        result = best_deck_vs_best_call(matrix, field, "A")
+        # With no display-grade cells, classification must be 'neither'
+        assert result.label == "neither", (
+            f"Low-n-only row must NOT be classified BEST_DECK/BEST_CALL; got {result.label!r}"
+        )
+
+    def test_fix7_high_n_cells_can_still_drive_best_deck(self):
+        """High-n cells (n>=30) continue to drive classification after the fix."""
+        archetypes = ["A", "B"]
+        cells = {
+            ("A", "A"): build_mirror_cell("A", 50),
+            ("B", "B"): build_mirror_cell("B", 50),
+            ("A", "B"): build_cell("A", "B", 56, 100),  # n=100 >= 30, WR=56% → low variance
+            ("B", "A"): build_cell("B", "A", 44, 100),
+        }
+        assert cells[("A", "B")].display, "Sanity: n=100 cell must be display-grade"
+
+        matrix = self._make_matrix(cells, archetypes)
+        field = _make_field({"B": 1.0})
+
+        result = best_deck_vs_best_call(matrix, field, "A")
+        # Low spread, above 0.52 mean → BEST_DECK
+        assert result.label == "BEST_DECK", (
+            f"High-n 56% cell should classify as BEST_DECK; got {result.label!r}"
+        )

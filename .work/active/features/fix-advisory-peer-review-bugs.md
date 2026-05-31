@@ -1,7 +1,7 @@
 ---
 id: fix-advisory-peer-review-bugs
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, bug]
 parent: epic-advisory-hardening
 depends_on: []
@@ -77,3 +77,28 @@ Single-stride: apply each documented finding's specified fix with a focused regr
 architecture. Ordering note: this lands before `improve-positioning` (which builds on the #2 tie fix) and
 `improve-sideboard` (which builds on the #6 Surgical/Faerie color fix). Finding #7 applies to the
 just-reworked `whattoplay.best_deck_vs_best_call`.
+
+## Implementation notes
+
+**Files touched:**
+- `src/legacy_engine/advisory/positioning.py` — fixes 1, 2, 3
+- `src/legacy_engine/advisory/sideboard.py` — fixes 4, 5, 6
+- `src/legacy_engine/advisory/whattoplay.py` — fix 7
+- `src/legacy_engine/advisory/field.py` — fix 8
+- `tests/test_positioning.py` — 3 regression tests (fixes 1, 2, 3)
+- `tests/test_sideboard.py` — 3 regression tests (fixes 4, 5, 6); 5 existing tests updated for schema change
+- `tests/test_whattoplay.py` — 2 regression tests (fix 7)
+- `tests/test_field_model.py` — 4 regression tests (fix 8)
+
+**Test count:** 611 before → 623 after (12 new regression tests). All green.
+
+**Per-finding status:**
+
+1. **Done.** Concentration-only params `a=max(_NODATA_STRENGTH*center, eps)`, `b=max(_NODATA_STRENGTH*(1-c), eps)` so E[Beta]=center. Tested: known-mean-0.8 row imputes ≈0.8 (±0.05).
+2. **Done.** Replaced `np.argmax` with row-max boolean mask + tie-fractional credit. Pairwise also updated to half-credit ties. Tested: two identical candidates → P(best)≈0.5 each.
+3. **Done.** Detect all-zero row_sums after mirror zeroing; return `np.full(n_draws, 0.5)` with `log.warning`. Tested: mirror-only field + include_mirror=False → S=0.5, not 0.0.
+4. **Done.** Replaced flat-archetype element keys with `"archetype|tag"` pairs so each hoser captures only the weight of the specific tags it attacks. 5 existing tests updated for new key scheme.
+5. **Done.** Replaced near-total-field-share weight with interactive-field-share (archetypes not tagged `low-interaction`) × `_SWING_SOFT`. Tested: half-low-interaction field → hate weight ≈ half field share × swing.
+6. **Done.** Added `castable_any_color: bool = False` field to `HoserCard`; set `True` for Surgical Extraction (Phyrexian mana) and Faerie Macabre (free activation). Color pre-filter bypassed when `castable_any_color=True`. Tested: all-white deck includes both cards.
+7. **Done.** Added `cell.display` guard (n≥30) before including a cell in `best_deck_vs_best_call` classification. Low-n cells are counted but skipped with `log.debug`. Tested: row with only n=10 cells → "neither", row with n=100 → classifies correctly.
+8. **Done.** Added `math.isfinite(share)` check before the `<0` check in `_normalize_shares`. Tested: nan, +inf, -inf each raise `ValueError` with "non-finite".

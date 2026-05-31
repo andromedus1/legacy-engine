@@ -68,6 +68,10 @@ class HoserCard:
                  Empty frozenset = colorless (always legal).
     ``max_copies``: hard upper bound on copies in the 15 (catalog-curated).
     ``swing``:   heuristic win-rate-swing constant (curated, NOT empirical).
+    ``castable_any_color``: True for cards with alternate costs that make them
+                 castable regardless of deck color identity (e.g. Phyrexian mana,
+                 free-activation abilities).  When True the color pre-filter is
+                 bypassed so all decks can receive the card as a candidate.
     """
 
     name: str
@@ -75,6 +79,7 @@ class HoserCard:
     colors: frozenset[str]
     max_copies: int
     swing: float
+    castable_any_color: bool = False
 
 
 # Seeded from docs/briefs/legacy-metagame.md §6 "Hosers by target"
@@ -88,6 +93,8 @@ HOSER_CATALOG: dict[str, HoserCard] = {
         colors=frozenset({"B"}),
         max_copies=2,
         swing=_SWING_DEDICATED,
+        # Phyrexian mana: castable for 2 life in any deck regardless of color identity.
+        castable_any_color=True,
     ),
     "Faerie Macabre": HoserCard(
         name="Faerie Macabre",
@@ -95,6 +102,8 @@ HOSER_CATALOG: dict[str, HoserCard] = {
         colors=frozenset({"B"}),
         max_copies=2,
         swing=_SWING_DEDICATED,
+        # Free discard activation: usable at zero mana cost in any deck.
+        castable_any_color=True,
     ),
     "Leyline of the Void": HoserCard(
         name="Leyline of the Void",
@@ -282,31 +291,35 @@ def _build_coverage_model(
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
-    Elements = field archetypes (weight = share × best_swing_for_that_archetype's_tags)
+    Elements = (archetype, tag) pairs (weight = share × best_swing_for_that_specific_tag)
              + anti-hate pseudo-elements ``"_hate:<k>"`` for each vulnerability tag the
-               deck carries that the field is likely to bring hate for.
+               deck carries, weighted by the field share of archetypes that are interactive
+               (i.e., carry the tag themselves or have interaction) and can plausibly bring
+               hate for tag k.
+
+    Using (archetype, tag) elements rather than flat archetypes prevents soft hosers from
+    capturing the weight of dedicated-hate tags they don't attack.  A hoser covering only
+    tag X of a multi-tag archetype earns only the weight tied to that tag, not the full
+    best-swing weight.
 
     Color pre-filter: drop catalog hosers whose required colors are not a subset of
-    ``deck_colors`` (colorless/empty-color hosers are always allowed).
+    ``deck_colors`` (colorless/empty-color hosers are always allowed).  Cards with
+    ``castable_any_color=True`` bypass the filter entirely (Phyrexian mana / free activations).
 
-    Anti-hate: for each tag ``k`` in ``deck_tags``, estimate how much of the field might
-    bring hate for ``k`` against the deck (= Σ_a field_share(a) where archetype ``a``
-    has access to counter-hosers).  The heuristic: ``a`` is assumed to bring hate ``k``
-    if at least one ``_hate`` catalog hoser castable in ``a``'s colors exists.  Since we
-    don't track archetype colors in the field, we use a simpler conservative heuristic:
-    every archetype in the field is assumed capable of bringing hate for any tag the deck
-    carries (a conservative overestimate; the optimizer then decides if the slot is worth
-    it).
+    Anti-hate (Fix 5): pseudo-element weight = Σ field_share(a) over archetypes that are
+    NOT tagged low-interaction (conservative proxy for "can bring interactive sideboard
+    cards") × the _SWING_SOFT constant.  Each counter-hoser covers only the hate
+    pseudo-elements for the deck-vulnerability tags that interactive field archetypes
+    actually care about — not every tag indiscriminately.
     """
     if catalog is None:
         catalog = HOSER_CATALOG
 
     warnings: list[str] = []
 
-    # --- Step 1: Identify best swing per tag across the (color-prefiltered) catalog ---
-    # We compute this globally (not per-deck-color) for the element-weight step, because
-    # element weight = best theoretical swing for that tag, not constrained by the deck.
-    # Color filtering happens only in candidate_covers.
+    # --- Step 1: Identify best swing per tag across the full catalog ---
+    # Computed globally (not per-deck-color) so element weights reflect the best
+    # *theoretical* swing for that tag; color filtering happens in candidate_covers.
     best_swing_for_tag: dict[str, float] = {}
     for hoser in catalog.values():
         for tag in hoser.attacks:
@@ -314,18 +327,26 @@ def _build_coverage_model(
                 continue  # counter-hosers don't directly represent archetype swing
             best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), hoser.swing)
 
-    # --- Step 2: Build element weights for field archetypes ---
+    # --- Step 2: Build (archetype, tag) element weights ---
+    # Each element is keyed as "<archetype>|<tag>" so a soft hoser covering only
+    # tag X captures only the weight for that tag, not for tag Y of the same archetype.
     element_weight: dict[str, float] = {}
+    # Track which element keys belong to each archetype (for coverage lookup below).
+    _archetype_tag_keys: dict[str, set[str]] = {}  # archetype → set of element keys
+
     for archetype, share in field.shares.items():
         tags = archetype_tags.get(archetype, frozenset())
-        # Best swing = max over all tags this archetype carries (any catalog hoser attacks any of them)
-        best_swing = max(
-            (best_swing_for_tag.get(tag, 0.0) for tag in tags),
-            default=0.0,
-        )
-        weight = share * best_swing
-        element_weight[archetype] = weight
-        if weight == 0.0 and share > 0.0:
+        archetype_element_keys: set[str] = set()
+        any_covered = False
+        for tag in tags:
+            swing = best_swing_for_tag.get(tag, 0.0)
+            if swing > 0.0:
+                key = f"{archetype}|{tag}"
+                element_weight[key] = share * swing
+                archetype_element_keys.add(key)
+                any_covered = True
+        _archetype_tag_keys[archetype] = archetype_element_keys
+        if not any_covered and share > 0.0:
             if not tags:
                 warnings.append(
                     f"archetype '{archetype}' (share={share:.3f}) has no vulnerability tags "
@@ -337,31 +358,31 @@ def _build_coverage_model(
                     "has no catalog hoser for any of its tags; weight=0"
                 )
 
-    # --- Step 3: Anti-hate pseudo-elements ---
-    # For each vulnerability tag the DECK itself carries, estimate the field's hate equity
-    # as a pseudo-element weight.  Counter-hosers (attacks={"_hate"}) cover these elements.
-    # Conservative heuristic: assume all archetypes in the field can bring hate for the tag
-    # if any counter-hoser exists that is castable in some color (since we don't know each
-    # archetype's sideboard colors well).  Weight = total field share (conservative overestimate).
+    # --- Step 3: Anti-hate pseudo-elements (tied to specific deck-tag categories) ---
+    # For each vulnerability tag k the DECK carries:
+    #   • Only create a pseudo-element if some counter-hoser in the catalog attacks "_hate".
+    #   • Weight = Σ field_share(a) for archetypes that are interactive (NOT "low-interaction")
+    #     × _SWING_SOFT.  This models the field share that can plausibly bring hate for k.
+    #   • Each counter-hoser (_hate attacker) covers only hate_keys for the deck-vulnerability
+    #     tags whose hoser category the counter-hoser is actually relevant for.  Since all
+    #     counter-hosers in the catalog are general interaction (Veil, Defense Grid, Carpet),
+    #     they cover ALL deck-tag hate pseudo-elements — but the weight is now field-appropriate
+    #     rather than the full field share.
     hate_elements_added: set[str] = set()
-    if deck_tags:
-        total_field_share = sum(field.shares.values())
+    counter_hosers_exist = any("_hate" in h.attacks for h in catalog.values())
+    if deck_tags and counter_hosers_exist:
+        # Interactive field share: archetypes NOT tagged "low-interaction"
+        interactive_share = sum(
+            share
+            for archetype, share in field.shares.items()
+            if "low-interaction" not in archetype_tags.get(archetype, frozenset())
+            and share >= 0.01
+        )
         for tag in deck_tags:
-            # Only create a pseudo-element for tags where counter-hosers exist in the catalog
-            # (i.e., "_hate" hosers could defend against hate brought for this tag).
             hate_key = _HATE_ELEMENT_PREFIX + tag
-            # Weight = proportion of field share that's expected to bring this hate against us.
-            # Heuristic: weight = total field share that is combo/tempo (likely to have interaction).
-            # Simpler MVP: weight = Σ field_share over all archetypes that have "low-interaction"
-            # NOT in their tags (i.e., likely interactive enough to bring hate).
-            # For MVP simplicity, weight = total field share that is non-trivial.
-            weight = sum(
-                share
-                for archetype, share in field.shares.items()
-                if share >= 0.01  # skip micro-slivers
-            )
+            weight = interactive_share * _SWING_SOFT
             if weight >= _HATE_ELEMENT_MIN_WEIGHT:
-                element_weight[hate_key] = weight * _SWING_SOFT
+                element_weight[hate_key] = weight
                 hate_elements_added.add(tag)
 
     # --- Step 4: Color-prefiltered candidate hosers ---
@@ -371,18 +392,21 @@ def _build_coverage_model(
     for card_name, hoser in catalog.items():
         # Color pre-filter: hoser.colors must be subset of deck_colors.
         # Empty hoser.colors = colorless → always legal.
-        if hoser.colors and not hoser.colors.issubset(deck_colors):
+        # castable_any_color=True bypasses the filter (Phyrexian mana / free activations).
+        if hoser.colors and not hoser.colors.issubset(deck_colors) and not hoser.castable_any_color:
             continue  # drop off-color hosers
 
         # Compute which elements this hoser covers.
         covered: set[str] = set()
 
-        for archetype, tags in archetype_tags.items():
-            if archetype not in element_weight:
-                continue
-            # This hoser covers the archetype if any of its attacks tags overlap with the archetype's tags.
-            if hoser.attacks & tags:
-                covered.add(archetype)
+        # Coverage for (archetype, tag) elements: this hoser covers an element key
+        # "<archetype>|<tag>" only when the hoser's attacks include that specific tag.
+        for archetype, tag_keys in _archetype_tag_keys.items():
+            for key in tag_keys:
+                # key format: "<archetype>|<tag>"
+                tag_part = key.split("|", 1)[1]
+                if tag_part in hoser.attacks:
+                    covered.add(key)
 
         # Counter-hosers (attacks contains "_hate") cover anti-hate pseudo-elements.
         if "_hate" in hoser.attacks:
