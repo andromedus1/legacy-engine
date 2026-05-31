@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-export
 kind: feature
-stage: implementing
+stage: review
 tags: [generation]
 parent: epic-deck-generation
 depends_on: []
@@ -12,6 +12,27 @@ updated: 2026-05-30
 ---
 
 # Portable decklist export (Moxfield-as-import + multi-target)
+
+## Implementation notes
+
+**Units delivered (2026-05-30):**
+
+- **Unit 1** (`generation/export.py::format_decklist`): Formats any `dict[str,int]` board pair as import text. `ExportFormat = Literal["moxfield", "archidekt", "mtggoldfish", "text", "dec"]`. Deterministic ordering: count DESC then name ASC. All header-based formats emit a blank line + "Sideboard" section header; `.dec` uses `SB: <count> <name>` sideboard prefix (no header). Empty sideboard omits the section entirely. Round-trip test confirmed: `parse(format(deck)) == deck` for all non-dec formats using `advisory.report._parse_decklist`.
+
+- **Unit 2** (`generation/export.py::moxfield_import_block`): Wraps `format_decklist(fmt="moxfield")` with a one-line Moxfield import hint. Zero network calls — pure text. Verified with a socket-monkey-patch test.
+
+- **Unit 3** (`cli.py`):
+  - `export` group + `export deck` leaf: `--deck` (required, Path exists), `--format` (Choice, default "moxfield"), `--out` (optional, write to file or stdout). Reads decklist via `_parse_decklist`, formats via `format_decklist`.
+  - `--export`/`--format` flag on `generate consensus`: delegates to `format_decklist` when `--export` is passed.
+  - New CLI group tests in `test_cli.py`: `generate` and `export` appear in top-level help; `generate consensus` requires `--archetype`; `export deck` requires `--deck`.
+
+**Note**: `export.py` was created during Feature 1 implementation (it was needed for the `generate consensus --export` flag in Unit 4 of that feature). Feature 2 adds the tests and confirms all ACs.
+
+**Tests** (`tests/test_generation_export.py`): 25 tests covering Units 1–3, plus additions to `tests/test_cli.py`. Round-trips for all 5 formats; `.dec` SB convention; empty-sideboard omission; deterministic ordering; deep-link no-network test; `export deck` to stdout and `--out` file; generate+export integration.
+
+**Deviations / implementation choices:**
+- The `ExportFormat` type alias is `Literal[...]` rather than an `Enum` — simpler and consistent with the spec description "thin enum, not separate code paths".
+- `format_decklist` default `fmt="moxfield"` matches the CLI default and spec.
 
 ## Brief
 
