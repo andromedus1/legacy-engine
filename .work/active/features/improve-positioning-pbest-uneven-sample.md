@@ -3,7 +3,7 @@ id: improve-positioning-pbest-uneven-sample
 kind: feature
 stage: drafting
 tags: [advisory]
-parent: null
+parent: epic-advisory-hardening
 depends_on: []
 release_binding: null
 gate_origin: null

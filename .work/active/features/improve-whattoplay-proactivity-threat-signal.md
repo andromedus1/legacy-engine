@@ -3,7 +3,7 @@ id: improve-whattoplay-proactivity-threat-signal
 kind: feature
 stage: drafting
 tags: [advisory]
-parent: null
+parent: epic-advisory-hardening
 depends_on: []
 release_binding: null
 gate_origin: null
