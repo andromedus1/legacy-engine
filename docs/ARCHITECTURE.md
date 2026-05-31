@@ -26,7 +26,7 @@ decisions:
 
 # Architecture: legacy-engine
 
-*Last updated: 2026-05-29*
+*Last updated: 2026-05-31*
 
 > How the system is built. For *what* and *why*, see [VISION.md](VISION.md) and [SPEC.md](SPEC.md).
 > For decision heuristics, see [PRINCIPLES.md](PRINCIPLES.md). For what to build when, the roadmap/epics
@@ -44,8 +44,9 @@ observed → label → analytics → advisory arc.
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                                CLI  (cli.py)                                 │
-│  seed · refresh · label · report (meta|matchups|tiers) · advise (position|   │
-│  sideboard|whattoplay · generate consensus|tune · export)   [later: goldfish] │
+│  seed · refresh · label · report (meta|matchups|tiers|trends|cards) · advise  │
+│  (positioning|sideboard|whattoplay|report) · generate (consensus|tune)        │
+│  · export (deck)                                    [later: goldfish]         │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────┘
     │          │           │            │               │
 ┌───▼─────┐ ┌──▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
@@ -188,7 +189,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ## Conventions
 - **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/ generation/` (+ deferred `goldfish/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
-- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends`, `advise positioning|sideboard|whattoplay|report`); lazy imports inside commands; `_setup_logging(verbose)` first.
+- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends|cards`, `advise positioning|sideboard|whattoplay|report`, `generate consensus|tune`, `export deck`); lazy imports inside commands; `_setup_logging(verbose)` first.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.

@@ -9,14 +9,14 @@ summary: |
   SideboardPackage), the MVP slice (ingestion + meta analytics + advisory), and non-functional
   requirements (reproducibility, version-stamped legality, sample-size confidence gating).
 decisions:
-  - "MVP capability set = card-data ingestion, tournament-results ingestion, archetype parsing, meta analytics (tier list / meta-% / matchup matrix), and the advisory layer (positioning score + sideboard recommender + what-to-play)."
-  - "Deferred capabilities = goldfish simulation (Deck Mechanics pillar) and deck generation — built after the meta+advisory arc, reusing edh-engine's goldfish/mana/mulligan code."
+  - "MVP capability set = card-data ingestion, tournament-results ingestion, archetype parsing, meta analytics (tier list / meta-% / matchup matrix / per-card win-rate), the advisory layer (positioning score + maindeck-aware sideboard recommender + what-to-play), and deck generation modes 1+2+export (consensus baseline, field-tuned decklist, Moxfield/Archidekt export)."
+  - "Deferred capabilities = goldfish simulation (Deck Mechanics pillar); deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation remain deferred until goldfish/ ships."
   - "Core entities: Card, Decklist (75-card maindeck+sideboard), Archetype, TournamentResult, MatchupCell, DeckDefinition (deck-as-data for sim), SideboardPackage, BanListSnapshot."
   - "Meta-% is computed under multiple definitions (raw entry count, top-cut presence, win-rate-weighted) and every report is labeled online/paper/blend — never a single unlabeled number."
   - "Matchup cells and any derived stat carry sample-size + confidence metadata; low-n cells (n<100) are flagged, reusing edh-engine's confidence-metadata pattern."
   - "Reproducibility is an NFR: deterministic given inputs+seed; all external data pre-fetched and cached; legality validated against a dated BanListSnapshot."
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-05-31
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -46,7 +46,11 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **[Later] Cross-deck comparison** + engines-vs-payoffs role tagging (per-deck, not global).
 
 ### Pillar 3 — Deck Generation
-- **[Later] Gap discovery** + **build tuning** against current/projected meta, validated by simulation + matchup data.
+- **[MVP] Consensus baseline** — modal-card aggregation over an archetype's in-window decks → legal exactly-60 + ≤15 de-duped list; `card_frequencies` primitive.
+- **[MVP] Field-tuning (mode 2)** — greedy maindeck-flex swaps driven by field-weighted per-card×matchup value; no-signal fallback; maindeck-aware sideboard + per-matchup OUT/IN plans.
+- **[MVP] Export** — portable multi-target import text (Moxfield/Archidekt/MTGGoldfish/`.dec`); pure offline.
+- **[Later] Gap discovery (mode 3)** — data-driven identification of under-explored cards/shells; depends on `card_value` (now unblocked) + goldfish validation.
+- **[Later] Goldfish-validated candidate validation** — simulate candidates against projected field; depends on `goldfish/` pillar.
 
 ### Pillar 4 — Meta Attack / Advisory *(differentiator)*
 - **[MVP] Meta-positioning score** — `Σ field_share(arch) × winrate(deck vs arch)` = expected WR vs the weighted field; user can supply a custom expected local field.
@@ -76,4 +80,4 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **Portability** — local file storage, no DB or server required for MVP (storage revisited at /architecture if query patterns demand it).
 
 ## What's explicitly out of scope (MVP)
-Goldfish simulation, deck generation, full rules-correct game engine, real-time event tooling, non-Legacy formats, any GUI. See VISION non-goals.
+Goldfish simulation, deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation, full rules-correct game engine, real-time event tooling, non-Legacy formats, any GUI. See VISION non-goals. Note: deck generation modes 1+2+export are built; only the simulation-dependent modes remain deferred.
