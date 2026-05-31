@@ -1,7 +1,7 @@
 ---
 id: fix-spine-peer-review-findings
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, archetype, bug]
 parent: null
 depends_on: []
@@ -358,6 +358,17 @@ def tournament_id(tr: TournamentResult) -> str:
   if it regresses real labels materially, surface as a follow-up rather than reverting (decision is locked).
 - **Full clone for SHA pin** (finding #5): dropping `--depth 1` increases clone size. **Fallback**: use
   `git fetch --depth 1 origin <sha>` + `checkout FETCH_HEAD` to stay shallow.
+
+## Implementation run summary
+All 3 child stories implemented and at `stage: review` (2026-05-30, autopilot wave). Full suite green.
+- **classifier** (#1-4): matcher.py contract fidelity; +31 tests. **Conflict analytics keys changed**
+  (color-prefixed, ruleset order) — a re-label pass over stored decks picks up the new keys (derived, no migration).
+- **correctness** (#5,7): rules_vendor.py true SHA pinning (fetch+checkout+verify, raises on mismatch) +
+  config `MTGOFORMATDATA_SHA`; validate_deck nonpositive-count + `CATEGORY_BANNED_NAMES` + optional
+  `type_line_of` resolver; +17 tests.
+- **hardening** (#6,8,9): `_coerce_format` Legacy-in-list; Scryfall NFC + `card_faces[]` indexing;
+  `tournament_id` player-set hash for no-URI collisions; +~22 tests.
+Verification: full `pytest` 745 passed (was 654). No cross-story integration issues.
 
 ## Notes
 Reviewer: peeragent → Codex (session 019e7b6d-79db), effort xhigh, in-repo; ran the spine test subset
