@@ -2,7 +2,7 @@
 id: epic-gap-discovery
 kind: epic
 stage: drafting
-tags: [generation, discovery, needs-brief]
+tags: [generation, discovery]
 parent: null
 depends_on: [epic-deck-generation]
 release_binding: null

@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-05-31T20:19:46Z'
+generated_at: '2026-05-31T20:42:45Z'
 generated_from: frontmatter
-total_docs: 18
+total_docs: 19
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -55,6 +55,15 @@ documents:
     pillar — matchup-matrix estimation, the meta-positioning score, the sideboard
     recommender, and the what-to-play advisor? Read before designing the advisory/
     module.
+- path: docs/briefs/card-adjacency-and-discovery.md
+  title: 'Brief: Card-Level Adjacency & Discovery for Deck Tuning'
+  type: brief
+  kind: research
+  updated: '2026-05-31'
+  research_method: /brief
+  consumer_hint: Read before designing epic-gap-discovery's card-adjacency-model +
+    discovery-tuning — how to pick novel swap-in candidates a shell doesn't run yet,
+    score them by transferred per-card value, and gate the exploration honestly.
 - path: docs/briefs/deck-generation-and-moxfield.md
   title: 'Brief: Deck Generation & Moxfield Surfacing'
   type: brief
