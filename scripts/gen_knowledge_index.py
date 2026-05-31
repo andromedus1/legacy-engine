@@ -43,6 +43,15 @@ def parse_frontmatter(text: str) -> dict | None:
         return None
 
 
+def derive_title(fm: dict, text: str, rel: str) -> str:
+    if fm.get("title"):
+        return fm["title"]
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return rel
+
+
 def derive_kind(fm: dict) -> str | None:
     status = fm.get("status")
     if status in ("legacy", "superseded"):
@@ -73,7 +82,8 @@ def main() -> int:
 
     for p in discover():
         rel = p.relative_to(ROOT).as_posix()
-        fm = parse_frontmatter(p.read_text())
+        text = p.read_text()
+        fm = parse_frontmatter(text)
         if fm is None:
             warnings.append(f"{rel}: no parseable frontmatter (orphan)")
             continue
@@ -95,6 +105,7 @@ def main() -> int:
             errors.append(f"{rel}: kind=historical must NOT carry decisions/key_findings")
         if isinstance(fm.get("decisions"), list) and len(fm["decisions"]) > 12:
             warnings.append(f"{rel}: {len(fm['decisions'])} decisions (>12; cap 5-9)")
+        fm["_title"] = derive_title(fm, text, rel)
         docs.append((rel, fm, kind))
 
     print(f"Lint: {len(errors)} error(s), {len(warnings)} warning(s)")
@@ -129,11 +140,11 @@ def main() -> int:
         "total_docs": len(docs),
         "by_kind": by_kind,
         "recent": [
-            {"path": rel, "title": fm.get("title") or rel, "kind": kind, "updated": str(fm.get("updated", ""))}
+            {"path": rel, "title": fm["_title"], "kind": kind, "updated": str(fm.get("updated", ""))}
             for rel, fm, kind in recent
         ],
         "load_bearing": [
-            {"path": rel, "title": fm.get("title") or rel, "kind": kind}
+            {"path": rel, "title": fm["_title"], "kind": kind}
             for rel, fm, kind in docs_sorted if fm.get("nav_priority") == "high"
         ],
         "full_index_path": "docs/knowledge-index.yaml",
@@ -145,7 +156,7 @@ def main() -> int:
     for rel, fm, kind in docs_sorted:
         entry = {
             "path": rel,
-            "title": fm.get("title") or rel,
+            "title": fm["_title"],
             "type": fm.get("type"),
             "kind": kind,
             "updated": str(fm.get("updated", "")),
