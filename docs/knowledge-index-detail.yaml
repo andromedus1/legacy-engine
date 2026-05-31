@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-05-31T19:27:10Z'
+generated_at: '2026-05-31T20:19:46Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -82,8 +82,10 @@ documents:
       only where Legacy demands it.'
     - 'Key architectural delta: an explicit archetype-parser layer (no commander to
       key on) — labels decklists into the community taxonomy.'
-    - MVP arc = ingestion + meta analytics + advisory shipped together; goldfish simulation
-      and deck generation come in later pillars.
+    - MVP arc = ingestion + meta analytics + advisory + deck generation (consensus
+      baseline, field-tuning mode 2, export) shipped together; goldfish simulation
+      and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation
+      come in later pillars.
     - Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and
       matchups are first-class, unlike edh-engine's 4-player goldfish framing.
     - Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped
@@ -188,11 +190,13 @@ documents:
       '
     decisions:
     - MVP capability set = card-data ingestion, tournament-results ingestion, archetype
-      parsing, meta analytics (tier list / meta-% / matchup matrix), and the advisory
-      layer (positioning score + sideboard recommender + what-to-play).
-    - Deferred capabilities = goldfish simulation (Deck Mechanics pillar) and deck
-      generation — built after the meta+advisory arc, reusing edh-engine's goldfish/mana/mulligan
-      code.
+      parsing, meta analytics (tier list / meta-% / matchup matrix / per-card win-rate),
+      the advisory layer (positioning score + maindeck-aware sideboard recommender
+      + what-to-play), and deck generation modes 1+2+export (consensus baseline, field-tuned
+      decklist, Moxfield/Archidekt export).
+    - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); deck generation
+      gap-discovery (mode 3) and goldfish-validated candidate-validation remain deferred
+      until goldfish/ ships.
     - 'Core entities: Card, Decklist (75-card maindeck+sideboard), Archetype, TournamentResult,
       MatchupCell, DeckDefinition (deck-as-data for sim), SideboardPackage, BanListSnapshot.'
     - Meta-% is computed under multiple definitions (raw entry count, top-cut presence,
