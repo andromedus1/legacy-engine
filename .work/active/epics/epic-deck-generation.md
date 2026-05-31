@@ -1,10 +1,10 @@
 ---
 id: epic-deck-generation
 kind: epic
-stage: drafting
+stage: implementing
 tags: [generation]
 parent: null
-depends_on: [epic-advisory, epic-goldfish-simulation]
+depends_on: [epic-advisory]
 release_binding: null
 gate_origin: null
 created: 2026-05-29
@@ -39,11 +39,26 @@ enhancement, not a blocker for consensus+export+field-tuning).
 - `docs/ARCHITECTURE.md` — the deferred `generation/` module (consumes advisory + goldfish outputs).
 - `docs/VISION.md` — Deck Generation pillar.
 
-## Anticipated child features
-(provisional — real decomposition after the generation brief + `/epic-design`)
-- Meta-gap discovery (structural gaps in the archetype/card space)
-- Constrained build search (mana/role/consistency constraints)
-- Candidate validation (positioning + goldfish clock + consistency floor)
+## Decomposition
+
+Split by capability into 3 child features, scoped per the `## Design decisions` to **consensus + field-tuning
++ export** (gap-discovery / candidate-validation deferred to a follow-up epic — the former needs a per-card
+win-rate data extension, the latter needs the goldfish pillar). `consensus` and `export` are independent
+(parallel wave 1); `tuning` depends on `consensus` because consensus establishes the `generation/` module and
+the `generate` CLI group, and tuning optimizes a consensus (or user) shell.
+
+### Child features
+- `epic-deck-generation-consensus` — mode 1: modal-card aggregation → legal exactly-60 + ≤15 de-duped list; establishes `generation/` + `generate` CLI group — depends on: `[]`
+- `epic-deck-generation-export` — portable multi-target import-text exporter (Moxfield/Archidekt/MTGGoldfish/.dec) + deep-link; pure/offline — depends on: `[]`
+- `epic-deck-generation-tuning` — mode 2: optimize 60+15 vs the windowed field (matchup×field-share + sideboard recommender), before/after positioning `S`, bimodal fallback — depends on: `[epic-deck-generation-consensus]`
+
+### Deferred to a follow-up epic
+- **Gap discovery (mode 3)** — archetype-gaps (high `S`, low share) + card-gaps; the card-gap half needs a new per-card win-rate match-results extension.
+- **Goldfish-validated candidate validation** — depends on the `epic-goldfish-simulation` pillar (cross-pillar enhancement).
+
+### Decomposition risks
+- **Tuning is the largest feature** (~8–10 units: flex-slot ID, field-weighted equity, swap search, sideboard integration, before/after `S`, regime windowing, bimodal fallback). Its `/feature-design` pass should spawn child stories.
+- **Consensus mode-1 reconciliation** (exactly-60 + main/side de-dupe from greedy modal fill) is the trickiest single unit — design it first in the consensus feature's pass.
 
 ## Design decisions
 Captured via `/epic-design --only-questions` (interactive, 2026-05-30). Fixed inputs for the full
