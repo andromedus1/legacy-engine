@@ -600,9 +600,10 @@ class TestMirrorInclusion:
     archetypes via ``n/1``.
     """
 
-    def test_mirror_only_corpus_no_included_row_with_zero_total_matches(self):
-        """A corpus of only mirror matches must not include any archetype at the
-        default 2% threshold (decisive_matched == 0, denominator == 2*mirror_matches).
+    def test_mirror_only_corpus_includes_row_via_honest_ratio(self):
+        """A mirror-only corpus includes its archetype via an honest mirror-aware ratio
+        (decisive_matched == 0, denominator == 2*mirror_matches), while total_matches
+        (the decisive-match headline) legitimately stays 0.
 
         With the old denominator (2*total_matches = 0 → fallback 1) the ratio
         would be n/1 which is >= 0.02 for any archetype with a mirror, wrongly

@@ -174,8 +174,10 @@ def build_matrix(
     ``min_row_share``.  Each decisive match contributes to two marginal counts
     (winner + loser); each mirror match similarly credits the archetype with
     +1 win and +1 loss.  The denominator therefore includes mirror matches so
-    the numerator and denominator both count mirror involvement — a mirror-only
-    corpus no longer yields an included row with ``total_matches=0``.
+    the numerator and denominator both count mirror involvement.  Per the locked
+    "count mirrors on both sides" decision, a mirror-only archetype is included
+    via this honest mirror-aware ratio; ``total_matches`` is the decisive-match
+    headline and may legitimately be 0 for such a degenerate corpus.
 
     For included archetypes every ordered pair ``(a, b)`` with ``a != b`` gets
     a cell (n=0 if the pair was never observed), and ``(a, a)`` gets a mirror
