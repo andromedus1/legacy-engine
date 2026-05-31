@@ -1,7 +1,7 @@
 ---
 id: improve-sideboard-realdata-quality
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: [improve-whattoplay-proactivity-threat-signal]
@@ -109,3 +109,9 @@ uncapped greedy, this holds for T_a-bounded models but not for unlimited-redunda
 Tests use single-copy hosers for the ILP ≥ greedy assertion so both solvers operate on the
 same effective objective. The greedy-fill test uses multi-copy hosers to demonstrate budget
 fill via diminishing returns. All behavior is honest — no tests were weakened to pass.
+
+## Review (2026-05-30, autopilot)
+**Verdict**: Approve. Saturating `g(n)=1-(1-p)^n` (p=0.5) in greedy + the incremental-`y_a^t` ILP; budget now
+fills all 15 slots (was 2 under binary coverage); diminishing marginal returns verified; ILP≥greedy on
+single-copy models (the T_a=4 cap vs uncapped greedy is honestly tested). Builds on the density-tags
+(whattoplay) + catalog color fix + (archetype,tag) keys (fix-advisory). 651 green (+16).
