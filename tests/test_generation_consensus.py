@@ -429,3 +429,67 @@ class TestGenerateConsensusCLI:
         )
         assert result.exit_code == 0, result.output
         assert "Sideboard" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Regression: cross-board de-dupe must not be undone by the top-up pass
+# (peer-review BLOCKER — top-up re-introduced a card de-duped to the other board).
+# ---------------------------------------------------------------------------
+
+def _build_dupboard_tournament() -> dict:
+    """5 'DupBoard' decks where 'Pyroblast' is a low-inclusion maindeck card (0.6) but a
+    high-inclusion sideboard card (1.0). De-dupe removes it from main (side wins); the
+    maindeck is then short and tops up. Pre-fix, top-up re-added Pyroblast to main while it
+    sat in the side → a cross-board duplicate. Post-fix the top-up excludes the other board.
+    """
+    core = [
+        "Island", "Volcanic Island", "Scalding Tarn", "Flooded Strand", "Polluted Delta",
+        "Brainstorm", "Ponder", "Force of Will", "Daze", "Wasteland",
+        "Dragon's Rage Channeler", "Murktide Regent", "Spell Pierce",
+    ]  # 13 core cards @4 = 52 in every deck (inclusion 1.0)
+    decks = []
+    for i in range(5):
+        main = [_card(n, 4) for n in core]
+        if i < 3:                       # Pyroblast in 3/5 maindecks → inclusion 0.6
+            main.append(_card("Pyroblast", 4))
+        if i < 2:                       # Opt in 2/5 → 0.4
+            main.append(_card("Opt", 4))
+        if i < 2:                       # Consider in 2/5 → 0.4
+            main.append(_card("Consider", 4))
+        side = [_card("Pyroblast", 4), _card("Red Elemental Blast", 4)]  # Pyroblast 5/5 → 1.0
+        decks.append(_make_deck_raw(f"dup{i}", main, side))
+    return {
+        "Tournament": {
+            "Name": "DupBoard Open",
+            "Date": "2026-05-25",
+            "Uri": "https://www.mtgo.com/decklist/dupboard-2026-05-25",
+            "Formats": "Legacy",
+        },
+        "Decks": decks,
+        "Rounds": [],
+        "Standings": [],
+    }
+
+
+class TestCrossBoardDedupeTopupRegression:
+    """The top-up pass must not re-introduce a card de-duped to the other board."""
+
+    def _con(self):
+        c = store.connect(":memory:")
+        store.init_schema(c)
+        store.load_tournament(c, parse_cache_item(_build_dupboard_tournament(), "MTGO"))
+        c.execute("UPDATE decks SET archetype = 'DupBoard'")
+        return c
+
+    def test_boards_stay_disjoint_after_topup(self):
+        con = self._con()
+        deck = build_consensus(con, "DupBoard")
+        overlap = set(deck.maindeck) & set(deck.sideboard)
+        assert overlap == set(), f"cross-board duplicate after top-up: {overlap}"
+        con.close()
+
+    def test_maindeck_still_exactly_60(self):
+        con = self._con()
+        deck = build_consensus(con, "DupBoard")
+        assert sum(deck.maindeck.values()) == 60, deck.maindeck
+        con.close()
