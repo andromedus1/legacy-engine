@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: review
+stage: done
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]
@@ -447,3 +447,36 @@ The old `test_swaps_only_from_candidate_pool`, `test_locked_core_never_modified`
 - **New tests in `tests/test_generation_tuning.py`**: 60 (up from 42 in the prior held implementation).
 - **Full suite**: 961 passed (up from 943 baseline; +18 net from the tuning rework).
 - **Consumed modules' tests not edited**: `test_sideboard.py`, `test_card_value.py`, `test_card_winrates.py`, `test_advise_report.py` — all green, unmodified.
+
+
+## Review findings (rework deep review, 2026-05-31) — APPROVED
+
+Fresh-context deep review (same-model Claude, Opus; **cross-model deferred — Codex out of credits**, true
+cross-model pass owed before epic closure). Verdict: **Approve — no blockers, no Important findings.** Both
+prior BLOCKERS confirmed genuinely closed, verified by directly exercising the code (not just trusting the
+green suite):
+1. **#4 gameplan-hollowing FIXED.** The greedy gain is `add_lift − cut_lift` from `field_weighted_values`
+   (per-card value) ONLY; `coverage_value` is computed for the audit metric but never read in any
+   accept/reject branch — coverage cannot drive a maindeck swap. Locked core never enters `flex`/never cut
+   (reviewer set the locked card to the worst fwv and confirmed it kept all 4 copies through 4 swaps).
+2. **#2 vacuous tests FIXED.** Unit `_greedy_tune` test (hand-built fwv, no DB) asserts the specific swap +
+   STRICT `value_after > value_before`; integration on n=30 `make_rounds_corpus` reaches `fell_back=False`,
+   4 real swaps, value 0.0→0.444, `legality_errors==[]`, `matchup_plans` populated (reviewer re-ran under
+   `-W error::UserWarning` to prove it does not silently take the fallback).
+3. **#3 combined legality FIXED.** `_legal_swap_maindeck` validates combined main+side (4-copy + overrides +
+   exactly-60); `tune_deck` runs a blocking final `validate_deck` and reverts to consensus+empty-side on any
+   error → returned `TunedDeck.legality_errors` is ALWAYS []. Verified live (4th Ponder allowed at 3main+0side,
+   rejected at 3main+1side).
+- No-signal fallback correct (thin → fell_back=True, no maindeck swaps, sideboard still built).
+  `compute_card_winrates` runs once (objective/search split); sideboard called with archetype/since/until.
+
+**Findings — both nits:**
+- **[Nit] integration test's central assertions were under `if not fell_back:` with an `else: warnings.warn`**
+  — could degrade to vacuous-with-warning on a future fixture change. FIXED in-session: now asserts
+  `result.fell_back is False` UNCONDITIONALLY (hardens against silent vacuous-test regression — apt given this
+  feature's history). 961 green after.
+- **[Nit] `legality_errors==[]` assumes the input maindeck is legal** (revert path returns the input main):
+  documented caller contract (CLI validates decklists on load); not a tuning defect. No action.
+
+Suite green at 961; consumed-module tests (sideboard/card_value/card_winrates/advise_report) untouched.
+Advanced review → done. This was the last child feature of epic-deck-generation.

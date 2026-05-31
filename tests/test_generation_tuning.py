@@ -990,29 +990,24 @@ class TestTuneDeckIntegration:
             since="2025-01-01",   # wide window to include 2026-01 fixture corpus
         )
 
-        # The central AC: if there is per-card signal, swaps happen and value improves.
-        if not result.fell_back:
-            # Per-card signal found: value must strictly improve
-            assert result.value_after > result.value_before, (
-                f"value_after ({result.value_after:.4f}) must be STRICTLY greater than "
-                f"value_before ({result.value_before:.4f}); "
-                f"swaps={result.swaps}"
-            )
-            assert len(result.swaps) > 0, (
-                f"Expected at least 1 swap when per-card signal present; "
-                f"swaps={result.swaps}"
-            )
-            assert result.objective == "per-card-value"
-        else:
-            # No signal found (possible if the corpus window is too narrow or something
-            # in field_weighted_values prevented gate clearing). This would mean the
-            # corpus setup didn't produce evolving-tier data. Log a diagnostic.
-            import warnings
-            warnings.warn(
-                f"tune_deck fell_back=True on n=30 corpus — check that n_repeats=15 "
-                f"produces evolving-tier data. reason={result.reason!r}",
-                stacklevel=1,
-            )
+        # The central AC, asserted UNCONDITIONALLY to harden against a silent vacuous
+        # regression: an n=30 corpus MUST produce evolving-tier per-card signal, so the
+        # real swap path MUST run (no fallback). If a future fixture change pushed this
+        # into the fallback branch, this assertion fails loudly rather than degrading to
+        # a vacuous warning. (Deep-review nit, 2026-05-31.)
+        assert result.fell_back is False, (
+            f"n=30 corpus must yield per-card signal and run the real swap path, not the "
+            f"no-signal fallback — vacuous-test guard. reason={result.reason!r}"
+        )
+        assert result.objective == "per-card-value"
+        # Per-card signal found: value must strictly improve and at least one swap happens.
+        assert result.value_after > result.value_before, (
+            f"value_after ({result.value_after:.4f}) must be STRICTLY greater than "
+            f"value_before ({result.value_before:.4f}); swaps={result.swaps}"
+        )
+        assert len(result.swaps) > 0, (
+            f"Expected at least 1 swap when per-card signal present; swaps={result.swaps}"
+        )
 
         # Regardless of path: these must always hold
         assert result.legality_errors == [], (
