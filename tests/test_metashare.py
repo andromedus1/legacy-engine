@@ -1118,6 +1118,48 @@ class TestPeerReviewFindingsUnit2:
         assert total_topcut == 1, f"Expected 1 non-ambiguous top-cut deck, got {total_topcut}"
         con.close()
 
+    def test_topcut_dup_standings_name_does_not_inflate_count(self):
+        """A name duplicated on the STANDINGS side (not the decks side) must not fan out the join.
+
+        Single 'alice' deck, but two standings rows normalize to 'alice' ('alice' + 'Alice').
+        Pre-fix the dup CTE only watched the decks side, so alice's one deck joined both
+        standings rows → Delver counted twice.  After the fix a name ambiguous in EITHER decks
+        or standings is excluded, so alice drops out and only the clean 'bob' deck is counted.
+        """
+        con = _con()
+        raw = {
+            "Tournament": {
+                "Name": "Dup Standings Test",
+                "Date": "2026-05-30",
+                "Uri": "https://www.mtgo.com/decklist/dup-standings-test-2026-05-30",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                {"Player": "alice", "Result": "1st Place",
+                 "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+                {"Player": "bob", "Result": "2nd Place",
+                 "Mainboard": [{"Count": 4, "CardName": "Force of Will"}], "Sideboard": []},
+            ],
+            "Rounds": [],
+            "Standings": [
+                {"Rank": 1, "Player": "alice", "Points": 18},
+                {"Rank": 2, "Player": "Alice", "Points": 15},   # normalizes to 'alice' → ambiguous
+                {"Rank": 3, "Player": "bob",   "Points": 12},
+            ],
+        }
+        tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'alice'", [tid]
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Combo' WHERE tournament_id = ? AND player = 'bob'", [tid]
+        )
+        counts = _topcut_counts(con, provenance=None, cut_size=8)
+        assert counts.get("Delver", 0) == 0, "alice is ambiguous on the standings side → excluded, not doubled"
+        assert counts.get("Combo", 0) == 1, "bob (unique on both sides) counted exactly once"
+        assert sum(counts.values()) == 1, f"standings dup must not inflate; got {counts}"
+        con.close()
+
     # ---- Finding #3: top-cut unlabeled count ----
 
     def test_topcut_unlabeled_null_archetype_counted(self):
@@ -1193,11 +1235,11 @@ class TestPeerReviewFindingsUnit2:
             con, definition="wrw", provenance=None, group_other=False, min_share=0.0
         )
         # total_decks must equal sum of matchup-n for archetypes in the weighted set
-        # alice(Delver)=1 match, bob(Lands)=1 match → total_matchup_n = 2
-        assert report.total_decks != 1, (
-            "total_decks must not be 1 (the raw normalised-weight total) — should be matchup-n"
+        # alice(Delver)=1 match, bob(Lands)=1 match → total_matchup_n = 2 (exact)
+        assert report.total_decks == 2, (
+            f"total_decks must be the matchup-n sum (2), not the raw normalised-weight total (1); "
+            f"got {report.total_decks}"
         )
-        assert report.total_decks >= 1, "total_decks must be a positive matchup-n sum"
         con.close()
 
     def test_wrw_group_other_true_and_false_same_total_decks(self):
