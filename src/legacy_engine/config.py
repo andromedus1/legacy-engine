@@ -31,3 +31,8 @@ MTGOFORMATDATA_REPO = "https://github.com/Badaro/MTGOFormatData"
 # `legacy refresh rules`. Empty string means unpinned — the archetype layer
 # treats that as fail-fast (it must classify against a known rules version).
 RULES_PINNED_SHA = ""
+
+# True pinned SHA for refresh_rules (finding #5). refresh_rules checks out this
+# exact commit and raises if the post-checkout HEAD doesn't match, preventing
+# silent drift when the upstream repo advances.
+MTGOFORMATDATA_SHA = "e056bc7d63c0138091986ce1696c705bc7dee296"

@@ -8,10 +8,12 @@ this module when WotC issues a new B&R announcement.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 
 from legacy_engine.models.banlist import (
     BASIC_LAND_NAMES,
+    CATEGORY_BANNED_NAMES,
     COPY_LIMIT_OVERRIDES,
     UNLIMITED_COPIES,
     BanListSnapshot,
@@ -83,11 +85,17 @@ def validate_deck(
     maindeck: dict[str, int],
     sideboard: dict[str, int] | None = None,
     snapshot: BanListSnapshot | None = None,
+    type_line_of: Callable[[str], str | None] | None = None,
 ) -> list[str]:
     """Validate a decklist against Legacy construction rules + a ban-list snapshot.
 
-    Returns a list of human-readable violations (empty = legal). ``maindeck``/``sideboard`` map card
-    name -> count. ``snapshot`` defaults to the current ban list.
+    Returns a list of human-readable violations (empty = legal).  ``maindeck``/``sideboard`` map card
+    name -> count.  ``snapshot`` defaults to the current ban list.
+
+    ``type_line_of`` is an optional injected resolver (Ports & Adapters — domain must not import
+    Scryfall/store).  When provided, cards whose type line contains "Conspiracy", "Attraction", or
+    "Sticker" are flagged as not Legacy-legal.  When ``None``, type-line predicates are skipped
+    entirely (those card types never appear in real Legacy data).
     """
     sideboard = sideboard or {}
     snapshot = snapshot or current_banlist()
@@ -105,8 +113,23 @@ def validate_deck(
         combined[name] = combined.get(name, 0) + count
 
     for name, count in combined.items():
+        # Nonpositive count guard (finding #7): counts must be positive integers.
+        if count <= 0:
+            errors.append(f"{name}: nonpositive count ({count})")
+
         if snapshot.is_banned(name):
             errors.append(f"{name} is banned (as of {snapshot.as_of})")
+
+        # Category bans: ante + offensive cards, name-enumerated (finding #7).
+        if name in CATEGORY_BANNED_NAMES:
+            errors.append(f"{name} is banned by category (ante/offensive)")
+
+        # Type-line category predicates — only when a resolver is injected.
+        if type_line_of is not None:
+            tl = type_line_of(name) or ""
+            if any(k in tl for k in ("Conspiracy", "Attraction", "Sticker")):
+                errors.append(f"{name} is not Legacy-legal (type: {tl})")
+
         limit = _copy_limit(name)
         if limit is not None and count > limit:
             errors.append(f"{name}: {count} copies (max {limit})")
