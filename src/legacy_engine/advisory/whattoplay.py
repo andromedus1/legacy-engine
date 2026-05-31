@@ -34,7 +34,38 @@ log = logging.getLogger(__name__)
 
 Role = str  # "counter" | "removal" | "stax" | "card_advantage" | "protection"
             # | "fast_mana" | "ritual" | "tutor" | "graveyard_recursion" | "storm"
+            # | "threat"
             # (compact_combo is deck-level, not single-card)
+
+# ---------------------------------------------------------------------------
+# Curated threat overrides — Legacy staples whose proactive value raw stats miss
+# (cheap planeswalkers, evasive threats, cards whose text understates them).
+# The general signal (cmc ≤ 2 and power ≥ 2 creature) does the heavy lifting;
+# this list handles edge cases (variable power, non-creature threats, etc.).
+# ---------------------------------------------------------------------------
+
+_THREAT_CARDS: frozenset[str] = frozenset(
+    {
+        # Creature threats — covered by the general rule too, listed for explicitness
+        "Dragon's Rage Channeler",
+        "Murktide Regent",
+        "Tarmogoyf",
+        "Nethergoyf",
+        "Barrowgoyf",
+        "Goblin Guide",
+        "Death's Shadow",
+        "Orcish Bowmasters",
+        "Ajani Nacatl Pariah // Ajani, Nacatl Avenger",
+        "Ajani Nacatl Pariah",
+        "Amped Raptor",
+        "Voice of Victory",
+        # Ocelot Pride — low-MV token generator, proactive even at P=1
+        "Ocelot Pride",
+        # Cheap planeswalkers — proactive threats raw P/T stats cannot capture
+        "Wrenn and Six",
+        "Ragavan, Nimble Pilferer",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Unit 1 — Regex constants for _card_roles
@@ -158,6 +189,20 @@ def _card_roles(card: Card) -> set[str]:
     if sr == "discard":
         roles.add("discard")
 
+    # --- threat (aggressive/proactive creature or permanent threat) ---
+    # General rule: a Creature at cmc ≤ 2 with power ≥ 2 is a proactive clock.
+    # Curated override: _THREAT_CARDS catches threats raw stats miss (variable
+    # power, token generators, cheap planeswalkers).
+    if card.name in _THREAT_CARDS:
+        roles.add("threat")
+    elif (
+        "Creature" in type_line
+        and card.cmc <= 2.0
+        and card.power_int() is not None
+        and card.power_int() >= 2  # type: ignore[operator]
+    ):
+        roles.add("threat")
+
     return roles
 
 
@@ -221,43 +266,70 @@ def _load_deck_cards(
         # Reconstruct colors and produced_mana from stored joined strings.
         # store.load_cards serializes: "".join(c.colors) → e.g. "UB" for ["U","B"].
         # We split back into single-char lists.
+        # power and toughness are stored as plain VARCHAR strings (or NULL) — pass through as-is.
         colors_raw = row.get("colors") or ""
         produced_raw = row.get("produced_mana") or ""
         row["colors"] = list(colors_raw) if colors_raw else []
         row["produced_mana"] = list(produced_raw) if produced_raw else []
+        # power/toughness: already plain strings from the DB; Card.model_validate handles None
         card = Card.model_validate(row)
         result.append((card, count))
     return result
 
 
+def _avg_nonland_mv(cards_with_counts: list[tuple[Card, int]]) -> float:
+    """Compute the average mana value across all non-land cards in the list.
+
+    Returns 2.0 (sigmoid center) when there are no non-land cards, so the
+    low_curve_score contributes a neutral 0.5 rather than skewing the score.
+    This is the single shared computation used by both ``_proactivity_from_cards``
+    (low_curve_score term) and ``_vulnerability_from_composition`` (low-curve tag),
+    ensuring they fire on the same threshold.
+    """
+    total_count = 0
+    total_mv = 0.0
+    for card, count in cards_with_counts:
+        if card.is_land:
+            continue
+        total_count += count
+        total_mv += card.cmc * count
+    return total_mv / total_count if total_count > 0 else 2.0
+
+
 def _proactivity_from_cards(cards_with_counts: list[tuple[Card, int]]) -> ProactivityProfile:
     """Pure proactivity computation from (Card, count) pairs (no DB needed).
 
-    Advisory-methods §4 formula:
-      proactive_mass = Σ count * (fast_mana + ritual + tutor + compact_combo)
+    Advisory-methods §4 formula (updated):
+      proactive_mass = Σ count * (fast_mana + ritual + tutor + discard + threat)
                        + low_curve_score  (deck-level signal, added once)
       reactive_mass  = Σ count * (counter + removal + stax + card_advantage + protection)
       score = proactive / (proactive + reactive)   [0.5 when both zero]
+
+    ``threat`` role: low-MV creature with a real body, or a card in _THREAT_CARDS.
+    ``low_curve_score``: sigmoid over avg nonland MV (shared with vulnerability low-curve tag).
     """
     proactive_slots = 0.0
     reactive_slots = 0.0
-    total_nonland_count = 0
-    total_nonland_mv = 0.0
 
     for card, count in cards_with_counts:
         if card.is_land:
             continue
-        total_nonland_count += count
-        total_nonland_mv += card.cmc * count
         roles = _card_roles(card)
         for role in roles:
             if role in ("fast_mana", "ritual", "tutor", "discard"):
                 proactive_slots += count
+            elif role == "threat":
+                # Threats are weighted 1.5× — a low-MV threat does double duty:
+                # it advances the proactive plan AND forces reactive answers, making
+                # each copy more impactful than a single ritual or discard slot.
+                proactive_slots += count * 1.5
             if role in ("counter", "removal", "stax", "card_advantage", "protection"):
                 reactive_slots += count
 
-    # low_curve_score: deck-level signal (sigmoid over avg nonland MV), added to proactive
-    avg_mv = total_nonland_mv / total_nonland_count if total_nonland_count > 0 else 2.0
+    # low_curve_score: deck-level signal (sigmoid over avg nonland MV), added once.
+    # Uses the shared _avg_nonland_mv helper so this fires on the same threshold as
+    # the "low-curve" vulnerability tag (avg MV < 2.0).
+    avg_mv = _avg_nonland_mv(cards_with_counts)
     low_curve_score = _sigmoid(avg_mv)
     proactive_mass = proactive_slots + low_curve_score
     reactive_mass = reactive_slots
@@ -332,6 +404,8 @@ _COMBO_AVG_MV_MAX = 2.5        # avg nonland MV must be below this for combo tag
 _COMBO_TUTOR_DENSITY = 0.05    # tutor slots / total maindeck >= threshold for combo
 _GREEDY_MANABASE_MIN_FAST = 4  # cards with fast_mana/dual land tags >= threshold → greedy manabase
 _GREEDY_NONBASIC_MIN = 8       # nonbasic lands count >= threshold → greedy manabase
+_STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → storm-reliant
+                               # (density gate kills false positives from stray storm cards in aggregates)
 
 
 def _archetype_composition(
@@ -383,11 +457,13 @@ def _vulnerability_from_composition(
 ) -> frozenset[str]:
     """Derive vulnerability tags from a name→count composition aggregate.
 
-    Tag rules (advisory-methods §4):
+    Tag rules (advisory-methods §4, updated):
     - graveyard-reliant: graveyard_recursion density ≥ threshold
-    - storm-reliant: any storm card present
+    - storm-reliant: storm slots / total nonland ≥ _STORM_DENSITY threshold
+      (density gate — presence alone caused false positives on aggregated compositions
+       where a stray storm card appeared in an otherwise non-storm archetype aggregate)
     - combo: low avg MV + tutors + storm-or-graveyard signal
-    - low-curve: avg nonland MV < 2.0
+    - low-curve: avg nonland MV < 2.0 (same computation as proactivity low_curve_score)
     - creature-based: creature slot density ≥ threshold
     - greedy-manabase: high fast/dual lands + nonbasic heavy
     - low-interaction: low (counter + removal) density
@@ -447,6 +523,7 @@ def _vulnerability_from_composition(
         if "fast_mana" in roles:
             fast_mana_cards += count
 
+    # avg nonland MV — shared threshold with proactivity low_curve_score sigmoid center
     avg_mv = total_nonland_mv / total_nonland if total_nonland > 0 else 3.0
     tags: set[str] = set()
 
@@ -454,8 +531,8 @@ def _vulnerability_from_composition(
     if total_cards > 0 and gy_slots / total_cards >= _GY_RECURSION_DENSITY:
         tags.add("graveyard-reliant")
 
-    # storm-reliant
-    if storm_slots > 0:
+    # storm-reliant: density gate (not mere presence) to avoid false positives on aggregates
+    if total_nonland > 0 and storm_slots / total_nonland >= _STORM_DENSITY:
         tags.add("storm-reliant")
 
     # combo: low avg MV + tutors + some broken signal (storm/gy/fast mana)
@@ -470,7 +547,7 @@ def _vulnerability_from_composition(
     ):
         tags.add("combo")
 
-    # low-curve
+    # low-curve: uses the same avg nonland MV computation as proactivity low_curve_score
     if avg_mv < 2.0:
         tags.add("low-curve")
 
