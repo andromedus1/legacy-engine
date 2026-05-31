@@ -1,7 +1,7 @@
 ---
 id: improve-sideboard-realdata-quality
 kind: feature
-stage: drafting
+stage: implementing
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: [improve-whattoplay-proactivity-threat-signal]
@@ -57,3 +57,28 @@ through `/feature-design` (greenfield-ish: new saturating objective + threshold 
 - Still depends on [[improve-whattoplay-proactivity-threat-signal]] (density-threshold vulnerability tags)
   to fix the `greedy-manabase=100%` tag inflation feeding the weights, and on the catalog color-gating fix
   in [[fix-advisory-peer-review-bugs]] (Surgical/Faerie castable in any deck).
+
+## Design (autopilot, 2026-05-30)
+Prereqs landed: density-threshold vulnerability tags (improve-whattoplay) tame the tag inflation feeding
+weights; Surgical/Faerie `castable_any_color` (fix-advisory) fixes the catalog gating. This feature adds the
+saturating coverage so the budget actually fills.
+
+### Units (`src/legacy_engine/advisory/sideboard.py`)
+1. **Saturating value `g(n)=1−(1−p)^n`** (module const `_COVERAGE_P` ≈ 0.5): an element's value at coverage
+   level n is `weight × g(n)`; the marginal value of the n-th answer is `weight × (g(n)−g(n−1))` — positive
+   but diminishing, so redundant answers still earn slots until the budget is full.
+2. **`_greedy_solve`**: marginal gain of adding a card = Σ over the elements it covers of
+   `weight × (g(cov+1)−g(cov))` given current coverage counts; pick max-marginal until budget slots filled
+   (respect `max_copies`). The trace records the (diminishing) gains.
+3. **`_ilp_solve`**: incremental linearization — per element `a` and coverage level `t=1..T_a`, a binary
+   `y_a^t` with objective coefficient `weight_a × (g(t)−g(t−1))`, and `Σ_t y_a^t ≤ (Σ_{c covers a} x_c)`,
+   `y_a^t ∈ {0,1}` monotone. Objective `max Σ_{a,t} coef · y_a^t`, budget `Σ_c x_c ≤ 15−reserved`. Solves to
+   fill the budget; greedy fallback on non-Optimal.
+4. Keep the `(archetype,tag)`-specific coverage keys + `_hate` weighting from fix-advisory.
+
+### Tests (`tests/test_sideboard.py`)
+- On a multi-archetype field, `recommend_sideboard` now fills the budget (≈15 slots, not 2) — assert
+  `sum(cards.values())` is at/near `15−reserved`.
+- Diminishing returns: the 2nd copy of an answer for the same archetype has lower marginal gain than the 1st
+  (greedy trace), and ILP objective ≥ greedy objective.
+- Budget + max_copies still respected; existing coverage-key tests stay green.
