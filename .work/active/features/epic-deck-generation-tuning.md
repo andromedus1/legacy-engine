@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: implementing
+stage: review
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus]
@@ -176,3 +176,47 @@ coverage before/after; `--export moxfield` emits import text; thin field prints 
   consensus + legality + sideboard-only, clearly flagged (`fell_back`, `reason`).
 - **CoverageModel reuse seam**: if `_build_coverage_model` isn't cleanly callable, add a thin public wrapper in
   `advisory/sideboard.py` rather than duplicating the model. Keep it a one-line export, not a fork.
+
+## Implementation discovery
+
+Implemented 2026-05-30. Units built, deviations, and decisions:
+
+### Units delivered
+1. **Unit 1** (`partition_flex`, `candidate_pool`) — flex/locked partition by inclusion threshold; candidate
+   pool from `card_frequencies(..., board="main")`. Exactly as spec'd.
+2. **Unit 2** (`coverage_value`) — pure delegate to `advisory.sideboard._compute_covered_weight`; same
+   saturating `g(n)=1−(1−p)^n` the sideboard recommender uses. No duplication.
+3. **Unit 3** (`TunedDeck`, `tune_deck`, `_is_thin_field`, `_legal_swap_maindeck`) — greedy loop with
+   per-step exactly-60 + legality validation; bimodal fallback fires when archetype absent from matrix OR
+   all non-mirror cells have n < DISPLAY_GATE_N. `positioning_s` computed once via `positioning_score`
+   (archetype context; labeled explicitly in output as unchanged by card swaps). Sideboard recommender
+   always called regardless of fallback path.
+4. **Unit 4** (`generate tune` CLI leaf) — full option set: `--deck`, `--archetype`, `--field`,
+   `--since`, `--until`, `--lock-threshold`, `--max-swaps`, `--export`, `--db`, `--verbose`.
+
+### Coverage-vs-positioning decision as realized
+The optimization target is `coverage_value(model, maindeck)` — field-weighted saturating coverage from
+`advisory.sideboard._compute_covered_weight`. Positioning S is computed via `positioning_score` once
+(archetype-level, unchanged by card swaps) and displayed as field context with an explicit label.
+This is correct per spec § Architectural choice: swapping cards cannot change S.
+
+### CoverageModel wrapper
+Added `build_tuning_coverage_model` as a thin public function in `generation/tuning.py` (not in
+`advisory/sideboard.py`) — it orchestrates the deck-colors + deck-tags + archetype-tags calls needed
+to build the model from outside the sideboard module, then delegates to `_build_coverage_model`.
+No forking; no duplication.
+
+### Deviations from spec
+- **Implementation order**: built all four units together in one stride (spec suggested skeleton-first,
+  but the coupling between Units 1–3 made a top-down approach cleaner). No behavioral impact.
+- **Bimodal fallback in test fixture**: the TuneDelver fixture has no rounds data, so the matchup matrix
+  is empty → `fell_back=True` fires in every DB-backed integration test. The `test_coverage_improvement`
+  class tests the greedy swap path directly via a hand-built `CoverageModel` without DB round-trips,
+  satisfying the AC that "a known swap improves coverage". The DB-backed path's greedy loop is exercised
+  by the determinism and coverage-improvement assertions when it doesn't fall back (on real corpus data
+  with actual rounds).
+- **`max_swaps` default**: 8, per spec.
+- **`lock_threshold` default**: 0.65, per spec.
+
+### Tests: 42 new in `tests/test_generation_tuning.py`; `tests/test_cli.py` updated (generate tune listed).
+### Full suite: 844 passed.
