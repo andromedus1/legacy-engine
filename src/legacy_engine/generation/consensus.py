@@ -311,16 +311,19 @@ def build_consensus(
 
     # After de-dupe the maindeck may be short (removed cards freed slots).
     # Top-up from the remaining main_freqs (cards not yet in main, preserving ranking).
+    # CRITICAL: exclude cards currently in the OTHER board, or top-up re-introduces the very
+    # cross-board duplicate _dedupe_cross_board just removed.
     in_main = set(main)
-    remaining_main = [cf for cf in main_freqs if cf.name not in in_main]
+    remaining_main = [cf for cf in main_freqs if cf.name not in in_main and cf.name not in side]
     current_main_total = sum(main.values())
     if current_main_total < main_size and remaining_main:
         top_up = _fill_board(remaining_main, main_size - current_main_total)
         main.update(top_up)
 
-    # Similarly top-up the sideboard after de-dupe.
+    # Similarly top-up the sideboard after de-dupe — excluding cards now in main (incl. any
+    # just added by the main top-up above) so the boards stay disjoint.
     in_side = set(side)
-    remaining_side = [cf for cf in side_freqs if cf.name not in in_side]
+    remaining_side = [cf for cf in side_freqs if cf.name not in in_side and cf.name not in main]
     current_side_total = sum(side.values())
     if current_side_total < side_size and remaining_side:
         top_up = _fill_board(remaining_side, side_size - current_side_total)
