@@ -92,6 +92,12 @@ class TestNonpositiveCounts:
         errors = validate_deck({"Island": 60})
         assert not any("nonpositive count" in e for e in errors)
 
+    def test_negative_sideboard_count_not_masked_by_maindeck(self):
+        # A negative count in one zone must not be hidden by positive copies of the same
+        # card in the other zone — the guard is per-zone, not on the merged total.
+        errors = validate_deck({"Island": 60, "Brainstorm": 4}, {"Brainstorm": -1})
+        assert any("nonpositive count" in e and "sideboard" in e for e in errors), errors
+
 
 class TestCategoryBans:
     """Finding #7 — CATEGORY_BANNED_NAMES are flagged regardless of snapshot contents."""

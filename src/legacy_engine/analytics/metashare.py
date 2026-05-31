@@ -25,20 +25,32 @@ log = logging.getLogger(__name__)
 # Unit 1 — Top-cut counts
 # ---------------------------------------------------------------------------
 
-_TOPCUT_SQL = """
+# `dup` excludes names non-unique among DECK rows; `dup_s` excludes names non-unique among
+# STANDINGS rows — either side can fan out the deck↔standings join, so both are excluded
+# ("skip the confusing ones", finding #1 top-cut half).
+_TOPCUT_DUP_CTES = """
 WITH dup AS (
     SELECT tournament_id, lower(trim(player)) AS norm
     FROM decks
     GROUP BY tournament_id, lower(trim(player))
     HAVING count(*) > 1
-)
+), dup_s AS (
+    SELECT tournament_id, lower(trim(player)) AS norm
+    FROM standings
+    GROUP BY tournament_id, lower(trim(player))
+    HAVING count(*) > 1
+)"""
+
+_TOPCUT_SQL = _TOPCUT_DUP_CTES + """
 SELECT d.archetype AS archetype, count(*) AS n
 FROM decks d
 JOIN tournaments t ON t.id = d.tournament_id
 JOIN standings s ON s.tournament_id = d.tournament_id
                AND lower(trim(s.player)) = lower(trim(d.player))
 LEFT JOIN dup du ON du.tournament_id = d.tournament_id AND du.norm = lower(trim(d.player))
-WHERE d.archetype IS NOT NULL AND du.norm IS NULL    -- exclude ambiguous normalized names
+LEFT JOIN dup_s dus ON dus.tournament_id = d.tournament_id AND dus.norm = lower(trim(d.player))
+WHERE d.archetype IS NOT NULL
+  AND du.norm IS NULL AND dus.norm IS NULL   -- exclude names ambiguous in decks OR standings
   AND s.rank <= ?
   AND (? IS NULL OR t.provenance = ?)
   AND (? IS NULL OR t.date >= ?)
@@ -47,20 +59,16 @@ GROUP BY d.archetype
 """
 
 # Same join structure but counts NULL-archetype decks for finding #3.
-_TOPCUT_UNLABELED_SQL = """
-WITH dup AS (
-    SELECT tournament_id, lower(trim(player)) AS norm
-    FROM decks
-    GROUP BY tournament_id, lower(trim(player))
-    HAVING count(*) > 1
-)
+_TOPCUT_UNLABELED_SQL = _TOPCUT_DUP_CTES + """
 SELECT count(*) AS n
 FROM decks d
 JOIN tournaments t ON t.id = d.tournament_id
 JOIN standings s ON s.tournament_id = d.tournament_id
                AND lower(trim(s.player)) = lower(trim(d.player))
 LEFT JOIN dup du ON du.tournament_id = d.tournament_id AND du.norm = lower(trim(d.player))
-WHERE d.archetype IS NULL AND du.norm IS NULL    -- unlabeled, non-ambiguous, in standings
+LEFT JOIN dup_s dus ON dus.tournament_id = d.tournament_id AND dus.norm = lower(trim(d.player))
+WHERE d.archetype IS NULL
+  AND du.norm IS NULL AND dus.norm IS NULL   -- unlabeled, non-ambiguous (either side), in standings
   AND s.rank <= ?
   AND (? IS NULL OR t.provenance = ?)
   AND (? IS NULL OR t.date >= ?)

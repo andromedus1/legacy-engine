@@ -108,15 +108,19 @@ def validate_deck(
     if sb_total > 15:
         errors.append(f"sideboard has {sb_total} cards (maximum 15)")
 
+    # Nonpositive count guard (finding #7): counts must be positive integers. Check each zone
+    # independently — a negative count in one zone must not be masked by positive copies of the
+    # same card in the other zone after merging.
+    for zone, cards in (("maindeck", maindeck), ("sideboard", sideboard)):
+        for name, count in cards.items():
+            if count <= 0:
+                errors.append(f"{name}: nonpositive count ({count}) in {zone}")
+
     combined: dict[str, int] = dict(maindeck)
     for name, count in sideboard.items():
         combined[name] = combined.get(name, 0) + count
 
     for name, count in combined.items():
-        # Nonpositive count guard (finding #7): counts must be positive integers.
-        if count <= 0:
-            errors.append(f"{name}: nonpositive count ({count})")
-
         if snapshot.is_banned(name):
             errors.append(f"{name} is banned (as of {snapshot.as_of})")
 

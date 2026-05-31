@@ -591,8 +591,13 @@ class TestMirrorInclusion:
 
     The numerator ``mr.archetypes[a].n`` already credits mirrors (+1 win +1 loss
     per mirror match), so the denominator must include ``mirror_matches`` to keep
-    the ratio consistent.  A mirror-only corpus (no decisive matches) must NOT
-    produce an included archetype row with ``total_matches == 0``.
+    the ratio consistent.  Per the locked decision ("count mirrors on both sides";
+    the alternative "exclude mirror marginals from inclusion" was rejected), a
+    mirror-only archetype IS included via an honest mirror-aware ratio — the
+    ``total_matches`` headline (decisive matches only) may legitimately be 0 for
+    such a degenerate corpus.  The bug this guards against is the old broken
+    fallback (``2*total_matches == 0 → denom 1``) that over-included fringe
+    archetypes via ``n/1``.
     """
 
     def test_mirror_only_corpus_no_included_row_with_zero_total_matches(self):
