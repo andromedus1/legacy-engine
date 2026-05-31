@@ -1,7 +1,7 @@
 ---
 id: fix-analytics-peer-review-findings-data-integrity
 kind: story
-stage: review
+stage: done
 tags: [analytics, bug]
 parent: fix-analytics-peer-review-findings
 depends_on: []

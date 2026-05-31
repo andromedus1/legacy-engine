@@ -1,7 +1,7 @@
 ---
 id: fix-spine-peer-review-findings-hardening
 kind: story
-stage: review
+stage: done
 tags: [ingestion, archetype, bug]
 parent: fix-spine-peer-review-findings
 depends_on: []
