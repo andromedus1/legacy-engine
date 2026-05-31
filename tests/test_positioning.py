@@ -587,14 +587,20 @@ class TestRankDecks:
             f"Y={ranking.p_best['Y']:.3f}"
         )
 
-    def test_decks_sorted_by_p_best(self):
-        """Default sort is p_best descending."""
+    def test_decks_sorted_by_risk_quantile(self):
+        """Default sort is lower-quantile (risk-adjusted) descending, not p_best."""
         matrix = _worked_matrix()
         field = _worked_field()
         ranking = rank_decks(
             matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED
         )
-        assert ranking.decks[0] == "X", "X (best call) should rank first"
+        # X has higher S mean/quantile than Y on the worked example
+        assert ranking.decks[0] == "X", "X (better call) should rank first by lower-quantile"
+        # Sort key is s_quantile, not p_best
+        assert ranking.s_quantile["X"] >= ranking.s_quantile["Y"], (
+            f"X should have higher or equal lower-quantile: "
+            f"X={ranking.s_quantile['X']:.4f}, Y={ranking.s_quantile['Y']:.4f}"
+        )
 
     def test_pairwise_symmetry(self):
         """P(A>B) + P(B>A) ≈ 1.0 (ties are negligible in continuous MC)."""
@@ -633,23 +639,10 @@ class TestRankDecks:
             lo, hi = ranking.s_ci[deck]
             assert lo <= ranking.s_mean[deck] <= hi
 
-    def test_risk_averse_can_reorder(self):
-        """risk_averse=True may produce a different order to the default ranking."""
-        # Build a setup where one deck has higher S_mean but more variance.
-        # Use large disparity in opponent n to achieve this.
-        archetypes = ["X", "Y", "A", "B"]
-        winrates = {
-            # X: high expected S but volatile (sparse n)
-            ("X", "A"): (17, 20),  # 85% — sparse, high variance
-            ("X", "B"): (3, 20),   # 15% — sparse, high variance
-            # Y: moderate S, stable (dense n)
-            ("Y", "A"): (60, 100),  # 60% — dense, lower variance
-            ("Y", "B"): (55, 100),  # 55% — dense, lower variance
-            ("A", "X"): (3, 20), ("A", "Y"): (40, 100), ("A", "B"): (50, 100),
-            ("B", "X"): (17, 20), ("B", "Y"): (45, 100), ("B", "A"): (50, 100),
-        }
-        matrix = _simple_matrix(archetypes, winrates)
-        field = _custom_field({"A": 0.5, "B": 0.5})
+    def test_risk_averse_uses_lower_quantile(self):
+        """risk_averse=True uses a more conservative quantile (0.05) than default (0.25)."""
+        matrix = _worked_matrix()
+        field = _worked_field()
 
         ranking_default = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
         ranking_risk = rank_decks(
@@ -661,6 +654,17 @@ class TestRankDecks:
         assert set(ranking_risk.decks) == {"X", "Y"}
         total_risk = sum(ranking_risk.p_best.values())
         assert abs(total_risk - 1.0) < _TOL_PROB
+
+        # risk_averse=True uses q=0.05; default uses q=0.25
+        assert ranking_default.quantile_level == 0.25
+        assert ranking_risk.quantile_level == 0.05
+
+        # risk_averse s_quantile ≤ default s_quantile (more conservative → lower floor)
+        for deck in ["X", "Y"]:
+            assert ranking_risk.s_quantile[deck] <= ranking_default.s_quantile[deck] + _TOL_MEAN, (
+                f"{deck}: risk_averse quantile should be ≤ default quantile "
+                f"(got risk={ranking_risk.s_quantile[deck]:.4f}, default={ranking_default.s_quantile[deck]:.4f})"
+            )
 
     def test_empty_candidates_returns_empty_ranking(self):
         """Empty candidate list returns an empty DeckRanking without error."""
@@ -837,3 +841,240 @@ class TestRegressionPeerReviewFixes:
         assert abs(samples.mean() - 0.5) < 1e-9, (
             f"Mirror-only field with include_mirror=False should return S=0.5, got {samples.mean()}"
         )
+
+
+# ===========================================================================
+# TestDataCoverage
+# ===========================================================================
+
+
+class TestDataCoverage:
+    """Tests for data_coverage in PositioningResult and DeckRanking."""
+
+    def test_full_coverage_all_cells_measured(self):
+        """A deck with n>=30 cells against all field opponents → data_coverage=1.0."""
+        # All cells have n=60 >= 30 (display=True)
+        archetypes = ["X", "A", "B", "C"]
+        winrates = {
+            ("X", "A"): (35, 60),
+            ("X", "B"): (30, 60),
+            ("X", "C"): (32, 60),
+            ("A", "X"): (25, 60), ("A", "B"): (30, 60), ("A", "C"): (30, 60),
+            ("B", "X"): (30, 60), ("B", "A"): (30, 60), ("B", "C"): (30, 60),
+            ("C", "X"): (28, 60), ("C", "A"): (30, 60), ("C", "B"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.4, "B": 0.35, "C": 0.25})
+
+        result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert result.data_coverage == pytest.approx(1.0, abs=1e-9), (
+            f"All-measured deck should have data_coverage=1.0, got {result.data_coverage}"
+        )
+
+    def test_zero_coverage_all_cells_sparse(self):
+        """A deck with n=0 against all field opponents → data_coverage=0.0."""
+        archetypes = ["X", "A", "B"]
+        # No data at all for X vs opponents
+        winrates = {
+            ("A", "B"): (30, 60),
+            ("B", "A"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.6, "B": 0.4})
+
+        result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert result.data_coverage == pytest.approx(0.0, abs=1e-9), (
+            f"All-sparse deck should have data_coverage=0.0, got {result.data_coverage}"
+        )
+
+    def test_partial_coverage_share_mass_weighted(self):
+        """Partial coverage is the share-mass fraction of measured opponents."""
+        # Field: A=0.6 (measured n=60), B=0.4 (sparse n=0)
+        # Expected coverage = 0.6 / (0.6 + 0.4) = 0.6
+        archetypes = ["X", "A", "B"]
+        winrates = {
+            ("X", "A"): (35, 60),   # n=60 → display=True → measured
+            # X vs B: no data (n=0)
+            ("A", "X"): (25, 60), ("A", "B"): (30, 60),
+            ("B", "A"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.6, "B": 0.4})
+
+        result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert result.data_coverage == pytest.approx(0.6, abs=1e-9), (
+            f"Expected data_coverage=0.6, got {result.data_coverage}"
+        )
+
+    def test_sparse_cell_n_lt_30_not_counted_as_measured(self):
+        """A cell with n=10 (display=False) does not count toward coverage."""
+        # X vs A: n=10 → display=False (speculative), not measured
+        # X vs B: n=60 → display=True, measured
+        # Field: A=0.5, B=0.5 → coverage = 0.5
+        archetypes = ["X", "A", "B"]
+        winrates = {
+            ("X", "A"): (5, 10),    # n=10 < 30 → display=False
+            ("X", "B"): (30, 60),   # n=60 >= 30 → display=True
+            ("A", "X"): (5, 10), ("A", "B"): (30, 60),
+            ("B", "X"): (30, 60), ("B", "A"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.5, "B": 0.5})
+
+        result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        # A has n=10 (display=False), B has n=60 (display=True)
+        assert result.data_coverage == pytest.approx(0.5, abs=1e-9), (
+            f"Cell n<30 should not count as measured; expected coverage=0.5, got {result.data_coverage}"
+        )
+
+    def test_rank_decks_data_coverage_present(self):
+        """DeckRanking carries data_coverage dict for all candidates."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        assert "X" in ranking.data_coverage
+        assert "Y" in ranking.data_coverage
+        for v in ranking.data_coverage.values():
+            assert 0.0 <= v <= 1.0
+
+    def test_min_coverage_flags_low_data_deck(self):
+        """Deck with data_coverage below min_coverage appears in low_coverage set."""
+        # X vs A: n=60 (measured), X vs B: n=0 (sparse)
+        # Field: A=0.6, B=0.4 → coverage(X)=0.6; coverage(Y)=1.0 (all measured)
+        archetypes = ["X", "Y", "A", "B"]
+        winrates = {
+            ("X", "A"): (35, 60),                # measured
+            # X vs B: no data
+            ("Y", "A"): (30, 60), ("Y", "B"): (30, 60),  # both measured
+            ("A", "X"): (25, 60), ("A", "Y"): (30, 60), ("A", "B"): (30, 60),
+            ("B", "Y"): (30, 60), ("B", "A"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.6, "B": 0.4})
+
+        ranking = rank_decks(
+            matrix, field, ["X", "Y"],
+            n_draws=_TEST_DRAWS, seed=SEED,
+            min_coverage=0.7,
+        )
+        # X has coverage ~0.6 → flagged; Y has coverage 1.0 → not flagged
+        assert "X" in ranking.low_coverage, (
+            f"X (coverage≈0.6) should be in low_coverage when min_coverage=0.7"
+        )
+        assert "Y" not in ranking.low_coverage, (
+            f"Y (coverage=1.0) should not be in low_coverage"
+        )
+        # X is NOT dropped — still in decks
+        assert "X" in ranking.decks
+
+    def test_min_coverage_zero_no_flagging(self):
+        """min_coverage=0.0 (default) never flags anything."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        assert ranking.low_coverage == set()
+
+
+# ===========================================================================
+# TestRiskAdjustedRanking
+# ===========================================================================
+
+
+class TestRiskAdjustedRanking:
+    """Tests for the risk-adjusted lower-quantile headline ranking."""
+
+    def test_well_measured_deck_outranks_sparse_spiker(self):
+        """A well-measured ~52% deck outranks a sparse high-variance deck by default ranking.
+
+        This is the Death-&-Taxes artifact: a deck with few measured cells has
+        high-variance S — imputed from mean ~0.5, giving a wide Beta that spikes
+        to the max across many argmax draws, inflating P(best).  The risk-adjusted
+        lower-quantile ranking (q=0.25) penalises this: the sparse deck's lower
+        tail is pulled down by its variance, even if its mean is similar or higher.
+
+        Setup:
+          W (well-measured): n=60 against A, B, C; ~52% WR → tight posterior near 0.52.
+          SP (sparse):       only 1 measured cell (n=10 vs A, 50%), rest n=0 → imputed
+                             from ~0.5 with wide Beta (NODATA_STRENGTH=2.0).
+        The wide imputation Beta on SP gives high variance and long tails in both
+        directions; the lower-quantile floor is well below W's tight ~0.52.
+        """
+        archetypes = ["W", "SP", "A", "B", "C"]
+        winrates = {
+            # W: fully measured, tight 52% posterior
+            ("W", "A"): (32, 60),   # 53%
+            ("W", "B"): (31, 60),   # 52%
+            ("W", "C"): (31, 60),   # 52%
+            # SP: only one thin cell; everything else imputed from ~50% center
+            ("SP", "A"): (5, 10),   # 50% but n=10 (speculative, display=False)
+            # SP vs B, SP vs C: completely absent → n=0
+            # Opponent rows
+            ("A", "W"): (28, 60), ("A", "SP"): (5, 10), ("A", "B"): (30, 60), ("A", "C"): (30, 60),
+            ("B", "W"): (29, 60), ("B", "A"): (30, 60), ("B", "C"): (30, 60),
+            ("C", "W"): (29, 60), ("C", "A"): (30, 60), ("C", "B"): (30, 60),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.4, "B": 0.3, "C": 0.3})
+
+        ranking = rank_decks(
+            matrix, field, ["W", "SP"], n_draws=10_000, seed=SEED
+        )
+
+        # Under the default risk-adjusted ranking (q=0.25):
+        # W's tight posterior keeps its lower tail near its mean (~0.52)
+        # SP's wide imputed posterior has a lower tail well below 0.52
+        assert ranking.decks[0] == "W", (
+            f"Well-measured W should outrank sparse-spiker SP; "
+            f"ranking={ranking.decks}, "
+            f"q(W)={ranking.s_quantile['W']:.4f}, q(SP)={ranking.s_quantile['SP']:.4f}"
+        )
+        assert ranking.s_quantile["W"] >= ranking.s_quantile["SP"], (
+            f"W lower-quantile should be >= SP's: W={ranking.s_quantile['W']:.4f}, "
+            f"SP={ranking.s_quantile['SP']:.4f}"
+        )
+
+    def test_p_best_still_present_as_secondary(self):
+        """p_best is still computed and present in the ranking, even though it's not the sort key."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+
+        assert "X" in ranking.p_best
+        assert "Y" in ranking.p_best
+        total = sum(ranking.p_best.values())
+        assert abs(total - 1.0) < _TOL_PROB, (
+            f"p_best should still sum to 1.0 as a secondary field: sum={total:.4f}"
+        )
+
+    def test_s_quantile_present_for_all_decks(self):
+        """s_quantile dict is populated for every candidate."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+
+        assert "X" in ranking.s_quantile
+        assert "Y" in ranking.s_quantile
+        assert ranking.quantile_level == 0.25  # default
+
+    def test_ranking_determinism_with_seed(self):
+        """Same seed → identical DeckRanking results."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        r1 = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        r2 = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        assert r1.decks == r2.decks
+        assert r1.s_quantile == r2.s_quantile
+        assert r1.p_best == r2.p_best
+
+    def test_custom_risk_quantile(self):
+        """risk_quantile=0.10 sets quantile_level correctly and s_quantile ≤ q=0.25."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        r_default = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        r_custom = rank_decks(
+            matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED, risk_quantile=0.10
+        )
+        assert r_custom.quantile_level == 0.10
+        # Lower quantile → more conservative floor
+        for deck in ["X", "Y"]:
+            assert r_custom.s_quantile[deck] <= r_default.s_quantile[deck] + _TOL_MEAN

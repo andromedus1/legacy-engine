@@ -1,7 +1,7 @@
 ---
 id: improve-positioning-pbest-uneven-sample
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: []
@@ -73,3 +73,36 @@ Builds on the rank_decks tie fix already landed in [[fix-advisory-peer-review-bu
   that crowned Death & Taxes). Assert the well-measured deck outranks the sparse spiker by lower-quantile.
 - `data_coverage` is 1.0 for a deck with all-n>=30 cells, lower for a sparse row.
 - `P(best)` still present as a secondary field; ties already even (regression from fix-advisory).
+
+## Implementation notes
+
+### Files touched
+- `src/legacy_engine/advisory/positioning.py` — all changes (Unit 2, 3, 4 + new helper)
+- `tests/test_positioning.py` — 1 test updated (sort key), 12 new tests added
+
+### Test count
+- Before: 623 (42 in test_positioning.py)
+- After: 635 (54 in test_positioning.py)
+
+### risk_averse vs risk_quantile reconciliation
+`risk_averse=True` is kept as a convenience flag — it overrides `risk_quantile` to 0.05
+(a more conservative floor, `_RISK_AVERSE_QUANTILE`). The default is `risk_quantile=0.25`
+(lower quartile), which is already risk-adjusted. Callers can pass any value for
+`risk_quantile` directly. If `risk_averse=True` is passed alongside an explicit
+`risk_quantile`, the `risk_averse` flag wins (sets q=0.05). This avoids a breaking
+change while making the behavior predictable and documented.
+
+### data_coverage definition
+Share-mass weighting (not archetype count): coverage = Σ(share of opponents with
+cell.display=True) / Σ(share of non-mirror opponents). Mirror cells are excluded.
+Cells with n<30 have `display=False` and do not count as measured.
+
+### New DeckRanking fields
+- `s_quantile: dict[str, float]` — headline sort key values
+- `quantile_level: float` — which quantile was used
+- `data_coverage: dict[str, float]` — per-deck share-mass coverage
+- `low_coverage: set[str]` — decks flagged below `min_coverage` (not dropped)
+
+### Deviations from spec
+None. The `dc_field` and `Sequence` imports in positioning.py were pre-existing
+unused imports; left as-is to avoid unrelated diff noise.
