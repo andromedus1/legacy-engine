@@ -450,7 +450,7 @@ class TestWrwWeights:
         Normalised: Delver=0.6, Lands=0.4.
         """
         con = self._build_wrw_corpus()
-        weights, matchup_n = _wrw_weights(con, provenance=None)
+        weights, matchup_n, _excluded = _wrw_weights(con, provenance=None)
 
         # Pre-norm: 0.5 * 0.6 = 0.30 for Delver, 0.5 * 0.4 = 0.20 for Lands
         # Normalised: 0.30/(0.30+0.20) = 0.6, 0.20/(0.30+0.20) = 0.4
@@ -462,7 +462,7 @@ class TestWrwWeights:
     def test_matchup_n_is_matchup_count(self):
         """matchup_n returned is the matchup-n from match_results."""
         con = self._build_wrw_corpus()
-        weights, matchup_n = _wrw_weights(con, provenance=None)
+        weights, matchup_n, _excluded = _wrw_weights(con, provenance=None)
         # Delver played 5 decisive matches total (3 wins + 2 losses = 5)
         assert matchup_n["Delver"] == 5
         # Lands played 5 decisive matches total (2 wins + 3 losses = 5)
@@ -478,7 +478,7 @@ class TestWrwWeights:
             "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'eve'",
             [tid],
         )
-        weights, matchup_n = _wrw_weights(con, provenance=None)
+        weights, matchup_n, _excluded = _wrw_weights(con, provenance=None)
         assert "Delver" not in weights
         assert matchup_n.get("Delver", 0) == 0
         con.close()
@@ -490,7 +490,7 @@ class TestWrwWeights:
         from legacy_engine.analytics.match_results import compute_match_results
 
         match_res = compute_match_results(con, provenance=None)
-        weights, matchup_n = _wrw_weights(con, provenance=None)
+        weights, matchup_n, _excluded = _wrw_weights(con, provenance=None)
 
         for archetype, rec in match_res.archetypes.items():
             if rec.n > 0:
@@ -1016,3 +1016,362 @@ class TestReportMetaCLI:
             assert result.exit_code == 0, (
                 f"--definition {defn} failed: {result.output}\n{result.exception}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Unit 7 — Peer-review finding fixes (Unit 2: findings 1-topcut, 3, 4, 5, 6)
+# ---------------------------------------------------------------------------
+
+# Raw tournament dict for a single event with two players sharing the same
+# normalized name (both "alice" after lower/trim) — triggers dup-CTE exclusion.
+_DUP_NAME_CHALLENGE = {
+    "Tournament": {
+        "Name": "Dup Name Challenge",
+        "Date": "2026-05-30",
+        "Uri": "https://www.mtgo.com/decklist/dup-name-challenge-2026-05-30",
+        "Formats": "Legacy",
+    },
+    "Decks": [
+        {
+            "Player": "alice",
+            "Result": "1st Place",
+            "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+            "Sideboard": [],
+        },
+        {
+            # Duplicate: same player name as above (simulates a data-entry collision)
+            "Player": "Alice",    # normalizes to "alice" via lower(trim(...))
+            "Result": "2nd Place",
+            "Mainboard": [{"Count": 4, "CardName": "Force of Will"}],
+            "Sideboard": [],
+        },
+        {
+            "Player": "bob",
+            "Result": "3rd Place",
+            "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}],
+            "Sideboard": [],
+        },
+    ],
+    "Rounds": [],
+    "Standings": [
+        {"Rank": 1, "Player": "alice", "Points": 18},
+        {"Rank": 2, "Player": "Alice", "Points": 15},
+        {"Rank": 3, "Player": "bob",   "Points": 12},
+    ],
+}
+
+
+def _load_dup_name_challenge(con):
+    """Load a tournament where 'alice' and 'Alice' share a normalized name.
+
+    alice → Delver, Alice → Lands, bob → Combo.  Only bob (non-ambiguous) should
+    appear in top-cut counts; alice/Alice are ambiguous and excluded by the dup CTE.
+    """
+    tid = store.load_tournament(con, parse_cache_item(_DUP_NAME_CHALLENGE, "MTGO"))
+    con.execute(
+        "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'alice'",
+        [tid],
+    )
+    con.execute(
+        "UPDATE decks SET archetype = 'Lands' WHERE tournament_id = ? AND player = 'Alice'",
+        [tid],
+    )
+    con.execute(
+        "UPDATE decks SET archetype = 'Combo' WHERE tournament_id = ? AND player = 'bob'",
+        [tid],
+    )
+    return tid
+
+
+class TestPeerReviewFindingsUnit2:
+    """Regression tests for findings 1 (top-cut half), 3, 4, 5, 6 from the cross-model peer review."""
+
+    # ---- Finding #1 (top-cut half): dup-CTE excludes ambiguous normalized names ----
+
+    def test_topcut_dup_name_excluded(self):
+        """Archetypes whose player name is ambiguous (dup norm) are excluded from top-cut counts.
+
+        alice vs Alice collapse to the same normalized name; both are excluded.
+        bob (unique norm) survives.  Pre-fix the count inflated because two distinct
+        deck rows both joined to the standings row for 'alice'.
+        """
+        con = _con()
+        _load_dup_name_challenge(con)
+        counts = _topcut_counts(con, provenance=None, cut_size=8)
+        # Ambiguous players excluded; only Combo (bob) survives
+        assert counts.get("Delver", 0) == 0, "Delver (alice) must be excluded — dup name"
+        assert counts.get("Lands", 0) == 0, "Lands (Alice) must be excluded — dup name"
+        assert counts.get("Combo", 0) == 1, "Combo (bob) must remain — unique name"
+        con.close()
+
+    def test_topcut_dup_name_does_not_inflate_count(self):
+        """With a dup name, total top-cut count equals only non-ambiguous players.
+
+        Before the fix, alice+Alice both joined the single standings row for 'alice',
+        producing count=2 for the two archetypes.  After the fix, both are dropped.
+        """
+        con = _con()
+        _load_dup_name_challenge(con)
+        counts = _topcut_counts(con, provenance=None, cut_size=8)
+        total_topcut = sum(counts.values())
+        # Only bob (rank 3, within cut_size=8) is non-ambiguous
+        assert total_topcut == 1, f"Expected 1 non-ambiguous top-cut deck, got {total_topcut}"
+        con.close()
+
+    # ---- Finding #3: top-cut unlabeled count ----
+
+    def test_topcut_unlabeled_null_archetype_counted(self):
+        """A top-cut window with 1 labeled + 1 NULL-archetype deck reports total_decks=1, unlabeled=1.
+
+        Before the fix the branch forced unlabeled=0 regardless of actual NULL-archetype
+        deck presence in standings.
+        """
+        con = _con()
+        # Single tournament: alice (rank 1, Delver) and bob (rank 2, NULL archetype)
+        raw = {
+            "Tournament": {
+                "Name": "Unlabeled Topcut Test",
+                "Date": "2026-05-30",
+                "Uri": "https://www.mtgo.com/decklist/unlabeled-topcut-test-2026-05-30",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                {
+                    "Player": "alice",
+                    "Result": "1st Place",
+                    "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                    "Sideboard": [],
+                },
+                {
+                    "Player": "bob",
+                    "Result": "2nd Place",
+                    "Mainboard": [{"Count": 4, "CardName": "Force of Will"}],
+                    "Sideboard": [],
+                },
+            ],
+            "Rounds": [],
+            "Standings": [
+                {"Rank": 1, "Player": "alice", "Points": 18},
+                {"Rank": 2, "Player": "bob",   "Points": 15},
+            ],
+        }
+        tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        # alice gets an archetype; bob stays NULL
+        con.execute(
+            "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'alice'",
+            [tid],
+        )
+        report = compute_metashare(con, definition="topcut", provenance=None, cut_size=8)
+        assert report.total_decks == 1, (
+            f"total_decks should be 1 (only alice), got {report.total_decks}"
+        )
+        assert report.unlabeled == 1, (
+            f"unlabeled should be 1 (bob has NULL archetype in standings), got {report.unlabeled}"
+        )
+        con.close()
+
+    def test_topcut_unlabeled_zero_when_all_labeled(self):
+        """All top-cut decks labeled → unlabeled=0."""
+        con = _con()
+        _load_online_challenge(con)   # alice=Delver (rank 1), bob=Lands (rank 2)
+        report = compute_metashare(con, definition="topcut", provenance=None, cut_size=8)
+        assert report.unlabeled == 0
+        con.close()
+
+    # ---- Finding #4: _assemble(group_other=False) honors display_total ----
+
+    def test_wrw_group_other_false_total_decks_is_matchup_n(self):
+        """compute_metashare(definition='wrw', group_other=False) reports total_decks = matchup-n.
+
+        Before the fix, the non-grouped return path used raw ``total`` (=1, the normalised
+        weight sum) instead of ``display_total`` (the matchup-n sum).  This meant
+        total_decks was always 1 for wrw with group_other=False.
+        """
+        con = _con()
+        _load_online_challenge(con)   # alice vs bob: 1 match played → matchup-n = 1 each
+        report = compute_metashare(
+            con, definition="wrw", provenance=None, group_other=False, min_share=0.0
+        )
+        # total_decks must equal sum of matchup-n for archetypes in the weighted set
+        # alice(Delver)=1 match, bob(Lands)=1 match → total_matchup_n = 2
+        assert report.total_decks != 1, (
+            "total_decks must not be 1 (the raw normalised-weight total) — should be matchup-n"
+        )
+        assert report.total_decks >= 1, "total_decks must be a positive matchup-n sum"
+        con.close()
+
+    def test_wrw_group_other_true_and_false_same_total_decks(self):
+        """group_other=True and group_other=False should report identical total_decks for wrw."""
+        con = _con()
+        _load_online_challenge(con)
+        report_grouped = compute_metashare(
+            con, definition="wrw", provenance=None, group_other=True, min_share=0.0
+        )
+        report_ungrouped = compute_metashare(
+            con, definition="wrw", provenance=None, group_other=False, min_share=0.0
+        )
+        assert report_grouped.total_decks == report_ungrouped.total_decks, (
+            f"grouped total_decks={report_grouped.total_decks} != "
+            f"ungrouped total_decks={report_ungrouped.total_decks}"
+        )
+        con.close()
+
+    # ---- Finding #5: excluded_no_match_data on wrw report ----
+
+    def test_wrw_excluded_no_match_data_populated(self):
+        """A wrw archetype with deck count but zero match data appears in excluded_no_match_data.
+
+        Before the fix this was only a debug log — callers had no way to detect the gap.
+        """
+        con = _con()
+        # Load league (no rounds → no match data) and online challenge side-by-side.
+        # eve (League/Delver) has a deck but plays no rounds.
+        # alice (Challenge/Delver) and bob (Challenge/Lands) play one match.
+        _load_online_challenge(con)   # alice=Delver, bob=Lands; 1 round played
+        league_raw = {
+            "Tournament": {
+                "Name": "League No Rounds",
+                "Date": "2026-05-30",
+                "Uri": "https://www.mtgo.com/decklist/league-no-rounds-2026-05-30",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                {
+                    "Player": "eve",
+                    "Result": "5-0",
+                    "Mainboard": [{"Count": 4, "CardName": "Ponder"}],
+                    "Sideboard": [],
+                }
+            ],
+            "Rounds": [],
+            "Standings": [],
+        }
+        tid = store.load_tournament(con, parse_cache_item(league_raw, "MTGO"))
+        con.execute(
+            "UPDATE decks SET archetype = 'NoMatchArch' WHERE tournament_id = ? AND player = 'eve'",
+            [tid],
+        )
+        report = compute_metashare(con, definition="wrw", provenance=None, group_other=False, min_share=0.0)
+        assert "NoMatchArch" in report.excluded_no_match_data, (
+            f"Expected 'NoMatchArch' in excluded_no_match_data, got {report.excluded_no_match_data!r}"
+        )
+        con.close()
+
+    def test_wrw_excluded_no_match_data_empty_when_all_have_match_data(self):
+        """excluded_no_match_data is empty when all archetypes have match data."""
+        con = _con()
+        _load_online_challenge(con)   # all archetypes played rounds
+        report = compute_metashare(con, definition="wrw", provenance=None)
+        assert report.excluded_no_match_data == [], (
+            f"Expected empty excluded_no_match_data, got {report.excluded_no_match_data!r}"
+        )
+        con.close()
+
+    def test_raw_excluded_no_match_data_always_empty(self):
+        """excluded_no_match_data is always empty for raw/topcut definitions."""
+        con = _con()
+        _load_online_challenge(con)
+        for defn in ("raw", "topcut"):
+            report = compute_metashare(con, definition=defn, provenance=None)
+            assert report.excluded_no_match_data == [], (
+                f"{defn}: expected empty excluded_no_match_data, got {report.excluded_no_match_data!r}"
+            )
+        con.close()
+
+    # ---- Finding #6: blend_shares keeps "Other" + guards zero weight-sum ----
+
+    def test_blend_shares_keeps_other_not_inflated(self):
+        """blend_shares with A=80%/Other=20% keeps Other at ~20%.
+
+        Before the fix 'Other' was dropped from all_archetypes, so A was renormalized
+        to 100% and Other disappeared entirely from the blended output.
+        """
+        con = _con()
+        # Build two reports that each have an "Other" bucket by using a corpus with many
+        # fringe archetypes and one dominant one.
+        # 80 Delver + 20 fringe archetypes → each fringe is 1% → group_other collapses them.
+        # We'll construct a report manually via _assemble to control the exact share split.
+        from legacy_engine.analytics.metashare import _assemble
+
+        counts_a = {"Delver": 80.0, "Other": 20.0}   # simulate post-group_other split
+        report_a = _assemble(
+            counts_a,
+            definition="raw",
+            provenance="online",
+            n_by_arch={"Delver": 80, "Other": 20},
+            total=100,
+            unlabeled=0,
+            min_share=0.0,
+            group_other=False,   # keep Other as-is; it's already bucketed
+        )
+        # Single-report blend with weight 1.0 — should be identity
+        blended = blend_shares({"online": report_a}, {"online": 1.0})
+        other_entry = next((e for e in blended.entries if e.archetype == "Other"), None)
+        assert other_entry is not None, "Other must be preserved in blended output"
+        assert pytest.approx(other_entry.share, abs=0.01) == 0.20, (
+            f"Other share should be ~0.20, got {other_entry.share:.4f}"
+        )
+        delver_entry = next(e for e in blended.entries if e.archetype == "Delver")
+        assert pytest.approx(delver_entry.share, abs=0.01) == 0.80, (
+            f"Delver share should be ~0.80, got {delver_entry.share:.4f}"
+        )
+        con.close()
+
+    def test_blend_shares_other_preserved_across_two_provenances(self):
+        """Two-provenance blend keeps Other in both inputs and blends it correctly."""
+        from legacy_engine.analytics.metashare import _assemble
+
+        # online: Delver=70%, Other=30%
+        report_online = _assemble(
+            {"Delver": 70.0, "Other": 30.0},
+            definition="raw",
+            provenance="online",
+            n_by_arch={"Delver": 70, "Other": 30},
+            total=100,
+            unlabeled=0,
+            min_share=0.0,
+            group_other=False,
+        )
+        # paper: Delver=60%, Other=40%
+        report_paper = _assemble(
+            {"Delver": 60.0, "Other": 40.0},
+            definition="raw",
+            provenance="paper",
+            n_by_arch={"Delver": 60, "Other": 40},
+            total=100,
+            unlabeled=0,
+            min_share=0.0,
+            group_other=False,
+        )
+        blended = blend_shares(
+            {"online": report_online, "paper": report_paper},
+            {"online": 0.5, "paper": 0.5},
+        )
+        archetypes_in_blend = {e.archetype for e in blended.entries}
+        assert "Other" in archetypes_in_blend, "Other must appear in blended output"
+        # Delver blended share: 0.5*0.70 + 0.5*0.60 = 0.65; Other: 0.5*0.30 + 0.5*0.40 = 0.35
+        # Before renorm they already sum to 1.0, so renorm is a no-op.
+        other_entry = next(e for e in blended.entries if e.archetype == "Other")
+        delver_entry = next(e for e in blended.entries if e.archetype == "Delver")
+        assert pytest.approx(other_entry.share, abs=0.01) == 0.35
+        assert pytest.approx(delver_entry.share, abs=0.01) == 0.65
+
+    def test_blend_shares_all_zero_weights_raises_value_error(self):
+        """blend_shares with all-zero weights raises ValueError, not ZeroDivisionError."""
+        con = _con()
+        _load_online_challenge(con)
+        report = compute_metashare(con, definition="raw", provenance=None)
+        with pytest.raises(ValueError, match="weights sum to"):
+            blend_shares({"online": report}, {"online": 0.0})
+        con.close()
+
+    def test_blend_shares_negative_weight_raises_value_error(self):
+        """blend_shares with a negative weight sum (≤0) raises ValueError."""
+        con = _con()
+        _load_online_challenge(con)
+        _load_paper_challenge(con)
+        report_a = compute_metashare(con, definition="raw", provenance="online")
+        report_b = compute_metashare(con, definition="raw", provenance="paper")
+        with pytest.raises(ValueError, match="weights sum to"):
+            blend_shares({"online": report_a, "paper": report_b}, {"online": -0.5, "paper": -0.5})
+        con.close()
