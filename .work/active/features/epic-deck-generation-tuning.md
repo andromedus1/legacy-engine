@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-tuning
 kind: feature
-stage: implementing
+stage: review
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]
@@ -420,3 +420,30 @@ on a thin DB prints the no-signal note and an unchanged maindeck.
   maindeck swaps and says so. **This is correct/honest**, not a failure — surfaced via `fell_back`/`reason`.
 - **Combined-legality reversion**: if the final check fails, revert the last swap / trim and re-validate.
   **Fallback**: worst case return the consensus main + recommended side (always legal).
+
+## Implementation discovery (rework)
+
+Implemented 2026-05-31. All five rework design units delivered as spec'd.
+
+### Units delivered
+1. **Unit 1** (`field_weighted_values`, `has_value_signal`) — `compute_card_winrates` called ONCE; `fwv[card] = Σ_opp field.shares[opp] * lift(card vs opp)` over gate-clearing cells only. `has_value_signal` gates the greedy loop. Verified on n=30 corpus: `fwv["Brainstorm"]=0.111` (proven Control main lift vs Combo), `has_value_signal=True`.
+2. **Unit 2** (`_greedy_tune`) — pure function, `legal_swap` INJECTED. Strict-improve only (`gain > 0`, not `>=`). Deterministic tie-break by `(cut, add)` lex order. Locked core never cut (guard: `add_card in locked_cards AND add_card in current_main`). Unit-tested with hand-built fwv + trivial `legal_swap`, NO DB — the central non-vacuous guarantee.
+3. **Unit 3** (`_legal_swap_maindeck`) — FIX #3: takes `sideboard` parameter, enforces 4-copy + COPY_LIMIT_OVERRIDES + UNLIMITED/BASIC exemptions against COMBINED main+side. Final `validate_deck(final_main, recommended_sb, snapshot)` run in `tune_deck`; revert to consensus main on failure (never returns populated `legality_errors`).
+4. **Unit 4** (`TunedDeck`, `tune_deck` rewire) — `TunedDeck` gains `value_before`, `value_after`, `matchup_plans`, `objective`. `fell_back=True` iff `not has_value_signal(fwv)` (no per-card signal → no maindeck swaps). `recommend_sideboard` always called with `archetype`/`since`/`until` for per-matchup plans. Coverage computed as audit metric only. `legality_errors == []` on return guaranteed.
+5. **Unit 5** (CLI render) — `generate tune` renders `Value (per-card field-weighted lift): before → after`, `Coverage (audit): before → after`, per-matchup OUT/IN plans, presence-correlational disclaimer, fallback note.
+
+### Deviations from spec
+- **Locked-core guard in `_greedy_tune`**: the spec says "add not locked-in-deck". Implementation checks `add_card in locked_cards AND add_card in current_main` — only blocks adding a card if it is BOTH in the locked set AND already in the current maindeck (prevents over-stacking). A card in the locked set but NOT currently in the maindeck (e.g. swapping Island→Brainstorm when Brainstorm isn't in the maindeck yet) is correctly allowed through. This is the right behavior (verified by integration test).
+- **`_legal_swap_maindeck` signature**: added `sideboard` as a positional parameter (not keyword-only) to match the rework spec's intent. The closure in `tune_deck` captures `starting_sideboard` (the sideboard at entry, before the re-run) — conservative, ensures greedy picks stay legal even before the sideboard re-run.
+- **Coverage model build failure**: wrapped in try/except with `cov_before = 0.0` fallback so a coverage model failure (e.g. unknown cards) does not abort the tuning run.
+
+### Vacuous-test gap: closed
+The old `test_swaps_only_from_candidate_pool`, `test_locked_core_never_modified`, and `test_coverage_after_ge_coverage_before` tests all looped over an empty `swaps` list and passed vacuously (the fixture always hit bimodal-fallback). ALL three were replaced:
+- `TestGreedyTune::test_real_swap_happens_value_strictly_improves` — hand-built fwv + trivial `legal_swap`, NO DB → asserts swap=(BadFlex→GoodPool), `value_after > value_before` STRICT. No DB required; runs in <0.1s.
+- `TestTuneDeckIntegration::test_tune_deck_swaps_on_rounds_corpus` — n=30 corpus (n_repeats=15), `field=Combo 100%`, maindeck with `Dark Ritual` flex slot + `Island` fill → Brainstorm (proven Control main lift) swapped in via real pipeline. Verified: 4 swaps, `value_before=0.0 → value_after=0.444`.
+- `TestTuneDeckIntegration::test_tune_deck_no_signal_fallback_thin_corpus` — n=2 corpus (n_repeats=1, speculative tier) → `fell_back=True`, `objective="no-signal-skip"`, `swaps=[]`. Honest: no fabricated edge from thin data.
+
+### Test counts
+- **New tests in `tests/test_generation_tuning.py`**: 60 (up from 42 in the prior held implementation).
+- **Full suite**: 961 passed (up from 943 baseline; +18 net from the tuning rework).
+- **Consumed modules' tests not edited**: `test_sideboard.py`, `test_card_value.py`, `test_card_winrates.py`, `test_advise_report.py` — all green, unmodified.
