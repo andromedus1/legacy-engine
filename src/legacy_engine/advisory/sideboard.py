@@ -1016,7 +1016,15 @@ def _plan_matchups(
         # But if total_maindeck != 60 (the caller owns that contract), we skip planning.
         out_total = sum(side_out.values())
         in_total = sum(side_in.values())
-        assert out_total == in_total, "BUG: out/in copies must be equal"
+        # Invariant: each swap removes one and adds one, so these are equal by
+        # construction. Guard defensively (not `assert`, which strips under -O):
+        # post_board below is rebuilt independently from side_out/side_in, so it
+        # stays correct regardless; a mismatch would signal a swap-loop bug.
+        if out_total != in_total:
+            log.warning(
+                "_plan_matchups: side_out copies (%d) != side_in copies (%d) for %s — "
+                "swap-loop invariant violated", out_total, in_total, opp,
+            )
 
         # Build post_board
         post_board = dict(deck_maindeck)

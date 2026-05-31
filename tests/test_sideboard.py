@@ -1904,3 +1904,138 @@ class TestRecommendSideboardWithRoundsCorpus:
         # The 88 tests above this class use rounds-less fixtures → gates always fail
         # → behavior byte-identical to pre-rework.
         assert True, "regression guard: existing tests must stay green (no assertion edits)"
+
+
+# ---------------------------------------------------------------------------
+# Real-swap legality (closes the deep-review "vacuous swap coverage" gap):
+# the rounds-corpus fixture never yields an opponent with BOTH a dead maindeck
+# card AND a winning sideboard card, so the swap-execution path was previously
+# only exercised on empty `side_out`.  These tests hand-build `_OppValues` to
+# force a real non-empty swap and assert the execution-path invariants.
+# ---------------------------------------------------------------------------
+class TestPlanMatchupsRealSwap:
+    @staticmethod
+    def _cv(card, board, opponent, lift, *, tier="established", n=120):
+        """Build a CardValue with a chosen lift/tier (p centered on 0.5+lift)."""
+        from legacy_engine.analytics.card_value import CardValue
+
+        p = 0.5 + lift
+        return CardValue(
+            card=card, board=board, opponent=opponent,
+            p_raw=p, p_shrunk=p, prior_mean=0.5, lift=lift, n=n, tier=tier,
+        )
+
+    def test_real_swap_executes_and_is_legal(self):
+        """A dead maindeck card is sided OUT for a winning sideboard card IN."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        from legacy_engine.ingestion import store
+
+        opp = "Combo"
+        maindeck = {"Dead Card": 4, "Filler": 56}          # total 60
+        sideboard_15 = {"Surgical Extraction": 4, "SB Filler": 11}  # total 15
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Dead Card": self._cv("Dead Card", "main", opp, -0.20),
+                "Filler": self._cv("Filler", "main", opp, +0.05),   # positive → kept in
+            },
+            side={
+                "Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25),
+                "SB Filler": self._cv("SB Filler", "side", opp, -0.01),  # negative → not brought in
+            },
+            cleared_gate=True,
+        )
+        con = store.connect(":memory:")
+        try:
+            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4)
+        finally:
+            con.close()
+
+        plan = plans[opp]
+        assert plan.degraded is False
+        assert plan.side_out, "expected a real, non-empty swap (regression: swap path was never exercised)"
+        # Direction: dead card out, winning card in; positive-lift cards never moved.
+        assert "Dead Card" in plan.side_out
+        assert "Surgical Extraction" in plan.side_in
+        assert "Filler" not in plan.side_out
+        assert "SB Filler" not in plan.side_in
+        # Conservation: a swap removes one and adds one → equal copies, post-board still 60.
+        assert sum(plan.side_out.values()) == sum(plan.side_in.values())
+        assert sum(plan.post_board.values()) == 60
+        # max_swaps cap honored.
+        assert sum(plan.side_out.values()) <= 4
+
+    def test_copy_cap_skips_overflowing_in_candidate(self):
+        """An IN candidate already at its copy cap in the maindeck is skipped, not over-stacked."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        from legacy_engine.ingestion import store
+
+        opp = "Combo"
+        # Brainstorm already at 4 in the maindeck (cap = max(catalog,4) = 4) → cannot bring more in.
+        maindeck = {"Dead Card": 4, "Brainstorm": 4, "Filler": 52}  # total 60
+        sideboard_15 = {"Brainstorm": 4, "Surgical Extraction": 4, "SB Filler": 7}  # total 15
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Dead Card": self._cv("Dead Card", "main", opp, -0.20),
+                "Brainstorm": self._cv("Brainstorm", "main", opp, +0.10),
+                "Filler": self._cv("Filler", "main", opp, +0.02),
+            },
+            side={
+                # Highest lift is Brainstorm, but it's already at cap → must be skipped.
+                "Brainstorm": self._cv("Brainstorm", "side", opp, +0.40),
+                "Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.20),
+                "SB Filler": self._cv("SB Filler", "side", opp, -0.01),
+            },
+            cleared_gate=True,
+        )
+        con = store.connect(":memory:")
+        try:
+            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4)
+        finally:
+            con.close()
+
+        plan = plans[opp]
+        # Brainstorm at cap 4 → not brought in beyond the cap.
+        assert plan.post_board.get("Brainstorm", 0) <= 4
+        # The non-overflowing winner (Surgical) is brought in instead.
+        assert "Surgical Extraction" in plan.side_in
+        assert sum(plan.side_out.values()) == sum(plan.side_in.values())
+        assert sum(plan.post_board.values()) == 60
+
+    def test_locked_core_excluded_from_real_swap(self, make_rounds_corpus):
+        """A locked-core staple (high inclusion) is never sided out, even when it is dead vs the opponent."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+
+        con, _facts = make_rounds_corpus(n_repeats=2)
+        # Brainstorm is in 100% of Control's maindecks → locked at threshold 0.65.
+        opp = "Combo"
+        maindeck = {"Brainstorm": 4, "Off Meta Card": 4, "Filler": 52}  # total 60
+        sideboard_15 = {"Surgical Extraction": 4, "SB Filler": 11}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                # Both dead vs opp, but Brainstorm is locked core → protected.
+                "Brainstorm": self._cv("Brainstorm", "main", opp, -0.30),
+                "Off Meta Card": self._cv("Off Meta Card", "main", opp, -0.10),
+            },
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        try:
+            # Pass the fixture's window explicitly: card_frequencies defaults None ->
+            # latest ban regime, which excludes the 2026-01 fixture corpus and would
+            # silently empty the locked core. (In production recommend_sideboard passes
+            # a consistent resolved window to both the value adapter and the planner.)
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov},
+                archetype="Control", lock_threshold=0.65, max_swaps=4,
+                since="2025-01-01",
+            )
+        finally:
+            con.close()
+
+        plan = plans[opp]
+        assert "Brainstorm" not in plan.side_out, "locked-core staple must never be sided out"
+        assert "Off Meta Card" in plan.side_out, "the non-locked dead card should be the one sided out"
+        assert sum(plan.post_board.values()) == 60
