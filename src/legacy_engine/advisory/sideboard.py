@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Unit 1: MatchupPlan + per-card matchup-value adapter
+# Extension A: MatchupPlan + per-card matchup-value adapter (maindeck-aware rework)
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -818,7 +818,7 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Unit 3 (design): Per-matchup OUT/IN planner
+# Extension B: Per-matchup OUT/IN planner (maindeck-aware rework)
 # ---------------------------------------------------------------------------
 
 def _plan_matchups(
@@ -885,8 +885,6 @@ def _plan_matchups(
     else:
         lock_note = " (archetype=None — all maindeck cards are flex; locked-core protection skipped)"
 
-    total_maindeck = sum(deck_maindeck.values())
-
     for opp, ov in opp_values.items():
         if not ov.cleared_gate:
             plans[opp] = MatchupPlan(
@@ -947,23 +945,23 @@ def _plan_matchups(
         out_iter = iter(out_candidates)
         in_iter = iter(in_candidates)
 
-        out_card, out_lift, out_avail, out_tier = None, 0.0, 0, "speculative"
-        in_card, in_lift, in_avail, in_tier = None, 0.0, 0, "speculative"
+        out_card, _out_lift, out_avail, _out_tier = None, 0.0, 0, "speculative"
+        in_card, _in_lift, in_avail, _in_tier = None, 0.0, 0, "speculative"
         out_exhausted = in_exhausted = False
 
         def _next_out() -> bool:
-            nonlocal out_card, out_lift, out_avail, out_tier, out_exhausted
+            nonlocal out_card, _out_lift, out_avail, _out_tier, out_exhausted
             try:
-                out_card, out_lift, out_avail, out_tier = next(out_iter)
+                out_card, _out_lift, out_avail, _out_tier = next(out_iter)
                 return True
             except StopIteration:
                 out_exhausted = True
                 return False
 
         def _next_in() -> bool:
-            nonlocal in_card, in_lift, in_avail, in_tier, in_exhausted
+            nonlocal in_card, _in_lift, in_avail, _in_tier, in_exhausted
             try:
-                in_card, in_lift, in_avail, in_tier = next(in_iter)
+                in_card, _in_lift, in_avail, _in_tier = next(in_iter)
                 return True
             except StopIteration:
                 in_exhausted = True
@@ -1012,8 +1010,8 @@ def _plan_matchups(
                     in_exhausted = True
 
         # ── Legality enforcement: post_board must sum to exactly 60 ──────
-        # Since each swap removes one and adds one, total = total_maindeck always.
-        # But if total_maindeck != 60 (the caller owns that contract), we skip planning.
+        # Since each swap removes one and adds one, total = sum(deck_maindeck.values()) always.
+        # If deck_maindeck does not sum to 60 (the caller owns that contract), planning is skipped.
         out_total = sum(side_out.values())
         in_total = sum(side_in.values())
         # Invariant: each swap removes one and adds one, so these are equal by

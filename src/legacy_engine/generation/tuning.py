@@ -54,8 +54,7 @@ from legacy_engine.advisory.sideboard import (
     recommend_sideboard,
 )
 from legacy_engine.advisory.whattoplay import field_vulnerability_tags, vulnerability_tags_for_deck
-from legacy_engine.analytics.matchup import DISPLAY_GATE_N, MatchupMatrix, build_matrix
-from legacy_engine.colors import compute_deck_colors
+from legacy_engine.analytics.matchup import build_matrix
 from legacy_engine.generation.consensus import _latest_regime_window, card_frequencies
 from legacy_engine.ingestion.banlist import current_banlist, validate_deck
 
@@ -558,31 +557,6 @@ class TunedDeck:
     legality_errors: list[str] = dc_field(default_factory=list)  # ALWAYS [] on return
 
 
-def _is_thin_field(matrix: MatchupMatrix, archetype: str) -> bool:
-    """Return True if the archetype has no displayable (n>=30) matchup cells.
-
-    A field is "thin" for the old bimodal-fallback purposes when:
-    - the archetype is absent from the matrix altogether, OR
-    - the archetype is in the matrix but EVERY non-mirror cell has n < DISPLAY_GATE_N.
-
-    Note: with the rework, this is no longer the primary fallback trigger —
-    ``has_value_signal(fwv)`` is.  This function is kept for
-    positioning_s computation and for backward-compat with existing tests.
-    """
-    if archetype not in matrix.archetypes:
-        return True
-
-    for opp in matrix.archetypes:
-        if opp == archetype:
-            continue
-        cell = matrix.cells.get((archetype, opp))
-        if cell is not None and cell.n >= DISPLAY_GATE_N:
-            return False
-
-    # All non-mirror cells are thin (or absent)
-    return True
-
-
 def tune_deck(
     con: duckdb.DuckDBPyConnection,
     archetype: str,
@@ -604,16 +578,17 @@ def tune_deck(
     Algorithm
     ---------
     1. Resolve window + field.
-    2. Build partition_flex + candidate_pool.
-    3. Compute fwv = field_weighted_values(con, field, maindeck|pool, ...).
-    4. If has_value_signal(fwv): run _greedy_tune (objective="per-card-value").
+    2. Build matchup matrix; compute positioning_s (archetype context).
+    3. Build coverage model for audit metrics (coverage_before/after); NOT the swap driver.
+    4. Build partition_flex + candidate_pool; fetch banlist snapshot.
+    5. Compute fwv = field_weighted_values(con, field, maindeck|pool, ...).
+    6. If has_value_signal(fwv): build legal_swap closure; run _greedy_tune
+       (objective="per-card-value").
        Else: no maindeck swaps, fell_back=True, objective="no-signal-skip".
-    5. Build legal_swap closure with the current sideboard for combined validation.
-    6. Re-run recommend_sideboard(archetype=archetype, since/until) for the 15 +
+    7. Re-run recommend_sideboard(archetype=archetype, since/until) for the 15 +
        per-matchup plans.
-    7. Final combined validate_deck; guarantee legality_errors == [] (revert if
-       needed — worst case return consensus main + recommended side).
-    8. Compute coverage_before/after (audit metric) + positioning_s (context).
+    8. Final combined validate_deck; guarantee legality_errors == [] (revert to
+       consensus main + empty side if needed).
 
     Parameters
     ----------

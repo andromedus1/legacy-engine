@@ -551,7 +551,7 @@ def compute_card_winrates(
     # deck_map[(tournament_id, norm)] = list of (board, card_name)
     # Multiple rows for the same card (different count) are still one card presence.
     deck_map: dict[tuple[str, str], list[tuple[str, str]]] = {}
-    seen_card: dict[tuple[str, str, str], None] = {}  # dedup within a deck
+    seen_card: dict[tuple[str, str, str, str], None] = {}  # dedup within a deck
 
     for dc_tid, dc_norm, dc_board, dc_name in deck_cards_rows:
         key = (dc_tid, dc_norm)
