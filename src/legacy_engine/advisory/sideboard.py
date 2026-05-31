@@ -111,6 +111,7 @@ def _field_matchup_values(
     until: str | None = None,
     top_k: int = 8,
     gate: tuple[str, ...] = _VALUE_GATE,
+    card_winrates=None,
 ) -> dict[str, _OppValues]:
     """Build per-opponent CardValue maps for the top_k field archetypes.
 
@@ -121,6 +122,11 @@ def _field_matchup_values(
       - ``cleared_gate``: True iff any cell in (maindeck ∪ side) vs opponent has
             tier in ``gate`` (meaning the data is sufficient to act on).
 
+    ``card_winrates``: an optional precomputed ``CardWinRates`` (over the same window).
+    Pass it to avoid recomputing the heavy full-corpus scan when a caller already has one
+    (e.g. ``recommend_sideboard`` reuses one across its two passes; ``tune_deck`` threads
+    one through the whole tune). When None, it is computed here.
+
     Window defaults to the latest ban regime when both since/until are None.
 
     Returns {} if the per-card win-rate table cannot be built (no rounds data).
@@ -128,11 +134,14 @@ def _field_matchup_values(
     from legacy_engine.analytics.match_results import compute_card_winrates
     from legacy_engine.analytics.card_value import card_values_vs
 
-    try:
-        r = compute_card_winrates(con, since=since, until=until)
-    except Exception as exc:
-        log.debug("_field_matchup_values: compute_card_winrates failed: %s", exc)
-        return {}
+    if card_winrates is not None:
+        r = card_winrates
+    else:
+        try:
+            r = compute_card_winrates(con, since=since, until=until)
+        except Exception as exc:
+            log.debug("_field_matchup_values: compute_card_winrates failed: %s", exc)
+            return {}
 
     # If there are no resolved matches at all, bail early — all gates will fail.
     if r.coverage.decisive_matched == 0:
@@ -1153,6 +1162,7 @@ def recommend_sideboard(
     until: str | None = None,
     opponents: list[str] | None = None,
     max_swaps: int = 4,
+    card_winrates=None,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -1236,10 +1246,20 @@ def recommend_sideboard(
 
     plan_window: tuple[str | None, str | None] = (eff_since, eff_until)
 
+    # Compute the per-card win-rate aggregate ONCE (heavy full-corpus scan) and reuse it
+    # across both _field_matchup_values passes below; callers (e.g. tune_deck) may inject one.
+    if card_winrates is None:
+        try:
+            from legacy_engine.analytics.match_results import compute_card_winrates
+            card_winrates = compute_card_winrates(con, since=eff_since, until=eff_until)
+        except Exception as exc:
+            log.debug("recommend_sideboard: compute_card_winrates failed: %s", exc)
+            card_winrates = None
+
     try:
         opp_values_pre = _field_matchup_values(
             con, field, deck_maindeck, {},
-            since=eff_since, until=eff_until,
+            since=eff_since, until=eff_until, card_winrates=card_winrates,
         )
     except Exception as exc:
         log.debug("recommend_sideboard: _field_matchup_values failed: %s", exc)
@@ -1329,7 +1349,7 @@ def recommend_sideboard(
         try:
             opp_values_final = _field_matchup_values(
                 con, field, deck_maindeck, final_cards,
-                since=eff_since, until=eff_until,
+                since=eff_since, until=eff_until, card_winrates=card_winrates,
             )
             # If caller restricted to specific opponents, filter here.
             if opponents is not None:

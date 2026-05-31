@@ -1,8 +1,16 @@
 ---
-id: idea-tuning-sideboard-winrate-reuse
-created: 2026-05-31
+id: fix-tuning-sideboard-winrate-reuse
+kind: story
+stage: done
 tags: [generation, advisory, perf, cleanup]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-05-31
+updated: 2026-05-31
 ---
+
 
 Optimization nit surfaced by the `epic-deck-generation` Phase-8 completion review (2026-05-31): a single
 `generation.tuning.tune_deck` call runs the heavy `analytics.match_results.compute_card_winrates` full-corpus
@@ -20,3 +28,6 @@ Ports-&-Adapters / explicit-dependency style. Touches `advisory/sideboard.recomm
 
 Promote via `/agile-workflow:scope` if tuning ever runs in a hot loop (e.g. tuning many decks in a batch) or
 the corpus grows enough that the 3× scan becomes noticeable.
+
+## Resolution (2026-05-31)
+Threaded ONE `CardWinRates` through the tune: `tune_deck` computes `compute_card_winrates` once and passes it (new optional `card_winrates=` param, default-None/additive) to `field_weighted_values` and `recommend_sideboard`, which forwards it to both its `_field_matchup_values` passes. Window-consistent (all use `eff_since/eff_until`). 3x → 1x scan per tune_deck. Guard test `test_tune_deck_computes_card_winrates_exactly_once` asserts the call count. Suite 969 green; existing callers unaffected (no-arg path still computes internally).
