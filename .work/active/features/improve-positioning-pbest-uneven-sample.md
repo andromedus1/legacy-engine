@@ -1,7 +1,7 @@
 ---
 id: improve-positioning-pbest-uneven-sample
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory-hardening
 depends_on: []
@@ -106,3 +106,10 @@ Cells with n<30 have `display=False` and do not count as measured.
 ### Deviations from spec
 None. The `dc_field` and `Sequence` imports in positioning.py were pre-existing
 unused imports; left as-is to avoid unrelated diff noise.
+
+## Review (2026-05-30, autopilot)
+**Verdict**: Approve. Default headline ranking is now the risk-adjusted lower-posterior-quantile (q=0.25);
+`p_best` retained as a secondary dict (not the sort key); `data_coverage` (measured share-mass fraction) +
+`min_coverage`/`low_coverage` flagging added to both result types; `risk_averse` reconciled (overrides q→0.05).
+Test asserts a well-measured ~52% deck outranks a sparse high-variance spiker (the Death-&-Taxes artifact is
+gone). 635 green (+12). Builds on the rank_decks tie fix from fix-advisory.
