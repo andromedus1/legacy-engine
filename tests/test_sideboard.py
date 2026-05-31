@@ -1366,6 +1366,66 @@ class TestSaturatingFill:
         con.close()
 
 
+    def test_ilp_fills_budget_multi_copy_saturating(self):
+        """BLOCKER regression: ILP with old T_a=4 cap under-filled the budget on multi-copy
+        models (12 slots instead of 15).  With T_a=budget the ILP must fill all 15 slots,
+        matching greedy, and its saturating objective must be ≥ greedy's.
+
+        Model: 3 elements, 3 hosers each covering all 3 elements with max_copies=8.
+        Total available copies = 24 >> budget=15, so budget is the binding constraint.
+        Greedy fills budget=15 trivially; ILP must too (and objective ≥ greedy).
+        """
+        budget = 15
+
+        def _make_multicopy_hoser(name: str) -> HoserCard:
+            return HoserCard(
+                name=name,
+                attacks=frozenset(),
+                colors=frozenset(),
+                max_copies=8,
+                swing=0.20,
+            )
+
+        elements = {"E1": 0.10, "E2": 0.08, "E3": 0.06}
+        hosers = {
+            "H1": _make_multicopy_hoser("H1"),
+            "H2": _make_multicopy_hoser("H2"),
+            "H3": _make_multicopy_hoser("H3"),
+        }
+        candidate_covers = {
+            "H1": frozenset({"E1", "E2", "E3"}),
+            "H2": frozenset({"E1", "E2", "E3"}),
+            "H3": frozenset({"E1", "E2", "E3"}),
+        }
+        model = CoverageModel(
+            element_weight=elements,
+            candidate_covers=candidate_covers,
+            candidate_meta=hosers,
+            warnings=(),
+        )
+
+        greedy_picks, _ = _greedy_solve(model, budget=budget)
+        greedy_slots = sum(greedy_picks.values())
+        greedy_obj = _compute_covered_weight_for_test(greedy_picks, model)
+
+        ilp_picks = _ilp_solve(model, budget=budget)
+        ilp_slots = sum(ilp_picks.values())
+        ilp_obj = _compute_covered_weight_for_test(ilp_picks, model)
+
+        # Both solvers must fill the full budget
+        assert greedy_slots == budget, (
+            f"Greedy should fill {budget} slots; got {greedy_slots}"
+        )
+        assert ilp_slots == budget, (
+            f"ILP should fill {budget} slots; got {ilp_slots}. "
+            f"(Was T_a capped too low?)"
+        )
+        # ILP objective must be ≥ greedy objective
+        assert ilp_obj >= greedy_obj - 1e-6, (
+            f"ILP objective {ilp_obj:.4f} < greedy {greedy_obj:.4f}"
+        )
+
+
 def _compute_covered_weight_for_test(cards: dict[str, int], model: CoverageModel) -> float:
     """Compute saturating covered weight for test assertions (mirrors the production function)."""
     cov_counts: dict[str, int] = {}

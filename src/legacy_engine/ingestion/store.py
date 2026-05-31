@@ -66,8 +66,16 @@ def connect(path: Path | str = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
 
 
 def init_schema(con: duckdb.DuckDBPyConnection) -> None:
-    """Create the analytical schema if absent (idempotent)."""
+    """Create the analytical schema if absent (idempotent).
+
+    Also runs ALTER TABLE migrations so an EXISTING cards table (created before
+    the power/toughness columns were added) gains those columns without data loss.
+    DuckDB supports ``ADD COLUMN IF NOT EXISTS`` natively, making these idempotent.
+    """
     con.execute(CARDS_DDL)
+    # Migration: add power/toughness to tables created with the old 9-column schema.
+    con.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS power VARCHAR")
+    con.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS toughness VARCHAR")
     for ddl in TOURNAMENT_DDL:
         con.execute(ddl)
 
@@ -92,7 +100,12 @@ def load_cards(con: duckdb.DuckDBPyConnection, cards: Iterable[Card]) -> int:
         for c in cards
     ]
     if rows:
-        con.executemany("INSERT OR REPLACE INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        con.executemany(
+            "INSERT OR REPLACE INTO cards "
+            "(name, mana_cost, cmc, type_line, colors, produced_mana, oracle_text, layout, is_land, power, toughness) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
     return len(rows)
 
 
