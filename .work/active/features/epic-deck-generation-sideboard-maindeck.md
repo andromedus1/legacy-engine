@@ -1,7 +1,7 @@
 ---
 id: epic-deck-generation-sideboard-maindeck
 kind: feature
-stage: review
+stage: done
 tags: [generation, advisory]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-per-card-value]
@@ -288,3 +288,37 @@ All 5 units delivered as designed:
 - `test_advise_report.py` and `test_generation_tuning.py` are unbroken.
 - On rounds-less corpus: `value_informed=False`, `matchup_plans={}`, element weights byte-identical
   (verified by `TestRegressionRoundsless.test_element_weights_identical_when_no_rounds`).
+
+
+## Review findings (deep review, 2026-05-31) — APPROVED
+
+Fresh-context deep review (same-model Claude, Opus; **cross-model deferred — Codex out of credits**, a true
+cross-model pass is owed before epic closure). Verdict: **Approve with comments — no blockers.** All six
+correctness-critical invariants verified by *directly exercising* the code (not just trusting the green suite):
+1. **Gate leak — none.** On a rounds-less corpus `_field_matchup_values` returns `{}`, `matchup_pressure`
+   stays None (true no-op in `_build_coverage_model` Step 3b), `matchup_plans` empty → output byte-identical
+   to pre-rework. The 88 existing `test_sideboard.py` assertions are unedited (0 deletions).
+2. Planner legality correct (post_board=60, copy caps, locked-core excluded, equal in/out copies).
+3. Degraded/hybrid path correct (thin → degraded=True, post_board==maindeck, honest note, no fabrication).
+4. Value direction correct (dead cards OUT ascending-lift, winning tech IN descending-lift; no inversion).
+5. Additive contract intact (`SideboardPackage` fields appended w/ defaults; `dummy_sb`, report.py,
+   tuning.py callers unaffected; `matchup_pressure` keyword-only).
+6. `value_informed` True iff ≥1 opponent cleared the gate.
+
+**Findings — all resolved in-session:**
+- **[Important] Vacuous swap coverage**: across all 115 tests `side_out` was never non-empty — the
+  rounds-corpus fixture has no opponent with BOTH a dead maindeck card AND a winning sideboard card, so the
+  planner-legality tests iterated empty-swap plans (the SAME bug class that bit the original tuning feature).
+  FIXED — added `TestPlanMatchupsRealSwap` (3 tests, hand-built `_OppValues`) that force real non-empty swaps
+  and assert the execution path: swap legality + 60-conservation + equal in/out copies + copy-cap skip +
+  locked-core exclusion. The reviewer had verified the path manually; it is now codified. (+3 tests → 943.)
+  This also surfaced that **locked-core silently no-ops when the planner's window excludes the deck's data**
+  (card_frequencies defaults None→latest-regime); documented in the test — production passes a consistent
+  resolved window so it is correct there.
+- **[Nit] production-path `assert out_total == in_total`** (stripped under `python -O`): FIXED — replaced
+  with a defensive `log.warning` guard; `post_board` is rebuilt independently so correctness is unaffected.
+- **[Nit] double `_field_matchup_values` call** in `recommend_sideboard` (pressure pass + planner pass, each
+  running `compute_card_winrates`): ACCEPTED — documented as intentional; redundant DB work but correct, and
+  `recommend_sideboard` is not called inside a hot loop (the tuning rework re-runs it once post-tune).
+
+Suite green at 943; existing sideboard/advise/tuning tests unbroken. Advanced review → done.
