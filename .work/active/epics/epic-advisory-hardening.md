@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-hardening
 kind: epic
-stage: review
+stage: done
 tags: [advisory, hardening]
 parent: null
 depends_on: [epic-advisory]
@@ -72,3 +72,9 @@ Four findings from the cross-model completion review resolved. Suite 651 → 654
 3. **IMPORTANT — positioning `--candidates` display** (`src/legacy_engine/cli.py`): ranking output now shows `Q{quantile_level}=...` (the sort key) and `cov=...` (data coverage) per deck, plus `[low_coverage]` flag when triggered. The header also surfaces which quantile is the sort key. Test: `test_positioning_candidates_output_shows_quantile_and_coverage` — asserts `Q0.` and `cov=` appear in CLI output.
 
 4. **NIT — tie regression test was weak** (`tests/test_positioning.py`): `test_fix2_rank_decks_identical_candidates_split_pbest_evenly` replaced by `test_fix2_rank_decks_exact_tie_splits_pbest_exactly`. New test monkeypatches `_sample_S` to return identical arrays for both candidates, making every draw an exact tie. Without the fix (argmax → index-0 wins) P(best) would be 1.0/0.0; with the fix both get exactly 0.5 to floating-point precision.
+
+## Phase 8 outcome + completion (2026-05-30)
+Cross-model final review (Codex xhigh) flagged 2 blockers + 1 important + 1 nit — all fixed inline with tests
+(cards-table migration via ALTER ADD COLUMN IF NOT EXISTS + explicit insert column list; ILP T_a cap raised
+to budget so the default solver fills 15; positioning CLI shows Q-quantile + data_coverage; deterministic
+tie test). No new substrate items required; queue empty; suite 654 green. **Goal outcome: complete.**
