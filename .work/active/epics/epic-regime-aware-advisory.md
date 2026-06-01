@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory
 kind: epic
-stage: drafting
+stage: implementing
 tags: [advisory, analytics, correctness]
 parent: null
 depends_on: []
@@ -57,16 +57,37 @@ lever, not v1/v2).
   banner** ("current regime too thin: n=X, flagged evolving — showing wider data"). Always returns an answer,
   never silently and never empty.
 
-## Anticipated child features (sketch — realized at /epic-design)
-- **v1: `windowing-plumbing`** — `since/until` through `compute_match_results` → `build_matrix` →
-  `positioning`/`rank_decks`/`gaps`; `--since`/`--regime`/`--all-time` on `report matchups|meta|gaps` +
-  `advise *`; thin-regime degrade-with-banner. `depends_on: []`.
-- **v2: `adaptive-cell-windowing`** — `valid_since` per archetype from banned-card inclusion (data-derived,
-  conservative when lists shift); per-cell window = `max(valid_since(A), valid_since(B))`; current-field
-  weighting; flip the default to adaptive; per-cell window surfaced in output (auditability).
-  `depends_on: [v1]`.
-- (epic-design may split v1's CLI surface from the core windowing, or v2's affectedness-classifier from the
-  cell-windowing, if sizing warrants.)
+## Decomposition
+
+Split along the natural seam between *making windowing possible* (analytics plumbing), *exposing it*
+(CLI UX + honest degradation), and *making it smart* (adaptive per-cell). v1 = {windowing-core,
+cli-surface}; v2 = {adaptive}. The chain is intentionally **linear** (core → cli → adaptive) — the
+work is inherently sequential (plumbing before UX before the default-flip), and the user asked to do
+v1 then v2. Core is split from CLI because their acceptance surfaces differ (analytics correctness vs
+CLI ergonomics + the degrade banner) and v1-as-one-feature would exceed the unit ceiling.
+
+### Child features
+- `epic-regime-aware-advisory-windowing-core` — thread `since/until` through
+  `compute_match_results` → `build_matrix` → `compute_archetype_gaps` + a regime resolver; additive,
+  full-corpus default preserved — depends on: `[]`
+- `epic-regime-aware-advisory-cli-surface` — `--since`/`--regime`/`--all-time` on `report
+  matchups|meta|gaps` + `advise *`; thin-regime degrade-with-banner; echo window used — depends on:
+  `[epic-regime-aware-advisory-windowing-core]`
+- `epic-regime-aware-advisory-adaptive` (v2) — data-derived per-archetype `valid_since` (banned-card
+  inclusion), per-cell window `max(valid_since(A),valid_since(B))`, current-field weighting, flip
+  default to adaptive, surface per-cell window — depends on:
+  `[epic-regime-aware-advisory-windowing-core, epic-regime-aware-advisory-cli-surface]`
+
+### Decomposition risks
+- **`adaptive` (v2) is the riskiest** — its performance unit (per-cell windows defeat a single
+  windowed scan; needs grouping-by-`valid_since` or union-then-filter) is the design crux, flagged in
+  its body. Affectedness via card-inclusion catches direct hits only (indirect rebuilds need a
+  conservative window + audit surfacing).
+- **Linear chain = no parallelism** — accepted; the arcs are inherently sequential and the user wants
+  v1 before v2.
+- **`compute_match_results` windowing must match `compute_card_winrates`' existing window semantics**
+  (shared dup/uniq_decks CTE) — divergence would split the two aggregates' coverage; windowing-core
+  must reuse the same date-bounded CTE.
 
 ## Known limits to design around (from the analysis)
 - **Affectedness via card-inclusion catches DIRECT hits, not indirect ones** — a deck that didn't run the
