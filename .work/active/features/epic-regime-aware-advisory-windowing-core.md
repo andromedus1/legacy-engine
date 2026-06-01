@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-windowing-core
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: []
@@ -194,3 +194,8 @@ selection (reuse that logic / call it where sensible to stay SSOT).
 - Suite: 1020 passing (was 1007, +13). `ruff check` clean on all touched files (incl. the 2 dead-import removals).
 - Discrepancies from design: none. Built Units 1–5 as specified. Half-open `[since, until)` confirmed by `test_half_open_upper_is_exclusive`. All new params default `None` → byte-identical no-window path (regression tests green).
 - Adjacent issues parked: none (the `compute_card_winrates` inclusive-`<=` discrepancy is documented in the design as an accepted, out-of-scope follow-up).
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex out of credits). 228 tests green across the 6 touched modules.
+- Verified: param order in `_JOIN_SQL` execute matches `?` positions exactly (the Blocker risk — clean); no-window path byte-identical (`None` predicates short-circuit true); all new params default None; no caller breakage; positioning correctly untouched. Half-open `[since,until)` proven by the boundary test (non-vacuous); divergence from `compute_card_winrates`' inclusive `<=` is real + intentionally out-of-scope. gaps threads the window into BOTH field and matrix (no mismatch). `resolve_regime` substring match is safe (ambiguity → ValueError; "current" intercepted before substring). Dead-import removal safe (not re-exported).
+- No Blockers, no Important. Nits: (1) `metashare.py` docstring + the windowed-wrw `NotImplementedError` text still say "match_results is not windowed" — now stale doc-rot (behavior still correct) → fold the 1-line fix into `cli-surface`; (2) impl-notes "13 vs 14 tests" cosmetic (it's 13).
