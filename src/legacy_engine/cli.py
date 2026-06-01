@@ -1393,6 +1393,20 @@ def generate_consensus(
     help="Also emit the tuned 60+15 in the specified import format.",
 )
 @click.option(
+    "--discover",
+    "discover",
+    is_flag=True,
+    default=False,
+    help="Also suggest adjacent swap-in candidates (deck-gen mode 3; exploratory, labeled, never auto-swapped).",
+)
+@click.option(
+    "--discover-cap",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Max exploratory discovery suggestions to show (--discover only).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -1408,6 +1422,8 @@ def generate_tune(
     lock_threshold: float,
     max_swaps: int,
     export_fmt: str | None,
+    discover: bool,
+    discover_cap: int,
     db: str | None,
     verbose: bool,
 ) -> None:
@@ -1436,6 +1452,7 @@ def generate_tune(
     field_text = Path(field_file).read_text() if field_file else None
 
     con = store.connect(db) if db else store.connect()
+    discovery = None
     try:
         field = _load_field(con, field_text=field_text)
 
@@ -1444,6 +1461,17 @@ def generate_tune(
             result = _classify_deck(con, maindeck, starting_side)
             resolved_archetype = result.archetype
             click.echo(f"Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        # When --discover, compute the heavy per-card win-rate aggregate ONCE and reuse it
+        # for both the tuner (injected) and discovery, avoiding a second full-corpus scan.
+        shared_rates = None
+        if discover:
+            from legacy_engine.analytics.match_results import compute_card_winrates
+            eff_since, eff_until = since, until
+            if eff_since is None and eff_until is None:
+                from legacy_engine.generation.consensus import _latest_regime_window
+                eff_since, eff_until = _latest_regime_window()
+            shared_rates = compute_card_winrates(con, since=eff_since, until=eff_until)
 
         tuned = tune_deck(
             con,
@@ -1455,7 +1483,23 @@ def generate_tune(
             until=until,
             lock_threshold=lock_threshold,
             max_swaps=max_swaps,
+            card_winrates=shared_rates,
         )
+
+        if discover:
+            from legacy_engine.generation.discovery import discover_candidates
+            discovery = discover_candidates(
+                con,
+                resolved_archetype,
+                maindeck,
+                starting_side,
+                field=field,
+                rates=shared_rates,
+                cap=discover_cap,
+                lock_threshold=lock_threshold,
+                since=since,
+                until=until,
+            )
     finally:
         con.close()
 
@@ -1545,11 +1589,51 @@ def generate_tune(
     else:
         click.echo("// Legality: OK")
 
+    # ── Discovery (exploratory; mode 3) — distinct section, never auto-swapped ──
+    if discovery is not None:
+        _print_discovery(discovery)
+
     # ── Optional export format ────────────────────────────────────────────────
     if export_fmt:
         from legacy_engine.generation.export import format_decklist
         click.echo("\n// --- Export ---")
         click.echo(format_decklist(tuned.maindeck, tuned.sideboard, fmt=export_fmt))
+
+
+def _print_discovery(result: "DiscoveryResult") -> None:
+    """Render the exploratory discovery section — distinct from the proven swap log."""
+    from legacy_engine.generation.discovery import DiscoveryResult  # noqa: F401
+
+    gate_label = "/".join(result.gate)
+    click.echo(f"\n// === Discovery (exploratory — gate: {gate_label} tier) ===")
+    if not result.suggestions:
+        click.echo("//   (no adjacent candidate cleared the transfer gate)")
+    for s in result.suggestions:
+        sb = " [in SB]" if s.in_sideboard else ""
+        roles = ", ".join(sorted(s.matched_roles))
+        click.echo(
+            f"//   {s.name}{sb}  value={s.transferred_value:.4f}  "
+            f"roles=[{roles}]  cmc={s.cmc:g}  pmi={s.pmi:.3f}  n={s.n_total}"
+        )
+        top = sorted(s.per_opponent.items(), key=lambda kv: -kv[1].lift)[:3]
+        for opp, cv in top:
+            click.echo(f"//       vs {opp}: lift={cv.lift:+.3f}  n={cv.n}  [{cv.tier}]")
+
+    # Honest accounting — no silent caps.
+    notes: list[str] = []
+    if result.capped_out:
+        notes.append(f"{result.capped_out} more eligible (raise --discover-cap)")
+    if result.omitted_below_gate:
+        notes.append(f"{result.omitted_below_gate} transferable candidate(s) below the gate")
+    if result.omitted_synergy:
+        notes.append(
+            f"{len(result.omitted_synergy)} synergy-role candidate(s) omitted — no honest "
+            f"cross-field transfer; need in-shell/goldfish validation: "
+            f"{', '.join(result.omitted_synergy)}"
+        )
+    for n in notes:
+        click.echo(f"//   - {n}")
+    click.echo(f"//   [disclaimer] {result.disclaimer}")
 
 
 # ── export: decklist formatting ──

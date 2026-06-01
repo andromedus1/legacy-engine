@@ -27,7 +27,10 @@ from statistics import median
 
 import duckdb
 
+from legacy_engine.advisory.field import FieldDistribution, build_global_field
 from legacy_engine.advisory.whattoplay import _card_roles
+from legacy_engine.analytics.card_value import CardValue, card_values_vs
+from legacy_engine.analytics.match_results import CardWinRates, compute_card_winrates
 from legacy_engine.generation.consensus import _latest_regime_window, card_frequencies
 from legacy_engine.ingestion.store import load_card
 from legacy_engine.models.card import Card
@@ -352,3 +355,160 @@ def adjacency_candidates(
     if limit is not None:
         candidates = candidates[:limit]
     return candidates
+
+
+# ===========================================================================
+# Discovery tuning (epic-gap-discovery-discovery-tuning) — value transfer +
+# confidence-gated exploratory suggestion surface, composed atop the adjacency
+# model above. Kept OUT of tuning.py; tuning stays the proven-swap engine.
+# ===========================================================================
+
+# Roles where cross-archetype value transfer is honest (answers / disruption /
+# generic card-advantage — value is largely pilot/shell-independent). Curated like
+# advisory.sideboard.HOSER_CATALOG. Synergy/engine roles (threat, ritual, storm, tutor,
+# graveyard_recursion, stax, fast_mana) are NON-transferable: pooled lift is meaningless
+# out of deck context, so those candidates require in-shell evidence (unavailable in v1).
+TRANSFERABLE_ROLES: frozenset[str] = frozenset(
+    {"counter", "removal", "protection", "card_advantage", "discard"}
+)
+
+_DISCOVERY_DISCLAIMER: str = (
+    "Discovery suggestions are PRESENCE-CORRELATIONAL and TRANSFERRED from cross-field "
+    "data (how the card performs vs these threats in OTHER decks), NOT causal and NOT "
+    "goldfish-validated in this shell. Treat as candidates to test, not swaps to make."
+)
+
+
+@dataclass(frozen=True)
+class DiscoverySuggestion:
+    """One exploratory swap-in suggestion: an adjacent card with transferred field value."""
+
+    name: str
+    matched_roles: frozenset[str]
+    transferred_value: float            # Σ field.shares[M]·lift over gate-clearing opponents
+    per_opponent: dict[str, CardValue]  # opponent → the gate-clearing CardValue (audit trail)
+    n_total: int                        # Σ cv.n over kept opponents
+    pmi: float                          # carried from the AdjacencyCandidate
+    cmc: float
+    in_sideboard: bool
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    """Capped, ranked discovery suggestions plus the honest accounting of what was omitted."""
+
+    suggestions: list[DiscoverySuggestion]  # capped, sorted transferred_value DESC
+    n_considered: int                       # adjacency candidates examined
+    omitted_below_gate: int                 # transferable cands with no established lift>0 cell
+    omitted_synergy: list[str]              # synergy-role cands (need in-shell/goldfish validation)
+    capped_out: int                         # surfaced-eligible candidates beyond the cap
+    gate: tuple[str, ...]
+    disclaimer: str
+
+
+def _transfer_from_values(
+    values: dict[str, CardValue],
+    field: FieldDistribution,
+    *,
+    gate: tuple[str, ...],
+) -> tuple[float, dict[str, CardValue]]:
+    """PURE: field-weighted positive transferred lift over gate-clearing established cells.
+
+    Keeps opponent ``M`` iff ``cv.tier in gate`` AND ``cv.lift > 0`` AND ``M in field.shares``;
+    its contribution is ``field.shares[M] · cv.lift``. Returns ``(total, kept_values)``. No DB,
+    no MC — testable with hand-built ``CardValue``s. ``lift`` is already the two-level-EB-shrunk
+    estimate (regresses to ~0 as n→0), so no further shrinkage is applied here.
+    """
+    total = 0.0
+    kept: dict[str, CardValue] = {}
+    for opponent, cv in values.items():
+        if cv.tier not in gate or cv.lift <= 0.0:
+            continue
+        share = field.shares.get(opponent)
+        if not share:
+            continue
+        total += share * cv.lift
+        kept[opponent] = cv
+    return total, kept
+
+
+def discover_candidates(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    maindeck: dict[str, int],
+    sideboard: dict[str, int] | None = None,
+    field: FieldDistribution | None = None,
+    *,
+    rates: CardWinRates | None = None,
+    cap: int = 5,
+    gate: tuple[str, ...] = ("established",),
+    lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
+    cooccur_floor: int = _DEFAULT_COOCCUR_FLOOR,
+    adjacency_limit: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> DiscoveryResult:
+    """Nominate (adjacency) → role-split → transfer/gate → assemble the suggestion list.
+
+    Transferable-role candidates are scored by field-weighted cross-archetype lift, gated at the
+    ``gate`` tier (default established, n≥100). Synergy/engine-role candidates are nominated but
+    have no honest transfer (and no in-shell-conditioned value source in v1), so they are omitted
+    and reported in ``omitted_synergy`` — the future goldfish pillar is their validation path.
+    Never enters the tuner's greedy objective. Capped at ``cap``; the capped-out / below-gate /
+    synergy counts are all reported (no silent caps).
+    """
+    if since is None and until is None:
+        since, until = _latest_regime_window()
+    if field is None:
+        field = build_global_field(con)
+    if rates is None:
+        rates = compute_card_winrates(con, since=since, until=until)
+
+    cands = adjacency_candidates(
+        con, archetype, maindeck, sideboard,
+        lock_threshold=lock_threshold, cooccur_floor=cooccur_floor,
+        limit=adjacency_limit, since=since, until=until,
+    )
+
+    eligible: list[DiscoverySuggestion] = []
+    omitted_below_gate = 0
+    omitted_synergy: list[str] = []
+
+    for cand in cands:
+        if not (cand.matched_roles & TRANSFERABLE_ROLES):
+            omitted_synergy.append(cand.name)  # synergy/engine — no honest transfer in v1
+            continue
+        # Value the candidate vs each field opponent (rates is precomputed → dict lookups).
+        # card_values_vs is keyed by card NAME, so unwrap to build an opponent→CardValue map.
+        values: dict[str, CardValue] = {
+            opponent: card_values_vs(rates, [cand.name], "main", opponent)[cand.name]
+            for opponent in field.shares
+        }
+        total, kept = _transfer_from_values(values, field, gate=gate)
+        if total <= 0.0 or not kept:
+            omitted_below_gate += 1
+            continue
+        eligible.append(
+            DiscoverySuggestion(
+                name=cand.name,
+                matched_roles=cand.matched_roles,
+                transferred_value=total,
+                per_opponent=kept,
+                n_total=sum(cv.n for cv in kept.values()),
+                pmi=cand.pmi,
+                cmc=cand.cmc,
+                in_sideboard=cand.in_sideboard,
+            )
+        )
+
+    eligible.sort(key=lambda s: (-s.transferred_value, -s.n_total, s.name))
+    capped_out = max(0, len(eligible) - cap)
+    return DiscoveryResult(
+        suggestions=eligible[:cap],
+        n_considered=len(cands),
+        omitted_below_gate=omitted_below_gate,
+        omitted_synergy=sorted(omitted_synergy),
+        capped_out=capped_out,
+        gate=gate,
+        disclaimer=_DISCOVERY_DISCLAIMER,
+    )
