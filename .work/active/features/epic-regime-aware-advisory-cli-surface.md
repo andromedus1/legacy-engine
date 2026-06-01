@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-cli-surface
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: [epic-regime-aware-advisory-windowing-core]
@@ -161,3 +161,11 @@ guard stays). No behavior change.
 - **Thin-floor = rounds-count proxy** (not decisive-matched) — slightly over-counts (draws/byes included). Acceptable for a thin/not-thin gate; the banner reports the proxy count honestly. **Fallback**: switch to a decisive count if the proxy ever mis-gates; floor is a constant.
 - **Degrade hides a genuinely-current-but-thin signal** behind full-corpus — but that's the inherited policy (degrade + loud caveat), and v2's adaptive default supersedes it. **Fallback**: `--regime <name>` without degrade could be offered later; v1 keeps it simple.
 - **`report meta` provenance-basis loop × window** — ensure the window threads into every basis iteration, not just the first.
+
+## Implementation notes
+- Files changed: `advisory/window.py` (new — `resolve_advisory_window` + `WindowResolution` + `_count_rounds`; `thin_floor<=0` disables degrade), `cli.py` (`_window_opts` decorator + `_echo_window`; threaded `--since/--until/--regime/--all-time` into `report matchups|meta|gaps` + `advise positioning|whattoplay|report`), `advisory/report.py` (`_load_field` + `build_field_read_report` window passthrough), `analytics/metashare.py` (doc-rot wording fix).
+- Tests added: `tests/test_advisory_window.py` (15: resolve_advisory_window×7 incl thin-degrade + thin_floor=0, CLI×6, metashare-doc×2).
+- Suite: 1035 passing (was 1020, +15). ruff clean on window.py/report.py/metashare.py/test; cli.py uses the established forward-ref+noqa pattern.
+- Discrepancies from design: **one refinement caught by real-DB smoke** — `report meta` is deck-based, so it must NOT degrade on rounds-thinness (636 decks is plenty even when rounds are thin). Added `thin_floor<=0` to disable the rounds-degrade and applied it to `report meta`; matchup/positioning/gaps keep the default 500-round degrade. Net: `report meta --regime current` shows the honest current-regime share (tier-flagged), while `report matchups/advise --regime current` degrade with the loud banner.
+- **End-to-end validated on real DB**: `report meta --regime current` → Tron 11.8% / Izzet Delver 8.5% / Energy 7.6% (evolving tier) over the post-Undercity-Informer regime; `report matchups --regime current` → "THIN: 49 rounds < floor 500 — showing FULL-CORPUS" banner. The engine now handles the new ban paradigm honestly instead of silently contradicting itself.
+- Adjacent issues parked: none.
