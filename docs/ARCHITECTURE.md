@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-05-31
+updated: 2026-06-01
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -11,8 +11,8 @@ summary: |
   matchup-matrix rounds-join workload). MVP arc: ingestion/ (Scryfall + fbettega cache + vendored
   MTGOFormatData rules + ban-list) → archetype/ (ported MTGOArchetypeParser matcher) → analytics/
   (meta-share, matchup matrix, per-card value) + advisory/ (positioning, maindeck-aware sideboard, what-to-play)
-  + generation/ (consensus, export, field-tuning) → models/ → data/. goldfish/ is the deferred pillar;
-  generation's gap-discovery (mode 3) + goldfish-validation remain deferred behind it.
+  + generation/ (consensus, export, field-tuning, gap-discovery) → models/ → data/. goldfish/ is the
+  deferred pillar; only goldfish-validated candidate-validation remains deferred behind it.
 decisions:
   - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, matplotlib, local files) + add scipy/numpy/statsmodels (advisory stats) and pulp/CBC (sideboard ILP)."
   - "STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/, data/scryfall/, data/rules/, data/banlist/); a rebuildable embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share + matchup-matrix joins. The one justified divergence from edh-engine's pure-files approach, driven by the rounds-join matchup workload."
@@ -21,7 +21,7 @@ decisions:
   - "Deck color = lands.produced_mana ∩ nonlands.colors (NOT color_identity); legality validated against a version-stamped BanListSnapshot blacklist (NOT Scryfall's lagging legacy flag)."
   - "Matchup matrix: computed ourselves from Rounds; Wilson CIs + Beta-Binomial shrinkage; confidence tiers (speculative n<30 hidden / evolving 30-99 / established >=100); matchup-n kept separate from metashare-n; meta-% computed 3 labeled ways with online/paper split."
   - "Ingestion mirror-and-decouple: consume the fbettega cache JSON (not mtgo.com), behind an ingestion/ port so a replacement source swaps in without touching analytics/advisory."
-  - "MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning); goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the deferred pillar; generation's gap-discovery (mode 3) + goldfish-validated candidate-validation remain deferred behind it."
+  - "MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning/gap-discovery mode 3); goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the deferred pillar; only goldfish-validated candidate-validation remains deferred behind it."
 ---
 
 # Architecture: legacy-engine
@@ -44,18 +44,18 @@ observed → label → analytics → advisory arc.
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                                CLI  (cli.py)                                 │
-│  seed · refresh · label · report (meta|matchups|tiers|trends|cards) · advise  │
-│  (positioning|sideboard|whattoplay|report) · generate (consensus|tune)        │
-│  · export (deck)                                    [later: goldfish]         │
+│  seed · refresh · label · report (meta|matchups|tiers|trends|cards|gaps)      │
+│  · advise (positioning|sideboard|whattoplay|report)                           │
+│  · generate (consensus|tune[--discover]) · export (deck)   [later: goldfish]  │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────┘
     │          │           │            │               │
 ┌───▼─────┐ ┌──▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
 │ingestion/│ │archetype/ │ │analytics/ │ │advisory/    │ │generation/    │
 │scryfall  │ │rules      │ │metashare  │ │positioning  │ │consensus      │
 │cache     │ │matcher    │ │matchup    │ │sideboard    │ │export·tuning  │
-│banlist   │ │colors     │ │trends     │ │whattoplay   │ │(goldfish/     │
-│rules_    │ │labeler    │ │charts     │ │report       │ │ deferred)     │
-│ vendor   │ │golden_test│ │           │ │             │ │               │
+│banlist   │ │colors     │ │trends     │ │whattoplay   │ │discovery      │
+│rules_    │ │labeler    │ │charts     │ │report       │ │(goldfish/     │
+│ vendor   │ │golden_test│ │card_value │ │gaps         │ │ deferred)     │
 │store     │ │           │ │           │ │             │ │               │
 └───┬─────┘ └────┬──────┘ └─────┬─────┘ └──────┬──────┘ └───────────────┘
     │            │              │              │
@@ -80,7 +80,7 @@ observed → label → analytics → advisory arc.
 |---|---|---|---|
 | **Observed** | fbettega tournament cache, Scryfall cards, ban-list, archetype labels | Meta & Performance | feeds advisory |
 | **Synthetic** | goldfish simulation (speed, consistency) | Deck Mechanics *(deferred)* | meta-speed metric |
-| **Generated** | positioning, maindeck-aware sideboard packages, consensus + field-tuned deck candidates | Meta Attack/Advisory + Deck Generation | gap-discovery (mode 3) deferred |
+| **Generated** | positioning, maindeck-aware sideboard packages, consensus + field-tuned deck candidates, gap-discovery (mode 3: archetype-gaps + adjacent-card discovery) | Meta Attack/Advisory + Deck Generation | goldfish-validated candidate-validation deferred |
 
 ---
 
@@ -140,11 +140,15 @@ pinned SHAs), `confidence.py` (shared tiering + sample-size→tier mapping).
 |---|---|---|
 | `consensus.py` | Modal-card aggregation over an archetype's in-window decks → legal exactly-60 + ≤15 de-duped consensus list; `card_frequencies` (per-card inclusion %, the flex/lock + candidate-pool primitive). | deck-generation-and-moxfield |
 | `export.py` | Portable multi-target import text (Moxfield/Archidekt/MTGGoldfish/`.dec`); pure, offline, zero network. | deck-generation-and-moxfield |
-| `tuning.py` | Field-tuning (mode 2): greedy maindeck-flex swaps driven **solely** by field-weighted per-card×matchup value (`card_value`) — proactive cards have real value, no gameplan hollowing; coverage is audit-only, never a swap driver. No per-card signal → no swaps (honest fallback). Re-runs the maindeck-aware `recommend_sideboard` for the 15 + per-matchup plans; combined main+side legality guaranteed; positioning S carried as archetype context. | deck-generation-and-moxfield |
+| `tuning.py` | Field-tuning (mode 2): greedy maindeck-flex swaps driven **solely** by field-weighted per-card×matchup value (`card_value`) — proactive cards have real value, no gameplan hollowing; coverage is audit-only, never a swap driver. No per-card signal → no swaps (honest fallback). Re-runs the maindeck-aware `recommend_sideboard` for the 15 + per-matchup plans; combined main+side legality guaranteed; positioning S carried as archetype context. Optional injected `card_winrates` lets the `--discover` path reuse one corpus scan. | deck-generation-and-moxfield |
+| `discovery.py` | Gap discovery (mode 3, card-gap half): `adjacency_candidates` nominates cards a shell does NOT run yet (∉ deck ∩ color-legal ∩ role-relevant ∩ CMC-band, ranked by `deck_cards` co-occurrence PMI vs the archetype core); `discover_candidates` scores them by **cross-archetype** per-card value transfer (`card_value.lift`, role-gated via `TRANSFERABLE_ROLES`, established-tier gated), emitting a distinct suggest-and-label surface that never drives the tuner's greedy objective. Synergy/engine candidates are nominated but omitted-and-reported (need in-shell/goldfish validation). | card-adjacency-and-discovery |
+
+### `advisory/gaps.py` — Archetype-Gap Finder (built)
+- **`gaps.py`** — gap discovery (mode 3, archetype-gap half): `compute_archetype_gaps` ranks under-explored archetypes by `gap_score = S − share_weight·share` over `positioning.rank_decks` × `metashare`, with the thin-matchup-data confidence gate delegated to `rank_decks(min_coverage=…)` (excluded archetypes reported, not hidden). Pure `_assemble_gaps` split from the DB/MC path. Surfaced via `report gaps`. | card-adjacency-and-discovery
 
 ### Deferred modules (clear seams, not built in MVP)
 - **`goldfish/`** — port edh-engine's bipartite-matching mana solver + role-dispatch engine; adapt the mulligan to **straight London (no free mull)**; deck-as-data YAML; calibrate clocks against the Oops-All-Spells anchor. Feeds the meta-speed distribution. (legacy-foundations)
-- **`generation/` — gap discovery (mode 3)** + goldfish-validated candidate-validation remain deferred (mode 3's card-gap half is now unblocked by `card_value`; goldfish-validation depends on the `goldfish/` pillar).
+- **Goldfish-validated candidate-validation** — discovery (mode 3) ships confidence-gated suggest-and-label without it; the `goldfish/` pillar later slots in as a candidate → goldfish-passes? → promote-from-suggestion filter (and the in-shell signal that lets synergy-role candidates surface).
 
 ---
 
@@ -189,7 +193,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ## Conventions
 - **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/ generation/` (+ deferred `goldfish/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
-- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends|cards`, `advise positioning|sideboard|whattoplay|report`, `generate consensus|tune`, `export deck`); lazy imports inside commands; `_setup_logging(verbose)` first.
+- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends|cards|gaps`, `advise positioning|sideboard|whattoplay|report`, `generate consensus|tune` (`tune --discover` adds exploratory adjacent-card suggestions), `export deck`); lazy imports inside commands; `_setup_logging(verbose)` first.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.
@@ -220,7 +224,7 @@ No web server. DuckDB is embedded (file-backed, no server) — keeps the "no ser
 | Capability | Why | Seam |
 |---|---|---|
 | **goldfish/** simulation (mana solver, London mulligan Monte-Carlo, clocks, meta-speed) | Deck Mechanics pillar; ports cleanly from edh-engine; not blocking meta+advisory | deck-as-data YAML + role dispatch; legacy-foundations brief |
-| **generation/** gap-discovery (mode 3) + goldfish-validated candidate-validation (consensus/export/field-tuning already built) | mode-3 card-gap half now unblocked by `card_value`; candidate-validation needs goldfish | consumes advisory + (later) goldfish outputs |
+| **goldfish-validated candidate-validation** (gap-discovery mode 3 itself is now built: `generation/discovery.py` + `advisory/gaps.py`) | discovery ships confidence-gated suggest-and-label; promoting a suggestion to "validated" needs the goldfish pillar | consumes generation/discovery + (later) goldfish outputs |
 | Full rules-correct game engine | Legacy is 1v1; goldfish suffices for speed/consistency | — |
 | Live/real-time event tooling | all data pre-fetched | — |
 | Non-Legacy formats | card/data layer is largely format-agnostic but out of scope | — |

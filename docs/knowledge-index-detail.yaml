@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-05-31T20:42:45Z'
+generated_at: '2026-06-01T14:26:07Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -21,11 +21,11 @@ documents:
       (meta-share, matchup matrix, per-card value) + advisory/ (positioning, maindeck-aware
       sideboard, what-to-play)
 
-      + generation/ (consensus, export, field-tuning) → models/ → data/. goldfish/
-      is the deferred pillar;
+      + generation/ (consensus, export, field-tuning, gap-discovery) → models/ → data/.
+      goldfish/ is the
 
-      generation''s gap-discovery (mode 3) + goldfish-validation remain deferred behind
-      it.
+      deferred pillar; only goldfish-validated candidate-validation remains deferred
+      behind it.
 
       '
     decisions:
@@ -55,10 +55,10 @@ documents:
     - 'Ingestion mirror-and-decouple: consume the fbettega cache JSON (not mtgo.com),
       behind an ingestion/ port so a replacement source swaps in without touching
       analytics/advisory.'
-    - MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning);
-      goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the
-      deferred pillar; generation's gap-discovery (mode 3) + goldfish-validated candidate-validation
-      remain deferred behind it.
+    - MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning/gap-discovery
+      mode 3); goldfish/ (port edh-engine's mana solver + straight-London mulligan)
+      is the deferred pillar; only goldfish-validated candidate-validation remains
+      deferred behind it.
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
