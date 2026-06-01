@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory
 kind: epic
-stage: implementing
+stage: done
 tags: [advisory, analytics, correctness]
 parent: null
 depends_on: []

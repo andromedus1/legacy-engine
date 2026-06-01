@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-adaptive
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: [epic-regime-aware-advisory-windowing-core, epic-regime-aware-advisory-cli-surface]
@@ -218,3 +218,8 @@ All Spells since 2026-05-18; others full-corpus`). Don't dump all cells.
 - Discrepancies from design: none material. Built Units 1–4. One refinement: added `adaptive_default=False` so `report meta` (deck-based) keeps full-corpus default + correct label, rather than inheriting the adaptive default it doesn't use.
 - **End-to-end validated on real DB**: `advise positioning` (default=adaptive) now ranks Lands/Show and Tell/Doomsday/Death & Taxes/Izzet Delver at the top — **Dimir Reanimator dropped out** (≈0 current-regime share zeroes its weight despite strong historical cells); the audit line shows per-archetype valid_since (Reanimator since 2025-11-10 = Entomb). The stale-after-ban best-deck artifact is fixed. `--all-time` restores the full-corpus view.
 - Adjacent issues parked: none.
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex out of credits). 201 tests green across touched + downstream consumer suites (matchup/positioning incl.).
+- Verified: affectedness pre-ban window `[prev_d,d)` + latest-ban-wins iteration + inclusion ratio + param order (no bug); adaptive `s_ab=max(...)` provably always a `mr_by_since` key (no KeyError path); mirror sourcing; full-corpus row inclusion (stable); scan count ≤ #distinct valid_since; default-flip modes distinct; `report meta` opts out (deck-based); current-regime field + adaptive matrix (dead decks drop); matrix/field injection additive (un-injected callers byte-identical); no analytics→advisory cycle; conservative thin-sample (decks==0 → unaffected); non-vacuous tests.
+- No Blockers, no Important. 1 nit: design Unit headers name `advisory/regime_affectedness.py` vs shipped `analytics/affectedness.py` — already reconciled in the impl notes (analytics-placement rationale). Doc-only.
