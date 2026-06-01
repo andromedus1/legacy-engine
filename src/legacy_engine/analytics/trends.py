@@ -19,8 +19,8 @@ from datetime import date
 
 import duckdb
 
-from legacy_engine.analytics.metashare import MetaShareEntry, compute_metashare
-from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
+from legacy_engine.analytics.metashare import compute_metashare
+from legacy_engine.confidence import ConfidenceLevel
 from legacy_engine.ingestion.banlist import BAN_EVENTS
 
 log = logging.getLogger(__name__)
@@ -100,6 +100,42 @@ def regime_windows() -> list[RegimeWindow]:
         )
 
     return windows
+
+
+def resolve_regime(name: str = "current") -> tuple[str | None, str | None]:
+    """Map a ban-regime name to a half-open ``(since, until)`` window of ISO date strings.
+
+    - ``"current"`` (default) → the latest (open-ended) regime: ``(last_since, None)``.
+    - ``"all"`` / ``"all-time"`` → ``(None, None)`` (full corpus).
+    - any other string → the regime whose ``label`` contains it (case-insensitive substring,
+      e.g. ``"Undercity"`` → the post-Undercity-Informer regime). Ambiguous/unknown → ``ValueError``.
+
+    Returns ISO date strings (``None`` for an open bound), ready to pass into the windowed
+    ``compute_match_results`` / ``build_matrix`` / ``build_global_field`` / ``compute_archetype_gaps``.
+    """
+    windows = regime_windows()
+    key = name.strip().lower()
+
+    if key == "current":
+        w = windows[-1]
+    elif key in ("all", "all-time", "alltime"):
+        return None, None
+    else:
+        matches = [w for w in windows if key in w.label.lower()]
+        if not matches:
+            raise ValueError(
+                f"resolve_regime: no ban regime matches {name!r}; "
+                f"known regimes: {[w.label for w in windows]}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"resolve_regime: {name!r} is ambiguous across regimes: {[w.label for w in matches]}"
+            )
+        w = matches[0]
+
+    since = w.since.isoformat() if w.since else None
+    until = w.until.isoformat() if w.until else None
+    return since, until
 
 
 # ---------------------------------------------------------------------------
