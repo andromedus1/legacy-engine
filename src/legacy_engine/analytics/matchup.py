@@ -255,3 +255,81 @@ def build_matrix(
         archetypes=included,
         caveat=_CAVEAT,
     )
+
+
+@dataclass
+class AdaptiveMatrix:
+    """A matchup matrix whose cells are sourced over per-pair ban-aware windows.
+
+    ``matrix`` is a normal ``MatchupMatrix`` (rectangular, same row set as the full-corpus
+    ``min_row_share`` inclusion). ``valid_since[a]`` is each archetype's ban-affectedness horizon
+    (ISO date or ``None`` = full history). ``cell_windows[(a, b)]`` records the ``since`` actually
+    used for that ordered cell — ``max(valid_since[a], valid_since[b])`` — for auditability.
+    """
+
+    matrix: MatchupMatrix
+    valid_since: dict[str, str | None]
+    cell_windows: dict[tuple[str, str], str | None]
+
+
+def build_adaptive_matrix(
+    con,
+    *,
+    provenance: str | None = None,
+    min_row_share: float = 0.02,
+    affect_threshold: float = 0.25,
+) -> AdaptiveMatrix:
+    """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
+
+    Each archetype has a ``valid_since`` (latest ban that materially affected it; see
+    ``analytics.affectedness``). A cell ``(a, b)`` pools matches back to
+    ``max(valid_since[a], valid_since[b])`` (``None`` = full corpus), so unaffected×unaffected cells
+    keep full history (established tier) while ban-affected cells truncate honestly. Row inclusion +
+    marginals + mirror counts come from the full-corpus scan (stable); only per-cell data sourcing is
+    windowed. Cost: one ``compute_match_results`` per distinct ``valid_since`` value (≤ #ban-dates),
+    not per cell.
+    """
+    from legacy_engine.analytics.affectedness import archetype_valid_since
+
+    # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
+    full = compute_match_results(con, provenance=provenance)
+    total_matches = full.coverage.decisive_matched
+    _denom_base = total_matches + full.coverage.mirror_matches
+    denom = 2 * _denom_base if _denom_base > 0 else 1
+    included = sorted(a for a, rec in full.archetypes.items() if rec.n / denom >= min_row_share)
+
+    # 2. Affectedness horizon per included archetype.
+    valid_since = archetype_valid_since(
+        con, included, provenance=provenance, affect_threshold=affect_threshold,
+    )
+
+    # 3. One scan per distinct valid_since (None reuses the full-corpus scan). s_ab is always one of
+    #    these values (max of two members), so this set covers every cell window.
+    mr_by_since = {None: full}
+    for s in set(valid_since.values()):
+        if s is not None and s not in mr_by_since:
+            mr_by_since[s] = compute_match_results(con, provenance=provenance, since=s)
+
+    # 4. Assemble: each cell from the scan at max(valid_since[a], valid_since[b]).
+    cells: dict[tuple[str, str], MatchupCell] = {}
+    cell_windows: dict[tuple[str, str], str | None] = {}
+    for a in included:
+        s_a = valid_since[a]
+        cells[(a, a)] = build_mirror_cell(a, mr_by_since[s_a].mirror_n.get(a, 0))
+        cell_windows[(a, a)] = s_a
+        for b in included:
+            if a == b:
+                continue
+            s_ab = max(valid_since[a] or "", valid_since[b] or "") or None
+            tally = mr_by_since[s_ab].matchups.get((a, b))
+            cells[(a, b)] = build_cell(a, b, tally.wins, tally.n) if tally else build_cell(a, b, 0, 0)
+            cell_windows[(a, b)] = s_ab
+
+    matrix = MatchupMatrix(
+        cells=cells,
+        provenance=provenance,
+        total_matches=total_matches,
+        archetypes=included,
+        caveat=_CAVEAT,
+    )
+    return AdaptiveMatrix(matrix=matrix, valid_since=valid_since, cell_windows=cell_windows)

@@ -88,8 +88,16 @@ class TestWindowCLI:
         for opt in ("--since", "--until", "--regime", "--all-time"):
             assert opt in result.output
 
-    def test_no_flags_says_full_corpus(self, db_path):
+    def test_no_flags_is_adaptive(self, db_path):
+        # v2: matchups default is now adaptive (per-cell ban-aware), not full-corpus.
         result = CliRunner().invoke(main, ["report", "matchups", "--db", db_path, "--provenance", "online"])
+        assert result.exit_code == 0, result.output
+        assert "window: adaptive" in result.output
+
+    def test_all_time_says_full_corpus(self, db_path):
+        result = CliRunner().invoke(
+            main, ["report", "matchups", "--db", db_path, "--provenance", "online", "--all-time"]
+        )
         assert result.exit_code == 0, result.output
         assert "window: full-corpus" in result.output
 

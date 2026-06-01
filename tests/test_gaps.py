@@ -143,8 +143,11 @@ class TestReportGapsCLI:
         assert "gaps" in result.output
 
     def test_gaps_happy_path(self, db_with_corpus):
+        # --all-time: the default is now adaptive (current-regime field), but this fixture's data is
+        # all Jan-2026, so full-corpus is needed to surface the corpus archetypes.
         result = CliRunner().invoke(
-            main, ["report", "gaps", "--db", db_with_corpus, "--min-coverage", "0.0", "--seed", "42"]
+            main, ["report", "gaps", "--db", db_with_corpus, "--all-time",
+                   "--min-coverage", "0.0", "--seed", "42"]
         )
         assert result.exit_code == 0, result.output
         assert "Archetype Gaps" in result.output
