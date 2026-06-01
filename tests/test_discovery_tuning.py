@@ -238,3 +238,19 @@ class TestGenerateTuneDiscoverCLI:
         )
         assert result.exit_code == 0, result.output
         assert "=== Discovery" not in result.output
+
+    def test_flag_does_not_change_swap_log(self, db_path, deck_file):
+        """AC: discovery never enters the greedy path — the swap log is identical with/without it."""
+        runner = CliRunner()
+        base = ["generate", "tune", "--deck", deck_file, "--archetype", "Control", "--db", db_path]
+
+        def swap_log(output: str) -> list[str]:
+            lines = output.splitlines()
+            start = next(i for i, ln in enumerate(lines) if "Swap log" in ln)
+            end = next((i for i, ln in enumerate(lines) if "=== Discovery" in ln), len(lines))
+            return [ln for ln in lines[start:end] if ln.startswith("//")]
+
+        without = runner.invoke(main, base)
+        with_flag = runner.invoke(main, [*base, "--discover"])
+        assert without.exit_code == 0 and with_flag.exit_code == 0
+        assert swap_log(without.output) == swap_log(with_flag.output)
