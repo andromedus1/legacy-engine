@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-adjacency
 kind: feature
-stage: implementing
+stage: review
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: []
@@ -322,3 +322,11 @@ def adjacency_candidates(
   archetypes. **Fallback**: `k` is a parameter; the `0.6` fraction is tunable without restructuring.
 - **Median-CMC band too tight** for bimodal curves (aggro-control). **Fallback**: band width is a
   constant (±1) easily widened; documented as a tuning lever, not load-bearing.
+
+## Implementation notes
+- Files changed: `src/legacy_engine/ingestion/store.py` (+`load_card`), `src/legacy_engine/generation/discovery.py` (new — Units 2–5).
+- Tests added: `tests/test_generation_discovery.py` (15: ShellProfile×2, Cooccurrence×3, AdjacencyCandidates×6 + helpers), `tests/test_store.py` (+3 `load_card`).
+- Suite: 982 passing (was 961, +21). `ruff check` clean on both touched files. mypy errors present are all pre-existing in other modules (report.py/charts.py) and not a CI gate.
+- Discrepancies from design: none. Built exactly to Units 1–5. The empty-band sentinel (`cmc_lo=1.0, cmc_hi=-1.0`) makes an all-locked deck surface zero candidates as designed.
+- Implementation detail: `_cooccurrence` uses three windowed CTE passes (universe per-card counts, total decks, core-deck count) rather than one mega-query — keeps each count independently assertable and matches `card_frequencies`' window-filter shape. PMI computed in Python from raw counts (SQL stays count-only, unit-testable).
+- Adjacent issues parked: none.

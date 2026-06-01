@@ -82,6 +82,33 @@ class TestStore:
 
         con.close()
 
+    def test_load_card_reconstructs_colors(self):
+        """load_card undoes the joined-string serialization back into a Card."""
+        con = _con()
+        store.load_cards(con, [Card(name="Brainstorm", type_line="Instant", cmc=1.0, colors=["U"])])
+        card = store.load_card(con, "Brainstorm")
+        assert card is not None
+        assert card.colors == ["U"]
+        assert card.cmc == 1.0
+        con.close()
+
+    def test_load_card_multicolor_round_trip(self):
+        """A multi-color card's colors split back into a single-char list."""
+        con = _con()
+        store.load_cards(
+            con, [Card(name="Baleful Strix", type_line="Artifact Creature — Bird", cmc=2.0, colors=["U", "B"])]
+        )
+        card = store.load_card(con, "Baleful Strix")
+        assert card is not None
+        assert card.colors == ["U", "B"]
+        con.close()
+
+    def test_load_card_miss_returns_none(self):
+        con = _con()
+        store.init_schema(con)
+        assert store.load_card(con, "Nonexistent") is None
+        con.close()
+
     def test_power_toughness_none_stored_as_null(self):
         """Cards without power/toughness store NULL and fetch back as None."""
         con = _con()

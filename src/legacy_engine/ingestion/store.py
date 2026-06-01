@@ -184,6 +184,26 @@ def fetch_card(con: duckdb.DuckDBPyConnection, name: str) -> dict | None:
     return dict(zip(columns, row))
 
 
+def load_card(con: duckdb.DuckDBPyConnection, name: str) -> Card | None:
+    """Resolve a card name to a fully reconstructed ``Card``, or ``None`` if absent.
+
+    SSOT for the cards-table round-trip: undoes the joined-string serialization of
+    ``colors`` / ``produced_mana`` that ``load_cards`` applies (``"".join(c.colors)``),
+    splitting them back into single-character lists. ``power``/``toughness`` are stored
+    as plain VARCHAR (or NULL) and pass through unchanged. Mirrors the reconstruction
+    currently inlined in ``advisory.whattoplay._load_deck_cards`` — that caller can adopt
+    this helper later.
+    """
+    row = fetch_card(con, name)
+    if row is None:
+        return None
+    colors_raw = row.get("colors") or ""
+    produced_raw = row.get("produced_mana") or ""
+    row["colors"] = list(colors_raw) if colors_raw else []
+    row["produced_mana"] = list(produced_raw) if produced_raw else []
+    return Card.model_validate(row)
+
+
 def rebuild(con: duckdb.DuckDBPyConnection) -> None:
     """Drop and recreate the cards table (raw JSON remains the source of truth)."""
     con.execute("DROP TABLE IF EXISTS cards")
