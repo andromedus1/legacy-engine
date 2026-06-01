@@ -100,10 +100,16 @@ def _load_field(
     *,
     field_text: str | None,
     provenance: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> FieldDistribution:
-    """Custom field from ``field_text`` (``<share> <archetype>`` lines) else the global field."""
+    """Custom field from ``field_text`` (``<share> <archetype>`` lines) else the global field.
+
+    ``since``/``until`` window the global field (half-open ``[since, until)``); both ``None`` =
+    full corpus. A custom ``field_text`` is user-specified and unaffected by the window.
+    """
     if field_text is None:
-        return build_global_field(con, provenance=provenance)
+        return build_global_field(con, provenance=provenance, since=since, until=until)
 
     shares: dict[str, float] = {}
     for raw_line in field_text.splitlines():
@@ -166,8 +172,14 @@ def build_field_read_report(
     archetype: str | None = None,
     reserved: int = 0,
     seed: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> FieldReadReport:
-    """Compose positioning + whattoplay + sideboard + audit trail into a FieldReadReport."""
+    """Compose positioning + whattoplay + sideboard + audit trail into a FieldReadReport.
+
+    ``since``/``until`` window the matchup matrix (half-open ``[since, until)``) so positioning is
+    computed over the same window as the (already-windowed) ``field``; both ``None`` = full corpus.
+    """
     from legacy_engine.advisory.positioning import positioning_score
     from legacy_engine.advisory.whattoplay import (
         best_deck_vs_best_call,
@@ -216,7 +228,7 @@ def build_field_read_report(
         audit.extend(f"field warning: {w}" for w in field.warnings)
 
     # ── Build matchup matrix once ────────────────────────────────────────────
-    matrix = build_matrix(con)
+    matrix = build_matrix(con, since=since, until=until)
     audit.append(
         f"matchup matrix: {len(matrix.archetypes)} archetypes, "
         f"{matrix.total_matches} decisive matches, "

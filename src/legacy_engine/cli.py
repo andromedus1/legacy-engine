@@ -31,6 +31,37 @@ def _not_implemented(command: str) -> NoReturn:
 _verbose = click.option("-v", "--verbose", is_flag=True, help="Verbose logging")
 
 
+def _window_opts(f):
+    """Stack the regime-window options (mirrors ``_verbose``).
+
+    Adds ``--since``/``--until`` (explicit half-open window), ``--regime`` (named/current ban
+    regime), and ``--all-time`` (explicit full corpus). Precedence + the thin-regime degrade live
+    in ``advisory.window.resolve_advisory_window``.
+    """
+    for opt in (
+        click.option("--all-time", is_flag=True, default=False,
+                     help="Use the full corpus (explicit; overrides --regime/--since/--until)."),
+        click.option("--regime", default=None,
+                     help="Ban regime to window to: 'current', or a label substring (e.g. 'Undercity')."),
+        click.option("--until", default=None, help="Window end (YYYY-MM-DD, exclusive)."),
+        click.option("--since", default=None, help="Window start (YYYY-MM-DD, inclusive)."),
+    ):
+        f = opt(f)
+    return f
+
+
+def _echo_window(res: "WindowResolution") -> None:
+    """Echo the resolved window (+ degrade banner) for auditability."""
+    from legacy_engine.advisory.window import WindowResolution  # noqa: F401
+
+    if res.since is None and res.until is None:
+        click.echo("// window: full-corpus")
+    else:
+        click.echo(f"// window: {res.since or '—'} .. {res.until or '—'}  ({res.requested_label})")
+    if res.banner:
+        click.echo(f"// {res.banner}")
+
+
 @click.group()
 def main() -> None:
     """legacy-engine — Magic: The Gathering Legacy analytics."""
@@ -179,6 +210,7 @@ def report() -> None:
     default=None,
     help="If set, render PNG charts into this directory.",
 )
+@_window_opts
 @_verbose
 def report_meta(
     definition: str,
@@ -186,12 +218,17 @@ def report_meta(
     min_share: float,
     db: str | None,
     chart_dir: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Metagame share (raw / top-cut / win-rate-weighted; online vs paper)."""
     _setup_logging(verbose)
     from pathlib import Path
 
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.metashare import MetaShareReport, compute_all, compute_metashare
     from legacy_engine.ingestion import store
 
@@ -215,12 +252,25 @@ def report_meta(
             definitions = [definition]
 
         for basis in bases:
+            # Meta-share is deck-based (not matchup/rounds-based), so it does NOT degrade on
+            # rounds-thinness — thin_floor=0. Per-row confidence tiers convey sample thinness.
+            win = resolve_advisory_window(
+                con, regime=regime, since=since, until=until, all_time=all_time,
+                provenance=basis, thin_floor=0,
+            )
+            _echo_window(win)
+            windowed = win.since is not None or win.until is not None
             for defn in definitions:
+                if windowed and defn == "wrw":
+                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
+                    continue
                 report = compute_metashare(
                     con,
                     definition=defn,
                     provenance=basis,
                     min_share=min_share,
+                    since=win.since,
+                    until=win.until,
                 )
                 _print_metashare_report(report)
                 if chart_dir:
@@ -282,18 +332,24 @@ def _print_metashare_report(report: "MetaShareReport") -> None:
     default=None,
     help="If set, render PNG charts into this directory.",
 )
+@_window_opts
 @_verbose
 def report_matchups(
     provenance: str,
     min_row_share: float,
     db: str | None,
     chart_dir: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Archetype matchup matrix with confidence intervals."""
     _setup_logging(verbose)
     from pathlib import Path
 
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.matchup import MatchupMatrix, build_matrix
     from legacy_engine.ingestion import store
 
@@ -311,7 +367,14 @@ def report_matchups(
             bases = [provenance]
 
         for basis in bases:
-            matrix = build_matrix(con, provenance=basis, min_row_share=min_row_share)
+            win = resolve_advisory_window(
+                con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
+            )
+            _echo_window(win)
+            matrix = build_matrix(
+                con, provenance=basis, min_row_share=min_row_share,
+                since=win.since, until=win.until,
+            )
             _print_matchup_matrix(matrix)
             if chart_dir:
                 fname = _chart_filename("matchups", "matchups", basis)
@@ -644,6 +707,7 @@ def _print_tier_list(model: "TierModel") -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def report_gaps(
     definition: str,
@@ -654,10 +718,15 @@ def report_gaps(
     min_share: float,
     seed: int | None,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Under-explored archetypes: high positioning S, low meta-share (deck-gen mode 3)."""
     _setup_logging(verbose)
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.advisory.gaps import compute_archetype_gaps
     from legacy_engine.ingestion import store
 
@@ -665,6 +734,10 @@ def report_gaps(
 
     con = store.connect(db) if db else store.connect()
     try:
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
+        )
+        _echo_window(win)
         report = compute_archetype_gaps(
             con,
             definition=definition,
@@ -674,6 +747,8 @@ def report_gaps(
             risk_quantile=risk_quantile,
             min_share=min_share,
             seed=seed,
+            since=win.since,
+            until=win.until,
         )
         _print_gap_report(report)
     finally:
@@ -893,6 +968,7 @@ def advise() -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def advise_positioning(
     deck: str,
@@ -902,6 +978,10 @@ def advise_positioning(
     reserved: int,
     seed: int | None,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Score a deck's expected win rate against the weighted field."""
@@ -910,6 +990,7 @@ def advise_positioning(
 
     from legacy_engine.advisory.positioning import positioning_score, rank_decks
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.matchup import build_matrix
     from legacy_engine.ingestion import store
 
@@ -919,8 +1000,12 @@ def advise_positioning(
 
     con = store.connect(db) if db else store.connect()
     try:
-        field = _load_field(con, field_text=field_text)
-        matrix = build_matrix(con)
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
+        matrix = build_matrix(con, since=win.since, until=win.until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -1078,12 +1163,17 @@ def advise_sideboard(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def advise_whattoplay(
     deck: str,
     archetype: str | None,
     field_file: str | None,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Field read and deck recommendation."""
@@ -1092,6 +1182,7 @@ def advise_whattoplay(
 
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist, _render_whattoplay
     from legacy_engine.advisory.whattoplay import proactivity_score, vulnerability_tags_for_deck
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
@@ -1100,7 +1191,11 @@ def advise_whattoplay(
 
     con = store.connect(db) if db else store.connect()
     try:
-        field = _load_field(con, field_text=field_text)
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -1112,7 +1207,7 @@ def advise_whattoplay(
         from legacy_engine.advisory.whattoplay import best_deck_vs_best_call, field_vulnerability_tags, hate_equity
         from legacy_engine.analytics.matchup import build_matrix
 
-        matrix = build_matrix(con)
+        matrix = build_matrix(con, since=win.since, until=win.until)
         archetype_tags = field_vulnerability_tags(con, field)
         field_vuln_profile = hate_equity(field, archetype_tags)
 
@@ -1187,6 +1282,7 @@ def advise_whattoplay(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def advise_report(
     deck: str,
@@ -1195,6 +1291,10 @@ def advise_report(
     reserved: int,
     seed: int | None,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Full Field Read & Deck Recommendation (positioning + what-to-play + sideboard + audit)."""
@@ -1207,6 +1307,7 @@ def advise_report(
         build_field_read_report,
         render_field_read,
     )
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
@@ -1215,7 +1316,11 @@ def advise_report(
 
     con = store.connect(db) if db else store.connect()
     try:
-        field = _load_field(con, field_text=field_text)
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
         report = build_field_read_report(
             con,
             mainboard,
@@ -1224,6 +1329,8 @@ def advise_report(
             archetype=archetype,
             reserved=reserved,
             seed=seed,
+            since=win.since,
+            until=win.until,
         )
         click.echo(render_field_read(report))
     finally:

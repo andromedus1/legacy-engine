@@ -387,14 +387,16 @@ def compute_metashare(
     date window against ``tournaments.date``; ``None`` = no bound.
 
     ``definition="wrw"`` with a date window raises ``NotImplementedError`` — windowed
-    win-rate-weighted share is incoherent because ``compute_match_results`` is not windowed.
+    win-rate-weighted share is incoherent here because this path weights by the full-corpus
+    win-rate aggregate rather than a per-window one; use raw/topcut for windowed/trend views.
 
     Returns a fully-labeled ``MetaShareReport`` with confidence tiers and the
     inclusion floor applied.
     """
     if definition == "wrw" and (since is not None or until is not None):
         raise NotImplementedError(
-            "windowed wrw is unsupported — match_results is not windowed; use raw/topcut for trends"
+            "windowed wrw is unsupported here — this path weights by the full-corpus win-rate "
+            "aggregate, not a per-window one; use raw/topcut for windowed/trend views"
         )
 
     unlabeled = _unlabeled_count(con, provenance=provenance, since=since, until=until)
