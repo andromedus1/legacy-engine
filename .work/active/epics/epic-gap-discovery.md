@@ -1,14 +1,14 @@
 ---
 id: epic-gap-discovery
 kind: epic
-stage: drafting
+stage: implementing
 tags: [generation, discovery]
 parent: null
 depends_on: [epic-deck-generation]
 release_binding: null
 gate_origin: null
 created: 2026-05-31
-updated: 2026-05-31
+updated: 2026-06-01
 ---
 
 # Gap Discovery (deck generation mode 3)
@@ -37,13 +37,48 @@ The adjacency model is a genuine research question (card-similarity / deckbuildi
 how to transfer per-card value across archetype contexts + confidence-gating exploratory picks). Write the
 brief before `/epic-design`. Brief topic queued: **card-level adjacency & discovery for deck tuning**.
 
-## Anticipated child features (sketch — realized at /epic-design after the brief)
-- `archetype-gap-finder` — high-S / low-share surfacing (positioning × metashare).
-- `card-adjacency-model` — role/color/CMC/synergy adjacency over the card pool (heuristic first;
-  embedding/co-occurrence later) grounded in existing card tags + `card_value`.
-- `discovery-tuning` — extend `generation/tuning` candidate pool to gate-clearing cross-field-valued adjacent
-  cards (confidence-gated; bounded v1 needs no goldfish).
-- (later) `goldfish-validated-candidates` — once `epic-goldfish-simulation` exists, validate exploratory picks.
+## Design decisions
+- **Card-discovery CLI surface**: `--discover` flag on `generate tune` (not a separate command) — one
+  command, two clearly-flagged output blocks: proven in-pool swaps first, exploratory suggestions in a
+  distinct labeled section after.
+- **Synergy/engine-piece candidates**: include, but require in-shell evidence (option b) — nominated by the
+  adjacency model, get NO cross-field transfer credit, must clear the normal un-transferred in-shell
+  confidence gate to surface (general path; rarely fires since they're under-played in shell by definition).
+- **Archetype-gap surface**: new `report gaps` command in the existing `report` family (not a column folded
+  into `report tiers`) — keeps the two distinct reads uncoupled.
+
+## Decomposition
+
+Split by capability into the two halves of mode 3, with the card-gap half further split along the
+nominate-then-score seam. The **archetype-gap** half is mechanical and fully independent
+(`report gaps` over positioning × metashare) → its own parallelizable feature. The **card-gap** half splits
+into nomination (`adjacency`: which cards are even candidates) and evidence+honesty (`discovery-tuning`:
+cross-archetype value transfer, role-gated, confidence-gated, suggest-and-label). This shape isolates the
+load-bearing safety logic (transfer gating, honesty invariants) into one feature and keeps the corpus-query
+adjacency work separable, while letting the archetype-gap read ship in parallel.
+
+### Child features
+
+- `epic-gap-discovery-archetype-gaps` — `report gaps`: high-S / low-share archetype surfacing (positioning ×
+  metashare), confidence-gated — depends on: `[]`
+- `epic-gap-discovery-adjacency` — `generation/discovery.py` candidate nomination: not-in-deck ∩ color-legal
+  ∩ role-relevant ∩ CMC-band, ranked by `deck_cards` co-occurrence PMI — depends on: `[]`
+- `epic-gap-discovery-discovery-tuning` — `--discover` flag on `generate tune`: role-gated cross-archetype
+  value transfer (shrunk), established-tier gate, distinct labeled suggest-and-label surface — depends on:
+  `[epic-gap-discovery-adjacency]`
+
+### Decomposition risks
+
+- **discovery-tuning is the riskiest feature** — it is where exploration could fabricate edges. The honesty
+  invariants (distinct flagged section, never drives the greedy objective, established-tier bar, explicit
+  correlational/not-goldfish labels, capped count) are load-bearing and must not be relaxed for coverage.
+- **Synergy-include (option b) adds a second gate path** in discovery-tuning (transferred vs un-transferred
+  in-shell), slightly more branching than omit-entirely would have. Acceptable for generality; covered by the
+  inherited decision.
+- **archetype-gaps is the smallest feature** (reuses two shipped surfaces) — borderline tiny, but a distinct
+  capability with its own CLI + gap-score design, so it stays its own feature rather than folding into report.
+- **(later) goldfish-validated candidates** — deferred to `epic-goldfish-simulation`; discovery-tuning's
+  output is designed so a goldfish-passes? filter slots in as a promote-from-suggestion step without a rewrite.
 
 ## Foundation references
 - `docs/briefs/deck-generation-and-moxfield.md` §2.2 (mode 3 card-gaps).
