@@ -53,3 +53,6 @@ window (→ `adaptive`) or the core plumbing (→ `windowing-core`).
 - `src/legacy_engine/cli.py` — `report matchups|meta|gaps`, `advise *` command group; the
   `report tiers`/`report gaps` option-shape precedent.
 - `windowing-core`'s regime resolver + windowed `build_matrix`/`compute_archetype_gaps`.
+
+## Carried-forward nit (from windowing-core review)
+- `metashare.py` has stale text now that `compute_match_results` IS windowed: the module docstring (~line 4) and the windowed-`wrw` `NotImplementedError` message (~line 397) both say "match_results is not windowed". Behavior is still correct (the wrw guard stands); fix the wording during this feature's pass.
