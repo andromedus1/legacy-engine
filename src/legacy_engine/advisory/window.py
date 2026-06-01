@@ -8,7 +8,9 @@ full corpus and carry a loud banner** rather than return a thin or empty result 
 
 Thinness is gated on a cheap rounds-count proxy (one `COUNT(*)`), not a full match-results build —
 matchup data lives in rounds-bearing events, so the in-window round count tracks matchup-data volume
-closely enough for a thin/not-thin gate; the banner reports the actual count honestly.
+closely enough for a thin/not-thin gate; the banner reports the actual count honestly. Deck-based
+surfaces (e.g. `report meta`) pass `thin_floor=0` to DISABLE the rounds-degrade — their thinness is
+conveyed by per-row confidence tiers, not the rounds-bearing matchup population.
 """
 
 from __future__ import annotations
