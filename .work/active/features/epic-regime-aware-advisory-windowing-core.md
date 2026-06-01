@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-windowing-core
 kind: feature
-stage: drafting
+stage: implementing
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: []
@@ -54,3 +54,136 @@ adaptive per-cell windowing (→ `adaptive`). It only makes a uniformly-windowed
 - `src/legacy_engine/analytics/matchup.py` — `build_matrix`.
 - `src/legacy_engine/analytics/trends.py` — `regime_windows` (resolver source).
 - `src/legacy_engine/advisory/gaps.py` — `compute_archetype_gaps` (window threading).
+
+## Design decisions
+Resolved with judgment during feature-design (autopilot delegation); mechanical, not strategic:
+- **Half-open `[since, until)` window semantics** (`>= since AND < until`) — matches `analytics.trends.regime_windows`
+  and `generation.consensus.card_frequencies` (the dominant convention). NOTE: the sibling
+  `compute_card_winrates` uses inclusive `<= until` — a pre-existing minor discrepancy. NOT changed here
+  (would risk a `card_value` regression); flagged for a possible follow-up. Regime boundaries are exact ban
+  dates, so half-open avoids double-counting a boundary day across adjacent regimes.
+- **`build_global_field` is windowed too** — gaps windowing is only coherent if BOTH its matrix and its field
+  use the same window, so `build_global_field` gains `since/until` threaded into its existing
+  `compute_metashare(..., since, until)` call. (Windowed `wrw` raises `NotImplementedError`, but the field
+  default is `raw` — fine.)
+- **Regime resolver lives in `analytics/trends.py`** (next to `regime_windows`, its only data source).
+  `"current"` → the last (open-ended) regime window; a named regime → matched by label substring; unknown →
+  `ValueError` (fail-loud).
+- **Additive, full-corpus default preserved** — every new param defaults to `None`; the `(? IS NULL OR …)`
+  predicates are no-ops when unset, so existing callers + tests are byte-identical.
+
+## Architectural choice
+Mirror the windowing that `compute_card_winrates` already established in the same module: add the two
+date predicates to the shared rounds-join so the date filter rides on the SAME cardinality-safe
+dup/uniq_decks CTE (no parser divergence, no second code path). Windowing happens at **aggregate-build
+time** (`compute_match_results` → `build_matrix`; `compute_metashare` → `build_global_field`); the
+positioning consumers (`positioning_score`, `rank_decks`) take a pre-built matrix + field and need NO
+changes — the window flows in through their inputs. Rejected: a separate windowed-matrix code path
+(divergence risk); windowing inside positioning (wrong layer — would re-window per call).
+
+## Implementation Units
+
+### Unit 1: `compute_match_results` windowing
+**File**: `src/legacy_engine/analytics/match_results.py`
+```python
+def compute_match_results(
+    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
+    since: str | None = None, until: str | None = None,
+) -> MatchResults: ...
+# _JOIN_SQL gains, after the provenance predicate:
+#   AND (? IS NULL OR t.date >= ?)
+#   AND (? IS NULL OR t.date <  ?)
+# params: [provenance, provenance, since, since, until, until]
+```
+**Implementation Notes**: half-open `[since, until)`. The `_JOIN_SQL` constant is shared only by this
+function; editing it is safe. `MatchResults` already carries `provenance`; no new result field needed
+(window is the caller's context). Mirror the exact predicate ordering used in `_CARD_WINRATES_SQL` for
+readability parity.
+**Acceptance Criteria**:
+- [ ] `compute_match_results(con)` (no window) returns byte-identical results to before (regression).
+- [ ] A window excluding all rounds → empty `matchups`, `coverage.decisive_matched == 0`.
+- [ ] A window covering only regime R returns only matches dated in `[since, until)`.
+
+---
+
+### Unit 2: `build_matrix` windowing
+**File**: `src/legacy_engine/analytics/matchup.py`
+```python
+def build_matrix(con, *, provenance=None, min_row_share=0.02,
+                 since: str | None = None, until: str | None = None) -> MatchupMatrix:
+    mr = compute_match_results(con, provenance=provenance, since=since, until=until)
+```
+**Acceptance Criteria**:
+- [ ] `build_matrix(con)` unchanged (regression). `build_matrix(con, since=…, until=…)` builds over the window.
+
+---
+
+### Unit 3: `build_global_field` windowing
+**File**: `src/legacy_engine/advisory/field.py`
+```python
+def build_global_field(con, *, definition="raw", provenance=None, min_share=0.0,
+                       since: str | None = None, until: str | None = None) -> FieldDistribution:
+    report = compute_metashare(con, definition=definition, provenance=provenance,
+                               min_share=min_share, group_other=False, since=since, until=until)
+```
+**Acceptance Criteria**:
+- [ ] `build_global_field(con)` unchanged (regression). Windowed call narrows the field shares/counts to the window.
+
+---
+
+### Unit 4: `compute_archetype_gaps` windowing
+**File**: `src/legacy_engine/advisory/gaps.py`
+```python
+def compute_archetype_gaps(con, *, definition="raw", provenance=None, share_weight=1.0,
+                           min_coverage=0.5, risk_quantile=0.25, min_share=0.0, seed=None,
+                           since: str | None = None, until: str | None = None) -> GapReport:
+    field  = build_global_field(con, definition=definition, provenance=provenance,
+                                min_share=min_share, since=since, until=until)
+    matrix = build_matrix(con, provenance=provenance, since=since, until=until)
+```
+**Acceptance Criteria**:
+- [ ] `compute_archetype_gaps(con, seed=…)` unchanged (regression). Windowed call ranks over windowed matrix+field.
+
+---
+
+### Unit 5: regime resolver
+**File**: `src/legacy_engine/analytics/trends.py`
+```python
+def resolve_regime(name: str = "current") -> tuple[str | None, str | None]:
+    """Map a regime name to a half-open (since, until) window via ``regime_windows()``.
+    "current" → the last (until=None) window; a label substring → that regime; unknown → ValueError."""
+```
+**Implementation Notes**: returns ISO date strings (or None for an open bound), ready to pass straight
+into the windowed functions above. `"current"` mirrors `consensus._latest_regime_window`'s "last window"
+selection (reuse that logic / call it where sensible to stay SSOT).
+**Acceptance Criteria**:
+- [ ] `resolve_regime("current")` returns the latest regime's `(since, None)`.
+- [ ] A label substring (e.g. `"Undercity"`) resolves to that regime's window.
+- [ ] An unknown name raises `ValueError`.
+
+## Implementation Order
+1. **Unit 1** (`compute_match_results`) — the core; everything else threads through it.
+2. **Unit 2** (`build_matrix`) + **Unit 3** (`build_global_field`) — passthroughs.
+3. **Unit 4** (`compute_archetype_gaps`) — composes 2+3.
+4. **Unit 5** (`resolve_regime`) — independent; consumed by `cli-surface` next feature.
+
+## Testing
+### Unit tests: `tests/test_match_results.py` (+ `test_matchup.py`, `test_gaps.py`, `test_trends.py`)
+- `compute_match_results`: no-window regression equals prior; windowed corpus (use `make_rounds_corpus`
+  whose tournaments are dated `2026-01-0N` — window `[2026-01-01, 2026-01-03)` includes only repeats 1–2)
+  yields the expected reduced decisive count; empty window → zero coverage.
+- `build_matrix` / `build_global_field` / `compute_archetype_gaps`: regression (no-window == prior) + a
+  windowed call narrows results.
+- `resolve_regime`: current → last window; substring match; unknown → ValueError.
+### Integration
+- Build a windowed matrix + windowed global field over the same window and confirm `rank_decks` consumes
+  them unchanged (positioning needs no new params — the window flows through its inputs).
+
+## Risks
+- **Half-open vs `compute_card_winrates`'s inclusive `<=`** — the two aggregates will treat a boundary-day
+  match differently. Acceptable (boundary days are rare; regimes are the dominant convention). **Fallback**:
+  align `card_winrates` to half-open in a follow-up if it ever matters; out of scope here to avoid a
+  `card_value` regression.
+- **`build_global_field` windowed `wrw`** — `compute_metashare` raises `NotImplementedError` for windowed
+  `wrw`. The field default is `raw`, so the default path is safe; a caller passing `definition="wrw"` +
+  window would hit the existing guard. **Fallback**: none needed — the guard is correct behavior.
