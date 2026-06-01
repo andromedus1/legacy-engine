@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-discovery-tuning
 kind: feature
-stage: implementing
+stage: review
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: [epic-gap-discovery-adjacency]
@@ -324,3 +324,11 @@ def _print_discovery(result: "DiscoveryResult") -> None: ...
   existing `idea-tuning-sideboard-winrate-reuse` backlog item, not regressed here.
 - **`card_values_vs` per-opponent call volume** — one lookup per field opponent per candidate; field
   is small (≤~30 archetypes) and `rates` is precomputed, so it's dict lookups, not scans. Fine.
+
+## Implementation notes
+- Files changed: `src/legacy_engine/generation/discovery.py` (+`TRANSFERABLE_ROLES`, `DiscoverySuggestion`, `DiscoveryResult`, pure `_transfer_from_values`, `discover_candidates`); `src/legacy_engine/generation/tuning.py` (additive `card_winrates` param on `tune_deck`); `src/legacy_engine/cli.py` (`--discover`/`--discover-cap` on `generate tune`, one-scan wiring, `_print_discovery`).
+- Tests added: `tests/test_discovery_tuning.py` (12: TRANSFERABLE_ROLES, `_transfer_from_values`×4 pure, `discover_candidates`×3 corpus, `tune_deck` injection no-drift, CLI×3).
+- Suite: 1006 passing (was 994, +12). `ruff check` clean on all changed files.
+- Discrepancies from design: none material. Built Units 1–4 as specified. One bug caught + fixed in-session: `card_values_vs` returns a dict keyed by CARD name, so the opponent loop must unwrap `[name]` to build the `opponent→CardValue` map (was overwriting one key → transfer always 0). Regression-covered by the corpus test (Daze surfaces vs Combo).
+- **End-to-end validated on the real seeded DB**: `generate tune --discover` on a consensus Dimir Tempo list nominated 3 transferable adjacent candidates, NONE cleared the established (n≥100) gate → honest degradation (no fabricated edges), 3 below-gate omissions reported. The established gate correctly suppresses thin real-data edges.
+- Adjacent issues parked: `idea-decklist-parser-skip-comments` (pre-existing: `_parse_decklist` rejects `//` comment lines, blocking the generate→tune pipe — surfaced during validation, not introduced here).

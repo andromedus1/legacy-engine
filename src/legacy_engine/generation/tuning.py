@@ -576,6 +576,7 @@ def tune_deck(
     until: str | None = None,
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     max_swaps: int = _DEFAULT_MAX_SWAPS,
+    card_winrates=None,
 ) -> TunedDeck:
     """Optimise a maindeck against the field using greedy per-card-value tuning.
 
@@ -676,12 +677,15 @@ def tune_deck(
     # The heavy full-corpus scan runs a single time and is reused by both
     # field_weighted_values (the swap objective) and recommend_sideboard (the
     # value-aware weighting + per-matchup plans), rather than 3x per tune.
-    try:
-        from legacy_engine.analytics.match_results import compute_card_winrates
-        card_winrates = compute_card_winrates(con, since=eff_since, until=eff_until)
-    except Exception as exc:
-        log.debug("tune_deck: compute_card_winrates failed: %s", exc)
-        card_winrates = None
+    # A caller (e.g. the `--discover` CLI path) may inject a precomputed aggregate
+    # over the same window to avoid a second scan; None → compute here as before.
+    if card_winrates is None:
+        try:
+            from legacy_engine.analytics.match_results import compute_card_winrates
+            card_winrates = compute_card_winrates(con, since=eff_since, until=eff_until)
+        except Exception as exc:
+            log.debug("tune_deck: compute_card_winrates failed: %s", exc)
+            card_winrates = None
 
     # ── Compute field-weighted per-card values (reuses the aggregate above) ──
     all_cards = list(set(list(maindeck.keys()) + pool))
