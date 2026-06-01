@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-windowing-core
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: []
@@ -187,3 +187,10 @@ selection (reuse that logic / call it where sensible to stay SSOT).
 - **`build_global_field` windowed `wrw`** — `compute_metashare` raises `NotImplementedError` for windowed
   `wrw`. The field default is `raw`, so the default path is safe; a caller passing `definition="wrw"` +
   window would hit the existing guard. **Fallback**: none needed — the guard is correct behavior.
+
+## Implementation notes
+- Files changed: `analytics/match_results.py` (compute_match_results +since/until; `_JOIN_SQL` gains the half-open date predicates), `analytics/matchup.py` (build_matrix passthrough), `advisory/field.py` (build_global_field passthrough → compute_metashare), `advisory/gaps.py` (compute_archetype_gaps +since/until into both build_global_field + build_matrix; docstring de-"un-windowed"), `analytics/trends.py` (new `resolve_regime`; also removed 2 pre-existing dead imports MetaShareEntry/tier_for_sample).
+- Tests added: `tests/test_regime_windowing_core.py` (13: compute_match_results×4 incl half-open-exclusive-upper, build_matrix/field×3, gaps×2, resolve_regime×4).
+- Suite: 1020 passing (was 1007, +13). `ruff check` clean on all touched files (incl. the 2 dead-import removals).
+- Discrepancies from design: none. Built Units 1–5 as specified. Half-open `[since, until)` confirmed by `test_half_open_upper_is_exclusive`. All new params default `None` → byte-identical no-window path (regression tests green).
+- Adjacent issues parked: none (the `compute_card_winrates` inclusive-`<=` discrepancy is documented in the design as an accepted, out-of-scope follow-up).

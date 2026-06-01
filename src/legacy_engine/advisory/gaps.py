@@ -112,16 +112,20 @@ def compute_archetype_gaps(
     risk_quantile: float = _DEFAULT_RISK_QUANTILE,
     min_share: float = 0.0,
     seed: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> GapReport:
     """Rank archetypes by under-exploration: high positioning ``S``, low meta-share.
 
     Builds the global field + matchup matrix, scores every field archetype against the shared
     field via ``rank_decks`` (which carries the ``min_coverage`` honesty gate), then assembles the
-    gap ranking. Un-windowed — consistent with ``build_matrix`` / ``rank_decks`` / the field, none
-    of which are windowed. Returns an empty ``GapReport`` for an empty field.
+    gap ranking. ``since``/``until`` window both the field and the matchup matrix (half-open
+    ``[since, until)``); both ``None`` (default) = full corpus. Returns an empty ``GapReport`` for an
+    empty field.
     """
     field = build_global_field(
         con, definition=definition, provenance=provenance, min_share=min_share,
+        since=since, until=until,
     )
     candidates = list(field.shares)
     if not candidates:
@@ -134,7 +138,7 @@ def compute_archetype_gaps(
             min_coverage=min_coverage,
         )
 
-    matrix = build_matrix(con, provenance=provenance)
+    matrix = build_matrix(con, provenance=provenance, since=since, until=until)
     ranking = rank_decks(
         matrix, field, candidates,
         risk_quantile=risk_quantile,

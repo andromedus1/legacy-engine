@@ -102,6 +102,8 @@ def build_global_field(
     definition: str = "raw",
     provenance: str | None = None,
     min_share: float = 0.0,
+    since: str | None = None,
+    until: str | None = None,
 ) -> FieldDistribution:
     """Build the global field from the labeled corpus via ``compute_metashare``.
 
@@ -109,6 +111,10 @@ def build_global_field(
     Unknown/Conflict labels (renormalizing + warning with the excluded share fraction).
     Carries the per-archetype deck counts as the Dirichlet ``counts``.
     ``field_source='global'``.
+
+    ``since``/``until`` window the field by ``tournaments.date`` (half-open
+    ``[since, until)``); both ``None`` (default) = full corpus. Windowed ``wrw`` is
+    unsupported upstream, but the default ``raw`` definition windows fine.
     """
     report = compute_metashare(
         con,
@@ -116,6 +122,8 @@ def build_global_field(
         provenance=provenance,
         min_share=min_share,
         group_other=False,
+        since=since,
+        until=until,
     )
 
     kept_entries = []
