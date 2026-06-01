@@ -174,11 +174,14 @@ def build_field_read_report(
     seed: int | None = None,
     since: str | None = None,
     until: str | None = None,
+    matrix=None,
 ) -> FieldReadReport:
     """Compose positioning + whattoplay + sideboard + audit trail into a FieldReadReport.
 
     ``since``/``until`` window the matchup matrix (half-open ``[since, until)``) so positioning is
     computed over the same window as the (already-windowed) ``field``; both ``None`` = full corpus.
+    A precomputed ``matrix`` (e.g. the adaptive per-cell matrix) may be injected, in which case
+    ``since``/``until`` are ignored for the matrix build.
     """
     from legacy_engine.advisory.positioning import positioning_score
     from legacy_engine.advisory.whattoplay import (
@@ -228,7 +231,8 @@ def build_field_read_report(
         audit.extend(f"field warning: {w}" for w in field.warnings)
 
     # ── Build matchup matrix once ────────────────────────────────────────────
-    matrix = build_matrix(con, since=since, until=until)
+    if matrix is None:
+        matrix = build_matrix(con, since=since, until=until)
     audit.append(
         f"matchup matrix: {len(matrix.archetypes)} archetypes, "
         f"{matrix.total_matches} decisive matches, "

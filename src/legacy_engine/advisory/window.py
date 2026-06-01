@@ -26,12 +26,20 @@ _THIN_ROUNDS_FLOOR: int = 500  # below this many in-window rounds → degrade to
 
 @dataclass(frozen=True)
 class WindowResolution:
-    """The resolved advisory window plus any degrade banner and a label for the header echo."""
+    """The resolved advisory window plus any degrade banner and a label for the header echo.
+
+    ``mode`` drives matrix-consumer behavior (matchups/positioning/gaps): ``"adaptive"`` (the v2
+    default — per-cell ban-aware matrix + current-regime field), ``"uniform"`` (an explicit
+    ``--regime``/``--since`` window applied to both legs, the v1 path), or ``"full"`` (full corpus,
+    via ``--all-time``). Deck-based surfaces like ``report meta`` ignore ``mode`` and just use
+    ``since``/``until``.
+    """
 
     since: str | None
     until: str | None
     banner: str | None        # set only when a thin requested window was degraded to full corpus
     requested_label: str      # "full-corpus" | "regime: <name>" | "<since>..<until>"
+    mode: str = "full"        # "adaptive" | "uniform" | "full"
 
 
 def _count_rounds(
@@ -65,6 +73,7 @@ def resolve_advisory_window(
     all_time: bool = False,
     provenance: str | None = None,
     thin_floor: int = _THIN_ROUNDS_FLOOR,
+    adaptive_default: bool = True,
 ) -> WindowResolution:
     """Resolve advisory window flags into a concrete window, degrading thin regimes to full corpus.
 
@@ -75,23 +84,30 @@ def resolve_advisory_window(
     surfaces like ``report meta`` whose thinness is conveyed by per-row confidence tiers, not the
     rounds-bearing matchup population.
     """
-    # Full corpus — explicit or default. No degrade.
-    if all_time or (regime is None and since is None and until is None):
-        return WindowResolution(since=None, until=None, banner=None, requested_label="full-corpus")
+    # Explicit full corpus.
+    if all_time:
+        return WindowResolution(None, None, None, "full-corpus", mode="full")
+
+    # Default (no flags) → adaptive per-cell windowing for matrix consumers (v2 default).
+    # Deck-based surfaces (report meta) pass adaptive_default=False → full corpus default.
+    if regime is None and since is None and until is None:
+        if adaptive_default:
+            return WindowResolution(None, None, None, "adaptive", mode="adaptive")
+        return WindowResolution(None, None, None, "full-corpus", mode="full")
 
     if regime is not None:
         win_since, win_until = resolve_regime(regime)
         label = f"regime: {regime}"
         # resolve_regime("all"/"all-time") → (None, None): treat as full corpus.
         if win_since is None and win_until is None:
-            return WindowResolution(None, None, None, "full-corpus")
+            return WindowResolution(None, None, None, "full-corpus", mode="full")
     else:
         win_since, win_until = since, until
         label = f"{since or '—'}..{until or '—'}"
 
     if thin_floor <= 0:
         # Degrade disabled (deck-based surface): honor the window as-is.
-        return WindowResolution(since=win_since, until=win_until, banner=None, requested_label=label)
+        return WindowResolution(win_since, win_until, None, label, mode="uniform")
 
     n_rounds = _count_rounds(con, since=win_since, until=win_until, provenance=provenance)
     if n_rounds < thin_floor:
@@ -99,6 +115,62 @@ def resolve_advisory_window(
             f"⚠ requested window ({label}) is THIN: {n_rounds} rounds < floor {thin_floor} — "
             f"showing FULL-CORPUS data (matchup/positioning math is unreliable on a window this small)"
         )
-        return WindowResolution(since=None, until=None, banner=banner, requested_label=label)
+        # Degraded to full corpus, but the request was an explicit uniform window.
+        return WindowResolution(None, None, banner, label, mode="uniform")
 
-    return WindowResolution(since=win_since, until=win_until, banner=None, requested_label=label)
+    return WindowResolution(win_since, win_until, None, label, mode="uniform")
+
+
+@dataclass(frozen=True)
+class AdvisoryInputs:
+    """Resolved matchup matrix + the field window to pair with it, plus audit lines to echo.
+
+    In adaptive mode the matrix is per-cell ban-aware and the field window is the CURRENT regime
+    (so dead decks fall out via ≈0 current share); in uniform/full mode both legs share one window.
+    """
+
+    matrix: object                 # analytics.matchup.MatchupMatrix
+    field_since: str | None
+    field_until: str | None
+    audit: tuple[str, ...]
+
+
+def _adaptive_audit(valid_since: dict[str, str | None]) -> tuple[str, ...]:
+    """One compact line naming ban-affected archetypes + their valid_since (others = full corpus)."""
+    affected = sorted((a, s) for a, s in valid_since.items() if s is not None)
+    if not affected:
+        return ("// adaptive: no archetype ban-affected — all cells use full corpus",)
+    parts = "; ".join(f"{a} since {s}" for a, s in affected)
+    return (f"// adaptive: per-cell windows — {parts}; all others full-corpus",)
+
+
+def build_advisory_inputs(
+    con: duckdb.DuckDBPyConnection,
+    win: WindowResolution,
+    *,
+    provenance: str | None = None,
+    min_row_share: float = 0.02,
+):
+    """Build the matchup matrix (+ field window + audit) per the resolved window mode.
+
+    - ``adaptive`` → ``build_adaptive_matrix`` + field over the current ban regime.
+    - ``uniform``  → ``build_matrix`` over ``win.since/until``; field shares that same window.
+    - ``full``     → full-corpus matrix + full-corpus field.
+    """
+    from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
+
+    if win.mode == "adaptive":
+        adaptive = build_adaptive_matrix(con, provenance=provenance, min_row_share=min_row_share)
+        cur_since, cur_until = resolve_regime("current")
+        return AdvisoryInputs(
+            matrix=adaptive.matrix,
+            field_since=cur_since,
+            field_until=cur_until,
+            audit=_adaptive_audit(adaptive.valid_since),
+        )
+
+    matrix = build_matrix(
+        con, provenance=provenance, min_row_share=min_row_share,
+        since=win.since, until=win.until,
+    )
+    return AdvisoryInputs(matrix=matrix, field_since=win.since, field_until=win.until, audit=())

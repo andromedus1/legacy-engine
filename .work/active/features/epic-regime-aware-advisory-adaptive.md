@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-adaptive
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: [epic-regime-aware-advisory-windowing-core, epic-regime-aware-advisory-cli-surface]
@@ -209,3 +209,12 @@ All Spells since 2026-05-18; others full-corpus`). Don't dump all cells.
   line. **Fallback**: none; this is the inherited strategic decision.
 - **Pre-ban window too thin to judge affectedness** for a niche archetype → left unaffected (full history).
   Acceptable (niche decks have little data either way); audited via the valid_since summary.
+
+## Implementation notes
+- Files changed: `analytics/affectedness.py` (new — `archetype_valid_since`, batched 1 query/ban-date), `analytics/matchup.py` (`AdaptiveMatrix` + `build_adaptive_matrix`: ≤(#distinct valid_since) scans, per-cell `max(vs)` sourcing), `advisory/window.py` (`WindowResolution.mode` + `AdvisoryInputs` + `build_advisory_inputs` + `_adaptive_audit` + `adaptive_default` param), `cli.py` (`_window_opts`/`_echo_window` mode-aware; default-flip wired into report matchups/gaps + advise positioning/whattoplay/report; `report meta` opts out via `adaptive_default=False`), `advisory/report.py` (`build_field_read_report` matrix injection), `advisory/gaps.py` (`compute_archetype_gaps` matrix+field injection).
+- Affectedness placed in `analytics/` (not advisory) to keep `analytics → advisory` acyclic — `build_adaptive_matrix` (analytics) consumes it.
+- Tests added: `tests/test_adaptive_regime.py` (7: affectedness×2, adaptive-matrix×2 incl scan-count spy, mode×3). Updated `test_gaps.py` (gaps CLI now needs `--all-time` for full-corpus) + `test_advisory_window.py` (matchups default = adaptive).
+- Suite: 1043 passing (was 1020 at epic start, +23 net for v2). ruff clean on all new/changed non-cli files.
+- Discrepancies from design: none material. Built Units 1–4. One refinement: added `adaptive_default=False` so `report meta` (deck-based) keeps full-corpus default + correct label, rather than inheriting the adaptive default it doesn't use.
+- **End-to-end validated on real DB**: `advise positioning` (default=adaptive) now ranks Lands/Show and Tell/Doomsday/Death & Taxes/Izzet Delver at the top — **Dimir Reanimator dropped out** (≈0 current-regime share zeroes its weight despite strong historical cells); the audit line shows per-archetype valid_since (Reanimator since 2025-11-10 = Entomb). The stale-after-ban best-deck artifact is fixed. `--all-time` restores the full-corpus view.
+- Adjacent issues parked: none.
