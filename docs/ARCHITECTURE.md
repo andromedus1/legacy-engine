@@ -225,6 +225,7 @@ No web server. DuckDB is embedded (file-backed, no server) — keeps the "no ser
 |---|---|---|
 | **goldfish/** simulation (mana solver, London mulligan Monte-Carlo, clocks, meta-speed) | Deck Mechanics pillar; ports cleanly from edh-engine; not blocking meta+advisory | deck-as-data YAML + role dispatch; legacy-foundations brief |
 | **goldfish-validated candidate-validation** (gap-discovery mode 3 itself is now built: `generation/discovery.py` + `advisory/gaps.py`) | discovery ships confidence-gated suggest-and-label; promoting a suggestion to "validated" needs the goldfish pillar | consumes generation/discovery + (later) goldfish outputs |
+| **Regime-aware advisory** — the matchup/positioning layer (`compute_match_results` → `build_matrix` → `positioning`/`rank_decks`/`gaps`) is currently **full-corpus / not ban-regime aware**, so it goes stale after a format-defining ban (the meta-share/`trends` layer, which IS regime-aware, then contradicts it). Scoped: `epic-regime-aware-advisory` — v1 threads `since/until` windowing through the matrix; v2 adds adaptive per-matchup-cell windowing keyed by data-derived ban-affectedness. | thread window through match_results/matrix/positioning; affectedness from `card_frequencies` × `regime_windows` |
 | Full rules-correct game engine | Legacy is 1v1; goldfish suffices for speed/consistency | — |
 | Live/real-time event tooling | all data pre-fetched | — |
 | Non-Legacy formats | card/data layer is largely format-agnostic but out of scope | — |
