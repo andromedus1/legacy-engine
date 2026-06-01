@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-adjacency
 kind: feature
-stage: review
+stage: done
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: []
@@ -330,3 +330,8 @@ def adjacency_candidates(
 - Discrepancies from design: none. Built exactly to Units 1–5. The empty-band sentinel (`cmc_lo=1.0, cmc_hi=-1.0`) makes an all-locked deck surface zero candidates as designed.
 - Implementation detail: `_cooccurrence` uses three windowed CTE passes (universe per-card counts, total decks, core-deck count) rather than one mega-query — keeps each count independently assertable and matches `card_frequencies`' window-filter shape. PMI computed in Python from raw counts (SQL stays count-only, unit-testable).
 - Adjacent issues parked: none.
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex/peeragent out of credits).
+- Verified: PMI formula + shared denominator + log/divide guards; the three `_cooccurrence` CTE passes (live-DuckDB check of `count(DISTINCT (a,b))` + CASE NULL exclusion); window filter matches `card_frequencies`; all four gates correct + non-vacuous; edge cases (empty core/flex, sentinel band, sideboard flag, cooccur_floor exclusion); determinism; hand-computed `log(41/37)` confirmed; `load_card` byte-faithful to whattoplay reconstruction.
+- No Blockers, no Important. 3 nits (all design-sanctioned, no action): (1) flex partition inlined rather than via `partition_flex` — functionally identical, avoids a redundant `card_frequencies` call; (2) `provenance` filter omitted from `_cooccurrence` — no-op on the default path, corpus-wide co-occurrence intentionally un-narrowed; (3) `_card_roles` private cross-module import — explicitly directed by the brief.
