@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-archetype-gaps
 kind: feature
-stage: implementing
+stage: review
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: []
@@ -236,3 +236,11 @@ def _print_gap_report(report: GapReport) -> None:
   penalty. **Fallback**: `--share-weight` lets the user dial popularity penalty up; documented lever.
 - **Thin-coverage gate too aggressive** (min_coverage 0.5 could exclude most archetypes on a sparse
   DB). **Fallback**: `--min-coverage` is tunable; excluded archetypes are reported, never hidden.
+
+## Implementation notes
+- Files changed: `src/legacy_engine/advisory/gaps.py` (new — Units 1, 2 + the pure `_assemble_gaps` split), `src/legacy_engine/cli.py` (+`report gaps` command + `_print_gap_report`).
+- Tests added: `tests/test_gaps.py` (12: `_assemble_gaps`×6 pure, `compute_archetype_gaps`×2 corpus, `report gaps` CLI×4).
+- Suite: 994 passing (was 982, +12). `ruff check` clean on `gaps.py` + `tests/test_gaps.py`.
+- Discrepancies from design: (1) **objective-search-split applied** — added a pure `_assemble_gaps(field, ranking, …)` that the public `compute_archetype_gaps(con, …)` calls after the DB/MC work, so the gap-scoring + exclusion logic is unit-testable with hand-built `FieldDistribution` + `DeckRanking` (no DB, no Monte-Carlo). This is an improvement over the single-function design and matches the project's `objective-search-split` pattern. (2) Dropped `since/until` from the signature as the design predicted (build_matrix/rank_decks/build_global_field are all un-windowed). Units otherwise built as specified.
+- `_print_gap_report` mirrors `_print_tier_list`'s forward-ref + local-`# noqa` re-import convention (ruff is not a CI gate; CI = pytest only).
+- Adjacent issues parked: none.
