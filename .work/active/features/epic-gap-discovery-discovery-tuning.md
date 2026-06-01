@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-discovery-tuning
 kind: feature
-stage: review
+stage: done
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: [epic-gap-discovery-adjacency]
@@ -332,3 +332,8 @@ def _print_discovery(result: "DiscoveryResult") -> None: ...
 - Discrepancies from design: none material. Built Units 1–4 as specified. One bug caught + fixed in-session: `card_values_vs` returns a dict keyed by CARD name, so the opponent loop must unwrap `[name]` to build the `opponent→CardValue` map (was overwriting one key → transfer always 0). Regression-covered by the corpus test (Daze surfaces vs Combo).
 - **End-to-end validated on the real seeded DB**: `generate tune --discover` on a consensus Dimir Tempo list nominated 3 transferable adjacent candidates, NONE cleared the established (n≥100) gate → honest degradation (no fabricated edges), 3 below-gate omissions reported. The established gate correctly suppresses thin real-data edges.
 - Adjacent issues parked: `idea-decklist-parser-skip-comments` (pre-existing: `_parse_decklist` rejects `//` comment lines, blocking the generate→tune pipe — surfaced during validation, not introduced here).
+
+## Review record
+- **Verdict: Approve with comments** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex/peeragent out of credits). 74 tests green (discovery-tuning + existing tuning suite, no drift).
+- Adversarially verified the load-bearing claim — **exploration can never fabricate an edge** — on every path: no double-shrink (reuses already-EB-shrunk `CardValue.lift`); airtight triple gate (`tier in gate` AND `lift>0` AND opponent-in-field), hit exactly at n=100 in tests so a loosening regression is caught; correct role gating (synergy-only → omitted+named, can't surface with transfer credit; both-role → transferable); `card_values_vs` keying fix genuinely covered (regression → loud KeyError); `tune_deck` swap logic untouched + `card_winrates` param byte-identical when None; no silent caps; disclaimer always printed.
+- No Blockers, no Important. Nits (3, addressed/accepted): (1) `--discover` `compute_card_winrates` is outside tune's internal try/except → fail-loud on opt-in flag (acceptable, can't fabricate); (2) added `test_flag_does_not_change_swap_log` to close the CLI-level AC literally; (3) `if not share` drops exactly-0.0-share opponents (harmless zero-weight). Pre-existing ruff F401s in cli.py/tuning.py untouched, not attributed here.
