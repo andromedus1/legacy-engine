@@ -1,7 +1,7 @@
 ---
 id: epic-regime-aware-advisory-cli-surface
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: [epic-regime-aware-advisory-windowing-core]
@@ -169,3 +169,8 @@ guard stays). No behavior change.
 - Discrepancies from design: **one refinement caught by real-DB smoke** — `report meta` is deck-based, so it must NOT degrade on rounds-thinness (636 decks is plenty even when rounds are thin). Added `thin_floor<=0` to disable the rounds-degrade and applied it to `report meta`; matchup/positioning/gaps keep the default 500-round degrade. Net: `report meta --regime current` shows the honest current-regime share (tier-flagged), while `report matchups/advise --regime current` degrade with the loud banner.
 - **End-to-end validated on real DB**: `report meta --regime current` → Tron 11.8% / Izzet Delver 8.5% / Energy 7.6% (evolving tier) over the post-Undercity-Informer regime; `report matchups --regime current` → "THIN: 49 rounds < floor 500 — showing FULL-CORPUS" banner. The engine now handles the new ban paradigm honestly instead of silently contradicting itself.
 - Adjacent issues parked: none.
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex out of credits). 126 tests green across touched + adjacent command suites.
+- Verified: flag precedence (all_time > regime > since/until > default) incl all_time-beats-regime + resolve_regime("all")→full; degrade COUNT query byte-identical to the canonical matchup-rounds query (honest proxy); `thin_floor=0` meta carve-out sound (deck-based; per-row tiers convey thinness — not hidden); wrw-skip computed post-resolution (degraded→full correctly doesn't skip); ALL 6 command signatures carry since/until/regime/all_time (no Click TypeError); both-legs windowing (matrix + field) in all 3 advise commands; non-vacuous tests.
+- No Blockers, no Important. 1 nit (module docstring didn't mention the thin_floor=0 carve-out) — fixed inline.
