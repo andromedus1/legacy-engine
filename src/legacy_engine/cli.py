@@ -54,7 +54,9 @@ def _echo_window(res: "WindowResolution") -> None:
     """Echo the resolved window (+ degrade banner) for auditability."""
     from legacy_engine.advisory.window import WindowResolution  # noqa: F401
 
-    if res.since is None and res.until is None:
+    if res.mode == "adaptive":
+        click.echo("// window: adaptive (per-cell ban-aware matrix; field = current regime)")
+    elif res.since is None and res.until is None:
         click.echo("// window: full-corpus")
     else:
         click.echo(f"// window: {res.since or '—'} .. {res.until or '—'}  ({res.requested_label})")
@@ -256,7 +258,7 @@ def report_meta(
             # rounds-thinness — thin_floor=0. Per-row confidence tiers convey sample thinness.
             win = resolve_advisory_window(
                 con, regime=regime, since=since, until=until, all_time=all_time,
-                provenance=basis, thin_floor=0,
+                provenance=basis, thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
             windowed = win.since is not None or win.until is not None
@@ -349,8 +351,8 @@ def report_matchups(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.window import resolve_advisory_window
-    from legacy_engine.analytics.matchup import MatchupMatrix, build_matrix
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
+    from legacy_engine.analytics.matchup import MatchupMatrix
     from legacy_engine.ingestion import store
 
     if chart_dir:
@@ -371,10 +373,10 @@ def report_matchups(
                 con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
             )
             _echo_window(win)
-            matrix = build_matrix(
-                con, provenance=basis, min_row_share=min_row_share,
-                since=win.since, until=win.until,
-            )
+            inputs = build_advisory_inputs(con, win, provenance=basis, min_row_share=min_row_share)
+            for line in inputs.audit:
+                click.echo(line)
+            matrix = inputs.matrix
             _print_matchup_matrix(matrix)
             if chart_dir:
                 fname = _chart_filename("matchups", "matchups", basis)
@@ -726,7 +728,7 @@ def report_gaps(
 ) -> None:
     """Under-explored archetypes: high positioning S, low meta-share (deck-gen mode 3)."""
     _setup_logging(verbose)
-    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.advisory.gaps import compute_archetype_gaps
     from legacy_engine.ingestion import store
 
@@ -738,6 +740,10 @@ def report_gaps(
             con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
         )
         _echo_window(win)
+        inputs = build_advisory_inputs(con, win, provenance=basis)
+        for line in inputs.audit:
+            click.echo(line)
+        # Adaptive mode → adaptive matrix + current-regime field window; uniform/full → matching window.
         report = compute_archetype_gaps(
             con,
             definition=definition,
@@ -747,8 +753,9 @@ def report_gaps(
             risk_quantile=risk_quantile,
             min_share=min_share,
             seed=seed,
-            since=win.since,
-            until=win.until,
+            since=inputs.field_since,
+            until=inputs.field_until,
+            matrix=inputs.matrix,
         )
         _print_gap_report(report)
     finally:
@@ -990,8 +997,7 @@ def advise_positioning(
 
     from legacy_engine.advisory.positioning import positioning_score, rank_decks
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
-    from legacy_engine.advisory.window import resolve_advisory_window
-    from legacy_engine.analytics.matchup import build_matrix
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
@@ -1004,8 +1010,11 @@ def advise_positioning(
             con, regime=regime, since=since, until=until, all_time=all_time,
         )
         _echo_window(win)
-        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
-        matrix = build_matrix(con, since=win.since, until=win.until)
+        inputs = build_advisory_inputs(con, win)
+        for line in inputs.audit:
+            click.echo(line)
+        matrix = inputs.matrix
+        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -1182,7 +1191,7 @@ def advise_whattoplay(
 
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist, _render_whattoplay
     from legacy_engine.advisory.whattoplay import proactivity_score, vulnerability_tags_for_deck
-    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
@@ -1195,7 +1204,10 @@ def advise_whattoplay(
             con, regime=regime, since=since, until=until, all_time=all_time,
         )
         _echo_window(win)
-        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
+        inputs = build_advisory_inputs(con, win)
+        for line in inputs.audit:
+            click.echo(line)
+        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -1205,9 +1217,8 @@ def advise_whattoplay(
 
         from legacy_engine.advisory.report import FieldReadReport
         from legacy_engine.advisory.whattoplay import best_deck_vs_best_call, field_vulnerability_tags, hate_equity
-        from legacy_engine.analytics.matchup import build_matrix
 
-        matrix = build_matrix(con, since=win.since, until=win.until)
+        matrix = inputs.matrix
         archetype_tags = field_vulnerability_tags(con, field)
         field_vuln_profile = hate_equity(field, archetype_tags)
 
@@ -1307,7 +1318,7 @@ def advise_report(
         build_field_read_report,
         render_field_read,
     )
-    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
@@ -1320,7 +1331,10 @@ def advise_report(
             con, regime=regime, since=since, until=until, all_time=all_time,
         )
         _echo_window(win)
-        field = _load_field(con, field_text=field_text, since=win.since, until=win.until)
+        inputs = build_advisory_inputs(con, win)
+        for line in inputs.audit:
+            click.echo(line)
+        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
         report = build_field_read_report(
             con,
             mainboard,
@@ -1329,8 +1343,7 @@ def advise_report(
             archetype=archetype,
             reserved=reserved,
             seed=seed,
-            since=win.since,
-            until=win.until,
+            matrix=inputs.matrix,
         )
         click.echo(render_field_read(report))
     finally:
