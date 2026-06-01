@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery-archetype-gaps
 kind: feature
-stage: review
+stage: done
 tags: [generation, discovery]
 parent: epic-gap-discovery
 depends_on: []
@@ -244,3 +244,8 @@ def _print_gap_report(report: GapReport) -> None:
 - Discrepancies from design: (1) **objective-search-split applied** — added a pure `_assemble_gaps(field, ranking, …)` that the public `compute_archetype_gaps(con, …)` calls after the DB/MC work, so the gap-scoring + exclusion logic is unit-testable with hand-built `FieldDistribution` + `DeckRanking` (no DB, no Monte-Carlo). This is an improvement over the single-function design and matches the project's `objective-search-split` pattern. (2) Dropped `since/until` from the signature as the design predicted (build_matrix/rank_decks/build_global_field are all un-windowed). Units otherwise built as specified.
 - `_print_gap_report` mirrors `_print_tier_list`'s forward-ref + local-`# noqa` re-import convention (ruff is not a CI gate; CI = pytest only).
 - Adjacent issues parked: none.
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — NOT cross-model; Codex/peeragent out of credits).
+- Verified: gap_score arithmetic + sort/tie-break (empirically, incl. tie cases); no-silent-drop exclusion reported via CLI; `tier` handles `counts is None`/empty; `rank_decks` contract guarantees `s_mean`/`s_quantile`/`data_coverage` for every candidate (no KeyError); `provenance`/`seed`/`risk_quantile`/`min_coverage` threaded correctly; empty-field early return; clean dependency direction (analytics has zero advisory imports — no cycle); CLI wiring + `_print_gap_report` mirrors `_print_tier_list`; confidence gate genuinely enforced (thin-data archetype → coverage 0 → excluded).
+- No Blockers, no Important. 2 nits: (1) DB-path exclusion not end-to-end tested (only unit-level + verified-by-construction) → filed `idea-gaps-e2e-coverage-exclusion-test` in backlog; (2) empty-field path records raw `risk_quantile` vs `ranking.quantile_level` — always equal today (risk_averse never set), latent only. No action.
