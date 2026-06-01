@@ -594,6 +594,119 @@ def _print_tier_list(model: "TierModel") -> None:
                 click.echo(f"    {archetype:<30}  {share:>6.1%}  [{conf_tier}]")
 
 
+@report.command("gaps")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut", "wrw"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+    help="Meta-share definition for the popularity term + candidate set.",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter to online/paper events, or all.",
+)
+@click.option(
+    "--share-weight",
+    type=float,
+    default=1.0,
+    show_default=True,
+    help="Popularity penalty weight in gap_score = S − weight·share.",
+)
+@click.option(
+    "--min-coverage",
+    type=float,
+    default=0.5,
+    show_default=True,
+    help="Exclude archetypes whose matchup data_coverage is below this (thin S). Reported, not hidden.",
+)
+@click.option(
+    "--risk-quantile",
+    type=float,
+    default=0.25,
+    show_default=True,
+    help="Lower quantile of S used as the risk-adjusted column (lower = more conservative).",
+)
+@click.option(
+    "--min-share",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Minimum meta-share for an archetype to be considered a candidate.",
+)
+@click.option("--seed", type=int, default=None, help="Seed for the Monte-Carlo positioning (determinism).")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_gaps(
+    definition: str,
+    provenance: str,
+    share_weight: float,
+    min_coverage: float,
+    risk_quantile: float,
+    min_share: float,
+    seed: int | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Under-explored archetypes: high positioning S, low meta-share (deck-gen mode 3)."""
+    _setup_logging(verbose)
+    from legacy_engine.advisory.gaps import compute_archetype_gaps
+    from legacy_engine.ingestion import store
+
+    basis = None if provenance == "all" else provenance
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        report = compute_archetype_gaps(
+            con,
+            definition=definition,
+            provenance=basis,
+            share_weight=share_weight,
+            min_coverage=min_coverage,
+            risk_quantile=risk_quantile,
+            min_share=min_share,
+            seed=seed,
+        )
+        _print_gap_report(report)
+    finally:
+        con.close()
+
+
+def _print_gap_report(report: "GapReport") -> None:
+    """Render a GapReport as a labeled text table; report thin-data exclusions explicitly."""
+    from legacy_engine.advisory.gaps import GapReport  # noqa: F401
+
+    q_label = f"Sq{report.risk_quantile:.2f}"
+    click.echo(
+        f"\n=== Archetype Gaps (field={report.field_source}, "
+        f"gap = S − {report.share_weight:g}·share) ==="
+    )
+    click.echo(
+        f"  {'archetype':<30}  {'gap':>7}  {'S':>6}  {q_label:>7}  {'share':>6}  {'cov':>5}  tier"
+    )
+    if not report.gaps:
+        click.echo("  (no positionable archetypes cleared the coverage gate)")
+    for g in report.gaps:
+        click.echo(
+            f"  {g.archetype:<30}  {g.gap_score:>7.3f}  {g.s_mean:>6.3f}  "
+            f"{g.s_quantile:>7.3f}  {g.share:>6.1%}  {g.data_coverage:>5.2f}  [{g.tier}]"
+        )
+    if report.excluded_low_coverage:
+        click.echo(
+            f"\n  Excluded {len(report.excluded_low_coverage)} archetype(s) for thin matchup "
+            f"data (coverage < {report.min_coverage:g}): "
+            f"{', '.join(report.excluded_low_coverage)}"
+        )
+
+
 @report.command("cards")
 @click.option("--archetype", default=None, help="Restrict to cards an archetype plays (via card_frequencies).")
 @click.option("--vs", "opponent", default=None, help="Show per-matchup value vs this opponent; else shows marginal.")
