@@ -1,7 +1,7 @@
 ---
 id: epic-gap-discovery
 kind: epic
-stage: implementing
+stage: done
 tags: [generation, discovery]
 parent: null
 depends_on: [epic-deck-generation]
@@ -31,11 +31,6 @@ cited. Adjacent candidates can now be scored by **cross-archetype** per-card val
 in *other* decks → transfer it here), confidence-gated. The remaining unknowns are an **adjacency model**
 (what makes a card a candidate) and **validating exploratory candidates** (where the eventual
 `epic-goldfish-simulation` pillar adds a confidence layer — not a hard blocker for a confidence-gated v1).
-
-## Why `[needs-brief]`
-The adjacency model is a genuine research question (card-similarity / deckbuilding-recommender prior art +
-how to transfer per-card value across archetype contexts + confidence-gating exploratory picks). Write the
-brief before `/epic-design`. Brief topic queued: **card-level adjacency & discovery for deck tuning**.
 
 ## Design decisions
 - **Card-discovery CLI surface**: `--discover` flag on `generate tune` (not a separate command) — one
