@@ -193,8 +193,13 @@ def build_matrix(
     *,
     provenance: str | None = None,
     min_row_share: float = 0.02,
+    since: str | None = None,
+    until: str | None = None,
 ) -> MatchupMatrix:
     """Build a ``MatchupMatrix`` from the DuckDB connection.
+
+    ``since``/``until`` window the underlying matches by ``tournaments.date``
+    (half-open ``[since, until)``); both ``None`` (default) = full corpus.
 
     Row inclusion: archetype ``a`` is included if its marginal involvement
     ``mr.archetypes[a].n / (2 * (decisive_matched + mirror_matches))`` ≥
@@ -210,7 +215,7 @@ def build_matrix(
     a cell (n=0 if the pair was never observed), and ``(a, a)`` gets a mirror
     cell whose ``n`` comes from the additive ``MatchResults.mirror_n`` field.
     """
-    mr = compute_match_results(con, provenance=provenance)
+    mr = compute_match_results(con, provenance=provenance, since=since, until=until)
     total_matches = mr.coverage.decisive_matched
 
     # ── Row inclusion ────────────────────────────────────────────────────────

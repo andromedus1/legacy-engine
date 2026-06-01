@@ -296,18 +296,26 @@ LEFT JOIN dup du1 ON du1.tournament_id = r.tournament_id
 LEFT JOIN dup du2 ON du2.tournament_id = r.tournament_id
                  AND du2.norm = lower(trim(r.player2))
 WHERE (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date <  ?)
 """
 
 
 def compute_match_results(
-    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None
+    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
+    since: str | None = None, until: str | None = None,
 ) -> MatchResults:
     """Join rounds→archetype labels, parse results, accumulate directed + marginal tallies.
 
     ``provenance`` filters to ``"online"``/``"paper"`` tournaments; ``None`` =
-    all.  Only rounds-bearing events contribute (Leagues have no rounds), so
-    this aggregate's n is the matchup-n population — strictly separate from
-    the metashare deck-count n.
+    all.  ``since``/``until`` window by ``tournaments.date`` over a half-open
+    ``[since, until)`` interval (matching ``regime_windows`` / ``card_frequencies``;
+    note the sibling ``compute_card_winrates`` uses an inclusive upper bound — a
+    pre-existing minor discrepancy, intentionally not reconciled here).  Both
+    ``None`` (the default) = full corpus, byte-identical to the un-windowed query.
+    Only rounds-bearing events contribute (Leagues have no rounds), so this
+    aggregate's n is the matchup-n population — strictly separate from the
+    metashare deck-count n.
 
     Mirror matches (``arch1 == arch2``) are **not** written to directed
     ``matchups`` cells; their count is carried in
@@ -320,7 +328,9 @@ def compute_match_results(
     archetypes: dict[str, ArchetypeRecord] = {}
     mirror_n: dict[str, int] = {}
 
-    rows = con.execute(_JOIN_SQL, [provenance, provenance]).fetchall()
+    rows = con.execute(
+        _JOIN_SQL, [provenance, provenance, since, since, until, until]
+    ).fetchall()
 
     for _prov, _p1, p2, result, arch1, arch2, amb1, amb2 in rows:
         cov.total_pairings += 1
