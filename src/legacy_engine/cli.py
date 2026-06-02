@@ -1674,6 +1674,392 @@ def _print_discovery(result: "DiscoveryResult") -> None:
     click.echo(f"//   [disclaimer] {result.disclaimer}")
 
 
+# ── viz: chart / dashboard rendering ──
+@main.group()
+def viz() -> None:
+    """Visualization — render per-deck dashboards and individual chart tiles."""
+
+
+@viz.command("deck")
+@click.argument("archetype")
+@click.option(
+    "--out",
+    required=True,
+    help=(
+        "Output path: a .html file → full dashboard HTML; "
+        "a directory → one PNG per chart tile."
+    ),
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+    help="Filter to online/paper events, or all.",
+)
+@click.option(
+    "--regime",
+    default="current",
+    show_default=True,
+    help="Ban regime to window the field/meta to (default: current).",
+)
+@click.option("--offline", is_flag=True, default=False,
+              help="Inline the vl_convert JS bundle (no CDN, fully self-contained HTML).")
+@click.option("--seed", type=int, default=0, show_default=True,
+              help="RNG seed for deterministic Monte-Carlo positioning.")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def viz_deck(
+    archetype: str,
+    out: str,
+    provenance: str,
+    regime: str,
+    offline: bool,
+    seed: int,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Render a per-deck dashboard for ARCHETYPE.
+
+    --out file.html  — full dark HTML dashboard (CDN vega-embed by default; --offline for self-contained).
+    --out <dir>      — one PNG per chart tile (whole-page PNG is out of scope).
+
+    Example: legacy-engine viz deck "Dimir Tempo" --out deck.html
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.ingestion import store
+    from legacy_engine.viz.deck_dashboard import build_deck_dashboard
+    from legacy_engine.viz.layout import render_dashboard_html
+    from legacy_engine.viz.render import render_png
+
+    basis = None if provenance == "all" else provenance
+    con = store.connect(db) if db else store.connect()
+    try:
+        dash = build_deck_dashboard(
+            con, archetype,
+            provenance=basis,
+            regime=regime,
+            seed=seed,
+        )
+    finally:
+        con.close()
+
+    out_path = Path(out)
+
+    # Determine output mode from path
+    is_dir = out_path.suffix == "" or out_path.is_dir()
+
+    if is_dir:
+        # Write one PNG per chart tile
+        out_path.mkdir(parents=True, exist_ok=True)
+        written = 0
+        for idx, tile in enumerate(dash.tiles):
+            if tile.kind != "chart" or tile.spec is None:
+                continue
+            safe_name = tile.title.replace(" ", "_").lower()
+            png_path = out_path / f"{idx:02d}_{safe_name}.png"
+            try:
+                png_bytes = render_png(tile.spec)
+            except ValueError as exc:
+                raise click.ClickException(
+                    f"Failed to render tile {tile.title!r} as PNG: {exc}"
+                ) from exc
+            png_path.write_bytes(png_bytes)
+            click.echo(f"  Wrote {png_path}")
+            written += 1
+        click.echo(f"Rendered {written} chart tile(s) to {out_path}")
+    else:
+        # Render full HTML dashboard
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            html_str = render_dashboard_html(dash, offline=offline)
+        except ValueError as exc:
+            raise click.ClickException(f"Failed to render dashboard HTML: {exc}") from exc
+        out_path.write_text(html_str, encoding="utf-8")
+        click.echo(f"Dashboard written to {out_path} ({len(html_str):,} chars)")
+
+
+@viz.command("meta")
+@click.option("--out", required=True, help="Output path: .html → self-contained tile; .png → PNG.")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut", "wrw"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+)
+@click.option("--min-share", type=float, default=0.02, show_default=True)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+)
+@_window_opts
+@_verbose
+def viz_meta(
+    out: str,
+    definition: str,
+    provenance: str,
+    min_share: float,
+    db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Render a meta-share chart to .html or .png."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.analytics.metashare import compute_metashare
+    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.ingestion import store
+    from legacy_engine.viz.models import _metashare_model
+    from legacy_engine.viz.render import render_html_tile, render_png
+    from legacy_engine.viz.specs import spec_metashare
+
+    basis = None if provenance == "all" else provenance
+    con = store.connect(db) if db else store.connect()
+    try:
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+            provenance=basis, thin_floor=0, adaptive_default=False,
+        )
+        _echo_window(win)
+        report = compute_metashare(
+            con,
+            definition=definition,
+            provenance=basis,
+            min_share=min_share,
+            since=win.since,
+            until=win.until,
+        )
+    finally:
+        con.close()
+
+    spec = spec_metashare(_metashare_model(report))
+    out_path = Path(out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if out_path.suffix.lower() == ".html":
+            out_path.write_text(render_html_tile(spec), encoding="utf-8")
+        else:
+            out_path.write_bytes(render_png(spec))
+    except ValueError as exc:
+        raise click.ClickException(f"Render failed: {exc}") from exc
+
+    click.echo(f"Written to {out_path}")
+
+
+@viz.command("matchups")
+@click.option("--out", required=True, help="Output path: .html → self-contained tile; .png → PNG.")
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+)
+@click.option("--min-row-share", type=float, default=0.02, show_default=True)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+)
+@_window_opts
+@_verbose
+def viz_matchups(
+    out: str,
+    provenance: str,
+    min_row_share: float,
+    db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Render the matchup heatmap to .html or .png."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
+    from legacy_engine.ingestion import store
+    from legacy_engine.viz.models import _heatmap_model
+    from legacy_engine.viz.render import render_html_tile, render_png
+    from legacy_engine.viz.specs import spec_matchup_heatmap
+
+    basis = None if provenance == "all" else provenance
+    con = store.connect(db) if db else store.connect()
+    try:
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
+        )
+        _echo_window(win)
+        inputs = build_advisory_inputs(con, win, provenance=basis, min_row_share=min_row_share)
+    finally:
+        con.close()
+
+    spec = spec_matchup_heatmap(_heatmap_model(inputs.matrix))
+    out_path = Path(out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if out_path.suffix.lower() == ".html":
+            out_path.write_text(render_html_tile(spec), encoding="utf-8")
+        else:
+            out_path.write_bytes(render_png(spec))
+    except ValueError as exc:
+        raise click.ClickException(f"Render failed: {exc}") from exc
+
+    click.echo(f"Written to {out_path}")
+
+
+@viz.command("trends")
+@click.option("--out", required=True, help="Output path: .html → self-contained tile; .png → PNG.")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+)
+@click.option("--min-share", type=float, default=0.02, show_default=True)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+)
+@_verbose
+def viz_trends(
+    out: str,
+    definition: str,
+    provenance: str,
+    min_share: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Render the meta-share trends chart to .html or .png."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.analytics.trends import compute_trends
+    from legacy_engine.ingestion import store
+    from legacy_engine.viz.models import _trends_model
+    from legacy_engine.viz.render import render_html_tile, render_png
+    from legacy_engine.viz.specs import spec_trends
+
+    basis = None if provenance == "all" else provenance
+    con = store.connect(db) if db else store.connect()
+    try:
+        series = compute_trends(
+            con,
+            definition=definition,
+            provenance=basis,
+            min_share=min_share,
+        )
+    finally:
+        con.close()
+
+    spec = spec_trends(_trends_model(series))
+    out_path = Path(out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if out_path.suffix.lower() == ".html":
+            out_path.write_text(render_html_tile(spec), encoding="utf-8")
+        else:
+            out_path.write_bytes(render_png(spec))
+    except ValueError as exc:
+        raise click.ClickException(f"Render failed: {exc}") from exc
+
+    click.echo(f"Written to {out_path}")
+
+
+@viz.command("tiers")
+@click.option("--out", required=True, help="Output path: .html → self-contained tile; .png → PNG.")
+@click.option(
+    "--definition",
+    type=click.Choice(["raw", "topcut", "wrw"], case_sensitive=False),
+    default="raw",
+    show_default=True,
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper", "all"], case_sensitive=False),
+    default="all",
+    show_default=True,
+)
+@click.option("--min-share", type=float, default=0.02, show_default=True)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+)
+@_verbose
+def viz_tiers(
+    out: str,
+    definition: str,
+    provenance: str,
+    min_share: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Render the tier list chart to .html or .png."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.analytics.metashare import compute_metashare
+    from legacy_engine.ingestion import store
+    from legacy_engine.viz.models import _tier_model
+    from legacy_engine.viz.render import render_html_tile, render_png
+    from legacy_engine.viz.specs import spec_tier_list
+
+    basis = None if provenance == "all" else provenance
+    con = store.connect(db) if db else store.connect()
+    try:
+        report = compute_metashare(
+            con,
+            definition=definition,
+            provenance=basis,
+            min_share=min_share,
+        )
+    finally:
+        con.close()
+
+    spec = spec_tier_list(_tier_model(report))
+    out_path = Path(out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if out_path.suffix.lower() == ".html":
+            out_path.write_text(render_html_tile(spec), encoding="utf-8")
+        else:
+            out_path.write_bytes(render_png(spec))
+    except ValueError as exc:
+        raise click.ClickException(f"Render failed: {exc}") from exc
+
+    click.echo(f"Written to {out_path}")
+
+
 # ── export: decklist formatting ──
 @main.group()
 def export() -> None:
