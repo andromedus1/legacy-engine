@@ -179,9 +179,21 @@ class TestSpecPositioning:
         bar_layer = spec["layer"][0]
         color_enc = bar_layer["encoding"]["color"]
         condition = color_enc["condition"]
-        # The condition test must reference the subject name
-        assert "Combo" in condition["test"]
+        # The condition test must use the boolean field idiom, not raw string interpolation
+        assert condition["test"] == "datum.is_subject"
         assert condition["value"] == "#D55E00"
+
+    def test_subject_is_subject_field_in_data(self, sample_ranking):
+        """The subject deck must have is_subject=True in emitted data (boolean-field idiom)."""
+        spec = spec_positioning(sample_ranking, subject="Combo")
+        rows = spec["data"]["values"]
+        combo_rows = [r for r in rows if r["deck"] == "Combo"]
+        assert len(combo_rows) == 1
+        assert combo_rows[0]["is_subject"] is True
+        # Non-subject decks must have is_subject=False
+        non_subj = [r for r in rows if r["deck"] != "Combo"]
+        for r in non_subj:
+            assert r["is_subject"] is False
 
     def test_low_coverage_deck_has_opacity_in_data(self, sample_ranking):
         spec = spec_positioning(sample_ranking, subject="Control")
@@ -212,3 +224,56 @@ class TestSpecPositioning:
         spec = spec_positioning(sample_ranking, subject="Control", u_bar=0.53)
         dumped = json.dumps(spec)
         assert len(dumped) > 0
+
+    def test_apostrophe_subject_renders_and_is_highlighted(self):
+        """B1 regression: archetype names with apostrophes must not produce invalid Vega expressions.
+
+        Uses the boolean is_subject field idiom instead of raw string interpolation
+        so names like "Dimir Death's Shadow" or "Mind's Desire" compile without error.
+        """
+        apos_subject = "Dimir Death's Shadow"
+        decks = [apos_subject, "Control", "Combo"]
+        ranking = DeckRanking(
+            decks=decks,
+            p_best={apos_subject: 0.5, "Control": 0.3, "Combo": 0.2},
+            s_mean={apos_subject: 0.540, "Control": 0.510, "Combo": 0.480},
+            s_ci={
+                apos_subject: (0.510, 0.570),
+                "Control": (0.490, 0.530),
+                "Combo": (0.450, 0.510),
+            },
+            s_quantile={apos_subject: 0.510, "Control": 0.490, "Combo": 0.450},
+            quantile_level=0.05,
+            data_coverage={apos_subject: 0.85, "Control": 0.90, "Combo": 0.80},
+            low_coverage=set(),
+            pairwise={
+                (apos_subject, "Control"): 0.60,
+                (apos_subject, "Combo"): 0.55,
+                ("Control", apos_subject): 0.40,
+                ("Control", "Combo"): 0.52,
+                ("Combo", apos_subject): 0.45,
+                ("Combo", "Control"): 0.48,
+            },
+            field_source="global",
+        )
+        spec = spec_positioning(ranking, subject=apos_subject)
+
+        # No apostrophe must appear in any Vega expression string
+        import json as _json
+        spec_str = _json.dumps(spec)
+        # The subject name appears in data values (safe), but NOT in a condition test string
+        bar_layer = spec["layer"][0]
+        condition_test = bar_layer["encoding"]["color"]["condition"]["test"]
+        assert "'" not in condition_test, (
+            f"apostrophe found in condition test expression: {condition_test!r}"
+        )
+        assert condition_test == "datum.is_subject"
+
+        # Real Vega compiler must accept the spec (would raise ValueError on invalid expression)
+        assert_renders(spec)
+
+        # The subject row must have is_subject=True in the emitted data
+        rows = spec["data"]["values"]
+        subj_rows = [r for r in rows if r["deck"] == apos_subject]
+        assert len(subj_rows) == 1
+        assert subj_rows[0]["is_subject"] is True

@@ -52,12 +52,12 @@ def _inclusion_bg(pct: float) -> str:
     return f"rgba(86,180,233,{alpha:.2f})"
 
 
-def _consensus_html(deck: str, main_freqs: list, side_freqs: list) -> str:
+def _consensus_html(deck: str, main_freqs: list, side_freqs: list, cons=None) -> str:
     """Render the consensus two-column HTML tile (Tile E).
 
     Each card row is shaded by inclusion_pct (lock = solid, flex = faint).
-    Shows sample_n (inferred from first card), the data window, and any
-    legality errors.
+    Renders: sample_n (from cons.sample_n), data window (cons.window), and any
+    legality errors (cons.legality_errors). If cons is None, metadata footer is omitted.
     """
     def _card_rows(freqs: list) -> str:
         if not freqs:
@@ -80,6 +80,28 @@ def _consensus_html(deck: str, main_freqs: list, side_freqs: list) -> str:
 
     safe_deck = _html_escape.escape(deck)
 
+    # Build metadata footer from cons (sample_n, window, legality_errors)
+    meta_lines: list[str] = []
+    if cons is not None:
+        sample_n = cons.sample_n
+        since, until = cons.window
+        since_str = _html_escape.escape(since) if since else "earliest"
+        until_str = _html_escape.escape(until) if until else "latest"
+        meta_lines.append(
+            f"Sample: <strong>{sample_n}</strong> decklists · "
+            f"Window: {since_str} – {until_str}"
+        )
+        if cons.legality_errors:
+            errors_html = "; ".join(_html_escape.escape(e) for e in cons.legality_errors)
+            meta_lines.append(
+                f"<span style='color:#E69F00'>Legality warnings: {errors_html}</span>"
+            )
+
+    meta_html = ""
+    if meta_lines:
+        joined = " · ".join(meta_lines) if len(meta_lines) == 1 else "<br>".join(meta_lines)
+        meta_html = f"<div style='margin-top:0.4rem;color:#9AA0A6;font-size:0.75rem'>{joined}</div>"
+
     return f"""
 <div style="font-size:0.82rem;line-height:1.4">
   <div style="display:flex;gap:1.5rem;align-items:flex-start">
@@ -96,6 +118,7 @@ def _consensus_html(deck: str, main_freqs: list, side_freqs: list) -> str:
       </table>
     </div>
   </div>
+  {meta_html}
   <div style="margin-top:0.5rem;color:#9AA0A6;font-size:0.75rem">
     Shading: lock (≥{_LOCK_THRESHOLD:.0%} inclusion) = solid · flex = faint
   </div>
@@ -257,7 +280,6 @@ def build_deck_dashboard(
     from legacy_engine.advisory.field import build_global_field
     from legacy_engine.advisory.positioning import positioning_score, rank_decks
     from legacy_engine.generation.consensus import build_consensus, card_frequencies
-    from legacy_engine.viz.models import _metashare_model, _trends_model
 
     # ── 1. Adaptive matrix (carries cell_windows for Tile B tooltips) ─────────
     adaptive = build_adaptive_matrix(con, provenance=provenance)
@@ -380,8 +402,8 @@ def build_deck_dashboard(
             "encoding": {},
         }
 
-    # Tile E — consensus HTML
-    consensus_html = _consensus_html(archetype, mf, sf)
+    # Tile E — consensus HTML (pass cons for sample_n / window / legality_errors)
+    consensus_html = _consensus_html(archetype, mf, sf, cons=cons)
 
     # Primer HTML
     primer_html = _primer_summary(archetype, meta, matchup_rows, ranking, subj)

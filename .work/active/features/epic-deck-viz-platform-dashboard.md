@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-dashboard
 kind: feature
-stage: implementing
+stage: review
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]
@@ -297,6 +297,43 @@ Rendered 4 chart tile(s) to /tmp/decktiles
 ### Deviations from spec
 - Integration tests use `regime="all-time"` instead of `"current"` because the `make_rounds_corpus` fixture generates January 2026 dates that fall before the current ban regime (2026-05-18). The current-regime default is correct in production; tests adapt to fixture constraints.
 - The `build_consensus` call inside the dashboard uses `cur_since`/`cur_until` from `resolve_regime`; when both are `None`, `build_consensus` internally defaults to `_latest_regime_window()` (not full corpus). This is correct behavior — consensus should reflect the current regime window, matching all other tiles. Tests that need full-corpus data pass `regime="all-time"` explicitly.
+
+## Fixes (bounce #1 resolved)
+
+### What changed per finding
+
+**B1 — spec_positioning apostrophe injection** (`src/legacy_engine/viz/specs.py`):
+Removed raw f-string interpolation of `subject` into the Vega expression. Changed the bar layer's `color.condition.test` from `f"datum.deck === '{subject}'"` to `"datum.is_subject"`. The `is_subject` boolean field was already being computed per row and emitted in `vl_rows` — it now drives the condition directly. No apostrophe or special character can appear in any expression string. Regression test added in `tests/test_viz_tiles.py`: builds a `DeckRanking` with subject `"Dimir Death's Shadow"`, calls `spec_positioning`, asserts `condition["test"] == "datum.is_subject"` (no apostrophe in expr), then calls `assert_renders` (real Vega compiler must accept the spec), and checks that the subject row has `is_subject=True` in emitted data.
+
+**I1 — consensus tile drops sample_n/window/legality_errors** (`src/legacy_engine/viz/deck_dashboard.py`):
+Changed `_consensus_html` signature to accept an optional `cons` parameter (the `GeneratedDeck` from `build_consensus`). The function now renders a metadata footer line showing `cons.sample_n`, the data window (`cons.window` since/until), and any `cons.legality_errors` (as a styled warning line). Updated the call site in `build_deck_dashboard` to pass `cons=cons`. Removed redundant re-import of `_metashare_model`/`_trends_model` inside the function body (N2 fix). Five new tests added in `tests/test_viz_deck_dashboard.py`: `test_consensus_html_shows_sample_n`, `test_consensus_html_shows_window`, `test_consensus_html_shows_legality_errors_when_present`, `test_consensus_html_no_legality_section_when_empty`, `test_consensus_html_without_cons_still_renders`.
+
+**I2 — bad-spec → ClickException untested** (`tests/test_cli.py`):
+Added `test_viz_render_failure_raises_click_exception` in `TestVizGroup`. Monkeypatches `legacy_engine.viz.render.render_png` to raise `ValueError("boom")`, invokes `viz deck Control --out <dir>`, asserts `exit_code != 0` and that `"Traceback (most recent call last)"` does not appear in output (confirming it surfaces as a clean `ClickException`/`SystemExit`, not a raw exception).
+
+**N1 — duplicate `from __future__ import annotations`** (`src/legacy_engine/viz/specs.py`):
+Removed the duplicate import at line 18 (the second `from __future__ import annotations` that appeared directly after the first).
+
+**N2 — redundant re-import of `_metashare_model`/`_trends_model`** (`src/legacy_engine/viz/deck_dashboard.py`):
+Removed `from legacy_engine.viz.models import _metashare_model, _trends_model` from the local import block inside `build_deck_dashboard`. They are already imported at module top.
+
+### Test count
+- Before bounce #1 fix: 1165 tests
+- After bounce #1 fix: 1173 tests (+8)
+- All passing
+
+### Apostrophe smoke result (real DB)
+```
+$ legacy-engine viz deck "Dimir Death's Shadow" --out /tmp/apos_check/
+  Wrote /tmp/apos_check/01_matchup_spread.png
+  Wrote /tmp/apos_check/02_positioning.png
+  Wrote /tmp/apos_check/03_meta_share.png
+  Wrote /tmp/apos_check/04_trends.png
+Rendered 4 chart tile(s) to /tmp/apos_check
+```
+No error. Previously this would have raised a `ClickException` at render time.
+
+---
 
 ## Review findings (bounce #1 — deep fresh-context review of 15c55e9)
 Verdict: **Request changes**. Fix these, re-verify, re-review.
