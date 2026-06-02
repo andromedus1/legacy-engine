@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-dashboard
 kind: feature
-stage: review
+stage: done
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]
@@ -341,3 +341,6 @@ Verdict: **Request changes**. Fix these, re-verify, re-review.
 - **[Important] I1 — consensus tile omits sample_n / window / legality_errors** (`viz/deck_dashboard.py`): `build_consensus` result `cons` is computed but unused; `_consensus_html` only takes the freq lists and renders none of sample_n/window/legality_errors (docstring falsely claims it does). **Fix**: thread `cons` + the (since,until) window into `_consensus_html` and render them (data-honesty: surface the consensus sample size). Add test assertions.
 - **[Important] I2 — bad-spec → ClickException is untested** (`tests/test_cli.py`): the wrap exists but no test exercises a render failure; the HTML path isn't protected at write time. **Fix**: add a test forcing a render ValueError (e.g. monkeypatch render_png/ the apostrophe case in dir mode) asserting a clean ClickException.
 - **[Nits] N1** dup `from __future__ import annotations` (specs.py); **N2** redundant re-import of `_metashare_model/_trends_model` inside build_deck_dashboard. Fix both. (N3 on-chart masked-text label and N4 primer threshold wording are accepted as defensible — no change.)
+
+## Review record
+- **Verdict: Request changes → (after fixes) Approve** (deep lane, fresh-context Opus; same-model, Codex out). Initial review of `15c55e9` found 1 Blocker (B1 apostrophe-injection in spec_positioning) + 2 Important (I1 consensus omits sample_n/window/legality_errors; I2 untested ClickException) + 2 nits — all FIXED in the bounce-#1 commit. Re-verified directly: spec_positioning uses `datum.is_subject` (no name interpolation; apostrophe archetypes like "Dimir Death's Shadow" now render — regression-tested via real compiler); `_consensus_html(cons=...)` surfaces sample_n + window + html-escaped legality_errors; CLI render-failure → clean ClickException is tested. Prior review confirmed-correct (no action): composer wiring (adaptive matrix + current-regime field, subject-row keying, seed), primer no-fabrication (thin-data degradation genuinely tested), layout (12-col grid, per-tile theme-injected vegaEmbed, CDN/offline), confidence carry-through, attack-focused layout. Suite 1173 green. Advanced review → done.
