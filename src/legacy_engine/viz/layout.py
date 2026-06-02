@@ -114,6 +114,10 @@ def _tile_html(tile: Tile, idx: int) -> str:
     if tile.kind == "chart" and tile.spec is not None:
         # Theme-inject the spec before inlining (HTML match PNG)
         prepared = strip_and_inject(tile.spec, variant="screen")
+        # Make the chart fill its grid cell (.vega-embed is width:100%). "container" is a
+        # browser/vega-embed concept — intentionally NOT baked into the spec builders, because
+        # static PNG (vl-convert) has no container to measure; only the HTML path sets it.
+        prepared["width"] = "container"
         spec_json = json.dumps(prepared, separators=(",", ":"))
         el_id = f"vega-{idx}"
         lines.append(f'  <div id="{el_id}" class="vega-embed"></div>')

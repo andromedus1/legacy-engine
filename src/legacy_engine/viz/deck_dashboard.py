@@ -26,7 +26,7 @@ import html as _html_escape
 import logging
 
 from legacy_engine.viz.layout import Dashboard, Tile
-from legacy_engine.viz.models import _metashare_model, _trends_model
+from legacy_engine.viz.models import TrendModel, _metashare_model, _trends_model
 from legacy_engine.viz.specs import (
     spec_matchup_row,
     spec_metashare,
@@ -35,6 +35,38 @@ from legacy_engine.viz.specs import (
 )
 
 log = logging.getLogger(__name__)
+
+# Cap the dashboard trends tile to the top-K archetype lines (by latest share) so it
+# stays readable rather than becoming a spaghetti of every archetype.
+_TRENDS_TOP_K = 8
+
+
+def _top_k_trend_model(m: TrendModel, *, k: int, keep: set[str]) -> TrendModel:
+    """Reduce a TrendModel to the top-``k`` archetypes by their latest non-None share,
+    always including any archetype in ``keep`` (e.g. the subject deck)."""
+    def _latest(arch: str) -> float:
+        for val in reversed(m.series.get(arch, [])):
+            if val is not None:
+                return val
+        return 0.0
+
+    ranked = sorted(m.archetypes, key=_latest, reverse=True)
+    chosen: list[str] = []
+    for arch in ranked:
+        if arch in keep or len(chosen) < k:
+            chosen.append(arch)
+    # Preserve the model's original archetype order (stable colour assignment).
+    keep_set = set(chosen)
+    archetypes = [a for a in m.archetypes if a in keep_set]
+    series = {a: m.series[a] for a in archetypes}
+    return TrendModel(
+        regime_labels=m.regime_labels,
+        archetypes=archetypes,
+        series=series,
+        thin_regimes=m.thin_regimes,
+        subtitle=m.subtitle,
+        title=m.title,
+    )
 
 # ---------------------------------------------------------------------------
 # _consensus_html — Tile E
@@ -136,6 +168,8 @@ def _primer_summary(
     matchup_rows: list[dict],
     ranking,
     subj,
+    *,
+    field_basis: str | None = None,
 ) -> str:
     """Generate a short auto-summary of the deck's meta position.
 
@@ -227,10 +261,12 @@ def _primer_summary(
         )
 
     # ── Data caveat ──────────────────────────────────────────────────────────
+    basis_note = f" {_html_escape.escape(field_basis)}" if field_basis else ""
     lines.append(
         "<em style='color:#9AA0A6;font-size:0.78rem'>"
         "All stats are empirical (matchup data from MTGO rounds-bearing events). "
         "Cells with n&lt;30 are masked. Confidence tiers: established ≥100, evolving 30–99, speculative &lt;30."
+        f"{basis_note}"
         "</em>"
     )
 
@@ -378,7 +414,10 @@ def build_deck_dashboard(
 
     # Tile C — trends spec (fallback to empty spec if unavailable)
     if trends is not None:
-        trends_spec = spec_trends(_trends_model(trends))
+        trend_model = _top_k_trend_model(
+            _trends_model(trends), k=_TRENDS_TOP_K, keep={archetype}
+        )
+        trends_spec = spec_trends(trend_model)
     else:
         from legacy_engine.config import VL_SCHEMA_URL
         trends_spec = {
@@ -405,8 +444,17 @@ def build_deck_dashboard(
     # Tile E — consensus HTML (pass cons for sample_n / window / legality_errors)
     consensus_html = _consensus_html(archetype, mf, sf, cons=cons)
 
-    # Primer HTML
-    primer_html = _primer_summary(archetype, meta, matchup_rows, ranking, subj)
+    # Primer HTML — surface the field basis (current ban-regime window + sample) so the
+    # thin-window caveat behind positioning/meta-share is visible.
+    _since_lbl = cur_since or "earliest"
+    field_basis = (
+        f"Field basis: meta-share & positioning weighted over the {regime} ban-regime "
+        f"window (since {_since_lbl}; {meta.total_decks} decks) — banned-out decks correctly fall away, "
+        f"but a young regime is a thin field (watch data_coverage)."
+    )
+    primer_html = _primer_summary(
+        archetype, meta, matchup_rows, ranking, subj, field_basis=field_basis
+    )
 
     # ── 9. Assemble tiles in attack-focused order ─────────────────────────────
     tiles = [
