@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from legacy_engine.confidence import ConfidenceMetadata
+from legacy_engine.config import VL_SCHEMA_URL
 
 
 @pytest.fixture
@@ -168,3 +169,39 @@ def make_rounds_corpus():
         return con, facts
 
     return _make
+
+
+@pytest.fixture
+def make_vl_spec():
+    """Return a builder for a minimal valid Vega-Lite v6 bar spec with overridable fields."""
+
+    def _make(**kwargs) -> dict:
+        spec = {
+            "$schema": VL_SCHEMA_URL,
+            "description": "test bar",
+            "data": {"values": [{"a": "x", "b": 3}, {"a": "y", "b": 5}]},
+            "mark": "bar",
+            "encoding": {
+                "x": {"field": "a", "type": "nominal"},
+                "y": {"field": "b", "type": "quantitative"},
+            },
+        }
+        spec.update(kwargs)
+        return spec
+
+    return _make
+
+
+def assert_renders(spec: dict) -> None:
+    """Structural-validation gate: render spec via vl_convert and assert non-empty PNG bytes.
+
+    Shared helper for render tests across all viz features (foundation + charts-migration +
+    dashboard). Uses the real Vega-Lite compiler via vl_convert — strictly stronger than
+    schema-only validation.
+    """
+    from legacy_engine.viz import render_png
+
+    result = render_png(spec)
+    assert isinstance(result, bytes), "render_png must return bytes"
+    assert result[:4] == b"\x89PNG", "render_png output must start with PNG magic bytes"
+    assert len(result) > 0, "render_png must return non-empty bytes"
