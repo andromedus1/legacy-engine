@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-dashboard
 kind: feature
-stage: review
+stage: implementing
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]
@@ -297,3 +297,10 @@ Rendered 4 chart tile(s) to /tmp/decktiles
 ### Deviations from spec
 - Integration tests use `regime="all-time"` instead of `"current"` because the `make_rounds_corpus` fixture generates January 2026 dates that fall before the current ban regime (2026-05-18). The current-regime default is correct in production; tests adapt to fixture constraints.
 - The `build_consensus` call inside the dashboard uses `cur_since`/`cur_until` from `resolve_regime`; when both are `None`, `build_consensus` internally defaults to `_latest_regime_window()` (not full corpus). This is correct behavior — consensus should reflect the current regime window, matching all other tiles. Tests that need full-corpus data pass `regime="all-time"` explicitly.
+
+## Review findings (bounce #1 — deep fresh-context review of 15c55e9)
+Verdict: **Request changes**. Fix these, re-verify, re-review.
+- **[Blocker] B1 — spec_positioning breaks on archetype names with `'`/`\\`** (`viz/specs.py` ~line 603): subject name is interpolated raw into the Vega expr `datum.deck === '{subject}'`; invalid for ~22 real labels ("Dimir Death's Shadow", "Mind's Desire", every `Conflict(...,Mind's Desire,...)`). Fails on PNG render (ClickException) and silently in-browser for HTML. **Fix**: add an `is_subject` boolean to each row (already computed as `is_subj`) and use `{"test": "datum.is_subject", ...}` — no interpolation. Mirror the boolean-field idiom the matchup builders already use. Add a regression test with an apostrophe subject + `assert_renders`.
+- **[Important] I1 — consensus tile omits sample_n / window / legality_errors** (`viz/deck_dashboard.py`): `build_consensus` result `cons` is computed but unused; `_consensus_html` only takes the freq lists and renders none of sample_n/window/legality_errors (docstring falsely claims it does). **Fix**: thread `cons` + the (since,until) window into `_consensus_html` and render them (data-honesty: surface the consensus sample size). Add test assertions.
+- **[Important] I2 — bad-spec → ClickException is untested** (`tests/test_cli.py`): the wrap exists but no test exercises a render failure; the HTML path isn't protected at write time. **Fix**: add a test forcing a render ValueError (e.g. monkeypatch render_png/ the apostrophe case in dir mode) asserting a clean ClickException.
+- **[Nits] N1** dup `from __future__ import annotations` (specs.py); **N2** redundant re-import of `_metashare_model/_trends_model` inside build_deck_dashboard. Fix both. (N3 on-chart masked-text label and N4 primer threshold wording are accepted as defensible — no change.)
