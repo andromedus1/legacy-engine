@@ -38,11 +38,13 @@ def _base(description: str, title: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def spec_metashare(m: BarModel) -> dict:
+def spec_metashare(m: BarModel, *, top_n: int = 12) -> dict:
     """Vega-Lite spec: horizontal bar chart of meta-share per archetype.
 
     Visual semantics:
-    - y = archetype label (sorted descending by share — largest at top)
+    - y = archetype label, ordered by share descending, but with "Other" PINNED to the bottom — it
+      aggregates the long tail and would otherwise float to the top by its size and dwarf real decks
+    - capped to the ``top_n`` largest named archetypes (+ the "Other" row when present)
     - x = share (quantitative, formatted as %)
     - opacity 0.35 for speculative-tier bars (muted[i] True)
     - fill colour #9AA0A6 (muted axis-grey) for fringe / "Other" bars; default category colour otherwise
@@ -61,6 +63,18 @@ def spec_metashare(m: BarModel) -> dict:
             "tier": str(m.tiers[i]),
         })
 
+    # Display order: the top_n named archetypes by share desc, then "Other" pinned last.
+    # The aggregate "Other" bar is large by construction; sorting the y-axis by value would
+    # float it to the top and visually dominate the real archetypes, so we fix the order.
+    other_rows = [r for r in rows if r["archetype"] == "Other"]
+    named_rows = sorted(
+        (r for r in rows if r["archetype"] != "Other"),
+        key=lambda r: r["share"],
+        reverse=True,
+    )[:top_n]
+    rows = named_rows + other_rows
+    y_order = [r["archetype"] for r in rows]  # named (share desc) then "Other" last
+
     spec = _base(
         description=f"Meta-share horizontal bar chart. {m.subtitle}",
         title={"text": m.title, "subtitle": m.subtitle},
@@ -72,7 +86,7 @@ def spec_metashare(m: BarModel) -> dict:
             "y": {
                 "field": "archetype",
                 "type": "nominal",
-                "sort": {"field": "share", "order": "descending"},
+                "sort": y_order,
                 "title": "Archetype",
             },
             "x": {

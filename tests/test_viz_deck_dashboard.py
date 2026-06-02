@@ -439,3 +439,25 @@ class TestBuildDeckDashboard:
         dash = build_deck_dashboard(con, "Unknown Archetype", regime="all-time", seed=42)
         # Should still return a Dashboard with the right number of tiles
         assert len(dash.tiles) == 6
+
+
+def test_trends_tile_capped_to_top_k_with_subject(make_rounds_corpus):
+    """Readability fix: dashboard trends tile is limited to top-K lines + the subject deck."""
+    from legacy_engine.viz.deck_dashboard import build_deck_dashboard, _TRENDS_TOP_K
+
+    con, _ = make_rounds_corpus(n_repeats=15)
+    try:
+        dash = build_deck_dashboard(con, "Control", regime="all-time", seed=42)
+    finally:
+        con.close()
+    tr = next(t for t in dash.tiles if t.title == "Trends").spec
+    rows = []
+    if "data" in tr:
+        rows += tr["data"].get("values", [])
+    for lyr in tr.get("layer", []):
+        if "data" in lyr:
+            rows += lyr["data"].get("values", [])
+    lines = {r["archetype"] for r in rows if "archetype" in r}
+    if lines:  # only meaningful when the fixture has trend data
+        assert len(lines) <= _TRENDS_TOP_K + 1   # top-K + possibly the subject
+        assert "Control" in lines                  # subject always included
