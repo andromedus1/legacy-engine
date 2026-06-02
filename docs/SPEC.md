@@ -15,8 +15,9 @@ decisions:
   - "Meta-% is computed under multiple definitions (raw entry count, top-cut presence, win-rate-weighted) and every report is labeled online/paper/blend — never a single unlabeled number."
   - "Matchup cells and any derived stat carry sample-size + confidence metadata; low-n cells (n<100) are flagged, reusing edh-engine's confidence-metadata pattern."
   - "Reproducibility is an NFR: deterministic given inputs+seed; all external data pre-fetched and cached; legality validated against a dated BanListSnapshot."
+  - "Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML via vega-embed + static PNG via vl-convert), superseding the matplotlib charts; headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus. Self-contained + offline; no server, no editing GUI."
 created: 2026-05-29
-updated: 2026-05-31
+updated: 2026-06-01
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -57,6 +58,11 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **[MVP] Sideboard recommender** — hoser→target bipartite graph solved as weighted set-cover over the expected field; models the anti-hate second order (Veil/Defense Grid/Force of Vigor point at hate cards).
 - **[MVP] "What to play" advisor** — proactive-vs-reactive and best-deck-vs-best-metagame-call framing over the current field.
 
+### Cross-cutting — Visualization & Reporting
+- **Per-deck dashboard** — one self-contained page composing meta-share, the matchup spread (adaptive per-cell ban-aware matrix), trends across ban-regimes, positioning (best-call vs best-deck), and the consensus 60+15 list + primer, for any archetype.
+- **Composable viz platform** — a Vega-Lite spec layer (curated sub-schema + structural validator + canonical theme + 12-col tile/layout); any command emits composable tiles. Supersedes the matplotlib chart export.
+- **Dual output** — interactive self-contained HTML (vega-embed from CDN) + static PNG (vl-convert, no browser). Every chart carries the same confidence/labels as the text reports.
+
 ## Domain Entities (the key nouns)
 
 | Entity | What it is | Notes |
@@ -69,6 +75,7 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 | **BanListSnapshot** | Legality as of a date | Blacklist of banned names + `banned_date` + `ban_reason` + category predicates; enables historical validation. |
 | **DeckDefinition** | Deck-as-data for sim | *(Later)* card list + tagged roles (payoff/enabler/engine) + combo line + goldfish clock + confidence metadata. Mirrors edh-engine's YAML model. |
 | **SideboardPackage** | A recommended 15 | *(Advisory)* set of hosers with edges to the archetypes/hate-cards they attack, plus coverage score vs a field. |
+| **DeckDashboard** | A composed per-deck page | *(Viz)* a set of Vega-Lite tiles (meta-share, matchup spread, trends, positioning, consensus + primer) laid out on a 12-col grid and rendered to self-contained HTML + PNG. |
 
 ## Non-Functional Requirements
 
@@ -78,6 +85,7 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **Source transparency** — every meta-% and matchup figure is labeled with its source, window, and online/paper/blend basis. No unlabeled headline numbers.
 - **Resilience** — ingestion tolerates a single bad deck/event (catch, log, continue); mirror the community cache locally (it's fragile / community-run).
 - **Portability** — local file storage, no DB or server required for MVP (storage revisited at /architecture if query patterns demand it).
+- **Self-contained, offline viz output** — visualization output is local and needs no server: interactive HTML embeds `vega-embed` from CDN and opens directly in a browser; static PNG via `vl-convert` needs no browser/Chrome at all.
 
 ## What's explicitly out of scope (MVP)
-Goldfish simulation, deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation, full rules-correct game engine, real-time event tooling, non-Legacy formats, any GUI. See VISION non-goals. Note: deck generation modes 1+2+export are built; only the simulation-dependent modes remain deferred.
+Goldfish simulation, deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation, full rules-correct game engine, real-time event tooling, non-Legacy formats, and any interactive deck-building / web-app GUI (read-only self-contained HTML dashboards from the `viz/` layer are in scope; an editing UI is not). See VISION non-goals. Note: deck generation modes 1+2+export are built; only the simulation-dependent modes remain deferred.
