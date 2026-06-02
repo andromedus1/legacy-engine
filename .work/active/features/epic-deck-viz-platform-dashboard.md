@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-dashboard
 kind: feature
-stage: implementing
+stage: review
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]
@@ -256,3 +256,44 @@ two-column consensus), and `viz`-group tests in `tests/test_cli.py` (viz deck/me
 None for now — single-stride, one module family (`viz/` + the `viz` CLI group). Kept whole so the
 composer, builders, layout, and CLI evolve together. The Risks section names the 2-story fallback split
 if the implementing pass proves too large.
+
+## Implementation notes
+
+### Modules added
+- `src/legacy_engine/viz/specs.py` — extended with `spec_matchup_row` (Tile B) and `spec_positioning` (Tile D)
+- `src/legacy_engine/viz/layout.py` — new: `Tile`, `Dashboard` dataclasses + `render_dashboard_html`
+- `src/legacy_engine/viz/deck_dashboard.py` — new: `build_deck_dashboard` composer + `_consensus_html` + `_primer_summary`
+- `src/legacy_engine/viz/__init__.py` — updated re-exports for new symbols
+- `src/legacy_engine/cli.py` — added `viz` group: `viz deck`, `viz meta`, `viz matchups`, `viz trends`, `viz tiers`
+
+### Tile / CLI summary
+- **Tile A** (meta-share) — reuses `spec_metashare` from charts-migration
+- **Tile B** (matchup spread) — `spec_matchup_row`: horizontal bar + CI rule + 0.5 ref rule; masked cells grey; adaptive `cell_windows` date in tooltip
+- **Tile C** (trends) — reuses `spec_trends` from charts-migration
+- **Tile D** (positioning) — `spec_positioning`: s_quantile bars, subject highlighted (#D55E00), low_coverage faded, u_bar overlay optional
+- **Tile E** (consensus) — `_consensus_html`: two-column HTML (maindeck|sideboard) shaded by inclusion_pct
+- **Primer** — `_primer_summary`: auto-generated sentences from meta rank/share, best/worst matchups, positioning rank + S; degrades gracefully on thin/absent data; never fabricates
+- Attack-focused layout: primer (12) → matchup (12) → positioning (6) + meta (6) → trends (12) → consensus (12)
+- CLI commands: `viz deck <arch> --out .html|<dir>` (HTML dashboard or per-tile PNGs); `viz meta|matchups|trends|tiers --out .html|.png`
+
+### Test count
+- Before: 1089 tests
+- After: 1165 tests (+76)
+- All passing
+
+### Smoke test result (real DB)
+```
+$ legacy-engine viz deck "Dimir Tempo" --out /tmp/deck.html
+Dashboard written to /tmp/deck.html (290,207 chars)
+
+$ legacy-engine viz deck "Dimir Tempo" --out /tmp/decktiles/
+Wrote /tmp/decktiles/01_matchup_spread.png (936×772 px)
+Wrote /tmp/decktiles/02_positioning.png (1036×3212 px)
+Wrote /tmp/decktiles/03_meta_share.png (1032×1090 px)
+Wrote /tmp/decktiles/04_trends.png (936×1092 px)
+Rendered 4 chart tile(s) to /tmp/decktiles
+```
+
+### Deviations from spec
+- Integration tests use `regime="all-time"` instead of `"current"` because the `make_rounds_corpus` fixture generates January 2026 dates that fall before the current ban regime (2026-05-18). The current-regime default is correct in production; tests adapt to fixture constraints.
+- The `build_consensus` call inside the dashboard uses `cur_since`/`cur_until` from `resolve_regime`; when both are `None`, `build_consensus` internally defaults to `_latest_regime_window()` (not full corpus). This is correct behavior — consensus should reflect the current regime window, matching all other tiles. Tests that need full-corpus data pass `regime="all-time"` explicitly.
