@@ -46,6 +46,14 @@ from here. Scope is strictly the 1:1 migration of the four standalone chart surf
   speculative muted, fringe hatched, thin regimes banded; subtitles from existing `*.subtitle`
   (`confidence-metadata` pattern, Brief §3.1).
 
+## Design decisions
+- **Visual tone = dark + minimal** (the maintainer, `--only-questions`; see the foundation feature for the
+  theme details). All four migrated charts must read correctly on the dark theme — same palette/axis
+  adjustments (light text/axes, swapped categorical-black).
+- (No other open forks: prep-model location — `viz/models.py` per the brief — and the tier-list
+  Vega-Lite representation — faceted text vs three stacked bars — are feature-design judgment calls
+  consistent with the dark-minimal tone.)
+
 ## Research briefs
 - [docs/briefs/deck-viz-platform.md](../../../docs/briefs/deck-viz-platform.md) — §5 (the charts.py
   migration map: surface → prep model → new builder → Vega-Lite mark), §4 (Tile A/C contracts these
