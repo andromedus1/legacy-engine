@@ -1,20 +1,10 @@
-"""Meta & performance analytics — meta-share, matchup matrix, trends, charts."""
+"""Meta & performance analytics — meta-share, matchup matrix, trends."""
 
 from legacy_engine.analytics.card_value import (
     CardValue,
     card_value_marginal,
     card_value_matchup,
     card_values_vs,
-)
-from legacy_engine.analytics.charts import (
-    BarModel,
-    HeatmapModel,
-    TierModel,
-    TrendModel,
-    render_matchup_heatmap,
-    render_metashare,
-    render_tier_list,
-    render_trends,
 )
 from legacy_engine.analytics.match_results import (
     ArchetypeRecord,
@@ -60,15 +50,6 @@ __all__ = [
     "card_value_marginal",
     "card_value_matchup",
     "card_values_vs",
-    # charts
-    "BarModel",
-    "HeatmapModel",
-    "TierModel",
-    "TrendModel",
-    "render_matchup_heatmap",
-    "render_metashare",
-    "render_tier_list",
-    "render_trends",
     # match_results
     "ArchetypeRecord",
     "CardMarginalRecord",

@@ -206,12 +206,6 @@ def report() -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
-@click.option(
-    "--chart-dir",
-    type=click.Path(file_okay=False),
-    default=None,
-    help="If set, render PNG charts into this directory.",
-)
 @_window_opts
 @_verbose
 def report_meta(
@@ -219,7 +213,6 @@ def report_meta(
     provenance: str,
     min_share: float,
     db: str | None,
-    chart_dir: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -228,16 +221,9 @@ def report_meta(
 ) -> None:
     """Metagame share (raw / top-cut / win-rate-weighted; online vs paper)."""
     _setup_logging(verbose)
-    from pathlib import Path
-
     from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.metashare import MetaShareReport, compute_all, compute_metashare
     from legacy_engine.ingestion import store
-
-    if chart_dir:
-        from legacy_engine.analytics.charts import render_metashare
-        chart_out = Path(chart_dir)
-        chart_out.mkdir(parents=True, exist_ok=True)
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -275,10 +261,6 @@ def report_meta(
                     until=win.until,
                 )
                 _print_metashare_report(report)
-                if chart_dir:
-                    fname = _chart_filename("meta", defn, basis)
-                    out = render_metashare(report, chart_out / fname)
-                    click.echo(f"Chart written: {out}")
     finally:
         con.close()
 
@@ -328,19 +310,12 @@ def _print_metashare_report(report: "MetaShareReport") -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
-@click.option(
-    "--chart-dir",
-    type=click.Path(file_okay=False),
-    default=None,
-    help="If set, render PNG charts into this directory.",
-)
 @_window_opts
 @_verbose
 def report_matchups(
     provenance: str,
     min_row_share: float,
     db: str | None,
-    chart_dir: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -349,16 +324,9 @@ def report_matchups(
 ) -> None:
     """Archetype matchup matrix with confidence intervals."""
     _setup_logging(verbose)
-    from pathlib import Path
-
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.analytics.matchup import MatchupMatrix
     from legacy_engine.ingestion import store
-
-    if chart_dir:
-        from legacy_engine.analytics.charts import render_matchup_heatmap
-        chart_out = Path(chart_dir)
-        chart_out.mkdir(parents=True, exist_ok=True)
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -378,10 +346,6 @@ def report_matchups(
                 click.echo(line)
             matrix = inputs.matrix
             _print_matchup_matrix(matrix)
-            if chart_dir:
-                fname = _chart_filename("matchups", "matchups", basis)
-                out = render_matchup_heatmap(matrix, chart_out / fname)
-                click.echo(f"Chart written: {out}")
     finally:
         con.close()
 
@@ -453,32 +417,18 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
-@click.option(
-    "--chart-dir",
-    type=click.Path(file_okay=False),
-    default=None,
-    help="If set, render PNG charts into this directory.",
-)
 @_verbose
 def report_trends(
     definition: str,
     provenance: str,
     min_share: float,
     db: str | None,
-    chart_dir: str | None,
     verbose: bool,
 ) -> None:
     """Meta-share evolution across ban-list regimes (version-stamped)."""
     _setup_logging(verbose)
-    from pathlib import Path
-
     from legacy_engine.analytics.trends import compute_trends
     from legacy_engine.ingestion import store
-
-    if chart_dir:
-        from legacy_engine.analytics.charts import render_trends
-        chart_out = Path(chart_dir)
-        chart_out.mkdir(parents=True, exist_ok=True)
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -496,10 +446,6 @@ def report_trends(
                 min_share=min_share,
             )
             _print_trend_series(series)
-            if chart_dir:
-                fname = _chart_filename("trends", definition, basis)
-                out = render_trends(series, chart_out / fname)
-                click.echo(f"Chart written: {out}")
     finally:
         con.close()
 
@@ -591,32 +537,19 @@ def _print_trend_series(series: "TrendSeries") -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
-@click.option(
-    "--chart-dir",
-    type=click.Path(file_okay=False),
-    default=None,
-    help="If set, render PNG charts into this directory.",
-)
 @_verbose
 def report_tiers(
     definition: str,
     provenance: str,
     min_share: float,
     db: str | None,
-    chart_dir: str | None,
     verbose: bool,
 ) -> None:
     """Tier list derived from the current metagame (S/A/B buckets by share)."""
     _setup_logging(verbose)
-    from pathlib import Path
-
-    from legacy_engine.analytics.charts import _tier_model, render_tier_list
     from legacy_engine.analytics.metashare import compute_metashare
     from legacy_engine.ingestion import store
-
-    if chart_dir:
-        chart_out = Path(chart_dir)
-        chart_out.mkdir(parents=True, exist_ok=True)
+    from legacy_engine.viz.models import _tier_model
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -635,17 +568,13 @@ def report_tiers(
             )
             model = _tier_model(report)
             _print_tier_list(model)
-            if chart_dir:
-                fname = _chart_filename("tiers", definition, basis)
-                out = render_tier_list(report, chart_out / fname)
-                click.echo(f"Chart written: {out}")
     finally:
         con.close()
 
 
 def _print_tier_list(model: "TierModel") -> None:
     """Render a tier model as a labeled text tier list."""
-    from legacy_engine.analytics.charts import TierModel  # noqa: F401
+    from legacy_engine.viz.models import TierModel  # noqa: F401
 
     click.echo(f"\n=== {model.title} ===")
     click.echo(model.subtitle)
@@ -911,17 +840,6 @@ def report_cards(
             click.echo("(no card data for the specified slice)")
     finally:
         con.close()
-
-
-def _chart_filename(kind: str, definition: str, provenance: str | None) -> str:
-    """Derive a chart filename from the kind, definition, and provenance basis.
-
-    Examples: meta_raw_online.png, matchups_all.png, trends_raw.png, tiers_raw_paper.png.
-    """
-    basis = provenance if provenance else "all"
-    if kind == "matchups":
-        return f"matchups_{basis}.png"
-    return f"{kind}_{definition}_{basis}.png"
 
 
 # ── advise: meta attack / advisory ──

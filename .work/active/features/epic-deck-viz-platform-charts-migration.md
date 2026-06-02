@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-charts-migration
 kind: feature
-stage: implementing
+stage: review
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation]
@@ -187,4 +187,54 @@ None — single-stride, tightly-coupled migration (one module family, ~5 units, 
 ## Foundation references
 - `docs/ARCHITECTURE.md` — `viz/` module section; the `charts.py` "being superseded" note + the
   drop-matplotlib dependency note.
-- `src/legacy_engine/analytics/charts.py` — the 594-LoC migration source (prep/render split).
+- `src/legacy_engine/analytics/charts.py` — the 594-LoC migration source (prep/render split; deleted).
+
+## Implementation notes
+
+### What moved / was created / deleted
+
+- **Created** `src/legacy_engine/viz/models.py` — 4 prep dataclasses (`HeatmapModel`, `BarModel`,
+  `TierModel`, `TrendModel`) + 4 prep functions (`_heatmap_model`, `_metashare_model`, `_tier_model`,
+  `_trends_model`) + threshold constants (`TIER_S_MIN/A_MIN/B_MIN`). Lifted verbatim from `charts.py`
+  (already matplotlib-free); only the import block was changed (from `analytics.metashare._is_never_other`
+  import path, unchanged; imports from `analytics.matchup` / `analytics.trends` unchanged).
+
+- **Created** `src/legacy_engine/viz/specs.py` — 4 Vega-Lite v6 spec builders:
+  - `spec_metashare(BarModel)`: horizontal bar, opacity condition on `muted`, color condition on `fringe`, tooltip
+  - `spec_matchup_heatmap(HeatmapModel)`: rect+text 2-layer; redyellowgreen scale domain [0,0.5,1]; masked/mirror cells → grey (`#9AA0A6`); mirror annotated
+  - `spec_tier_list(TierModel)`: faceted by bucket row (S/A/B); x=share, y=archetype; bucket-colored bars; empty model falls back to stub spec
+  - `spec_trends(TrendModel)`: line+point; ordinal x (chronological sort); None cells omitted (gap); rect band layer for thin regimes; no band layer when no thin regimes
+
+- **Updated** `src/legacy_engine/analytics/__init__.py` — removed the `charts` import block and 8 names
+  from `__all__` (`BarModel`, `HeatmapModel`, `TierModel`, `TrendModel`, `render_*` ×4).
+
+- **Updated** `src/legacy_engine/cli.py` — removed `--chart-dir` option from all 4 report commands
+  (`meta`, `matchups`, `trends`, `tiers`); removed the `_chart_filename` helper; removed all
+  `if chart_dir:` blocks; repointed `_print_tier_list`'s local import from `analytics.charts.TierModel`
+  → `viz.models.TierModel`; `report_tiers` now imports `_tier_model` from `viz.models`.
+
+- **Updated** `src/legacy_engine/viz/__init__.py` — added all 4 spec builders + 4 prep models/fns to
+  re-export surface.
+
+- **Deleted** `src/legacy_engine/analytics/charts.py` (594 LoC; matplotlib `render_*` functions removed;
+  prep layer moved to `viz/models.py`).
+
+- **Updated** `pyproject.toml` — removed `"matplotlib>=3.8"` from dependencies.
+
+- **Deleted** `tests/test_charts.py` (matplotlib-era smoke renders + `--chart-dir` CLI tests, all obsolete).
+
+- **Created** `tests/test_viz_specs.py` — 61 tests:
+  - Prep-model tests re-pointed from `analytics.charts` → `viz.models` (all passing, byte-identical logic)
+  - Per-builder: `test_schema_present`, `test_description_non_empty`, `test_no_config_key`,
+    `test_assert_renders` (real Vega-Lite compiler via vl_convert), `test_json_snapshot`,
+    plus surface-specific assertions (masking, mirror, fringe, gaps, thin bands, faceting)
+
+### Final test count
+- **1089 passing** (full suite; was 1076 before this feature; delta +13 = 61 new tests − 48 deleted
+  matplotlib smoke tests and chart-dir CLI tests from test_charts.py).
+
+### Confirmation: matplotlib gone
+- `rg "import matplotlib" src/ tests/` → empty (exit 1)
+- `rg "analytics\.charts" src/ tests/` → empty (exit 1)
+- `rg "chart_dir|_chart_filename|--chart-dir" src/ tests/` → empty (exit 1)
+- `"matplotlib>=3.8"` removed from `pyproject.toml`
