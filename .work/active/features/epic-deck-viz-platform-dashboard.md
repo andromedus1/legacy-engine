@@ -59,6 +59,20 @@ delivers the `viz` CLI group: `viz deck <archetype> --out file.html|<dir>` plus 
 - Patterns: `cli-nested-groups` (`@main.group() viz`, `_setup_logging` first, lazy imports, `_window_opts`
   + `_verbose`, `_not_implemented` stubs); `constants-only-config`; dataclass result types.
 
+## Design decisions
+(All from Andrew, `--only-questions`.)
+- **Layout = attack-focused**: matchup-spread **wide** across the top, positioning **prominent**,
+  meta-share + trends secondary, consensus full-width at the bottom. (Leads with the "how to attack the
+  field" surfaces — the engine's advisory differentiator.)
+- **Visual tone = dark + minimal** (see the foundation feature for theme details).
+- **Consensus tile (E) = two-column**: maindeck on the left, sideboard on the right, each card row
+  shaded by `card_frequencies` `inclusion_pct` (lock = solid, flex = faint).
+- **Primer = auto-generated summary tile — IN scope for v1.** Derive a few sentences from data the other
+  tiles already pull: meta rank/share (`metashare`), best/worst matchups (the deck's adaptive-matrix
+  row), and the positioning verdict (`rank_decks` rank + S). Confidence-gated/labelled like every other
+  surface; **degrade gracefully on thin data — never fabricate** a read. Adds a summary/primer unit to
+  `deck_dashboard.py`. (This supersedes the brief's "no primer fn / optional prose" note — §4 Tile E.)
+
 ## Research briefs
 - [docs/briefs/deck-viz-platform.md](../../../docs/briefs/deck-viz-platform.md) — §4 (per-tile data
   contracts: source fns + return shapes + Vega-Lite marks for all 5 tiles), §3.5 (layout/Tile model),

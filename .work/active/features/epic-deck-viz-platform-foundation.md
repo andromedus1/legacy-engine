@@ -50,6 +50,20 @@ the dashboard page or CLI. It is pure plumbing + conventions.
 - Patterns: `constants-only-config` (all viz constants in `config.py`, mkdir at write time),
   result/record types as `@dataclass` not `LegacyEngineModel` (`pydantic-base-model` deviation note).
 
+## Design decisions
+- **Theme = dark + minimal** (Andrew, `--only-questions`). The screen/HTML variant uses a **dark
+  background with light text and thin light-grey axes**, minimal chrome. This **overrides the brief's
+  transparent/white screen spec** (Brief §3.3). Keep two variants (`screen`/`print`) but both in the
+  dark family by default; a light/white `print` variant may be added later only if shareable-on-white
+  PNGs are wanted. Implementation notes for `theme.py`:
+  - On a dark bg the Okabe-Ito categorical palette's black `#000000` entry is invisible — swap it for a
+    light tone (e.g. near-white/light-grey) so every category stays legible.
+  - Flip title/axis/legend text + gridline colors to light tones (invert the brief's neutral-grey set).
+  - Verify the `redyellowgreen` win-rate heatmap and the masked-cell grey both read well on dark.
+- (No other open forks at this tier — schema-validation mechanism for the `jsonschema` test, vendored
+  VL-v6 schema vs relying on vl-convert's own render-time validation, and exact render signatures are
+  feature-design judgment calls.)
+
 ## Research briefs
 - [docs/briefs/deck-viz-platform.md](../../../docs/briefs/deck-viz-platform.md) — §2 (vl-convert facts +
   API), §3.1–3.4 (module conventions, strip-and-inject algorithm, theme fields, test-time validation).
