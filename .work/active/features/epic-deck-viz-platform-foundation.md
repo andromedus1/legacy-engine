@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-foundation
 kind: feature
-stage: implementing
+stage: review
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: []
@@ -269,3 +269,19 @@ def make_vl_spec():
 ## Child stories
 None — single-stride plumbing feature (~6 tightly-coupled units, one implementation pass). The design IS
 the work; stories would be pure overhead.
+
+## Implementation notes
+
+**What landed (all 6 units):**
+- `src/legacy_engine/config.py` — `# ── Visualization ──` section appended with 7 constants (`VIZ_DIR`, `VIZ_PNG_SCALE`, `VIZ_VL_VERSION`, `VL_SCHEMA_URL`, `VIZ_CDN_VEGA`, `VIZ_CDN_VEGA_LITE`, `VIZ_CDN_VEGA_EMBED`). No I/O on import; existing `test_config.py` still green.
+- `src/legacy_engine/viz/theme.py` — `CATEGORICAL` (8-entry Okabe-Ito, `#000000` → `#E6E6E6`), `_variant()` builder, `THEME` dict with `"screen"` (title 15 / label 12) and `"print"` (title 18 / label 14) variants (both dark bg `#15181C`), and `strip_and_inject(spec, *, variant="screen") -> dict`.
+- `src/legacy_engine/viz/render.py` — `render_png(spec, *, variant="print", scale=VIZ_PNG_SCALE) -> bytes` and `render_html_tile(spec, *, variant="screen") -> str` via `vl_convert`; both call `strip_and_inject` first; `ValueError` propagates.
+- `src/legacy_engine/viz/__init__.py` — re-exports `THEME`, `strip_and_inject`, `render_png`, `render_html_tile`.
+- `pyproject.toml` — `"vl-convert-python>=1.9,<2"` added to `[project] dependencies`.
+- `tests/conftest.py` — `make_vl_spec` factory fixture and `assert_renders(spec)` helper added.
+- `tests/test_viz_theme.py` — 14 pure unit tests (strip_and_inject + THEME invariants + CATEGORICAL).
+- `tests/test_viz_render.py` — 12 integration tests exercising the real Vega-Lite compiler via vl_convert.
+
+**vl-convert version installed:** `vl-convert-python==1.9.0.post1` (wheel: `cp37-abi3-macosx_11_0_arm64`).
+
+**Test count delta:** 1043 → 1076 (+33 tests, all passing).

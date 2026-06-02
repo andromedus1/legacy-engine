@@ -36,3 +36,12 @@ RULES_PINNED_SHA = ""
 # exact commit and raises if the post-checkout HEAD doesn't match, preventing
 # silent drift when the upstream repo advances.
 MTGOFORMATDATA_SHA = "e056bc7d63c0138091986ce1696c705bc7dee296"
+
+# ── Visualization ──
+VIZ_DIR = DATA_DIR / "viz"                 # default output dir; mkdir at write time, never on import
+VIZ_PNG_SCALE = 2.0                        # vl_convert PNG scale multiplier (2x for crisp raster)
+VIZ_VL_VERSION = "6.4"                     # vl_convert vl_version pin (bundled set tops out at 6.4)
+VL_SCHEMA_URL = "https://vega.github.io/schema/vega-lite/v6.json"  # spec "$schema" value
+VIZ_CDN_VEGA = "https://cdn.jsdelivr.net/npm/vega@6"               # dashboard template (later feature)
+VIZ_CDN_VEGA_LITE = "https://cdn.jsdelivr.net/npm/vega-lite@6"     # matches vl-convert's bundled JS
+VIZ_CDN_VEGA_EMBED = "https://cdn.jsdelivr.net/npm/vega-embed@7"
