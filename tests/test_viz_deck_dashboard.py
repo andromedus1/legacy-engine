@@ -128,6 +128,66 @@ class TestConsensusHtml:
         assert "rgba(86,180,233,0.22)" in html  # lock alpha
         assert "rgba(86,180,233,0.08)" in html  # flex alpha
 
+    # I1 regression: cons metadata (sample_n, window, legality_errors) must appear in tile
+
+    def _make_cons(self, sample_n=20, since="2025-01-01", until="2025-06-01", legality_errors=None):
+        """Build a minimal GeneratedDeck-like stub for _consensus_html tests."""
+        from dataclasses import dataclass, field as dc_field
+
+        @dataclass
+        class _FakeCons:
+            sample_n: int
+            window: tuple
+            legality_errors: list = dc_field(default_factory=list)
+
+        return _FakeCons(
+            sample_n=sample_n,
+            window=(since, until),
+            legality_errors=legality_errors or [],
+        )
+
+    def test_consensus_html_shows_sample_n(self):
+        """cons.sample_n must appear in the rendered HTML."""
+        from legacy_engine.generation.consensus import CardFreq
+        main = [CardFreq(name="Brainstorm", inclusion_pct=0.80, modal_count=4, decks_running=16)]
+        cons = self._make_cons(sample_n=42)
+        html = _consensus_html("Control", main, [], cons=cons)
+        assert "42" in html
+
+    def test_consensus_html_shows_window(self):
+        """cons.window (since, until) dates must appear in the rendered HTML."""
+        from legacy_engine.generation.consensus import CardFreq
+        main = [CardFreq(name="Brainstorm", inclusion_pct=0.80, modal_count=4, decks_running=8)]
+        cons = self._make_cons(since="2025-03-15", until="2025-09-01")
+        html = _consensus_html("Control", main, [], cons=cons)
+        assert "2025-03-15" in html
+        assert "2025-09-01" in html
+
+    def test_consensus_html_shows_legality_errors_when_present(self):
+        """legality_errors in cons must appear visibly in the rendered HTML."""
+        from legacy_engine.generation.consensus import CardFreq
+        main = [CardFreq(name="Brainstorm", inclusion_pct=0.80, modal_count=4, decks_running=8)]
+        cons = self._make_cons(legality_errors=["maindeck has 58 cards (expected 60)"])
+        html = _consensus_html("Control", main, [], cons=cons)
+        assert "Legality" in html or "legality" in html.lower()
+        assert "58 cards" in html
+
+    def test_consensus_html_no_legality_section_when_empty(self):
+        """When legality_errors is empty, no legality warning section should appear."""
+        from legacy_engine.generation.consensus import CardFreq
+        main = [CardFreq(name="Brainstorm", inclusion_pct=0.80, modal_count=4, decks_running=8)]
+        cons = self._make_cons(legality_errors=[])
+        html = _consensus_html("Control", main, [], cons=cons)
+        assert "Legality warnings" not in html
+
+    def test_consensus_html_without_cons_still_renders(self):
+        """When cons=None (fallback path), HTML must still render correctly (no crash)."""
+        from legacy_engine.generation.consensus import CardFreq
+        main = [CardFreq(name="Brainstorm", inclusion_pct=0.80, modal_count=4, decks_running=8)]
+        html = _consensus_html("Control", main, [], cons=None)
+        assert "Brainstorm" in html
+        assert "Maindeck" in html
+
 
 # ---------------------------------------------------------------------------
 # TestPrimerSummaryUnit — pure unit tests on _primer_summary
