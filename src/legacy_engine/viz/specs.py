@@ -15,8 +15,6 @@ Builders:
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from legacy_engine.config import VL_SCHEMA_URL
@@ -600,7 +598,7 @@ def spec_positioning(
                 "scale": {"zero": False},
             },
             "color": {
-                "condition": {"test": f"datum.deck === '{subject}'", "value": "#D55E00"},
+                "condition": {"test": "datum.is_subject", "value": "#D55E00"},
                 "value": "#56B4E9",
             },
             "opacity": {

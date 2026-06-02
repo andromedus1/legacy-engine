@@ -346,3 +346,32 @@ class TestVizGroup:
         assert r2.exit_code == 0, r2.output
         pngs = [f for f in os.listdir(tile_dir) if f.endswith(".png")]
         assert len(pngs) >= 1
+
+    def test_viz_render_failure_raises_click_exception(self, runner, tmp_path, db_path_rounds, monkeypatch):
+        """I2 regression: a ValueError from render_png must surface as a clean ClickException.
+
+        The CLI must not propagate a raw traceback — it wraps render errors as ClickException
+        (non-zero exit, error message in output, no raw ValueError traceback).
+        """
+        import legacy_engine.viz.render as _render_mod
+
+        def _boom(spec, **kwargs):
+            raise ValueError("boom — simulated vl_convert failure")
+
+        monkeypatch.setattr(_render_mod, "render_png", _boom)
+
+        out_dir = str(tmp_path / "fail_tiles")
+        result = runner.invoke(main, [
+            "viz", "deck", "Control",
+            "--out", out_dir,
+            "--db", db_path_rounds,
+            "--seed", "0",
+        ])
+        # Must exit non-zero
+        assert result.exit_code != 0
+        # Must show the user-friendly error message (ClickException), not a raw traceback
+        output = result.output
+        assert "Error" in output or (result.exception is not None and isinstance(result.exception, SystemExit))
+        # The raw ValueError class name must NOT appear as an unhandled traceback
+        # (it appears in the ClickException message, but not as "Traceback (most recent call last)")
+        assert "Traceback (most recent call last)" not in output
