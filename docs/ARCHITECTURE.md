@@ -14,7 +14,7 @@ summary: |
   + generation/ (consensus, export, field-tuning, gap-discovery) → models/ → data/. goldfish/ is the
   deferred pillar; only goldfish-validated candidate-validation remains deferred behind it.
 decisions:
-  - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, matplotlib, local files) + add scipy/numpy/statsmodels (advisory stats) and pulp/CBC (sideboard ILP)."
+  - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and vl-convert-python (Vega-Lite viz render)."
   - "STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/, data/scryfall/, data/rules/, data/banlist/); a rebuildable embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share + matchup-matrix joins. The one justified divergence from edh-engine's pure-files approach, driven by the rounds-join matchup workload."
   - "archetype/ is the novel subsystem: vendor MTGOFormatData rules-as-JSON pinned to a SHA (data/rules/ + manifest), reimplement only the ~210-line MTGOArchetypeParser Detect matcher in Python, golden-test to >=99% label agreement against the archived C# parser's published labels (fallback: hand-curated fixtures)."
   - "Scryfall ADR RESOLVED: EXTEND edh-engine's ingestion/scryfall.py (every needed function verified to exist), index the WHOLE oracle pool (~30k+ IDs, not a fixed subset); do NOT adopt Scrython (bulk index makes the API path rare) or mtg_parser (fbettega JSON is the decklist source, already name-normalized)."
@@ -22,7 +22,7 @@ decisions:
   - "Matchup matrix: computed ourselves from Rounds; Wilson CIs + Beta-Binomial shrinkage; confidence tiers (speculative n<30 hidden / evolving 30-99 / established >=100); matchup-n kept separate from metashare-n; meta-% computed 3 labeled ways with online/paper split."
   - "Ingestion mirror-and-decouple: consume the fbettega cache JSON (not mtgo.com), behind an ingestion/ port so a replacement source swaps in without touching analytics/advisory."
   - "MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning/gap-discovery mode 3); goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the deferred pillar; only goldfish-validated candidate-validation remains deferred behind it."
-  - "VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col tile/layout) that supersedes the matplotlib charts.py; headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus. No server, no cloud (mirrors the knowledge-graph/board HTML precedent)."
+  - "VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col tile/layout) that replaces matplotlib-based charting; headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus. No server, no cloud (mirrors the knowledge-graph/board HTML precedent)."
 ---
 
 # Architecture: legacy-engine
@@ -114,7 +114,6 @@ observed → label → analytics → advisory arc.
 | `matchup.py` | Build the matchup matrix from `match_results`' directed cells: per-cell `{wins, n, p_raw, p_shrunk(Wilson/Beta), ci, tier}`; mirror fixed 0.5; **matchup-n separate from metashare-n**. Stats primitives (`beta_binomial_shrink_to`, `wilson_or_jeffreys_ci`) reused by `card_value`. `build_matrix` takes a `since/until` window; `build_adaptive_matrix` (regime-aware advisory) sources each pairwise cell over `[max(valid_since(a), valid_since(b)), …)` — unaffected cells keep full history, ban-affected cells truncate. | advisory-methods |
 | `affectedness.py` | Ban-affectedness classifier for adaptive regime-aware advisory: `archetype_valid_since` = the latest ban each archetype was materially affected by (ran a banned card in ≥ threshold of its pre-ban decks), data-derived from `BAN_EVENTS` × `card_frequencies` × `regime_windows`. Lives in `analytics` (no advice) so the matrix builder consumes it without an `analytics → advisory` cycle. | — |
 | `trends.py` | Meta evolution across ban-list regimes (version-stamped). | legacy-metagame |
-| `charts.py` | matplotlib charts: tier list, meta share, matchup heatmap, trends. **Being superseded by the Vega-Lite `viz/` presentation layer** (see below); these surfaces migrate onto `viz/`. | (edh-engine pattern) |
 
 ### `advisory/` — Meta Attack/Advisory (the differentiator)
 | File | Responsibility | Brief |
@@ -148,7 +147,7 @@ pinned SHAs), `confidence.py` (shared tiering + sample-size→tier mapping).
 ### `advisory/gaps.py` — Archetype-Gap Finder (built)
 - **`gaps.py`** — gap discovery (mode 3, archetype-gap half): `compute_archetype_gaps` ranks under-explored archetypes by `gap_score = S − share_weight·share` over `positioning.rank_decks` × `metashare`, with the thin-matchup-data confidence gate delegated to `rank_decks(min_coverage=…)` (excluded archetypes reported, not hidden). Pure `_assemble_gaps` split from the DB/MC path. Surfaced via `report gaps`. | card-adjacency-and-discovery
 
-### `viz/` — Visualization & Reporting (presentation layer, supersedes `charts.py`)
+### `viz/` — Visualization & Reporting (presentation layer)
 Local, self-contained, no server — mirrors the `/knowledge-graph` + kanban-`board` HTML precedent.
 Authors **Vega-Lite** specs in Python and renders them two ways: interactive self-contained **HTML via
 `vega-embed`** (CDN) and static **PNG via `vl-convert`** (Rust, no Chrome). Fed by `analytics/`,
@@ -157,12 +156,14 @@ Authors **Vega-Lite** specs in Python and renders them two ways: interactive sel
 
 | File | Responsibility | Brief |
 |---|---|---|
-| `spec.py` | Typed tile → Vega-Lite JSON over a **curated Vega-Lite sub-schema** + structural validator; the canonical theme is applied via **strip-and-inject** (a spec-internal `config` is stripped and the project theme re-injected at render — vega-embed #27). | deck-viz-platform |
-| `layout.py` | 12-col grid tile/layout model so any command composes tiles into a multi-chart dashboard. | deck-viz-platform |
-| `render.py` | Two renderers off one spec: `render_html` (vega-embed, self-contained, interactive) and `render_png` (vl-convert, offline, JS-free). | deck-viz-platform |
-| `deck_dashboard.py` | The headline reusable **per-deck dashboard**: composes meta-share, the (adaptive per-cell) matchup spread, trends-across-ban-regimes, positioning (best-call vs best-deck), and the consensus 60+15 list + primer into one page. Later feeds Moxfield surfacing. | deck-viz-platform, deck-generation-and-moxfield |
+| `theme.py` | The canonical `THEME` dicts (`screen`/`print`, dark) + `strip_and_inject(spec, variant)` — a spec-internal `config` is stripped and the project theme re-injected at render (vega-embed #27). | deck-viz-platform |
+| `models.py` | The pure prep dataclasses (`BarModel`/`HeatmapModel`/`TierModel`/`TrendModel`) + `_*_model` fns migrated from the former `charts.py` — they bake the honesty logic (masking, fringe, thin-regime banding) and are matplotlib-free. | deck-viz-platform |
+| `specs.py` | Hand-built Vega-Lite v6 dict builders (no Altair): `spec_metashare`, `spec_matchup_heatmap`, `spec_tier_list`, `spec_trends` (format-level) + `spec_matchup_row`, `spec_positioning` (per-deck tiles). No runtime validator — spec validity is a test-time concern (real Vega-Lite compiler via vl-convert + JSON snapshots). | deck-viz-platform |
+| `render.py` | Two renderers off one spec: `render_png` (vl-convert, offline, JS-free) and `render_html_tile` (vl-convert `vegalite_to_html`, self-contained, interactive). | deck-viz-platform |
+| `layout.py` | `Tile`/`Dashboard` 12-col grid model + `render_dashboard_html` (self-contained dark page; chart tiles via vega-embed CDN triple or inlined when `offline=True`). | deck-viz-platform |
+| `deck_dashboard.py` | The headline reusable **per-deck dashboard**: composes meta-share, the (adaptive per-cell) matchup spread, trends-across-ban-regimes, positioning (best-call vs best-deck), the two-column consensus 60+15 list, and an auto-generated primer (degrades on thin data) into one page. Later feeds Moxfield surfacing. | deck-viz-platform, deck-generation-and-moxfield |
 
-CLI: `viz deck <archetype> [--out file.html|.png]` (+ tile/dashboard subcommands as they land).
+CLI: `viz deck <archetype> [--out file.html|<dir>] [--offline]` + `viz meta|matchups|trends|tiers [--out file.html|.png]`. (`report … --chart-dir` was removed; rendering centralizes here.)
 
 ### Deferred modules (clear seams, not built in MVP)
 - **`goldfish/`** — port edh-engine's bipartite-matching mana solver + role-dispatch engine; adapt the mulligan to **straight London (no free mull)**; deck-as-data YAML; calibrate clocks against the Oops-All-Spells anchor. Feeds the meta-speed distribution. (legacy-foundations)
@@ -184,7 +185,8 @@ data/legacy.duckdb: tournaments · decks · deck_cards · rounds · standings ·
         ▼  archetype/labeler.py  (resolve names → colors → classify)
    archetype_labels (deck → Archetype, Color, Variant, Companion)
         │
-        ├─► analytics/  metashare (3 defs, online/paper) · matchup matrix (Wilson+shrinkage+tiers) · trends · charts
+        ├─► analytics/  metashare (3 defs, online/paper) · matchup matrix (Wilson+shrinkage+tiers) · trends
+        │         └─► viz/  (Vega-Lite specs → HTML via vega-embed + PNG via vl-convert; per-deck dashboard)
         │
         └─► advisory/   positioning (Bayesian MC) · sideboard (ILP+greedy) · whattoplay → report (field read + audit trail)
 ```
@@ -226,9 +228,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 | `httpx` | async HTTP (Scryfall) | edh-engine parity |
 | `pydantic` ≥2 | typed models | edh-engine parity |
 | `click` ≥8 | CLI | edh-engine parity |
-| `matplotlib` ≥3.8 | charts (being superseded by `viz/`) | edh-engine parity |
-| **`altair`** *or* hand-built JSON | author Vega-Lite specs from Python (resolved in the viz brief) | new (viz); vega-embed loads from CDN, no Python dep |
-| **`vl-convert-python`** | static PNG rendering of Vega-Lite (Rust, no Chrome) | new (viz) |
+| **`vl-convert-python`** ≥1.9,<2 | render Vega-Lite specs → static PNG (`vegalite_to_png`) AND self-contained interactive HTML (`vegalite_to_html`); Rust, no Chrome/Node | new (viz); the single render dep |
 | `pyyaml` | deck-as-data (goldfish, later) | edh-engine parity |
 | **`duckdb`** | embedded analytical store (matchup/meta-share joins) | **new — the storage divergence** |
 | **`numpy`/`scipy`** | Beta/Dirichlet sampling, stats | new (advisory) |
