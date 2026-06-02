@@ -1058,3 +1058,35 @@ class TestSpecTrends:
         spec = spec_trends(empty)
         assert spec["$schema"] == VL_SCHEMA_URL
         assert_renders(spec)
+
+
+class TestMetashareOrderingFix:
+    """Readability fix: top-N cap + 'Other' pinned to the bottom (not floated by its size)."""
+
+    def _model(self):
+        from legacy_engine.viz.models import BarModel
+        # 15 named archetypes of descending share + a big Other; Other must NOT float to top.
+        labels = [f"Deck{i}" for i in range(15)] + ["Other"]
+        shares = [0.15 - i * 0.005 for i in range(15)] + [0.40]
+        n = len(labels)
+        return BarModel(
+            labels=labels, shares=shares,
+            muted=[False] * n, fringe=[l == "Other" for l in labels],
+            tiers=["established"] * n, subtitle="basis=test", title="Meta",
+        )
+
+    def test_other_pinned_last_and_capped(self):
+        from legacy_engine.viz.specs import spec_metashare
+        spec = spec_metashare(self._model(), top_n=12)
+        order = spec["encoding"]["y"]["sort"]
+        assert order[-1] == "Other"               # pinned to the bottom despite 40% share
+        assert len(order) == 13                     # top-12 named + Other
+        assert order[0] == "Deck0"                  # largest named at top
+        # data rows match the displayed order (no extra named beyond top-12 + Other)
+        names = {r["archetype"] for r in spec["data"]["values"]}
+        assert names == set(order)
+
+    def test_renders(self):
+        from tests.conftest import assert_renders
+        from legacy_engine.viz.specs import spec_metashare
+        assert_renders(spec_metashare(self._model()))
