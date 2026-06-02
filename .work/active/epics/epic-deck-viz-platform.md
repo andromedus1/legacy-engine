@@ -2,7 +2,7 @@
 id: epic-deck-viz-platform
 kind: epic
 stage: drafting
-tags: [viz, needs-brief]
+tags: [viz]
 parent: null
 depends_on: [epic-meta-analytics, epic-advisory, epic-deck-generation, epic-regime-aware-advisory]
 release_binding: null
@@ -68,19 +68,26 @@ already paid for the landscape (`.research/briefs/adhoc-viz-rendering`,
 - **Fully local / offline.** No web server, no cloud, no MCP, no SPA. Self-contained HTML opened
   directly in a browser; PNG needs no runtime.
 
-## Needs-brief (legacy-engine-specific, before /epic-design)
-Tagged `[needs-brief]`. The remaining unknowns are integration-grain, not landscape-grain. The brief
-(`/brief`) must resolve:
-1. **`vl-convert-python`** integration — packaging, version, invocation, theme/font handling, failure
-   modes; confirm it's the PNG path (vs alternatives) at our scale.
-2. **Authoring path — Altair vs hand-built Vega-Lite JSON** from Python. Trade-offs: Altair ergonomics
-   + dependency weight vs. hand-built JSON + full control of the curated sub-schema. Pick one.
-3. **Tile data contracts** — the exact existing `legacy_engine` analytics/advisory/generation functions
-   (and their return records) that feed each of the five dashboard tiles, and the shape each tile needs.
-4. **charts.py migration map** — which current chart surfaces map to which new tiles, and the CLI
-   surface (`viz deck …` plus any `report --html`/`--png` wiring) that replaces the matplotlib path.
+## Brief (DONE — ready for /epic-design)
+Integration brief written: [docs/briefs/deck-viz-platform.md](../../../docs/briefs/deck-viz-platform.md).
+It harvests ds-engine's locked research and resolves all four legacy-engine-specific unknowns. Key
+resolutions that shape the design:
+1. **`vl-convert-python`** is the SINGLE render dependency — `vegalite_to_png` (static PNG) AND
+   `vegalite_to_html` (self-contained interactive HTML). Zero-dependency wheel, macOS-arm64 + linux, no
+   Chrome/Node. Pin `>=1.9,<2`, `vl_version="6.4"`.
+2. **Authoring = hand-built Vega-Lite dicts, NOT Altair** (small fixed vocabulary, we already need
+   vl-convert, tight theme control, trivial snapshot tests).
+3. **Scope trim:** because we author every spec ourselves, ds-engine's runtime AJV validator +
+   correction-loop + curated sub-schema are NOT needed — validation is test-time (`jsonschema` +
+   JSON snapshots). The "structural validator" unit shrinks accordingly.
+4. **charts.py migration win:** keep its pure `_*_model` prep dataclasses (matplotlib-free honesty
+   logic), write `spec_*` Vega-Lite builders against them, drop the matplotlib renderers + dep.
+5. **Per-deck dashboard** = our own 12-col HTML template (charts via vega-embed + card-list/primer as
+   HTML); a whole-page PNG is OUT (no browser) — PNG export is per-tile.
 
-Do NOT re-run a full research campaign — harvest ds-engine's locked briefs for the landscape.
+Suggested 3-feature decomposition (dependency-ordered): (1) `viz/` foundation (theme + strip-and-inject
++ render png/html + test-time validation); (2) migrate the 4 charts.py surfaces; (3) per-deck dashboard
+(layout + deck_dashboard + Tiles B/D/E + `viz deck` CLI).
 
 ## Dependencies
 `depends_on`: `epic-meta-analytics`, `epic-advisory`, `epic-deck-generation`, `epic-regime-aware-advisory`
