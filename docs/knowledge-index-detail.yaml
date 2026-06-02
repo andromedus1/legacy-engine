@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-02T01:58:51Z'
+generated_at: '2026-06-02T02:31:10Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -373,6 +373,54 @@ documents:
     - Goldfish-simulation (speed/consistency/mulligan) is a SEPARATE deferred pillar;
       a mature generator should goldfish-validate candidates, but that integration
       is out of this brief's scope.
+  docs/briefs/deck-viz-platform.md:
+    summary: 'Integration brief that unblocks epic-deck-viz-platform. Harvests ds-engine''s
+      locked viz research
+
+      (Vega-Lite + vl-convert + strip-and-inject theming + 12-col tiles) and resolves
+      the four
+
+      legacy-engine-specific questions: vl-convert-python is the single render dependency
+      (it does BOTH
+
+      static PNG and self-contained HTML); specs are authored as hand-built Python
+      dicts (not Altair);
+
+      the five dashboard tiles bind to named analytics/advisory/generation functions
+      whose shapes are
+
+      documented here; and charts.py migrates by keeping its pure `_*_model` prep
+      layer and swapping the
+
+      matplotlib renderers for Vega-Lite spec builders.
+
+      '
+    key_findings:
+    - 'vl-convert-python (1.9.x, zero-dependency abi3 wheel, macOS-arm64 + linux wheels)
+      is the SINGLE render dependency: vegalite_to_png(spec, scale=) for static PNG
+      AND vegalite_to_html(spec, bundle=True) for self-contained interactive HTML.
+      No Chrome, no Node, no browser. PNG is deterministic same-machine.'
+    - Author specs as hand-built Vega-Lite v6 dicts, NOT Altair. Small fixed chart
+      vocabulary (~5 marks), we already depend on vl-convert (which takes dicts),
+      tight theme control, trivial JSON snapshot tests. Altair would add jinja2+jsonschema+narwhals
+      for no benefit.
+    - We author every spec ourselves, so ds-engine's runtime AJV validator + correction-loop
+      are NOT needed. Validation is a TEST-TIME concern (jsonschema.validate against
+      the VL v6 schema + JSON snapshot fixtures). This trims the epic's 'structural
+      validator' scope substantially.
+    - 'Strip-and-inject is still mandatory (vega-embed #27): strip top-level spec.config,
+      then bake the canonical theme dict into spec.config before BOTH render paths
+      so HTML and PNG match. Two theme variants (screen vs print) sharing palette/fonts.'
+    - charts.py already splits pure honesty-logic prep (_heatmap_model/_metashare_model/_tier_model/_trends_model
+      — matplotlib-free dataclasses) from matplotlib render_* . Migration KEEPS the
+      prep models, writes spec_from_*(model) Vega-Lite builders, and drops the matplotlib
+      renderers + the matplotlib dependency.
+    - 'Per-deck dashboard tiles bind to: metashare.compute_metashare→MetaShareReport;
+      matchup.build_adaptive_matrix→AdaptiveMatrix (the deck''s ROW as a win% bar,
+      not the full NxN); trends.compute_trends→TrendSeries; positioning.rank_decks→DeckRanking
+      (highlight subject deck); generation/consensus.build_consensus→GeneratedDeck
+      (HTML card-list tile, not a chart). No ''primer'' function exists — the composed
+      page IS the primer.'
   docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md:
     summary: 'Reverse-engineers the CLASSIFY stage: the archived Badaro/MTGOArchetypeParser
       C# engine that
