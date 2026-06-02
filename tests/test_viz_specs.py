@@ -1,49 +1,51 @@
-"""Charts tests — prep helpers + smoke renders + CLI wiring for epic-meta-analytics-charts.
+"""Viz specs tests — prep models + Vega-Lite builder tests for the four chart surfaces.
 
-House style: module-level raw dicts → ``parse_cache_item`` → ``store.load_tournament``
-into ``:memory:``; labels pinned via direct SQL UPDATE; ``TestX`` classes; deterministic.
-CliRunner for CLI tests.
+Replaces the old test_charts.py (matplotlib-era) after the charts-migration feature.
+House style: CliRunner + in-memory DuckDB; TestX classes; deterministic.
 
 Covers:
-- TestHeatmapModel — masking, p_shrunk, annotations, mirror, caveat.
-- TestMetashareModel — speculative muted, fringe/Other flagged, subtitle labeled.
-- TestTierModel — S/A/B bucket boundaries; confidence carried; Other/never-other excluded.
-- TestTrendModel — per-regime series with None gaps; thin_regimes mirrors regime flags.
-- TestRenderSmoke — each render_* writes a non-empty PNG; empty inputs still write a valid PNG.
-- TestReportTiersCLI — report tiers prints a labeled text tier list.
-- TestChartDirCLI — --chart-dir writes expected filenames; omitting it leaves text-only output.
+- TestHeatmapModel — masking, p_shrunk, annotations, mirror, caveat (moved from test_charts.py).
+- TestMetashareModel — speculative muted, fringe/Other flagged, subtitle (moved).
+- TestTierModel — S/A/B bucket boundaries; confidence carried; Other/never-other excluded (moved).
+- TestTrendModel — per-regime series with None gaps; thin_regimes mirrors regime flags (moved).
+- TestSpecMetashare — schema + description + assert_renders; muted/fringe data in rows.
+- TestSpecMatchupHeatmap — schema + description + assert_renders; masked/mirror/annotation rows.
+- TestSpecTierList — schema + description + assert_renders; facet rows; empty model.
+- TestSpecTrends — schema + description + assert_renders; thin-band layer; gap (None) omission.
 """
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
+import json
 
 import duckdb
 import pytest
 from click.testing import CliRunner
 
-from legacy_engine.analytics.charts import (
-    BarModel,
+from legacy_engine.analytics.matchup import build_matrix
+from legacy_engine.analytics.metashare import compute_metashare
+from legacy_engine.analytics.trends import compute_trends
+from legacy_engine.config import VL_SCHEMA_URL
+from legacy_engine.ingestion import store
+from legacy_engine.ingestion.cache import parse_cache_item
+from legacy_engine.ingestion.store import init_schema
+from legacy_engine.viz.models import (
     HeatmapModel,
+    BarModel,
     TierModel,
     TrendModel,
     _heatmap_model,
     _metashare_model,
     _tier_model,
     _trends_model,
-    render_matchup_heatmap,
-    render_metashare,
-    render_tier_list,
-    render_trends,
 )
-from legacy_engine.analytics.matchup import build_matrix
-from legacy_engine.analytics.metashare import compute_metashare
-from legacy_engine.analytics.trends import compute_trends
-from legacy_engine.cli import main
-from legacy_engine.ingestion import store
-from legacy_engine.ingestion.cache import parse_cache_item
-from legacy_engine.ingestion.store import init_schema
+from legacy_engine.viz.specs import (
+    spec_matchup_heatmap,
+    spec_metashare,
+    spec_tier_list,
+    spec_trends,
+)
+from tests.conftest import assert_renders
 
 # ---------------------------------------------------------------------------
 # Shared raw tournament fixtures
@@ -157,36 +159,8 @@ def _load_and_label(con, raw_dict, source, labels: dict[str, str]):
     return tid
 
 
-def _setup_db_file(tmp_path, label_online=True) -> Path:
-    """Create a file-based DuckDB with a minimal labeled corpus."""
-    db_path = tmp_path / "charts_test.duckdb"
-    con = duckdb.connect(str(db_path))
-    init_schema(con)
-    tid = store.load_tournament(con, parse_cache_item(_ONLINE_T1, "MTGO"))
-    if label_online:
-        con.execute(
-            "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'alice'",
-            [tid],
-        )
-        con.execute(
-            "UPDATE decks SET archetype = 'Lands' WHERE tournament_id = ? AND player = 'bob'",
-            [tid],
-        )
-    con.close()
-    return db_path
-
-
-# ---------------------------------------------------------------------------
-# Build a large corpus (≥30 decks per matchup) for testing the matchup heatmap
-# display=True path.  We need n≥30 between two archetypes.
-# ---------------------------------------------------------------------------
-
-
 def _build_large_matchup_corpus(con):
     """Build enough matchup data for at least one cell to have n≥30 (display=True)."""
-    # We need 30+ Delver-vs-Lands matches.  Build 31 rounds:
-    # Each 'round' is a separate mini-tournament with 2 players (one Delver, one Lands)
-    # to give us 31 decisive match results total.
     for i in range(31):
         raw = {
             "Tournament": {
@@ -224,7 +198,7 @@ def _build_large_matchup_corpus(con):
 
 
 # ---------------------------------------------------------------------------
-# TestHeatmapModel
+# TestHeatmapModel (moved from test_charts.py; re-pointed to viz.models)
 # ---------------------------------------------------------------------------
 
 
@@ -235,11 +209,9 @@ class TestHeatmapModel:
         _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
         matrix = build_matrix(con, provenance=None, min_row_share=0.0)
         model = _heatmap_model(matrix)
-        # In a 2-archetype matrix, find the non-mirror Delver-vs-Lands cell
         if "Delver" in model.archetypes and "Lands" in model.archetypes:
             d_idx = model.archetypes.index("Delver")
             l_idx = model.archetypes.index("Lands")
-            # n=1 match → display is False → masked
             assert model.masked[d_idx][l_idx] is True
             assert model.values[d_idx][l_idx] is None
         con.close()
@@ -250,7 +222,6 @@ class TestHeatmapModel:
         _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
         matrix = build_matrix(con, provenance=None, min_row_share=0.0)
         model = _heatmap_model(matrix)
-        # Count all masked cells with values=None
         for i, row in enumerate(model.values):
             for j, v in enumerate(row):
                 if model.masked[i][j]:
@@ -263,7 +234,6 @@ class TestHeatmapModel:
         _build_large_matchup_corpus(con)
         matrix = build_matrix(con, provenance=None, min_row_share=0.0)
         model = _heatmap_model(matrix)
-        # Find a cell that is not masked and not a mirror
         found_displayed = False
         for i in range(len(model.archetypes)):
             for j in range(len(model.archetypes)):
@@ -316,7 +286,6 @@ class TestHeatmapModel:
     def test_empty_matrix_produces_empty_model(self):
         """An empty matrix (no archetypes) produces a HeatmapModel with empty lists."""
         con = _con()
-        # No data → no archetypes above any threshold
         matrix = build_matrix(con, provenance=None, min_row_share=0.0)
         model = _heatmap_model(matrix)
         assert model.archetypes == []
@@ -328,7 +297,7 @@ class TestHeatmapModel:
 
 
 # ---------------------------------------------------------------------------
-# TestMetashareModel
+# TestMetashareModel (moved from test_charts.py; re-pointed to viz.models)
 # ---------------------------------------------------------------------------
 
 
@@ -354,7 +323,6 @@ class TestMetashareModel:
     def test_other_bar_is_fringe(self):
         """An 'Other' entry → fringe[i] is True."""
         con = _con()
-        # Build a 100-deck corpus; all labeled Delver except one tiny Lands → Lands gets grouped into Other
         decks = []
         for k in range(99):
             decks.append({
@@ -401,9 +369,7 @@ class TestMetashareModel:
     def test_fringe_entry_is_fringe_flagged(self):
         """An entry with fringe=True → fringe[i] is True in model."""
         con = _con()
-        # 2-deck corpus: each at 50% share but we use group_other=False to keep fringe rows
         _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
-        # Build a bigger corpus where Lands is fringe
         decks = []
         for k in range(50):
             decks.append({
@@ -443,8 +409,6 @@ class TestMetashareModel:
             con, definition="raw", provenance=None, min_share=0.02, group_other=False
         )
         model = _metashare_model(report)
-        # Lands should be fringe (share ≈ 2/53 ≈ 3.8% from first tournament, much less than 2% from combined)
-        # Actually let's just verify: fringe entries map to fringe[i] True
         for i, label in enumerate(model.labels):
             entry = next(e for e in report.entries if e.archetype == label)
             if entry.fringe:
@@ -473,7 +437,6 @@ class TestMetashareModel:
     def test_empty_report_produces_empty_model_labels(self):
         """Empty report (no entries) → model.labels is empty list."""
         con = _con()
-        # No data at all
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0)
         model = _metashare_model(report)
         assert model.labels == []
@@ -484,19 +447,13 @@ class TestMetashareModel:
 
 
 # ---------------------------------------------------------------------------
-# TestTierModel
+# TestTierModel (moved from test_charts.py; re-pointed to viz.models)
 # ---------------------------------------------------------------------------
 
 
 class TestTierModel:
     def _build_tier_corpus(self, con):
         """Build a corpus with exact share counts: S-tier, A-tier, B-tier, sub-floor."""
-        # 100 decks total:
-        # - 12 Reanimator (12% → S)
-        # - 7 Delver (7% → A)
-        # - 3 Combo (3% → B)
-        # - 1 Stompy (1% → sub-floor)
-        # - 77 Control (77% → S)
         decks = []
         labels = {}
         idx = 0
@@ -544,18 +501,15 @@ class TestTierModel:
             )
 
     def test_s_tier_boundary(self):
-        """An archetype at 12% lands in the 'S' tier bucket."""
         con = _con()
         self._build_tier_corpus(con)
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0, group_other=False)
         model = _tier_model(report)
         s_archs = [arch for arch, _share, _tier in model.buckets["S"]]
-        # Reanimator is at 12% → S
         assert "Reanimator" in s_archs
         con.close()
 
     def test_a_tier_boundary(self):
-        """An archetype at 7% lands in the 'A' tier bucket."""
         con = _con()
         self._build_tier_corpus(con)
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0, group_other=False)
@@ -565,7 +519,6 @@ class TestTierModel:
         con.close()
 
     def test_b_tier_boundary(self):
-        """An archetype at 3% lands in the 'B' tier bucket."""
         con = _con()
         self._build_tier_corpus(con)
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0, group_other=False)
@@ -575,7 +528,6 @@ class TestTierModel:
         con.close()
 
     def test_sub_floor_is_untiered(self):
-        """An archetype at 1% (below b_min=2%) is absent from all buckets."""
         con = _con()
         self._build_tier_corpus(con)
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0, group_other=False)
@@ -589,7 +541,6 @@ class TestTierModel:
         con.close()
 
     def test_confidence_tier_carried_in_bucket(self):
-        """Each bucket entry carries the archetype's confidence tier from the report."""
         con = _con()
         self._build_tier_corpus(con)
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0, group_other=False)
@@ -597,15 +548,12 @@ class TestTierModel:
         entry_tiers = {e.archetype: e.tier for e in report.entries}
         for tier_key in ("S", "A", "B"):
             for arch, _share, conf_tier in model.buckets[tier_key]:
-                assert conf_tier == entry_tiers[arch], (
-                    f"{arch}: bucket tier={conf_tier!r} but report tier={entry_tiers[arch]!r}"
-                )
+                assert conf_tier == entry_tiers[arch]
         con.close()
 
     def test_other_excluded_from_tiers(self):
         """The 'Other' row is excluded from all tier buckets."""
         con = _con()
-        # Build corpus with Other row
         decks = []
         labels = {}
         idx = 0
@@ -618,7 +566,7 @@ class TestTierModel:
             p = f"p{idx}"; idx += 1
             decks.append({"Player": p, "Result": f"{idx}th",
                            "Mainboard": [{"Count": 4, "CardName": "Force of Will"}], "Sideboard": []})
-            labels[p] = "Smol"  # fringe → grouped into Other
+            labels[p] = "Smol"
         raw = {
             "Tournament": {
                 "Name": "Other Excl Test",
@@ -636,7 +584,6 @@ class TestTierModel:
                 "UPDATE decks SET archetype = ? WHERE tournament_id = ? AND player = ?",
                 [archetype, tid, player],
             )
-        # group_other=True so "Smol" is rolled into "Other"
         report = compute_metashare(con, definition="raw", provenance=None, min_share=0.5, group_other=True)
         model = _tier_model(report)
         all_tiered = (
@@ -663,7 +610,7 @@ class TestTierModel:
 
 
 # ---------------------------------------------------------------------------
-# TestTrendModel
+# TestTrendModel (moved from test_charts.py; re-pointed to viz.models)
 # ---------------------------------------------------------------------------
 
 
@@ -688,11 +635,7 @@ class TestTrendModel:
 
         for archetype in model.archetypes:
             arch_series = model.series[archetype]
-            assert len(arch_series) == len(model.regime_labels), (
-                f"series[{archetype!r}] length {len(arch_series)} != "
-                f"regime count {len(model.regime_labels)}"
-            )
-            # Each entry is float or None
+            assert len(arch_series) == len(model.regime_labels)
             for val in arch_series:
                 assert val is None or isinstance(val, float)
         con.close()
@@ -706,10 +649,7 @@ class TestTrendModel:
 
         assert len(model.thin_regimes) == len(trend_series.regimes)
         for k, regime in enumerate(trend_series.regimes):
-            assert model.thin_regimes[k] == regime.thin, (
-                f"thin_regimes[{k}]={model.thin_regimes[k]!r} != "
-                f"regime.thin={regime.thin!r} for {regime.label!r}"
-            )
+            assert model.thin_regimes[k] == regime.thin
         con.close()
 
     def test_regime_labels_match_series_regimes(self):
@@ -745,7 +685,6 @@ class TestTrendModel:
         """An empty TrendSeries produces a TrendModel with no regimes or archetypes."""
         con = _con()
         trend_series = compute_trends(con, definition="raw", min_share=0.0)
-        # Empty corpus → empty series
         model = _trends_model(trend_series)
         assert model.regime_labels == []
         assert model.archetypes == []
@@ -755,313 +694,367 @@ class TestTrendModel:
 
 
 # ---------------------------------------------------------------------------
-# TestRenderSmoke
+# Builder fixtures — minimal representative models for spec tests
 # ---------------------------------------------------------------------------
 
 
-class TestRenderSmoke:
-    def test_render_matchup_heatmap_writes_nonempty_png(self, tmp_path):
-        """render_matchup_heatmap writes a non-empty PNG for a minimal corpus."""
-        con = _con()
-        _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
-        matrix = build_matrix(con, provenance=None, min_row_share=0.0)
-        out = tmp_path / "heatmap.png"
-        result = render_matchup_heatmap(matrix, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
+def _make_bar_model() -> BarModel:
+    """Representative BarModel with one muted + one fringe entry."""
+    from legacy_engine.confidence import ConfidenceLevel
+    return BarModel(
+        labels=["Delver", "Lands", "Other"],
+        shares=[0.40, 0.25, 0.05],
+        muted=[True, False, False],
+        fringe=[False, False, True],
+        tiers=["speculative", "evolving", "evolving"],
+        subtitle="definition=RAW  basis=all  total_decks=100",
+        title="Meta Share [RAW]  basis=all",
+    )
 
-    def test_render_matchup_heatmap_empty_matrix_writes_png(self, tmp_path):
-        """render_matchup_heatmap with empty matrix writes a valid placeholder PNG."""
-        con = _con()
-        matrix = build_matrix(con, provenance=None, min_row_share=0.0)
-        out = tmp_path / "heatmap_empty.png"
-        result = render_matchup_heatmap(matrix, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
 
-    def test_render_metashare_writes_nonempty_png(self, tmp_path):
-        """render_metashare writes a non-empty PNG for a minimal corpus."""
-        con = _con()
-        _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
-        report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0)
-        out = tmp_path / "metashare.png"
-        result = render_metashare(report, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
+def _make_heatmap_model() -> HeatmapModel:
+    """Representative HeatmapModel with 2 archetypes, 1 display cell, all others masked."""
+    return HeatmapModel(
+        archetypes=["Delver", "Lands"],
+        values=[
+            [None, 0.65],
+            [0.35, None],
+        ],
+        masked=[
+            [True, False],
+            [False, True],
+        ],
+        mirror=[
+            [True, False],
+            [False, True],
+        ],
+        annotations=[
+            ["mirror", "65%\n(n=31)"],
+            ["35%\n(n=31)", "mirror"],
+        ],
+        caveat="n=31 decisive matches; shrunk win rates",
+        title="Matchup Matrix  [basis=all]",
+    )
 
-    def test_render_metashare_empty_report_writes_png(self, tmp_path):
-        """render_metashare with empty report writes a valid placeholder PNG."""
-        con = _con()
-        report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0)
-        out = tmp_path / "metashare_empty.png"
-        result = render_metashare(report, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
 
-    def test_render_tier_list_writes_nonempty_png(self, tmp_path):
-        """render_tier_list writes a non-empty PNG for a minimal corpus."""
-        con = _con()
-        _load_and_label(con, _ONLINE_T1, "MTGO", {"alice": "Delver", "bob": "Lands"})
-        report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0)
-        out = tmp_path / "tiers.png"
-        result = render_tier_list(report, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
+def _make_tier_model() -> TierModel:
+    """Representative TierModel with one entry per bucket."""
+    return TierModel(
+        buckets={
+            "S": [("Control", 0.30, "established")],
+            "A": [("Delver", 0.07, "evolving")],
+            "B": [("Combo", 0.03, "speculative")],
+        },
+        subtitle="definition=RAW  basis=all  total_decks=100  S≥10% A≥5% B≥2%",
+        title="Tier List [RAW]  basis=all",
+    )
 
-    def test_render_tier_list_empty_report_writes_png(self, tmp_path):
-        """render_tier_list with empty report writes a valid placeholder PNG."""
-        con = _con()
-        report = compute_metashare(con, definition="raw", provenance=None, min_share=0.0)
-        out = tmp_path / "tiers_empty.png"
-        result = render_tier_list(report, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
 
-    def test_render_trends_writes_nonempty_png(self, tmp_path):
-        """render_trends writes a non-empty PNG for a multi-regime corpus."""
-        con = _con()
-        _load_and_label(con, _REGIME_A_T1, "MTGO", {"p1": "Delver", "p2": "Lands", "p3": "Reanimator"})
-        _load_and_label(con, _REGIME_C_T1, "MTGO", {"s1": "Delver", "s2": "Lands"})
-        trend_series = compute_trends(con, definition="raw", min_share=0.0)
-        out = tmp_path / "trends.png"
-        result = render_trends(trend_series, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
-
-    def test_render_trends_empty_series_writes_png(self, tmp_path):
-        """render_trends with empty series writes a valid placeholder PNG."""
-        con = _con()
-        trend_series = compute_trends(con, definition="raw", min_share=0.0)
-        out = tmp_path / "trends_empty.png"
-        result = render_trends(trend_series, out)
-        assert result == out
-        assert out.exists()
-        assert out.stat().st_size > 0
-        con.close()
+def _make_trend_model() -> TrendModel:
+    """Representative TrendModel: 2 archetypes × 3 regimes, 1 gap, 1 thin regime."""
+    return TrendModel(
+        regime_labels=["Grief era", "Post-Grief", "Post-Undercity"],
+        archetypes=["Delver", "Reanimator"],
+        series={
+            "Delver": [0.25, 0.30, None],        # absent from regime 3 → gap
+            "Reanimator": [None, 0.15, 0.20],    # absent from regime 1 → gap
+        },
+        thin_regimes=[False, True, False],
+        subtitle="definition=RAW  basis=all",
+        title="Meta Trends [RAW]  basis=all",
+    )
 
 
 # ---------------------------------------------------------------------------
-# TestReportTiersCLI
+# TestSpecMetashare — spec_metashare builder
 # ---------------------------------------------------------------------------
 
 
-class TestReportTiersCLI:
-    @pytest.fixture
-    def runner(self):
-        return CliRunner()
+class TestSpecMetashare:
+    def test_schema_present(self):
+        """spec_metashare returns a dict with $schema == VL_SCHEMA_URL."""
+        spec = spec_metashare(_make_bar_model())
+        assert spec["$schema"] == VL_SCHEMA_URL
 
-    def test_report_tiers_no_longer_stub(self, runner, tmp_path):
-        """report tiers is implemented — does NOT return 'not implemented'."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(main, ["report", "tiers", "--db", str(db_path)])
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "not implemented" not in result.output
+    def test_description_non_empty(self):
+        """spec_metashare sets a non-empty description."""
+        spec = spec_metashare(_make_bar_model())
+        assert isinstance(spec.get("description"), str)
+        assert len(spec["description"]) > 0
 
-    def test_report_tiers_prints_tier_headers(self, runner, tmp_path):
-        """report tiers output contains Tier S, Tier A, Tier B labels."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(main, ["report", "tiers", "--db", str(db_path)])
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "Tier S" in result.output
-        assert "Tier A" in result.output
-        assert "Tier B" in result.output
+    def test_no_config_key(self):
+        """spec_metashare does NOT set config (theme is injected at render time)."""
+        spec = spec_metashare(_make_bar_model())
+        assert "config" not in spec
 
-    def test_report_tiers_prints_labeled_title(self, runner, tmp_path):
-        """report tiers output contains definition and basis labels."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main, ["report", "tiers", "--definition", "raw", "--provenance", "all", "--db", str(db_path)]
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "RAW" in result.output or "raw" in result.output.lower()
+    def test_data_values_contains_all_rows(self):
+        """spec data.values has one row per label."""
+        model = _make_bar_model()
+        spec = spec_metashare(model)
+        rows = spec["data"]["values"]
+        assert len(rows) == len(model.labels)
 
-    def test_report_tiers_on_empty_db_runs_ok(self, runner, tmp_path):
-        """report tiers on an empty DB runs without error."""
-        db_path = tmp_path / "empty.duckdb"
-        con = duckdb.connect(str(db_path))
-        init_schema(con)
-        con.close()
-        result = runner.invoke(main, ["report", "tiers", "--db", str(db_path)])
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
+    def test_muted_flag_present_in_rows(self):
+        """Rows include the muted field so opacity conditions can fire."""
+        spec = spec_metashare(_make_bar_model())
+        rows = spec["data"]["values"]
+        muted_row = next(r for r in rows if r["archetype"] == "Delver")
+        assert muted_row["muted"] is True
 
-    def test_report_tiers_help_shows_options(self, runner):
-        """report tiers --help shows the expected options."""
-        result = runner.invoke(main, ["report", "tiers", "--help"])
-        assert result.exit_code == 0
-        assert "--definition" in result.output
-        assert "--provenance" in result.output
-        assert "--min-share" in result.output
-        assert "--chart-dir" in result.output
+    def test_fringe_flag_present_in_rows(self):
+        """Rows include the fringe field so color conditions can fire."""
+        spec = spec_metashare(_make_bar_model())
+        rows = spec["data"]["values"]
+        fringe_row = next(r for r in rows if r["archetype"] == "Other")
+        assert fringe_row["fringe"] is True
 
-    def test_report_tiers_single_provenance(self, runner, tmp_path):
-        """report tiers --provenance online prints only one basis."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main, ["report", "tiers", "--provenance", "online", "--db", str(db_path)]
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "online" in result.output
+    def test_assert_renders(self):
+        """spec_metashare passes the real Vega-Lite compiler (assert_renders)."""
+        assert_renders(spec_metashare(_make_bar_model()))
+
+    def test_json_snapshot(self):
+        """spec_metashare produces a stable JSON snapshot for the representative model."""
+        spec = spec_metashare(_make_bar_model())
+        # Round-trip through JSON to catch any non-serialisable values
+        serialised = json.loads(json.dumps(spec))
+        assert serialised["$schema"] == VL_SCHEMA_URL
+        assert serialised["encoding"]["y"]["field"] == "archetype"
+        assert serialised["encoding"]["x"]["field"] == "share"
 
 
 # ---------------------------------------------------------------------------
-# TestChartDirCLI
+# TestSpecMatchupHeatmap — spec_matchup_heatmap builder
 # ---------------------------------------------------------------------------
 
 
-class TestChartDirCLI:
-    @pytest.fixture
-    def runner(self):
-        return CliRunner()
+class TestSpecMatchupHeatmap:
+    def test_schema_present(self):
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        assert spec["$schema"] == VL_SCHEMA_URL
 
-    def test_report_meta_chart_dir_writes_png(self, runner, tmp_path):
-        """report meta --chart-dir D writes PNG files into D."""
-        db_path = _setup_db_file(tmp_path)
-        chart_dir = tmp_path / "charts"
-        result = runner.invoke(
-            main,
-            [
-                "report", "meta",
-                "--definition", "raw",
-                "--provenance", "all",
-                "--db", str(db_path),
-                "--chart-dir", str(chart_dir),
-            ],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        # Expect filenames for each basis: meta_raw_all.png, meta_raw_online.png, meta_raw_paper.png
-        for basis in ("all", "online", "paper"):
-            expected = chart_dir / f"meta_raw_{basis}.png"
-            assert expected.exists(), f"Expected {expected} to exist; output:\n{result.output}"
-            assert expected.stat().st_size > 0
+    def test_description_non_empty(self):
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        assert isinstance(spec.get("description"), str)
+        assert len(spec["description"]) > 0
 
-    def test_report_meta_no_chart_dir_text_only(self, runner, tmp_path):
-        """report meta without --chart-dir produces text output only (no PNG mentioned)."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main,
-            ["report", "meta", "--definition", "raw", "--provenance", "all", "--db", str(db_path)],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "Chart written" not in result.output
+    def test_no_config_key(self):
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        assert "config" not in spec
 
-    def test_report_matchups_chart_dir_writes_png(self, runner, tmp_path):
-        """report matchups --chart-dir D writes PNG files into D."""
-        db_path = _setup_db_file(tmp_path)
-        chart_dir = tmp_path / "charts_matchups"
-        result = runner.invoke(
-            main,
-            [
-                "report", "matchups",
-                "--provenance", "all",
-                "--db", str(db_path),
-                "--chart-dir", str(chart_dir),
-            ],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        # Expect matchups_all.png, matchups_online.png, matchups_paper.png
-        for basis in ("all", "online", "paper"):
-            expected = chart_dir / f"matchups_{basis}.png"
-            assert expected.exists(), f"Expected {expected} to exist; output:\n{result.output}"
-            assert expected.stat().st_size > 0
+    def test_has_two_layers(self):
+        """Heatmap has a rect layer and a text layer."""
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        assert "layer" in spec
+        assert len(spec["layer"]) == 2
+        marks = [layer["mark"] for layer in spec["layer"]]
+        assert "rect" in marks
+        assert any(m == "text" or (isinstance(m, dict) and m.get("type") == "text") for m in marks)
 
-    def test_report_matchups_no_chart_dir_text_only(self, runner, tmp_path):
-        """report matchups without --chart-dir produces no chart output."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main,
-            ["report", "matchups", "--provenance", "all", "--db", str(db_path)],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "Chart written" not in result.output
+    def test_data_values_has_n_squared_rows(self):
+        """A 2×2 heatmap has 4 rows in data.values."""
+        model = _make_heatmap_model()
+        spec = spec_matchup_heatmap(model)
+        n = len(model.archetypes)
+        rows = spec["data"]["values"]
+        assert len(rows) == n * n
 
-    def test_report_trends_chart_dir_writes_png(self, runner, tmp_path):
-        """report trends --chart-dir D writes PNG files into D."""
-        db_path = _setup_db_file(tmp_path)
-        chart_dir = tmp_path / "charts_trends"
-        result = runner.invoke(
-            main,
-            [
-                "report", "trends",
-                "--definition", "raw",
-                "--provenance", "all",
-                "--db", str(db_path),
-                "--chart-dir", str(chart_dir),
-            ],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        for basis in ("all", "online", "paper"):
-            expected = chart_dir / f"trends_raw_{basis}.png"
-            assert expected.exists(), f"Expected {expected} to exist; output:\n{result.output}"
-            assert expected.stat().st_size > 0
+    def test_masked_cells_present_in_data(self):
+        """Masked cells appear in data.values with p_shrunk == None."""
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        rows = spec["data"]["values"]
+        masked_rows = [r for r in rows if r["masked"]]
+        assert len(masked_rows) > 0
+        for r in masked_rows:
+            assert r["p_shrunk"] is None
 
-    def test_report_trends_no_chart_dir_text_only(self, runner, tmp_path):
-        """report trends without --chart-dir produces no chart output."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main,
-            ["report", "trends", "--definition", "raw", "--provenance", "all", "--db", str(db_path)],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "Chart written" not in result.output
+    def test_mirror_cells_annotated(self):
+        """Mirror cells carry annotation == 'mirror'."""
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        rows = spec["data"]["values"]
+        mirror_rows = [r for r in rows if r["mirror"]]
+        assert len(mirror_rows) > 0
+        for r in mirror_rows:
+            assert r["annotation"] == "mirror"
 
-    def test_report_tiers_chart_dir_writes_png(self, runner, tmp_path):
-        """report tiers --chart-dir D writes tiers_*.png files into D."""
-        db_path = _setup_db_file(tmp_path)
-        chart_dir = tmp_path / "charts_tiers"
-        result = runner.invoke(
-            main,
-            [
-                "report", "tiers",
-                "--definition", "raw",
-                "--provenance", "all",
-                "--db", str(db_path),
-                "--chart-dir", str(chart_dir),
-            ],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        for basis in ("all", "online", "paper"):
-            expected = chart_dir / f"tiers_raw_{basis}.png"
-            assert expected.exists(), f"Expected {expected} to exist; output:\n{result.output}"
-            assert expected.stat().st_size > 0
+    def test_assert_renders(self):
+        """spec_matchup_heatmap passes the real Vega-Lite compiler."""
+        assert_renders(spec_matchup_heatmap(_make_heatmap_model()))
 
-    def test_report_tiers_no_chart_dir_text_only(self, runner, tmp_path):
-        """report tiers without --chart-dir produces no chart output."""
-        db_path = _setup_db_file(tmp_path)
-        result = runner.invoke(
-            main,
-            ["report", "tiers", "--definition", "raw", "--provenance", "all", "--db", str(db_path)],
-        )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert "Chart written" not in result.output
+    def test_json_snapshot(self):
+        spec = spec_matchup_heatmap(_make_heatmap_model())
+        serialised = json.loads(json.dumps(spec))
+        assert serialised["$schema"] == VL_SCHEMA_URL
+        # Rect layer encodes x as archetype_b, y as archetype_a
+        rect_layer = next(l for l in serialised["layer"] if l["mark"] == "rect")
+        assert rect_layer["encoding"]["x"]["field"] == "archetype_b"
+        assert rect_layer["encoding"]["y"]["field"] == "archetype_a"
+        # Color scale scheme
+        assert rect_layer["encoding"]["color"]["field"] == "p_shrunk"
+        assert rect_layer["encoding"]["color"]["scale"]["scheme"] == "redyellowgreen"
 
-    def test_chart_dir_created_if_not_exists(self, runner, tmp_path):
-        """--chart-dir creates the directory if it does not exist."""
-        db_path = _setup_db_file(tmp_path)
-        chart_dir = tmp_path / "nonexistent" / "deep" / "charts"
-        assert not chart_dir.exists()
-        result = runner.invoke(
-            main,
-            [
-                "report", "meta",
-                "--definition", "raw",
-                "--provenance", "online",
-                "--db", str(db_path),
-                "--chart-dir", str(chart_dir),
-            ],
+
+# ---------------------------------------------------------------------------
+# TestSpecTierList — spec_tier_list builder
+# ---------------------------------------------------------------------------
+
+
+class TestSpecTierList:
+    def test_schema_present(self):
+        spec = spec_tier_list(_make_tier_model())
+        assert spec["$schema"] == VL_SCHEMA_URL
+
+    def test_description_non_empty(self):
+        spec = spec_tier_list(_make_tier_model())
+        assert isinstance(spec.get("description"), str)
+        assert len(spec["description"]) > 0
+
+    def test_no_config_key(self):
+        spec = spec_tier_list(_make_tier_model())
+        assert "config" not in spec
+
+    def test_data_values_has_one_row_per_archetype(self):
+        """data.values has one row per tiered archetype (3 = 1 S + 1 A + 1 B)."""
+        model = _make_tier_model()
+        spec = spec_tier_list(model)
+        rows = spec["data"]["values"]
+        total_archs = sum(len(v) for v in model.buckets.values())
+        assert len(rows) == total_archs
+
+    def test_facet_by_bucket(self):
+        """Spec uses facet with row field == 'bucket'."""
+        spec = spec_tier_list(_make_tier_model())
+        assert "facet" in spec
+        assert spec["facet"]["row"]["field"] == "bucket"
+
+    def test_bucket_order_is_s_a_b(self):
+        """Facet row sort order is ['S', 'A', 'B']."""
+        spec = spec_tier_list(_make_tier_model())
+        assert spec["facet"]["row"]["sort"] == ["S", "A", "B"]
+
+    def test_empty_tier_model_renders(self):
+        """An empty TierModel (no buckets) still produces a valid renderable spec."""
+        empty_model = TierModel(
+            buckets={"S": [], "A": [], "B": []},
+            subtitle="definition=RAW  basis=all  total_decks=0  S≥10% A≥5% B≥2%",
+            title="Tier List [RAW]  basis=all",
         )
-        assert result.exit_code == 0, f"CLI failed: {result.output}\n{result.exception}"
-        assert chart_dir.exists()
+        spec = spec_tier_list(empty_model)
+        assert spec["$schema"] == VL_SCHEMA_URL
+        assert_renders(spec)
+
+    def test_assert_renders(self):
+        """spec_tier_list passes the real Vega-Lite compiler."""
+        assert_renders(spec_tier_list(_make_tier_model()))
+
+    def test_json_snapshot(self):
+        spec = spec_tier_list(_make_tier_model())
+        serialised = json.loads(json.dumps(spec))
+        assert serialised["$schema"] == VL_SCHEMA_URL
+        assert serialised["facet"]["row"]["field"] == "bucket"
+        # Inner spec encodes x=share, y=archetype
+        inner = serialised["spec"]["encoding"]
+        assert inner["x"]["field"] == "share"
+        assert inner["y"]["field"] == "archetype"
+
+
+# ---------------------------------------------------------------------------
+# TestSpecTrends — spec_trends builder
+# ---------------------------------------------------------------------------
+
+
+class TestSpecTrends:
+    def test_schema_present(self):
+        spec = spec_trends(_make_trend_model())
+        assert spec["$schema"] == VL_SCHEMA_URL
+
+    def test_description_non_empty(self):
+        spec = spec_trends(_make_trend_model())
+        assert isinstance(spec.get("description"), str)
+        assert len(spec["description"]) > 0
+
+    def test_no_config_key(self):
+        spec = spec_trends(_make_trend_model())
+        assert "config" not in spec
+
+    def test_none_cells_omitted_from_line_layer(self):
+        """None (absent) cells are not emitted in the line layer data; line breaks via gap."""
+        model = _make_trend_model()
+        spec = spec_trends(model)
+        # Line layer is the last layer
+        line_layer = spec["layer"][-1]
+        rows = line_layer["data"]["values"]
+        # Delver absent from regime 3 → only 2 rows for Delver
+        delver_rows = [r for r in rows if r["archetype"] == "Delver"]
+        assert len(delver_rows) == 2
+        # Reanimator absent from regime 1 → only 2 rows for Reanimator
+        reanimator_rows = [r for r in rows if r["archetype"] == "Reanimator"]
+        assert len(reanimator_rows) == 2
+        # No row with share == 0 from a gap
+        for r in rows:
+            if r["archetype"] in ("Delver", "Reanimator"):
+                assert r["share"] is not None
+                assert r["share"] > 0
+
+    def test_thin_regime_band_layer_present(self):
+        """When thin_regimes has True entries, a rect band layer is present."""
+        model = _make_trend_model()  # thin_regimes=[False, True, False]
+        spec = spec_trends(model)
+        assert "layer" in spec
+        # Should have 2 layers: band + line
+        assert len(spec["layer"]) == 2
+        band_layer = spec["layer"][0]
+        assert band_layer["mark"]["type"] == "rect"
+        # Band data has one row for the one thin regime
+        assert len(band_layer["data"]["values"]) == 1
+        assert band_layer["data"]["values"][0]["regime"] == "Post-Grief"
+
+    def test_no_thin_band_when_no_thin_regimes(self):
+        """When thin_regimes are all False, no band layer is emitted."""
+        model = TrendModel(
+            regime_labels=["Era A", "Era B"],
+            archetypes=["Delver"],
+            series={"Delver": [0.20, 0.25]},
+            thin_regimes=[False, False],
+            subtitle="definition=RAW  basis=all",
+            title="Meta Trends [RAW]  basis=all",
+        )
+        spec = spec_trends(model)
+        # Only the line layer should be present
+        assert len(spec["layer"]) == 1
+        assert spec["layer"][0]["mark"]["type"] == "line"
+
+    def test_regime_order_preserved(self):
+        """The regime sort order in x encoding matches model.regime_labels."""
+        model = _make_trend_model()
+        spec = spec_trends(model)
+        line_layer = spec["layer"][-1]
+        x_sort = line_layer["encoding"]["x"]["sort"]
+        assert x_sort == model.regime_labels
+
+    def test_assert_renders(self):
+        """spec_trends passes the real Vega-Lite compiler."""
+        assert_renders(spec_trends(_make_trend_model()))
+
+    def test_json_snapshot(self):
+        spec = spec_trends(_make_trend_model())
+        serialised = json.loads(json.dumps(spec))
+        assert serialised["$schema"] == VL_SCHEMA_URL
+        line_layer = serialised["layer"][-1]
+        assert line_layer["encoding"]["x"]["field"] == "regime"
+        assert line_layer["encoding"]["x"]["type"] == "ordinal"
+        assert line_layer["encoding"]["y"]["field"] == "share"
+        assert line_layer["encoding"]["color"]["field"] == "archetype"
+
+    def test_empty_trends_model_renders(self):
+        """An empty TrendModel (no archetypes, no regimes) still produces a valid spec."""
+        empty = TrendModel(
+            regime_labels=[],
+            archetypes=[],
+            series={},
+            thin_regimes=[],
+            subtitle="definition=RAW  basis=all",
+            title="Meta Trends [RAW]  basis=all",
+        )
+        spec = spec_trends(empty)
+        assert spec["$schema"] == VL_SCHEMA_URL
+        assert_renders(spec)
