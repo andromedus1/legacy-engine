@@ -1,20 +1,29 @@
-"""Vega-Lite v6 spec builders for the four chart surfaces.
+"""Vega-Lite v6 spec builders for the chart surfaces.
 
 Each builder takes a prep model from ``viz/models.py`` and returns a hand-built
 Vega-Lite spec dict.  No Altair.  No ``config`` key — the canonical dark theme is
 injected at render time by ``strip_and_inject`` (foundation convention; vega-embed #27).
 
 Builders:
-- ``spec_metashare(BarModel)``        — horizontal bar, muted speculative, fringe greyed
-- ``spec_matchup_heatmap(HeatmapModel)`` — rect+text layer, redyellowgreen, masked cells null/grey
-- ``spec_tier_list(TierModel)``       — horizontal bars faceted by bucket (S/A/B)
-- ``spec_trends(TrendModel)``         — line+point, ordinal x, gaps for None, thin-regime bands
+- ``spec_metashare(BarModel)``              — horizontal bar, muted speculative, fringe greyed
+- ``spec_matchup_heatmap(HeatmapModel)``    — rect+text layer, redyellowgreen, masked cells null/grey
+- ``spec_tier_list(TierModel)``             — horizontal bars faceted by bucket (S/A/B)
+- ``spec_trends(TrendModel)``               — line+point, ordinal x, gaps for None, thin-regime bands
+- ``spec_matchup_row(rows, *, deck)``       — Tile B: per-deck matchup spread vs each opponent
+- ``spec_positioning(ranking, *, subject)`` — Tile D: s_quantile bars, subject highlighted
 """
 
 from __future__ import annotations
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from legacy_engine.config import VL_SCHEMA_URL
 from legacy_engine.viz.models import BarModel, HeatmapModel, TierModel, TrendModel
+
+if TYPE_CHECKING:
+    from legacy_engine.advisory.positioning import DeckRanking
 
 
 def _base(description: str, title: str) -> dict:
@@ -385,6 +394,265 @@ def spec_trends(m: TrendModel) -> dict:
     layers.append(line_layer)
 
     spec.update({
+        "layer": layers,
+    })
+    return spec
+
+
+# ---------------------------------------------------------------------------
+# spec_matchup_row — Tile B: per-deck matchup spread (horizontal bar + CI + ref)
+# ---------------------------------------------------------------------------
+
+_MASKED_GREY = "#9AA0A6"   # grey for display==False cells (reuses heatmap constant)
+
+
+def spec_matchup_row(rows: list[dict], *, deck: str) -> dict:
+    """Vega-Lite spec: per-deck matchup spread (Tile B).
+
+    ``rows`` is a list of dicts, each with:
+      opponent, p_shrunk, ci_low, ci_high, n, tier, display, window
+
+    Visual semantics:
+    - y = opponent (sorted by p_shrunk desc where display; masked opponents at bottom)
+    - x = p_shrunk (quantitative; null for masked cells)
+    - bar fill = p_shrunk colour when display==True; grey (#9AA0A6) when display==False
+    - CI rule from ci_low to ci_high (only for displayed cells)
+    - reference rule at 0.5 (dotted)
+    - tooltip: p_raw (omitted here — not in rows; use p_shrunk%), n, tier, window
+    - masked cells show annotation "n=X insufficient" on the y-axis area
+    """
+    # Build flat rows for Vega-Lite; add sort_key so masked rows go to bottom.
+    vl_rows = []
+    for r in rows:
+        p = r.get("p_shrunk")
+        display = bool(r.get("display", False))
+        n = r.get("n", 0)
+        tier = str(r.get("tier", ""))
+        window = r.get("window") or "full corpus"
+        vl_rows.append({
+            "opponent": r["opponent"],
+            "p_shrunk": p if display and p is not None else None,
+            "ci_low": r.get("ci_low") if display else None,
+            "ci_high": r.get("ci_high") if display else None,
+            "n": n,
+            "tier": tier,
+            "display": display,
+            "window": window,
+            # sort key: displayed by rate desc, then masked (None sorts low in VL)
+            "sort_key": (p if display and p is not None else -1.0),
+        })
+
+    spec = _base(
+        description=f"Matchup spread for {deck}: win rate vs each opponent. Masked cells have insufficient data (n<30).",
+        title={"text": f"Matchup Spread — {deck}", "subtitle": "Grey bars = n<30 insufficient; error bars = 95% CI"},
+    )
+
+    # Bar layer — displayed cells only
+    bar_layer = {
+        "mark": {"type": "bar", "cornerRadiusEnd": 3},
+        "encoding": {
+            "y": {
+                "field": "opponent",
+                "type": "nominal",
+                "sort": {"field": "sort_key", "order": "descending"},
+                "title": "Opponent",
+            },
+            "x": {
+                "field": "p_shrunk",
+                "type": "quantitative",
+                "title": "Win rate (p_shrunk)",
+                "axis": {"format": ".0%"},
+                "scale": {"domain": [0, 1]},
+            },
+            "color": {
+                "condition": {"test": "!datum.display || datum.p_shrunk === null", "value": _MASKED_GREY},
+                "value": "#56B4E9",
+            },
+            "opacity": {
+                "condition": {"test": "!datum.display || datum.p_shrunk === null", "value": 0.4},
+                "value": 0.85,
+            },
+            "tooltip": [
+                {"field": "opponent", "type": "nominal", "title": "Opponent"},
+                {"field": "p_shrunk", "type": "quantitative", "title": "Win rate", "format": ".1%"},
+                {"field": "n", "type": "quantitative", "title": "n (matches)"},
+                {"field": "tier", "type": "nominal", "title": "Tier"},
+                {"field": "window", "type": "nominal", "title": "Data window (since)"},
+            ],
+        },
+    }
+
+    # CI rule layer — only for displayed cells (ci_low/ci_high non-null)
+    ci_layer = {
+        "mark": {"type": "rule", "strokeWidth": 2, "color": "#E69F00"},
+        "encoding": {
+            "y": {
+                "field": "opponent",
+                "type": "nominal",
+                "sort": {"field": "sort_key", "order": "descending"},
+            },
+            "x": {
+                "field": "ci_low",
+                "type": "quantitative",
+                "scale": {"domain": [0, 1]},
+            },
+            "x2": {"field": "ci_high"},
+        },
+        "transform": [{"filter": "datum.display && datum.ci_low !== null"}],
+    }
+
+    # Reference rule at 0.5 (even match)
+    ref_data = [{"ref": 0.5}]
+    ref_layer = {
+        "data": {"values": ref_data},
+        "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#9AA0A6", "opacity": 0.8},
+        "encoding": {
+            "x": {"field": "ref", "type": "quantitative"},
+        },
+    }
+
+    spec.update({
+        "data": {"values": vl_rows},
+        "layer": [bar_layer, ci_layer, ref_layer],
+    })
+    return spec
+
+
+# ---------------------------------------------------------------------------
+# spec_positioning — Tile D: s_quantile bars, subject highlighted, CI rules
+# ---------------------------------------------------------------------------
+
+
+def spec_positioning(
+    ranking: "DeckRanking",
+    *,
+    subject: str,
+    u_bar: float | None = None,
+) -> dict:
+    """Vega-Lite spec: positioning ranking (Tile D).
+
+    ``ranking`` is a ``DeckRanking`` from ``advisory.positioning.rank_decks``.
+    The subject deck is highlighted via a Vega-Lite condition on ``datum.deck == subject``.
+    Low-coverage decks are rendered at reduced opacity.
+
+    Visual semantics:
+    - y = deck (sorted best→worst by s_quantile)
+    - x = s_quantile (quantitative)
+    - bar color condition: subject = #D55E00 (orange-red), others = #56B4E9 (blue)
+    - opacity condition: low_coverage = 0.35, normal = 0.85
+    - CI rule from s_ci low to high, yellow
+    - optional u_bar overlay (dotted rule, best-deck lens)
+    - tooltip: deck, s_mean, s_quantile, p_best, coverage, tier (from data_coverage)
+    """
+    q_level = ranking.quantile_level
+    low_coverage = ranking.low_coverage
+
+    vl_rows = []
+    for deck in ranking.decks:
+        s_q = ranking.s_quantile[deck]
+        s_mean = ranking.s_mean[deck]
+        ci_lo, ci_hi = ranking.s_ci[deck]
+        p_best = ranking.p_best[deck]
+        cov = ranking.data_coverage[deck]
+        is_subj = deck == subject
+        is_low = deck in low_coverage
+        vl_rows.append({
+            "deck": deck,
+            "s_quantile": s_q,
+            "s_mean": s_mean,
+            "ci_low": ci_lo,
+            "ci_high": ci_hi,
+            "p_best": p_best,
+            "data_coverage": cov,
+            "is_subject": is_subj,
+            "low_coverage": is_low,
+            "sort_key": s_q,
+        })
+
+    q_pct = f"{q_level:.0%}" if q_level < 1 else "mean"
+    subtitle = (
+        f"field_source={ranking.field_source}  "
+        f"sort=S(q{q_level:.2f})  "
+        f"subject={subject!r}"
+    )
+    spec = _base(
+        description=(
+            f"Positioning ranking: s_quantile bars for candidate decks. "
+            f"Subject={subject!r} highlighted. Low-coverage decks faded."
+        ),
+        title={"text": "Positioning Ranking", "subtitle": subtitle},
+    )
+
+    bar_layer = {
+        "mark": {"type": "bar", "cornerRadiusEnd": 3},
+        "encoding": {
+            "y": {
+                "field": "deck",
+                "type": "nominal",
+                "sort": {"field": "sort_key", "order": "descending"},
+                "title": "Archetype",
+            },
+            "x": {
+                "field": "s_quantile",
+                "type": "quantitative",
+                "title": f"S (q{q_level:.2f})",
+                "axis": {"format": ".3f"},
+                "scale": {"zero": False},
+            },
+            "color": {
+                "condition": {"test": f"datum.deck === '{subject}'", "value": "#D55E00"},
+                "value": "#56B4E9",
+            },
+            "opacity": {
+                "condition": {"test": "datum.low_coverage", "value": 0.35},
+                "value": 0.85,
+            },
+            "tooltip": [
+                {"field": "deck", "type": "nominal", "title": "Archetype"},
+                {"field": "s_mean", "type": "quantitative", "title": "S (mean)", "format": ".4f"},
+                {"field": "s_quantile", "type": "quantitative", "title": f"S (q{q_level:.2f})", "format": ".4f"},
+                {"field": "p_best", "type": "quantitative", "title": "P(best)", "format": ".3f"},
+                {"field": "data_coverage", "type": "quantitative", "title": "Data coverage", "format": ".2f"},
+            ],
+        },
+    }
+
+    ci_layer = {
+        "mark": {"type": "rule", "strokeWidth": 2, "color": "#E69F00"},
+        "encoding": {
+            "y": {
+                "field": "deck",
+                "type": "nominal",
+                "sort": {"field": "sort_key", "order": "descending"},
+            },
+            "x": {
+                "field": "ci_low",
+                "type": "quantitative",
+            },
+            "x2": {"field": "ci_high"},
+        },
+    }
+
+    layers: list[dict] = [bar_layer, ci_layer]
+
+    if u_bar is not None:
+        u_ref_layer = {
+            "data": {"values": [{"u_bar": u_bar}]},
+            "mark": {
+                "type": "rule",
+                "strokeDash": [6, 3],
+                "color": "#009E73",
+                "opacity": 0.9,
+                "tooltip": f"Unweighted mean (u_bar) = {u_bar:.3f}",
+            },
+            "encoding": {
+                "x": {"field": "u_bar", "type": "quantitative"},
+            },
+        }
+        layers.append(u_ref_layer)
+
+    spec.update({
+        "data": {"values": vl_rows},
         "layer": layers,
     })
     return spec
