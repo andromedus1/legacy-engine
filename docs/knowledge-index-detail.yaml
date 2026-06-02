@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-01T15:55:24Z'
+generated_at: '2026-06-02T01:58:51Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -59,6 +59,11 @@ documents:
       mode 3); goldfish/ (port edh-engine's mana solver + straight-London mulligan)
       is the deferred pillar; only goldfish-validated candidate-validation remains
       deferred behind it.
+    - 'VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML
+      via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col
+      tile/layout) that supersedes the matplotlib charts.py; headline deliverable
+      is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
+      No server, no cloud (mirrors the knowledge-graph/board HTML precedent).'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
@@ -206,6 +211,10 @@ documents:
       low-n cells (n<100) are flagged, reusing edh-engine's confidence-metadata pattern.
     - 'Reproducibility is an NFR: deterministic given inputs+seed; all external data
       pre-fetched and cached; legality validated against a dated BanListSnapshot.'
+    - Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML
+      via vega-embed + static PNG via vl-convert), superseding the matplotlib charts;
+      headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
+      Self-contained + offline; no server, no editing GUI.
     related:
     - slug: docs/VISION.md
       relationship: depends-on
