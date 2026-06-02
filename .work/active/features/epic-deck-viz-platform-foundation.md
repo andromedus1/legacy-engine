@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-foundation
 kind: feature
-stage: review
+stage: done
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: []
@@ -23,12 +23,12 @@ vega-embed #27), and `viz/render.py` with `render_png(spec) -> bytes` (via
 `vl_convert.vegalite_to_png(spec, scale=VIZ_PNG_SCALE, vl_version="6.4")`) and
 `render_html_tile(spec) -> str` (via `vl_convert.vegalite_to_html(spec, bundle=True)`, self-contained).
 
-Adds the runtime dependency `vl-convert-python>=1.9,<2` and the dev/test dependency `jsonschema`, plus
-the viz constants in `config.py` (`VIZ_DIR`, `VIZ_PNG_SCALE`, CDN version triple, palette constants —
-no I/O on import). Establishes the **test-time** validation harness: a helper that schema-validates an
-emitted spec against the real Vega-Lite v6 schema with `jsonschema`, plus the JSON-snapshot fixture
-convention every later builder will use. A non-empty-bytes PNG smoke test exercises the vl-convert
-integration end to end.
+Adds the runtime dependency `vl-convert-python>=1.9,<2`, plus the viz constants in `config.py`
+(`VIZ_DIR`, `VIZ_PNG_SCALE`, VL version, `$schema` URL, CDN version triple — no I/O on import; theme
+color tokens live in `viz/theme.py`). Establishes the **test-time** validation harness: a shared
+`assert_renders(spec)` helper (render → non-empty PNG bytes via the real Vega-Lite compiler in
+vl-convert — the structural gate) plus the JSON-snapshot fixture convention every later builder will use.
+(No `jsonschema` dep — see `## Design decisions`.)
 
 This feature does NOT author any chart specs (that's charts-migration + dashboard) and does NOT build
 the dashboard page or CLI. It is pure plumbing + conventions.
@@ -42,8 +42,9 @@ the dashboard page or CLI. It is pure plumbing + conventions.
 - **vl-convert-python is the single render dependency** — `vegalite_to_png` (PNG) + `vegalite_to_html`
   (self-contained HTML). Pin `>=1.9,<2`; pass dicts directly; `vl_version="6.4"`.
 - **Author specs as hand-built Vega-Lite v6 dicts, not Altair.**
-- **No runtime validator / correction-loop** — validation is test-time (`jsonschema` against the real
-  VL v6 schema) + JSON snapshots. (Brief §1, §2.2, §3.4.)
+- **No runtime validator / correction-loop** — validation is test-time (the real Vega-Lite compiler via
+  vl-convert `render`) + JSON snapshots. (Brief §1, §2.2, §3.4; the `jsonschema` mechanism the brief
+  suggested was dropped — see `## Design decisions`.)
 - **Strip-and-inject is mandatory** and baked into BOTH render paths so HTML and PNG match (Brief §3.2).
 - **Two theme variants** (`screen`/`print`), Okabe-Ito categorical + `redyellowgreen` diverging
   (heatmap keeps the MTG-conventional scale; categorical uses colorblind-safe Okabe-Ito) (Brief §3.3).
@@ -285,3 +286,6 @@ the work; stories would be pure overhead.
 **vl-convert version installed:** `vl-convert-python==1.9.0.post1` (wheel: `cp37-abi3-macosx_11_0_arm64`).
 
 **Test count delta:** 1043 → 1076 (+33 tests, all passing).
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Claude sub-agent — Codex out of credits, so same-model not cross-model). Commit `c16d262`. All six review axes pass: strip_and_inject (no mutation, top-level-config only), dark theme (bg #15181C, 8-color palette with black→#E6E6E6, light text/axes, print fonts > screen), render_png/render_html_tile (correct vl_convert calls, variant defaults print/screen, ValueError propagates), constants-only-config (no I/O on import), test integrity (33 viz tests exercise the real Vega-Lite compiler — no mocks, no vacuous asserts), patterns conform. No blockers, no important findings. The stale-jsonschema-prose doc nit was fixed in this pass. Suite 1076 green. Advanced review → done.
