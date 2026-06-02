@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-charts-migration
 kind: feature
-stage: drafting
+stage: implementing
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation]
@@ -58,6 +58,131 @@ from here. Scope is strictly the 1:1 migration of the four standalone chart surf
 - [docs/briefs/deck-viz-platform.md](../../../docs/briefs/deck-viz-platform.md) — §5 (the charts.py
   migration map: surface → prep model → new builder → Vega-Lite mark), §4 (Tile A/C contracts these
   builders also serve).
+
+## Design decisions (added at feature-design, autopilot judgment)
+- **Plan B split — this feature migrates the chart MACHINERY; the dashboard feature owns the new CLI
+  surface.** charts-migration moves the prep models, adds the Vega-Lite spec builders, deletes
+  `charts.py`, drops matplotlib, AND removes the now-orphaned `report … --chart-dir` hook. The
+  replacement CLI (`viz meta|matchups|trends|tiers`) lands in the dashboard feature alongside the `viz`
+  group. Rationale: keeps each feature independently green and avoids rewriting the `--chart-dir`
+  handlers twice (once to a vega backend, once to remove). Between the two features the chart-export CLI
+  is briefly absent — acceptable inside one epic shipped together (late-binding release).
+- **Prep models + prep fns move to `viz/models.py` verbatim** (they're already matplotlib-free; they
+  import domain records, so `viz → analytics`/`models` is a clean presentation→data edge).
+- **Tier-list Vega-Lite representation = horizontal bars faceted by bucket** (row-facet S/A/B, `x=share`,
+  `y=archetype`) — reuses the bar idiom, legible, snapshot-stable. (The faceted-text alternative was the
+  other only-questions option; bars chosen.)
+- **Spec builders consume the prep models, not raw records** — `spec_*(model)` so the honesty logic
+  (masking/fringe/thin/caveat) stays in one place and the builders are pure dict→dict-testable.
+
+## Architectural choice
+Two new modules under `viz/`: `viz/models.py` (the four prep dataclasses + their `_*_model` prep
+functions, lifted verbatim from `charts.py`) and `viz/specs.py` (four `spec_*` builders that turn a prep
+model into a hand-built Vega-Lite v6 dict). `charts.py` is deleted and matplotlib dropped. Considered
+(A) leave the prep fns in `analytics/` and only add `viz/specs.py` — rejected, the prep models are a
+presentation concern (view-models), they belong with the renderer, and `analytics/__init__` should stop
+re-exporting chart code; (B) one combined `viz/specs.py` holding both models and builders — rejected,
+the model/builder split mirrors the foundation's theme/render split and keeps prep logic testable apart
+from spec shape. Chosen: `viz/models.py` + `viz/specs.py`.
+
+## Implementation Units
+
+### Unit 1: viz/models.py — lift the prep layer
+**File**: `src/legacy_engine/viz/models.py`
+Move verbatim from `analytics/charts.py` (they are already matplotlib-free):
+- `@dataclass HeatmapModel{archetypes, values, masked, mirror, annotations, caveat, title}` + `_heatmap_model(matrix: MatchupMatrix) -> HeatmapModel`
+- `@dataclass BarModel{labels, shares, muted, fringe, tiers, subtitle, title}` + `_metashare_model(report: MetaShareReport) -> BarModel`
+- `@dataclass TierModel{buckets, subtitle, title}` + `_tier_model(report, *, s_min=0.10, a_min=0.05, b_min=0.02) -> TierModel`
+- `@dataclass TrendModel{regime_labels, archetypes, series, thin_regimes, subtitle, title}` + `_trends_model(series: TrendSeries) -> TrendModel`
+**Implementation Notes**: keep imports (`MatchupMatrix` from `models.matchup`, `MetaShareReport`/`TrendSeries` from analytics) — the prep logic is unchanged; this is a pure move. Keep the `_is_never_other` / threshold helpers `_tier_model` relies on.
+**Acceptance Criteria**:
+- [ ] The four prep fns produce byte-identical models to the pre-move `charts.py` versions (existing prep-model tests pass after re-pointing imports to `viz.models`).
+
+### Unit 2: viz/specs.py — Vega-Lite builders
+**File**: `src/legacy_engine/viz/specs.py`
+```python
+from __future__ import annotations
+from legacy_engine.config import VL_SCHEMA_URL
+from legacy_engine.viz.models import BarModel, HeatmapModel, TierModel, TrendModel
+
+def _base(description: str, title: str) -> dict:
+    return {"$schema": VL_SCHEMA_URL, "description": description, "title": title}
+
+def spec_metashare(m: BarModel) -> dict: ...          # horizontal bar; y=label (sorted), x=share;
+    # opacity 0.35 where muted; fringe rows greyed; tooltip share/tier; subtitle via title.subtitle
+def spec_matchup_heatmap(m: HeatmapModel) -> dict: ... # rect + text layer; color=p_shrunk redyellowgreen
+    # domain [0,1] midpoint .5; masked cells -> null/grey; text = annotations; caveat as subtitle
+def spec_tier_list(m: TierModel) -> dict: ...          # bar faceted by bucket row (S/A/B); x=share,y=archetype
+def spec_trends(m: TrendModel) -> dict: ...            # line+point; x=regime (ordinal, chronological),
+    # y=share, color=archetype; None -> gaps (omit, don't 0); rect band layer where thin_regimes
+```
+**Implementation Notes**:
+- Hand-built dicts only (no Altair). Every spec sets `$schema` (v6) + a non-empty `description`.
+- Do NOT set `config` — the theme is injected at render time by `strip_and_inject`.
+- redyellowgreen scale matches `THEME.range.diverging`; the heatmap relies on the injected theme.
+- For trends gaps: omit the (archetype, regime) datum entirely so the line breaks; never emit share=0.
+**Acceptance Criteria**:
+- [ ] Each builder returns a dict with `$schema == VL_SCHEMA_URL` and a non-empty `description`.
+- [ ] `assert_renders(spec_X(model))` passes for each builder (real Vega-Lite compiler via render_png).
+- [ ] JSON snapshot fixtures match for a representative model per builder.
+- [ ] Heatmap masks cells where `masked[i][j]` (null/grey, not a fabricated rate); mirror annotated.
+- [ ] Trends omits `None` cells (gaps), shades `thin_regimes` bands.
+
+### Unit 3: delete charts.py + drop matplotlib
+**Files**: remove `src/legacy_engine/analytics/charts.py`; edit `pyproject.toml` (remove the
+`"matplotlib>=3.8",` line).
+**Acceptance Criteria**:
+- [ ] `rg matplotlib src/ tests/` returns nothing.
+- [ ] `import legacy_engine.analytics` succeeds with charts exports removed.
+
+### Unit 4: repoint callers
+**Files**:
+- `src/legacy_engine/analytics/__init__.py` — remove the `from ...charts import (...)` block and the
+  `render_*` / model names from `__all__`.
+- `src/legacy_engine/cli.py` — remove the `--chart-dir` option + its `if chart_dir:` blocks from
+  `report meta`, `report matchups`, `report trends`, `report tiers` (4 commands), plus the now-unused
+  `_chart_filename` helper and the `TierModel`/charts imports. (The replacement `viz` CLI group lands in
+  the dashboard feature.)
+- `src/legacy_engine/viz/__init__.py` — add `spec_metashare/spec_matchup_heatmap/spec_tier_list/spec_trends`
+  and the four prep models/fns to the re-export surface.
+**Acceptance Criteria**:
+- [ ] `legacy report meta|matchups|trends|tiers` run without `--chart-dir` (no chart option present); text output unchanged.
+- [ ] No import references `analytics.charts` anywhere.
+
+### Unit 5: tests
+**Files**: rename/rework `tests/test_charts.py` → `tests/test_viz_specs.py`:
+- Keep the prep-model tests (re-point imports to `viz.models`).
+- Add per-builder: a JSON snapshot assertion + `assert_renders` (real compiler).
+- Remove the old CLI `--chart-dir` smoke tests (the option is gone; the `viz` CLI tests arrive with the
+  dashboard feature). Confirm no other test imports `analytics.charts` or uses `--chart-dir`.
+**Acceptance Criteria**:
+- [ ] Full suite green; no references to `charts`/`--chart-dir`/matplotlib remain.
+
+## Implementation Order
+1. **Unit 1 (viz/models.py)** — lift prep layer; re-point its imports.
+2. **Unit 2 (viz/specs.py)** — builders against the moved models.
+3. **Unit 4 (repoint callers)** — analytics/__init__, cli.py, viz/__init__.
+4. **Unit 3 (delete charts.py + drop matplotlib)** — after callers no longer import it.
+5. **Unit 5 (tests)** — move prep-model tests, add builder tests, drop --chart-dir tests. Run full suite.
+
+## Testing
+- **Unit (`tests/test_viz_specs.py`)**: the four prep fns (moved tests) + four builders (snapshot + render
+  via `assert_renders`); heatmap masking/mirror; trends gaps + thin bands; tier faceting.
+- **Integration**: `legacy report meta|matchups|trends|tiers` still run (text path) with `--chart-dir`
+  gone (covered by existing test_cli.py once the option is removed — update any assertion that referenced it).
+- **Test data**: reuse the rounds-bearing DB fixtures already used by test_charts.py; `make_vl_spec` not
+  needed here (builders produce their own specs).
+
+## Risks
+- **Heatmap + tier-facet spec correctness** is the trickiest — **Fallback**: design heatmap as a
+  `rect`+`text` layered spec and tier as a row-faceted bar; if a faceted tier spec proves awkward in VL,
+  fall back to three `vconcat` bar panels (same data, simpler). Validate via `assert_renders`.
+- **Removing `--chart-dir` leaves no chart CLI until the dashboard feature** — **Fallback**: acceptable
+  within one epic; if it must not regress mid-epic, the dashboard feature is the very next item in the
+  chain and restores it as `viz meta|matchups|trends|tiers`.
+
+## Child stories
+None — single-stride, tightly-coupled migration (one module family, ~5 units, one pass). Stories would be overhead.
 
 ## Foundation references
 - `docs/ARCHITECTURE.md` — `viz/` module section; the `charts.py` "being superseded" note + the
