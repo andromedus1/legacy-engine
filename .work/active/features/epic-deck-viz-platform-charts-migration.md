@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform-charts-migration
 kind: feature
-stage: review
+stage: done
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation]
@@ -238,3 +238,6 @@ None — single-stride, tightly-coupled migration (one module family, ~5 units, 
 - `rg "analytics\.charts" src/ tests/` → empty (exit 1)
 - `rg "chart_dir|_chart_filename|--chart-dir" src/ tests/` → empty (exit 1)
 - `"matplotlib>=3.8"` removed from `pyproject.toml`
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context Opus sub-agent — Codex out of credits, same-model not cross-model). Commit `7c7cb1a`. Confirmed: prep-model move byte-identical to old charts.py (diffed; masking/mirror/fringe/tier-bucketing/None-gaps unchanged; only the matplotlib-only `_SUPPRESSED_HATCH` const dropped, correctly); 4 spec builders correct ($schema+description, no config, heatmap masked→null/grey not fabricated, mirror annotated, trends true gaps, tier faceted bars); callers cleanly repointed (no analytics.charts/--chart-dir refs; report text output unchanged); matplotlib fully gone (deps + source); test integrity solid (assert_renders = real vl_convert compiler, removed --chart-dir tests genuinely obsolete). No blockers/important/nits. Suite 1089 green. Advanced review → done.
