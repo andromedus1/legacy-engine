@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform
 kind: epic
-stage: drafting
+stage: implementing
 tags: [viz]
 parent: null
 depends_on: [epic-meta-analytics, epic-advisory, epic-deck-generation, epic-regime-aware-advisory]
@@ -88,6 +88,32 @@ resolutions that shape the design:
 Suggested 3-feature decomposition (dependency-ordered): (1) `viz/` foundation (theme + strip-and-inject
 + render png/html + test-time validation); (2) migrate the 4 charts.py surfaces; (3) per-deck dashboard
 (layout + deck_dashboard + Tiles B/D/E + `viz deck` CLI).
+
+## Design decisions
+- **Dashboard HTML script loading**: CDN triple (`vega@6`/`vega-lite@6`/`vega-embed@7`) by default; an
+  `--offline` flag inlines vl-convert's `javascript_bundle()` for a fully self-contained page.
+  Single-tile HTML export is self-contained by default (`vegalite_to_html(bundle=True)`). — resolved this
+  session (reversible flag; multi-chart offline bundles would be heavy, so CDN is the sane default).
+- **`report --chart-dir` disposition**: removed; all rendering centralizes under the `viz` group (SSOT).
+  No `--html/--png` forwarding on `report` for v1. — resolved this session (reversible; cleaner surface).
+
+## Decomposition
+Split by capability into a 3-feature dependency chain (per brief §7). A linear chain rather than parallel
+fan-out is deliberate: the dashboard reuses the migration's `spec_metashare`/`spec_trends` builders, and
+both depend on the foundation's render/theme/validation plumbing — the shared-contract edges are real, so
+forcing parallelism would duplicate builders. The epic is small (3 features); the critical path is fine.
+
+### Child features
+- `epic-deck-viz-platform-foundation` — theme + strip-and-inject + render (png/html) + test-time validation; adds vl-convert-python dep — depends on: `[]`
+- `epic-deck-viz-platform-charts-migration` — move the 4 pure `_*_model` prep dataclasses into viz/, write `spec_*` Vega-Lite builders, drop matplotlib `render_*` + the dep — depends on: `[epic-deck-viz-platform-foundation]`
+- `epic-deck-viz-platform-dashboard` — `layout.py` + `deck_dashboard.py` (5 tiles) + net-new Tile B/D/E builders + the `viz` CLI group — depends on: `[epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]`
+
+### Decomposition risks
+- **Dashboard is the largest feature** (5-tile composer + 3 net-new builders + layout template + CLI
+  group + migrated leaves ≈ 10-12 units). If `/feature-design` finds it overflows one pass, split the
+  `viz` CLI group off as a child story.
+- **Linear critical path** means no parallelism across the three; acceptable for a 3-feature epic, but it
+  does mean the dashboard can't start until both predecessors land.
 
 ## Dependencies
 `depends_on`: `epic-meta-analytics`, `epic-advisory`, `epic-deck-generation`, `epic-regime-aware-advisory`
