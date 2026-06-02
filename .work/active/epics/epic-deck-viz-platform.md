@@ -1,7 +1,7 @@
 ---
 id: epic-deck-viz-platform
 kind: epic
-stage: implementing
+stage: done
 tags: [viz]
 parent: null
 depends_on: [epic-meta-analytics, epic-advisory, epic-deck-generation, epic-regime-aware-advisory]
@@ -118,3 +118,20 @@ forcing parallelism would duplicate builders. The epic is small (3 features); th
 ## Dependencies
 `depends_on`: `epic-meta-analytics`, `epic-advisory`, `epic-deck-generation`, `epic-regime-aware-advisory`
 — all `done`. The dashboard composes their outputs; no new analytics are required, only presentation.
+
+## Completion
+All three child features `done` (foundation → charts-migration → dashboard). Final completion review
+(fresh-context Opus; same-model, Codex out) verdict: **Complete** after foundation-doc reconciliation.
+- **Code/tests/integration/e2e: sound.** Suite 1173 green. `import legacy_engine.{cli,viz,analytics}` clean.
+  End-to-end on the real seeded DB: `viz deck` writes a 12-col dashboard HTML (4 vegaEmbed tiles +
+  non-fabricated primer) + per-tile PNGs; `viz meta|matchups|trends|tiers` render; apostrophe archetypes
+  render. matplotlib fully removed.
+- **Accepted findings (all doc-drift, fixed in this pass):** reconciled ARCHITECTURE.md (`viz/` module
+  table → as-built theme/models/specs/render/layout/deck_dashboard; removed deleted `charts.py` row;
+  removed matplotlib + altair from deps, vl-convert-python is the single render dep; 5 viz CLI commands;
+  data-flow + frontmatter) and SPEC.md (dropped the "structural validator" over-claim → test-time
+  validation). Regenerated the knowledge index. No code defects found.
+
+v1 ships: a reusable local Vega-Lite viz layer (hand-built specs, dark theme, dual HTML+PNG output) that
+replaces matplotlib, plus the headline attack-focused per-deck dashboard with auto-primer. NOT pushed —
+the maintainer controls publication.

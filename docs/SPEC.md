@@ -60,7 +60,7 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 
 ### Cross-cutting — Visualization & Reporting
 - **Per-deck dashboard** — one self-contained page composing meta-share, the matchup spread (adaptive per-cell ban-aware matrix), trends across ban-regimes, positioning (best-call vs best-deck), and the consensus 60+15 list + primer, for any archetype.
-- **Composable viz platform** — a Vega-Lite spec layer (curated sub-schema + structural validator + canonical theme + 12-col tile/layout); any command emits composable tiles. Supersedes the matplotlib chart export.
+- **Composable viz platform** — a Vega-Lite spec layer (hand-built spec builders + canonical theme via strip-and-inject + 12-col tile/layout; spec validity checked test-time via the real Vega-Lite compiler); any command emits composable tiles. Replaces the matplotlib chart export.
 - **Dual output** — interactive self-contained HTML (vega-embed from CDN) + static PNG (vl-convert, no browser). Every chart carries the same confidence/labels as the text reports.
 
 ## Domain Entities (the key nouns)

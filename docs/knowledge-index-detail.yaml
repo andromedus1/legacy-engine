@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-02T02:31:10Z'
+generated_at: '2026-06-02T04:04:09Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -29,9 +29,9 @@ documents:
 
       '
     decisions:
-    - Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, matplotlib,
-      local files) + add scipy/numpy/statsmodels (advisory stats) and pulp/CBC (sideboard
-      ILP).
+    - Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files)
+      + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and
+      vl-convert-python (Vega-Lite viz render).
     - 'STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/,
       data/scryfall/, data/rules/, data/banlist/); a rebuildable embedded DuckDB (data/legacy.duckdb)
       is the analytical layer for meta-share + matchup-matrix joins. The one justified
@@ -61,8 +61,8 @@ documents:
       deferred behind it.
     - 'VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML
       via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col
-      tile/layout) that supersedes the matplotlib charts.py; headline deliverable
-      is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
+      tile/layout) that replaces matplotlib-based charting; headline deliverable is
+      a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
       No server, no cloud (mirrors the knowledge-graph/board HTML precedent).'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
