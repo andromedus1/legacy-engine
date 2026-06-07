@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-whattoplay-honesty
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-advisory-output-honesty
 depends_on: [epic-advisory-output-honesty-positioning-coverage]
@@ -151,3 +151,9 @@ class BestDeckCall:
 - **Discrepancies from design**: none.
 - **Adjacent issues parked**: none.
 - **Verified live**: `advise whattoplay` now prints `Positioning S (vs covered sub-field): 0.503 (coverage 70%, excluded 30%)` and `Best-deck-call: neither (best_deck=0.414, best_call=0.505, ...)` — the borderline 0.505 reads as borderline, not a bare label.
+
+## Review record
+- **Verdict: Approve** (deep lane, fresh-context same-model reviewer). No blockers, no important findings.
+- Reviewer verified the label change is **monotone-safe**: dropping the BEST_CALL variance gate can only move `neither → BEST_CALL` when `field_weighted_mean ≥ mean_hi` (the intended cliff fix); robust-strong decks still hit BEST_DECK first (precedence correct); no spurious BEST_CALL possible. Score math, NaN handling, list-split render order, and CLI wiring all confirmed correct. 176 tests green across positioning/whattoplay/report.
+- One cosmetic nit fixed in-session: renamed `test_neither_returns_zero_scores` → `test_neither_returns_bounded_scores` (assertion was bounded, not zero).
+- Advanced review → done.

@@ -1360,7 +1360,7 @@ class TestBestDeckCallGradient:
         rs = best_deck_vs_best_call(spiky, _make_field({"S": 0.0, **field.shares}), "S")
         assert rf.best_deck_score > rs.best_deck_score
 
-    def test_neither_returns_zero_scores(self):
+    def test_neither_returns_bounded_scores(self):
         m = self._row_matrix("W", {"A": 30, "B": 30, "C": 30})  # bad everywhere
         field = _make_field({"W": 0.0, "A": 0.34, "B": 0.33, "C": 0.33})
         r = best_deck_vs_best_call(m, field, "W")
