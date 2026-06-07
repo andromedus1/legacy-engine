@@ -557,15 +557,32 @@ class TestTransparency:
         assert "thin sample" in result.output
 
     # --- tune swap rationale ---
-    def test_tune_renders_delta_and_swaps(self, runner, db_with_corpus, tmp_path):
+    def test_tune_renders_delta_and_swap_log(self, runner, db_with_corpus, tmp_path):
+        # Derive a LEGAL 60-card deck from the consensus output (its maindeck is exactly 60),
+        # then tune it — so the command actually exits 0 and the new render lines are asserted.
+        cons = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control", "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert cons.exit_code == 0, cons.output
+        maindeck_lines = []
+        for ln in cons.output.splitlines():
+            if ln.strip() == "Sideboard":
+                break
+            if ln and ln[0].isdigit():  # "N CardName" — skip // headers/blank lines
+                maindeck_lines.append(ln)
+        assert maindeck_lines, cons.output
         deck = tmp_path / "control.txt"
-        # A minimal Control list — exact legality isn't the point; the render is.
-        deck.write_text("4 Brainstorm\n")
+        deck.write_text("\n".join(maindeck_lines) + "\n")
+
         result = runner.invoke(
             main,
             ["generate", "tune", "--deck", str(deck), "--archetype", "Control", "--db", db_with_corpus],
         )
-        # Tune may legality-fail on a 1-card deck; if it runs, the rationale lines must be present.
-        if result.exit_code == 0:
-            assert "Δvalue =" in result.output
-            assert ("Swaps:" in result.output) or ("Swaps (" in result.output)
+        assert result.exit_code == 0, result.output
+        assert "Δvalue =" in result.output
+        # Thin corpus → no signal → no swaps; the no-swap log line must render cleanly.
+        assert "// Swap log:" in result.output
+        # The presence-correlational scale note appears only when swaps were made.
+        if "1. CUT" in result.output:
+            assert "presence-correlational" in result.output

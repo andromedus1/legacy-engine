@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-transparency
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, generation]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -143,3 +143,11 @@ def _echo_data_freshness(con) -> None:
 - **Discrepancies from design**: none. Hardened `_staleness_age_days` to tolerate out-of-range/synthetic dates (e.g. `2026-01-50`) — found during impl when test corpora crashed `date.fromisoformat`; the header still prints the raw date, only the staleness advisory degrades.
 - **Adjacent issues parked**: none.
 - **Verified live**: `report meta` → `// data as of 2026-05-30 (63150 decks)`; `generate consensus --archetype "Dimir Tempo"` (current regime, n=27) → `sample_n=27 [speculative]` + thin-sample warning; `generate tune` → `Δvalue = +0.0000` + `Swaps: none` (no-signal path).
+
+## Review record
+- **Verdict: Approve with comments → both Important findings fixed in-session → Approve** (deep lane, fresh-context reviewer).
+- **Important #1 fixed (duplicate swap listing)**: the reviewer found a PRE-EXISTING `// Swap log:` block already listed the cut→add swaps — my new block duplicated it. Removed my duplicate listing (kept only the new `// Δvalue =` line) and moved the presence-correlational scale note into the existing Swap log block. Verified live: single swap log, no duplication.
+- **Important #2 fixed (hollow tune test)**: the 1-card deck failed legality so the assertions were skipped. Rewrote `test_tune_renders_delta_and_swap_log` to derive a legal 60 from the consensus output, tune it, assert exit 0 + `Δvalue =` + `// Swap log:` (+ scale note when swaps occur).
+- Reviewer verified clean: determinism/NFR boundary (single `date.today()` at the CLI edge → advisory line only; header + all figures deterministic), date-guard robustness (full-timestamp/empty/out-of-range dates all degrade safely), all 6 report-command wiring sites correct (inside `try`, `con` open, `finally` covers).
+- **Nits acknowledged, not actioned**: staleness-firing branch + empty-corpus branch + 5/6 header-wiring sites untested (wiring verified by inspection); header reports whole-corpus (provenance=None) by design since multi-basis commands print it once. Left as-is.
+- Full suite 1210 → 1219. Advanced review → done.
