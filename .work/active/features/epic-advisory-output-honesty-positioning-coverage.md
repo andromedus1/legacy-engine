@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-positioning-coverage
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -216,3 +216,9 @@ _PBEST_SUPPRESS_COVERAGE: float = 0.05   # below this, P(best) is imputation noi
 - **Discrepancies from design**: none. (Design's "data_coverage was computed twice" — removed the duplicate end-of-function call, moved it up before the gate.)
 - **Adjacent issues parked**: none.
 - **Verified live**: `advise positioning` vs a field containing Tron (uncovered) restricts to the covered 70%, excludes Tron explicitly, and reports `S vs covered sub-field`.
+
+## Review record
+- **Verdict: Approve with comments** (deep lane, fresh-context same-model reviewer; Codex credits out).
+- **Byte-identical guarantee verified RNG-safe** — `_compute_data_coverage`/`covered_field_archetypes` never touch `rng`; first consumer is still `_sample_S`. Mirror keep-set vs coverage-ratio denominator confirmed correct (no off-by-one/double-count). Tests: 120 in the two named files; 379 across consumers; full suite 1195 green.
+- **Important finding filed** → `epic-advisory-output-honesty-coverage-consumers`: the `rank_decks` ranking path still prints a raw full-field S, contradicting the now-restricted single-deck output. Not a quick inline fix (shared-field MC is load-bearing) → separate feature. Same item also folds the review nits (misleading `imputed` on restricted results, `s_mean=nan` audit line, `tuning.positioning_s` NaN, viz consistency).
+- No blockers. Advanced review → done.
