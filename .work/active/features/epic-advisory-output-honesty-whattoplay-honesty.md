@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-whattoplay-honesty
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-advisory-output-honesty
 depends_on: [epic-advisory-output-honesty-positioning-coverage]
@@ -141,3 +141,13 @@ class BestDeckCall:
 ## Risks
 - **Existing best-call test expectations** — the de-cliffed label could flip a borderline fixture. **Fallback**: the three documented label tests are construction-based with controlled win-rates; re-verify each still lands its intended label (BEST_DECK/BEST_CALL/neither unchanged for their constructed inputs; only the new low-variance-field-favored case changes). Add the cliff-fix case explicitly.
 - **whattoplay now always runs the MC** (positioning_score) — small added cost per `advise whattoplay`. **Fallback**: it already builds the matrix + field; the MC is the same one `advise positioning` runs. Acceptable.
+
+## Implementation notes
+- **Files changed**:
+  - `advisory/whattoplay.py` — `BestDeckCall` gains `best_deck_score`/`best_call_score`; label logic drops the `variance > spread_hi` gate on BEST_CALL (cliff fix); scores computed (`best_deck = clamp(unweighted_mean − √variance, 0, 1)`, `best_call = field_weighted_mean`); both early-return paths zero the scores (Unit 1).
+  - `advisory/report.py` — `_render_whattoplay` renders the coverage-aware Positioning S line + the two best-call scores; audit line in `build_field_read_report` carries both scores (Units 2 + 3).
+  - `cli.py` — `advise whattoplay` gains `--seed`, computes `positioning_score`, passes it into `FieldReadReport` (was `positioning=None`); removed a now-unused `BestDeckCall` import (Unit 3).
+- **Tests added**: `tests/test_whattoplay.py::TestBestDeckCallGradient` (6) — cliff-fix case, score definitions, spiky-vs-flat, neither/missing zero-scores. Full suite 1195 → 1201.
+- **Discrepancies from design**: none.
+- **Adjacent issues parked**: none.
+- **Verified live**: `advise whattoplay` now prints `Positioning S (vs covered sub-field): 0.503 (coverage 70%, excluded 30%)` and `Best-deck-call: neither (best_deck=0.414, best_call=0.505, ...)` — the borderline 0.505 reads as borderline, not a bare label.
