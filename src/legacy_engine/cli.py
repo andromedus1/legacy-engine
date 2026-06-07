@@ -64,6 +64,48 @@ def _echo_window(res: "WindowResolution") -> None:
         click.echo(f"// {res.banner}")
 
 
+_STALE_DAYS = 30  # newest event older than this (vs wall clock) → staleness advisory
+
+
+def _staleness_age_days(max_date: str | None, today) -> int | None:
+    """Days between ``max_date`` and ``today``, or ``None`` if unknown/unparseable.
+
+    Wall-clock-free (``today`` is injected) so it is unit-testable; the CLI passes
+    ``date.today()`` at the edge. Returns ``None`` for an empty corpus OR a non-ISO date string
+    (real corpora mix plain dates with odd values) so the staleness advisory degrades silently
+    rather than crashing the report.
+    """
+    if max_date is None:
+        return None
+    from datetime import date as _date
+
+    try:
+        return (today - _date.fromisoformat(max_date)).days
+    except ValueError:
+        return None
+
+
+def _echo_data_freshness(con, *, provenance: str | None = None) -> None:
+    """Echo a data-currency header (deterministic) + a clock-based staleness advisory.
+
+    The header (`// data as of <max date> (<N> decks)`) is a pure function of the corpus and
+    never affects any computed figure. Only the optional staleness warning reads the wall clock,
+    and it degrades silently if the date can't be parsed.
+    """
+    from datetime import date
+
+    from legacy_engine.analytics.metashare import corpus_freshness
+
+    max_date, deck_count = corpus_freshness(con, provenance=provenance)
+    if max_date is None:
+        click.echo("// data as of: (empty corpus)")
+        return
+    click.echo(f"// data as of {max_date} ({deck_count} decks)")
+    age = _staleness_age_days(max_date, date.today())
+    if age is not None and age > _STALE_DAYS:
+        click.echo(f"// ⚠ newest event is {age} days old — data may be stale (run `refresh`)")
+
+
 @click.group()
 def main() -> None:
     """legacy-engine — Magic: The Gathering Legacy analytics."""
@@ -227,6 +269,7 @@ def report_meta(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -346,6 +389,7 @@ def report_matchups(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -456,6 +500,7 @@ def report_trends(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -583,6 +628,7 @@ def report_tiers(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         # Tiers is an advisory "what to play now" surface, so it defaults to the CURRENT ban
         # regime (unlike descriptive `report meta`, which defaults to full corpus). This stops
         # tiers crowning a deck that is dead in the current regime. thin_floor=0: deck-based,
@@ -718,6 +764,7 @@ def report_gaps(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         win = resolve_advisory_window(
             con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
         )
@@ -817,6 +864,7 @@ def report_cards(
 
     con = store.connect(db) if db else store.connect()
     try:
+        _echo_data_freshness(con)
         # Resolve the effective window ONCE so the card list and the win-rate
         # values share the same window. card_frequencies defaults None -> latest
         # ban regime; compute_card_winrates treats None as the full corpus — so
@@ -1426,10 +1474,17 @@ def generate_consensus(
         )
 
     # Print the decklist in the default readable format.
+    from legacy_engine.confidence import tier_for_sample
     click.echo(f"// Consensus deck: {deck.archetype}")
     window_since = deck.window[0] or "open"
     window_until = deck.window[1] or "current"
-    click.echo(f"// Window: [{window_since}, {window_until})  sample_n={deck.sample_n}")
+    sample_tier = tier_for_sample(deck.sample_n)
+    click.echo(f"// Window: [{window_since}, {window_until})  sample_n={deck.sample_n} [{sample_tier}]")
+    if sample_tier == "speculative":
+        click.echo(
+            f"// ⚠ thin sample (n={deck.sample_n}) — modal card choices and inclusion %s are "
+            "unreliable; treat this list as speculative"
+        )
     click.echo("")
 
     # Maindeck — sorted by count desc, then name for stable output.
@@ -1630,6 +1685,17 @@ def generate_tune(
         f"{tuned.value_before:.4f} → {tuned.value_after:.4f}"
         + (" [no-signal: no swaps made]" if tuned.objective == "no-signal-skip" else "")
     )
+    click.echo(f"// Δvalue = {tuned.value_after - tuned.value_before:+.4f}")
+    if tuned.swaps:
+        click.echo("// Swaps (per-card field-weighted lift drove each):")
+        for cut, add in tuned.swaps:
+            click.echo(f"//   cut {cut} → add {add}")
+        click.echo(
+            "// (per-card lift is presence-correlational, not causal; magnitudes are small — "
+            "treat swap ordering as indicative, not precise)"
+        )
+    else:
+        click.echo("// Swaps: none")
 
     # Coverage: audit context only (NOT the swap driver).
     click.echo(f"// Coverage (audit): {tuned.coverage_before:.4f} → {tuned.coverage_after:.4f}")

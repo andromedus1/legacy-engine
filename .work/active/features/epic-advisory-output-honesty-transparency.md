@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-transparency
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, generation]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -134,3 +134,12 @@ def _echo_data_freshness(con) -> None:
 ## Risks
 - **Clock-coupling in tests** — the staleness warning reads `date.today()`, which is nondeterministic. **Fallback**: keep the date comparison trivially testable by structuring `_echo_data_freshness` so the staleness decision is a pure function of `(max_date, today)` (e.g. an inner `_is_stale(max_date, today, days)` helper) that tests call directly; the wall-clock only enters at the CLI edge.
 - **"data as of" on every report adds a line** — minor output-shape change; existing CLI output tests may need the extra header line. **Fallback**: it's additive at the top; update any strict full-output assertions (most tests assert substrings).
+
+## Implementation notes
+- **Files changed**:
+  - `analytics/metashare.py` — new `corpus_freshness(con, *, provenance) -> (max_date|None, deck_count)` (deterministic, no wall-clock) (Unit 1).
+  - `cli.py` — `_STALE_DAYS`, pure `_staleness_age_days(max_date, today)` (degrades to None on empty/unparseable date), `_echo_data_freshness(con)` (header + clock-based staleness advisory); wired into all 6 report subcommands (meta/matchups/trends/tiers/gaps/cards) (Unit 1). `generate consensus` echo shows `sample_n=N [tier]` + a thin-sample warning when speculative (Unit 2). `generate tune` echo renders `Δvalue`, the `cut → add` swap list (or "Swaps: none"), + a presence-correlational scale note (Unit 3).
+- **Tests added**: `tests/test_metashare.py::TestCorpusFreshness` (3); `tests/test_cli.py::TestTransparency` (6: pure staleness helper incl. unparseable-date guard, freshness header, consensus thin-sample flag, tune Δvalue/Swaps). Full suite 1210 → 1219.
+- **Discrepancies from design**: none. Hardened `_staleness_age_days` to tolerate out-of-range/synthetic dates (e.g. `2026-01-50`) — found during impl when test corpora crashed `date.fromisoformat`; the header still prints the raw date, only the staleness advisory degrades.
+- **Adjacent issues parked**: none.
+- **Verified live**: `report meta` → `// data as of 2026-05-30 (63150 decks)`; `generate consensus --archetype "Dimir Tempo"` (current regime, n=27) → `sample_n=27 [speculative]` + thin-sample warning; `generate tune` → `Δvalue = +0.0000` + `Swaps: none` (no-signal path).

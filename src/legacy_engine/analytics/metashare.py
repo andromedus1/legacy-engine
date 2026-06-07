@@ -261,6 +261,30 @@ class MetaShareReport:
     # as coverage metadata rather than only a debug log.  Empty for raw/topcut.
 
 
+def corpus_freshness(
+    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None
+) -> tuple[str | None, int]:
+    """Return ``(max_event_date, deck_count)`` for data-currency headers.
+
+    ``max_event_date`` is the newest ``tournaments.date`` as an ISO ``YYYY-MM-DD`` string
+    (date-portion only — real-corpus values mix plain dates with full timestamps), or ``None``
+    on an empty corpus.  ``deck_count`` is the number of decks in scope.  Deterministic: a pure
+    function of the corpus, with no wall-clock — the staleness *comparison* is the caller's job.
+    """
+    row = con.execute(
+        """
+        SELECT max(t.date), count(d.deck_idx)
+        FROM tournaments t
+        LEFT JOIN decks d ON d.tournament_id = t.id
+        WHERE (? IS NULL OR t.provenance = ?)
+        """,
+        [provenance, provenance],
+    ).fetchone()
+    if not row or row[0] is None:
+        return None, 0
+    return row[0][:10], int(row[1] or 0)
+
+
 # Labels that must never be folded into the "Other" fringe bucket
 _NEVER_OTHER = {"Unknown", "Conflict"}
 
