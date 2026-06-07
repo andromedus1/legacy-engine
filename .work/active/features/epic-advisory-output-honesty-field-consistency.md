@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-field-consistency
 kind: feature
-stage: review
+stage: done
 tags: [analytics, archetype, correctness]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -128,3 +128,10 @@ data the descriptive reports are meant to show faithfully (the decision is expli
 - **Discrepancies from design**: none. (Test assertion adjusted to the shrunk win-rate `(n=100)` rather than raw 55% — Beta shrinkage, expected.)
 - **Adjacent issues parked**: none.
 - **Verified live**: `report tiers` → `// window: regime: current` (was full-corpus, which crowned dead Dimir Reanimator); `report tiers --all-time` → `// window: full-corpus`. Unknown/Conflict rows carry `‡` + footnote in both `report meta` and `report matchups`.
+
+## Review record
+- **Verdict: Request changes → fixed in-session → Approve** (deep lane, fresh-context reviewer).
+- **Blocker caught + fixed**: the default-current-regime flip broke bare `report tiers --definition wrw` (windowed wrw is unsupported → unhandled `NotImplementedError` traceback). Fixed by adding a fail-loud guard (mirrors `report meta`'s skip-under-window guard): bare windowed wrw now raises a clean `click.ClickException` pointing at `--all-time`. Verified live (clean error, no traceback).
+- **Test-gap nit addressed**: the reviewer noted the default-current behavior + wrw case were untested (only `--help` opts were). Added 4 DB-backed regression tests: default→current-regime echo, `--all-time`→full-corpus, windowed-wrw fails-loud-not-crash, `--all-time` wrw allowed.
+- Reviewer confirmed clean: windowing precedence (all_time > regime > since/until > injected-current, incl. `--since`-only), matchup alignment + bare-`row_arch` cell lookup, footnote-once logic, `‡` UTF-8 encoding.
+- Full suite 1206 → 1210. Advanced review → done.

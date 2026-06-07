@@ -385,6 +385,50 @@ class TestVizGroup:
 class TestFieldConsistency:
     """tiers default→current-regime window opts + Unknown/Conflict labeling in render."""
 
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """Write a rounds corpus to a real DuckDB file for CLI invocation."""
+        db_path = tmp_path / "test.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_tiers_default_windows_to_current_regime(self, runner, db_with_corpus):
+        result = runner.invoke(main, ["report", "tiers", "--db", db_with_corpus, "--provenance", "online"])
+        assert result.exit_code == 0, result.output
+        assert "// window: regime: current" in result.output
+
+    def test_tiers_all_time_uses_full_corpus(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main, ["report", "tiers", "--db", db_with_corpus, "--provenance", "online", "--all-time"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window: full-corpus" in result.output
+
+    def test_tiers_windowed_wrw_fails_loud_not_crash(self, runner, db_with_corpus):
+        # Bare wrw windows to the current regime → unsupported. Must be a clean ClickException,
+        # NOT an unhandled NotImplementedError traceback (regression caught in review).
+        result = runner.invoke(main, ["report", "tiers", "--db", db_with_corpus, "--definition", "wrw"])
+        assert result.exit_code != 0
+        assert "Traceback" not in result.output
+        assert "windowed wrw is unsupported" in result.output
+        assert "--all-time" in result.output
+
+    def test_tiers_all_time_wrw_is_allowed(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main, ["report", "tiers", "--db", db_with_corpus, "--definition", "wrw", "--all-time"]
+        )
+        assert result.exit_code == 0, result.output
+
     def _meta_report(self, archetypes):
         from legacy_engine.analytics.metashare import MetaShareEntry, MetaShareReport
         entries = [

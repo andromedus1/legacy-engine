@@ -594,6 +594,16 @@ def report_tiers(
         )
         click.echo(f"// window: {win.requested_label}")
 
+        # wrw is full-corpus only (win-rate weights aren't windowed). Since tiers now defaults
+        # to the current regime, a bare `--definition wrw` would window → unsupported. Fail loud
+        # with the escape hatch rather than crash (mirrors report meta's skip-under-window guard).
+        windowed = win.since is not None or win.until is not None
+        if windowed and definition == "wrw":
+            raise click.ClickException(
+                "windowed wrw is unsupported (win-rate weights are full-corpus only); "
+                "use --all-time for a wrw tier list, or pick --definition raw/topcut."
+            )
+
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
