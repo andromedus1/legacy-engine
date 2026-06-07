@@ -913,7 +913,11 @@ def advise_positioning(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.positioning import positioning_score, rank_decks
+    from legacy_engine.advisory.positioning import (
+        _PBEST_SUPPRESS_COVERAGE,
+        positioning_score,
+        rank_decks,
+    )
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
@@ -952,16 +956,33 @@ def advise_positioning(
                 lo, hi = ranking.s_ci[d]
                 cov = ranking.data_coverage[d]
                 low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
+                # Suppress P(best) when coverage ≈ 0 — the value is imputation noise that
+                # otherwise reads as a spuriously confident ranking signal.
+                if cov < _PBEST_SUPPRESS_COVERAGE:
+                    pbest_str = "P(best)=n/a [cov≈0]"
+                else:
+                    pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
                 click.echo(
                     f"  {d:<35}  S={ranking.s_mean[d]:.3f}  "
-                    f"CI=[{lo:.3f},{hi:.3f}]  P(best)={ranking.p_best[d]:.3f}  "
+                    f"CI=[{lo:.3f},{hi:.3f}]  {pbest_str}  "
                     f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
                 )
         else:
             pos = positioning_score(matrix, field, resolved_archetype, seed=seed)
             click.echo(f"\n=== Positioning: {pos.deck_archetype} (field_source={pos.field_source}) ===")
-            click.echo(f"  S (meta-positioning): {pos.s_mean:.3f}")
-            click.echo(f"  95% CI: [{pos.s_ci[0]:.3f}, {pos.s_ci[1]:.3f}]")
+            if pos.s_computable:
+                scope = "covered sub-field" if pos.restricted else "field"
+                click.echo(f"  S (meta-positioning, vs {scope}): {pos.s_mean:.3f}")
+                click.echo(f"  95% CI: [{pos.s_ci[0]:.3f}, {pos.s_ci[1]:.3f}]")
+            else:
+                click.echo("  S (meta-positioning): not computable — no covered (n≥30) matchups in the field")
+            click.echo(f"  Field coverage: {pos.data_coverage:.0%} of field has matchup data")
+            if pos.restricted:
+                excl = ", ".join(sorted(pos.excluded_archetypes))
+                click.echo(
+                    f"  Excluded {pos.excluded_share:.0%} with no data "
+                    f"({len(pos.excluded_archetypes)}): {excl}"
+                )
             click.echo(f"  Unweighted mean (u_bar): {pos.u_bar:.3f}")
             click.echo(f"  MC draws: {pos.n_draws}")
             if pos.imputed:

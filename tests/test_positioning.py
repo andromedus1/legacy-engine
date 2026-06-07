@@ -1098,3 +1098,99 @@ class TestRiskAdjustedRanking:
         # Lower quantile → more conservative floor
         for deck in ["X", "Y"]:
             assert r_custom.s_quantile[deck] <= r_default.s_quantile[deck] + _TOL_MEAN
+
+
+# ---------------------------------------------------------------------------
+# Coverage-aware positioning — epic-advisory-output-honesty-positioning-coverage
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.positioning import (  # noqa: E402
+    _COVERAGE_RESTRICT_THRESHOLD,
+    _is_covered_cell,
+    covered_field_archetypes,
+)
+
+
+class TestCoveredPredicate:
+    """_is_covered_cell + covered_field_archetypes — the coverage SSOT."""
+
+    def test_mirror_is_covered(self):
+        m = _simple_matrix(["X", "A"], {("X", "A"): (50, 100)}, mirror_n={"X": 0})
+        assert _is_covered_cell(m, "X", "X") is True  # mirror, even at mirror_n=0
+
+    def test_displayed_cell_is_covered(self):
+        m = _simple_matrix(["X", "A"], {("X", "A"): (50, 100)})
+        assert _is_covered_cell(m, "X", "A") is True
+
+    def test_thin_cell_not_covered(self):
+        m = _simple_matrix(["X", "A"], {("X", "A"): (5, 10)})  # n<30 → not display
+        assert _is_covered_cell(m, "X", "A") is False
+
+    def test_absent_cell_not_covered(self):
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (50, 100)})  # X vs B absent (n=0)
+        assert _is_covered_cell(m, "X", "B") is False
+
+    def test_covered_set_includes_mirror_and_displayed(self):
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (50, 100)})
+        field = _custom_field({"X": 0.2, "A": 0.5, "B": 0.3})
+        covered = covered_field_archetypes(m, field, "X")
+        assert covered == frozenset({"X", "A"})  # mirror X + displayed A; B uncovered
+
+
+class TestPositioningCoverageRestrict:
+    """positioning_score restrict-to-covered behavior across coverage bands."""
+
+    def test_full_coverage_is_byte_identical(self):
+        # coverage==1.0 → restrict is a no-op; restrict_to_covered True vs False match exactly.
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (60, 100), ("X", "B"): (40, 100)})
+        field = _custom_field({"A": 0.6, "B": 0.4})
+        on = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED, restrict_to_covered=True)
+        off = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED, restrict_to_covered=False)
+        assert on.restricted is False
+        assert on.s_mean == off.s_mean
+        assert on.s_ci == off.s_ci
+        assert pytest.approx(on.data_coverage) == 1.0
+
+    def test_low_coverage_restricts(self):
+        # X covered vs A (share .5), uncovered vs B (share .5) → coverage 0.5 < 0.85 → restrict.
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (70, 100)})
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert r.restricted is True
+        assert pytest.approx(r.data_coverage) == 0.5
+        assert pytest.approx(r.excluded_share) == 0.5
+        assert r.excluded_archetypes == frozenset({"B"})
+        # S now scored on {A:1.0} → ~0.70 (the measured A cell), not pulled toward 0.5 by B.
+        assert r.s_mean == pytest.approx(0.70, abs=_TOL_MEAN)
+
+    def test_threshold_respected(self):
+        # coverage 0.9 ≥ 0.85 → NOT restricted (trivial uncovered tail left alone).
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (60, 100)})
+        field = _custom_field({"A": 0.9, "B": 0.1})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert r.restricted is False
+        assert pytest.approx(r.data_coverage) == 0.9
+
+    def test_zero_coverage_not_computable(self):
+        # X has no displayed non-mirror cell → S not computable, NaN, no exception.
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (5, 10)})  # thin only
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert r.s_computable is False
+        assert np.isnan(r.s_mean)
+        assert any("not computable" in w for w in r.warnings)
+
+    def test_restricted_suppresses_thin_row_warning(self):
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (70, 100)})
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        # The "dominated by the imputation prior" framing must NOT appear once restricted.
+        assert not any("dominated by the imputation prior" in w for w in r.warnings)
+        assert any("restricted S to the covered sub-field" in w for w in r.warnings)
+
+    def test_restrict_can_be_disabled(self):
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (70, 100)})
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED, restrict_to_covered=False)
+        assert r.restricted is False
+        assert r.s_computable is True  # falls back to full-field imputed S
