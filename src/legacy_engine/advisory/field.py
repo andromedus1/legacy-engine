@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
@@ -89,6 +90,49 @@ class FieldDistribution:
     counts: dict[str, int] | None
     no_data: frozenset[str]
     warnings: tuple[str, ...]
+
+    def restrict_to(self, keep: Collection[str]) -> tuple["FieldDistribution", float]:
+        """Return a copy restricted to ``keep`` (renormalized to sum 1.0) + the excluded share mass.
+
+        ``shares`` is filtered to ``keep ∩ shares`` and renormalized directly — NOT via
+        ``_normalize_shares``, since an intentional restriction is not a data-quality issue and
+        should not emit a "summed to X" warning.  ``counts`` (if not ``None``) is filtered to the
+        kept keys but NOT renormalized — counts are integer backing samples, not shares.
+        ``no_data`` is intersected with the kept set; ``field_source`` and ``warnings`` are
+        preserved.
+
+        Returns ``(restricted_field, excluded_share)`` where ``excluded_share`` is the summed
+        share-mass of the dropped archetypes.  Raises ``ValueError`` if the kept set has zero
+        overlapping share mass (callers guard via a coverage check before calling).
+        """
+        keep_set = set(keep)
+        kept = {a: s for a, s in self.shares.items() if a in keep_set}
+        kept_total = sum(kept.values())
+        if kept_total <= 0:
+            raise ValueError(
+                "FieldDistribution.restrict_to: kept set has zero share mass; "
+                "nothing to renormalize"
+            )
+
+        excluded_share = 1.0 - kept_total
+        restricted_shares = {a: s / kept_total for a, s in kept.items()}
+
+        restricted_counts: dict[str, int] | None
+        if self.counts is None:
+            restricted_counts = None
+        else:
+            restricted_counts = {a: c for a, c in self.counts.items() if a in keep_set}
+
+        return (
+            FieldDistribution(
+                shares=restricted_shares,
+                field_source=self.field_source,
+                counts=restricted_counts,
+                no_data=self.no_data & frozenset(keep_set),
+                warnings=self.warnings,
+            ),
+            excluded_share,
+        )
 
 
 # ---------------------------------------------------------------------------

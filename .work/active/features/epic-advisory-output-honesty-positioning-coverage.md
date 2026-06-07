@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-positioning-coverage
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, correctness]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -205,3 +205,14 @@ _PBEST_SUPPRESS_COVERAGE: float = 0.05   # below this, P(best) is imputation noi
 - **Existing positioning tests change** — any test asserting `s_mean` against an imputed broad field below 0.85 coverage will move. **Fallback**: this is the intended fix; update those expectations and ADD an explicit coverage==1.0 byte-identical regression so the no-op guarantee is locked. (Flagged at epic level.)
 - **NaN `s_mean` propagation** — downstream `epic-advisory-output-honesty-whattoplay-honesty` (which surfaces this S) must handle `s_computable=False`. **Fallback**: documented here so the dependent feature designs for it; `s_computable` is the explicit guard flag, not a magic NaN check.
 - **Threshold value (0.85) is a judgment call** — too high churns; too low hides real imputation. **Fallback**: it's a single named constant, trivially tunable after dogfooding the new output.
+
+## Implementation notes
+- **Files changed**:
+  - `src/legacy_engine/advisory/field.py` — added `FieldDistribution.restrict_to(keep) -> (field, excluded_share)` (Unit 1); imported `Collection`.
+  - `src/legacy_engine/advisory/positioning.py` — added `_is_covered_cell` + `covered_field_archetypes` and refactored `_compute_data_coverage` to use the shared predicate (Unit 2); added `_COVERAGE_RESTRICT_THRESHOLD`/`_PBEST_SUPPRESS_COVERAGE`; extended `PositioningResult` (restricted/excluded_share/excluded_archetypes/s_computable); wired restrict + zero-coverage refusal into `positioning_score(..., restrict_to_covered=True)`; gated the "dominated by imputation prior" thin-row warning behind `not restricted and s_computable` (Unit 3).
+  - `src/legacy_engine/cli.py` — `advise positioning`: coverage line + restriction note + not-computable line; ranking output suppresses P(best) below `_PBEST_SUPPRESS_COVERAGE` (Unit 4).
+  - `src/legacy_engine/advisory/report.py` — `advise report` positioning section + audit line carry coverage/restriction (Unit 4).
+- **Tests added**: `tests/test_field_model.py::TestRestrictTo` (8); `tests/test_positioning.py::TestCoveredPredicate` (5) + `TestPositioningCoverageRestrict` (6). Full suite 1176 → 1195.
+- **Discrepancies from design**: none. (Design's "data_coverage was computed twice" — removed the duplicate end-of-function call, moved it up before the gate.)
+- **Adjacent issues parked**: none.
+- **Verified live**: `advise positioning` vs a field containing Tron (uncovered) restricts to the covered 70%, excludes Tron explicitly, and reports `S vs covered sub-field`.
