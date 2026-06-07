@@ -260,6 +260,8 @@ def build_field_read_report(
                 f"u_bar={positioning.u_bar:.3f}, "
                 f"n_draws={positioning.n_draws}, "
                 f"imputed={len(positioning.imputed)} opponents, "
+                f"coverage={positioning.data_coverage:.2f}, "
+                f"restricted={positioning.restricted} (excluded_share={positioning.excluded_share:.2f}), "
                 f"field_source={positioning.field_source!r}"
             )
             if positioning.warnings:
@@ -385,9 +387,21 @@ def _render_positioning(report: FieldReadReport) -> str:
             "  Use --archetype to override and enable positioning."
         )
     p = report.positioning
-    lines: list[str] = [
-        f"Positioning score (S): {p.s_mean:.3f}",
-        f"  95% credible interval: [{p.s_ci[0]:.3f}, {p.s_ci[1]:.3f}]",
+    if p.s_computable:
+        scope = "covered sub-field" if p.restricted else "field"
+        lines = [
+            f"Positioning score (S, vs {scope}): {p.s_mean:.3f}",
+            f"  95% credible interval: [{p.s_ci[0]:.3f}, {p.s_ci[1]:.3f}]",
+        ]
+    else:
+        lines = ["Positioning score (S): not computable — no covered (n≥30) matchups in the field"]
+    lines.append(f"  Field coverage: {p.data_coverage:.0%} of field has matchup data")
+    if p.restricted:
+        excl = ", ".join(sorted(p.excluded_archetypes))
+        lines.append(
+            f"  Excluded {p.excluded_share:.0%} with no data ({len(p.excluded_archetypes)}): {excl}"
+        )
+    lines += [
         f"  Unweighted mean (u_bar): {p.u_bar:.3f}  [best-deck lens]",
         f"  MC draws: {p.n_draws}  |  field_source: {p.field_source}",
     ]
