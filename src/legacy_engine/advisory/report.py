@@ -310,6 +310,8 @@ def build_field_read_report(
             else:
                 audit.append(
                     f"best-deck-call: label={best_deck_call.label!r}, "
+                    f"best_deck_score={best_deck_call.best_deck_score:.3f}, "
+                    f"best_call_score={best_deck_call.best_call_score:.3f}, "
                     f"spread_variance={best_deck_call.spread_variance:.4f}, "
                     f"field_weighted_mean={best_deck_call.field_weighted_mean:.3f}, "
                     f"unweighted_mean={best_deck_call.unweighted_mean:.3f} "
@@ -419,6 +421,22 @@ def _render_whattoplay(report: FieldReadReport) -> str:
     lines: list[str] = [
         "What to play:",
         f"  Archetype: {report.deck_archetype}",
+    ]
+
+    # Coverage-aware positioning S (when supplied) — the headline number a user wants.
+    pos = report.positioning
+    if pos is not None:
+        if not pos.s_computable:
+            lines.append("  Positioning S: not computable (no covered matchups)")
+        elif pos.restricted:
+            lines.append(
+                f"  Positioning S (vs covered sub-field): {pos.s_mean:.3f}  "
+                f"(coverage {pos.data_coverage:.0%}, excluded {pos.excluded_share:.0%})"
+            )
+        else:
+            lines.append(f"  Positioning S: {pos.s_mean:.3f}  (coverage {pos.data_coverage:.0%})")
+
+    lines += [
         f"  Proactivity score: {p.score:.3f}  "
         f"(proactive_mass={p.proactive_mass:.2f}, reactive_mass={p.reactive_mass:.2f})",
         f"  Low-curve score: {p.low_curve_score:.3f}  [heuristic: composition-derived]",
@@ -435,8 +453,8 @@ def _render_whattoplay(report: FieldReadReport) -> str:
         bdc = report.best_deck_call
         lines.append(
             f"  Best-deck-call: {bdc.label}  "
-            f"(spread_variance={bdc.spread_variance:.4f}, "
-            f"field_weighted_mean={bdc.field_weighted_mean:.3f})"
+            f"(best_deck={bdc.best_deck_score:.3f}, best_call={bdc.best_call_score:.3f}, "
+            f"spread_var={bdc.spread_variance:.4f})"
         )
     else:
         lines.append("  Best-deck-call: N/A (archetype unresolved)")
