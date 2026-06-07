@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty
 kind: epic
-stage: drafting
+stage: implementing
 tags: [advisory, analytics, correctness]
 parent: null
 depends_on: []
@@ -60,3 +60,44 @@ but its framing misleads, fix the framing. `/epic-design` decomposes the finding
   Surface it.
 - **tune-transparency** [generation]: `generate tune` is opaque/conservative — reports Value/Coverage
   with no sense of scale and no rationale. Add scale anchoring + per-swap rationale.
+
+## Design decisions
+- **Low-coverage positioning behavior**: auto-restrict + note — compute S over the covered sub-field
+  automatically and print it with the field-coverage ratio + excluded share; no flag needed, honest
+  result is the default. — matches the hand-built workflow that worked in dogfooding; preserves the
+  full-field path byte-identical when coverage is already high.
+- **List-aware positioning**: OUT of this epic — deferred to a research spike
+  (`idea-list-granular-positioning`). — adding a presence-correlational heuristic that nudges S risks
+  false precision in an epic about honesty; validate the approach separately first.
+- **'Unknown' semantics**: bucket into 'Other' in fields/positioning (already excluded there) but keep
+  visible + labeled as a data-quality signal in meta-share, applied consistently across matchup rows.
+  — consistent handling without losing the "how much is unclassified" signal.
+- **`report tiers` default**: flip to current-regime (with `--all-time` escape). — consistency with
+  the already-shipped regime-aware advisory default; stops crowning dead decks.
+
+## Decomposition
+
+Split by the *mechanism of dishonesty and where the fix lives*, not by file or layer.
+`positioning-coverage` is the foundation — it establishes the field-coverage ratio and the
+coverage-aware S that `whattoplay-honesty` consumes. `field-consistency` and `transparency` are
+independent and parallelizable. List-aware positioning was considered but deferred (see Design
+decisions), keeping the epic tight at 4 features.
+
+### Child features
+- `epic-advisory-output-honesty-positioning-coverage` — field-coverage ratio + auto-restricted
+  coverage-aware S + suppress/flag P(best) at cov≈0 — depends on: `[]`
+- `epic-advisory-output-honesty-whattoplay-honesty` — gradient best-call (no threshold cliff) +
+  surface the coverage-aware S — depends on: `[epic-advisory-output-honesty-positioning-coverage]`
+- `epic-advisory-output-honesty-field-consistency` — tiers default→current-regime + consistent
+  'Unknown' (bucket+flag) semantics — depends on: `[]`
+- `epic-advisory-output-honesty-transparency` — data-currency header + foreground-n on inclusion +
+  tune scale/rationale — depends on: `[]`
+
+### Decomposition risks
+- **positioning-coverage shifts headline S values** — auto-restricting changes S for broad-field runs,
+  which will move existing positioning test expectations. Mitigate: gate the restrict on a coverage
+  threshold, keep the full-field path byte-identical when coverage is high, and leave explicit
+  `--field` / `--all-time` invocations behaving predictably; regression-cover the high-coverage no-op.
+- **transparency spans three modules** (report/metashare/generation) — kept as one feature because all
+  three are the same source-transparency NFR; if feature-design finds them too loosely coupled, it may
+  spawn child stories per surface.
