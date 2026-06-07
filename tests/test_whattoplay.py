@@ -1294,3 +1294,85 @@ class TestRegressionPeerReviewFixes:
         assert result.label == "BEST_DECK", (
             f"High-n 56% cell should classify as BEST_DECK; got {result.label!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Best-deck-call gradient — epic-advisory-output-honesty-whattoplay-honesty
+# ---------------------------------------------------------------------------
+
+
+class TestBestDeckCallGradient:
+    """De-cliffed BEST_CALL + continuous best_deck_score/best_call_score."""
+
+    def _row_matrix(self, source: str, opp_wins: dict[str, int]) -> MatchupMatrix:
+        """Matrix: `source` vs each opp at opp_wins[opp]/100; opponents play each other at 50/100."""
+        archetypes = [source, *opp_wins]
+        cells = {}
+        for a in archetypes:
+            cells[(a, a)] = build_mirror_cell(a, 50)
+            for b in archetypes:
+                if a == b:
+                    continue
+                if a == source:
+                    cells[(a, b)] = build_cell(a, b, opp_wins[b], 100)
+                elif b == source:
+                    cells[(a, b)] = build_cell(a, b, 100 - opp_wins[a], 100)
+                else:
+                    cells[(a, b)] = build_cell(a, b, 50, 100)
+        return _make_matrix(cells, archetypes)
+
+    def test_cliff_fixed_low_variance_field_favored_is_best_call(self):
+        """The reported cliff: low variance + field-weighted mean ≥ 0.52 + unweighted < 0.52.
+
+        Old code → 'neither' (BEST_CALL required variance > spread_hi). New code → BEST_CALL.
+        """
+        m = self._row_matrix("DnT", {"A": 58, "B": 47, "C": 47})
+        field = _make_field({"DnT": 0.0, "A": 0.8, "B": 0.1, "C": 0.1})  # field concentrated on A
+        r = best_deck_vs_best_call(m, field, "DnT")
+        assert r.spread_variance <= 0.02, f"expected low variance, got {r.spread_variance:.4f}"
+        assert r.unweighted_mean < 0.52, f"expected sub-threshold unweighted, got {r.unweighted_mean:.3f}"
+        assert r.field_weighted_mean >= 0.52, f"expected field-favored, got {r.field_weighted_mean:.3f}"
+        assert r.label == "BEST_CALL", f"cliff not fixed: got {r.label}"
+
+    def test_best_call_score_is_field_weighted_mean(self):
+        m = self._row_matrix("DnT", {"A": 58, "B": 47, "C": 47})
+        field = _make_field({"DnT": 0.0, "A": 0.8, "B": 0.1, "C": 0.1})
+        r = best_deck_vs_best_call(m, field, "DnT")
+        assert r.best_call_score == pytest.approx(r.field_weighted_mean)
+
+    def test_best_deck_score_is_robust_floor(self):
+        # best_deck_score = clamp(unweighted_mean − √variance, 0, 1)
+        m = self._row_matrix("X", {"A": 60, "B": 55, "C": 50})
+        field = _make_field({"X": 0.0, "A": 0.34, "B": 0.33, "C": 0.33})
+        r = best_deck_vs_best_call(m, field, "X")
+        import math
+        expected = max(0.0, min(1.0, r.unweighted_mean - math.sqrt(r.spread_variance)))
+        assert r.best_deck_score == pytest.approx(expected)
+
+    def test_spiky_scores_below_flat_at_equal_mean(self):
+        """A spiky deck (high variance) has a lower best_deck_score than a flat deck of equal mean."""
+        # Flat: 55/55/55  → mean .55, variance ~0
+        flat = self._row_matrix("F", {"A": 55, "B": 55, "C": 55})
+        # Spiky: 75/75/15 → mean .55, high variance
+        spiky = self._row_matrix("S", {"A": 75, "B": 75, "C": 15})
+        field = _make_field({"A": 0.34, "B": 0.33, "C": 0.33})
+        rf = best_deck_vs_best_call(flat, _make_field({"F": 0.0, **field.shares}), "F")
+        rs = best_deck_vs_best_call(spiky, _make_field({"S": 0.0, **field.shares}), "S")
+        assert rf.best_deck_score > rs.best_deck_score
+
+    def test_neither_returns_bounded_scores(self):
+        m = self._row_matrix("W", {"A": 30, "B": 30, "C": 30})  # bad everywhere
+        field = _make_field({"W": 0.0, "A": 0.34, "B": 0.33, "C": 0.33})
+        r = best_deck_vs_best_call(m, field, "W")
+        assert r.label == "neither"
+        # scores are still computed (continuous), just low — not forced to 0 unless no cells
+        assert 0.0 <= r.best_deck_score <= 1.0
+        assert 0.0 <= r.best_call_score <= 1.0
+
+    def test_missing_archetype_zero_scores(self):
+        m = self._row_matrix("X", {"A": 55, "B": 55})
+        field = _make_field({"X": 0.5, "A": 0.25, "B": 0.25})
+        r = best_deck_vs_best_call(m, field, "ZZZ")  # not in matrix
+        assert r.label == "neither"
+        assert r.best_deck_score == 0.0
+        assert r.best_call_score == 0.0
