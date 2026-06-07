@@ -375,3 +375,123 @@ class TestVizGroup:
         # The raw ValueError class name must NOT appear as an unhandled traceback
         # (it appears in the ClickException message, but not as "Traceback (most recent call last)")
         assert "Traceback (most recent call last)" not in output
+
+
+# ---------------------------------------------------------------------------
+# Field & regime consistency — epic-advisory-output-honesty-field-consistency
+# ---------------------------------------------------------------------------
+
+
+class TestFieldConsistency:
+    """tiers default→current-regime window opts + Unknown/Conflict labeling in render."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """Write a rounds corpus to a real DuckDB file for CLI invocation."""
+        db_path = tmp_path / "test.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_tiers_default_windows_to_current_regime(self, runner, db_with_corpus):
+        result = runner.invoke(main, ["report", "tiers", "--db", db_with_corpus, "--provenance", "online"])
+        assert result.exit_code == 0, result.output
+        assert "// window: regime: current" in result.output
+
+    def test_tiers_all_time_uses_full_corpus(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main, ["report", "tiers", "--db", db_with_corpus, "--provenance", "online", "--all-time"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window: full-corpus" in result.output
+
+    def test_tiers_windowed_wrw_fails_loud_not_crash(self, runner, db_with_corpus):
+        # Bare wrw windows to the current regime → unsupported. Must be a clean ClickException,
+        # NOT an unhandled NotImplementedError traceback (regression caught in review).
+        result = runner.invoke(main, ["report", "tiers", "--db", db_with_corpus, "--definition", "wrw"])
+        assert result.exit_code != 0
+        assert "Traceback" not in result.output
+        assert "windowed wrw is unsupported" in result.output
+        assert "--all-time" in result.output
+
+    def test_tiers_all_time_wrw_is_allowed(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main, ["report", "tiers", "--db", db_with_corpus, "--definition", "wrw", "--all-time"]
+        )
+        assert result.exit_code == 0, result.output
+
+    def _meta_report(self, archetypes):
+        from legacy_engine.analytics.metashare import MetaShareEntry, MetaShareReport
+        entries = [
+            MetaShareEntry(archetype=a, share=s, n=n, tier="established", fringe=False)
+            for a, s, n in archetypes
+        ]
+        return MetaShareReport(
+            definition="raw", provenance="online", entries=entries,
+            total_decks=1000, unlabeled=0, min_share=0.02,
+        )
+
+    def test_tiers_exposes_window_opts(self, runner):
+        result = runner.invoke(main, ["report", "tiers", "--help"])
+        assert result.exit_code == 0
+        for opt in ("--all-time", "--regime", "--since", "--until"):
+            assert opt in result.output, f"{opt} missing from `report tiers --help`"
+
+    def test_metashare_render_marks_unknown(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Unknown", 0.08, 80)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        # The Unknown line carries ‡; the real archetype line does not.
+        unknown_line = next(ln for ln in out.splitlines() if ln.startswith("Unknown"))
+        delver_line = next(ln for ln in out.splitlines() if ln.startswith("Izzet Delver"))
+        assert "‡" in unknown_line
+        assert "‡" not in delver_line
+        assert out.count("unclassified — not positionable") == 1  # footnote once
+
+    def test_metashare_render_marks_conflict(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Conflict(Delver,Tempo)", 0.04, 40)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        conflict_line = next(ln for ln in out.splitlines() if ln.startswith("Conflict("))
+        assert "‡" in conflict_line
+
+    def test_metashare_render_no_footnote_when_all_classified(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Lands", 0.10, 100)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        assert "‡" not in out
+        assert "unclassified — not positionable" not in out
+
+    def test_matchup_render_marks_unknown(self, capsys):
+        from legacy_engine.cli import _print_matchup_matrix
+        from legacy_engine.analytics.matchup import MatchupMatrix, build_cell, build_mirror_cell
+        archs = ["Izzet Delver", "Unknown"]
+        cells = {}
+        for a in archs:
+            cells[(a, a)] = build_mirror_cell(a, 50)
+            for b in archs:
+                if a != b:
+                    cells[(a, b)] = build_cell(a, b, 55, 100)
+        matrix = MatchupMatrix(
+            cells=cells, provenance=None, total_matches=200,
+            archetypes=archs, caveat="test",
+        )
+        _print_matchup_matrix(matrix)
+        out = capsys.readouterr().out
+        unknown_row = next(ln for ln in out.splitlines() if ln.startswith("Unknown"))
+        assert "Unknown ‡" in unknown_row
+        assert out.count("unclassified — not positionable") == 1
+        # numeric cells unaffected
+        assert "(n=100)" in out
