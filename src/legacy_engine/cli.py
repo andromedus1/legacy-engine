@@ -1111,6 +1111,7 @@ def advise_sideboard(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@click.option("--seed", type=int, default=None, help="RNG seed for deterministic positioning S.")
 @_window_opts
 @_verbose
 def advise_whattoplay(
@@ -1118,6 +1119,7 @@ def advise_whattoplay(
     archetype: str | None,
     field_file: str | None,
     db: str | None,
+    seed: int | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -1173,15 +1175,19 @@ def advise_whattoplay(
             heuristic_note="(not computed in whattoplay mode)", warnings=(),
         )
 
-        from legacy_engine.advisory.whattoplay import BestDeckCall
         bdc = best_deck_vs_best_call(matrix, field, resolved_archetype)
+
+        # Coverage-aware positioning S — the headline number; reuses the honest
+        # (auto-restricted / not-computable) positioning_score from the foundation feature.
+        from legacy_engine.advisory.positioning import positioning_score
+        positioning = positioning_score(matrix, field, resolved_archetype, seed=seed)
 
         report = FieldReadReport(
             deck_archetype=resolved_archetype,
             field_source=field.field_source,
             field_shares=dict(field.shares),
             field_vuln_profile=field_vuln_profile,
-            positioning=None,
+            positioning=positioning,
             proactivity=proactivity,
             vulnerability=deck_vuln,
             best_deck_call=bdc,

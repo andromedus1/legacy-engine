@@ -653,6 +653,11 @@ class BestDeckCall:
     non-mirror cells in the archetype's row.
     ``field_weighted_mean`` is Σ field_share(b) * p_shrunk(a,b) over known cells.
     ``unweighted_mean`` is the simple mean across known cells.
+    ``best_deck_score`` is the continuous robust floor ``clamp(unweighted_mean −
+    √spread_variance, 0, 1)`` — high when the deck is good across the field AND
+    not spiky.  ``best_call_score`` is ``field_weighted_mean`` — how good the deck
+    is vs THIS field.  The two scores give a gradient so near-threshold decks read
+    as borderline rather than as a binary label flip.
     """
 
     archetype: str
@@ -660,6 +665,8 @@ class BestDeckCall:
     spread_variance: float
     field_weighted_mean: float
     unweighted_mean: float
+    best_deck_score: float = 0.0  # robust floor: clamp(unweighted_mean − √variance, 0, 1)
+    best_call_score: float = 0.0  # field_weighted_mean — good-vs-THIS-field
 
 
 def best_deck_vs_best_call(
@@ -674,9 +681,16 @@ def best_deck_vs_best_call(
 
     BEST_DECK: low spread (variance ≤ spread_hi) AND high unweighted mean (≥ mean_hi)
                → robust across the field.
-    BEST_CALL: high spread (variance > spread_hi) AND high field-weighted mean (≥ mean_hi)
-               → field-specific gamble (preys on the current meta).
-    neither: neither condition holds.
+    BEST_CALL: high field-weighted mean (≥ mean_hi) but not robust-strong
+               → field-specific pick (preys on the current meta).  NOTE: this no
+               longer requires high variance — a consistent, field-favored deck
+               (low spread, high field-weighted mean, sub-threshold unweighted mean)
+               is correctly a BEST_CALL, not "neither".  Removing that variance gate
+               is the cliff fix (Death & Taxes used to fall through to "neither").
+    neither: field-weighted mean below threshold and not robust-strong.
+
+    Also reports continuous ``best_deck_score`` / ``best_call_score`` for a gradient
+    read independent of the discrete label.
 
     Uses ``p_shrunk`` of known (n>0, non-mirror) cells in the archetype's row.
     Missing archetype → returns a "neither" cell with zeroed stats and a warning.
@@ -689,6 +703,8 @@ def best_deck_vs_best_call(
             spread_variance=0.0,
             field_weighted_mean=0.0,
             unweighted_mean=0.0,
+            best_deck_score=0.0,
+            best_call_score=0.0,
         )
 
     # Collect known non-mirror cells — restrict to display-grade (n>=30) so the
@@ -727,18 +743,27 @@ def best_deck_vs_best_call(
             spread_variance=0.0,
             field_weighted_mean=0.0,
             unweighted_mean=0.0,
+            best_deck_score=0.0,
+            best_call_score=0.0,
         )
 
     unweighted_mean = sum(winrates) / len(winrates)
     field_weighted_mean = weighted_sum / weight_total if weight_total > 0 else unweighted_mean
     variance = sum((r - unweighted_mean) ** 2 for r in winrates) / len(winrates)
 
+    # De-cliffed label: BEST_CALL no longer requires high variance, so a consistent,
+    # field-favored deck (low spread, field-weighted mean ≥ threshold, but unweighted
+    # mean below threshold) is correctly a BEST_CALL rather than "neither".
     if variance <= spread_hi and unweighted_mean >= mean_hi:
         label = "BEST_DECK"
-    elif variance > spread_hi and field_weighted_mean >= mean_hi:
+    elif field_weighted_mean >= mean_hi:
         label = "BEST_CALL"
     else:
         label = "neither"
+
+    # Continuous gradient scores (independent of the discrete label).
+    best_deck_score = max(0.0, min(1.0, unweighted_mean - math.sqrt(variance)))
+    best_call_score = field_weighted_mean
 
     return BestDeckCall(
         archetype=archetype,
@@ -746,6 +771,8 @@ def best_deck_vs_best_call(
         spread_variance=variance,
         field_weighted_mean=field_weighted_mean,
         unweighted_mean=unweighted_mean,
+        best_deck_score=best_deck_score,
+        best_call_score=best_call_score,
     )
 
 
