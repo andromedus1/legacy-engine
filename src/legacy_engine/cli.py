@@ -1686,16 +1686,6 @@ def generate_tune(
         + (" [no-signal: no swaps made]" if tuned.objective == "no-signal-skip" else "")
     )
     click.echo(f"// Δvalue = {tuned.value_after - tuned.value_before:+.4f}")
-    if tuned.swaps:
-        click.echo("// Swaps (per-card field-weighted lift drove each):")
-        for cut, add in tuned.swaps:
-            click.echo(f"//   cut {cut} → add {add}")
-        click.echo(
-            "// (per-card lift is presence-correlational, not causal; magnitudes are small — "
-            "treat swap ordering as indicative, not precise)"
-        )
-    else:
-        click.echo("// Swaps: none")
 
     # Coverage: audit context only (NOT the swap driver).
     click.echo(f"// Coverage (audit): {tuned.coverage_before:.4f} → {tuned.coverage_after:.4f}")
@@ -1736,6 +1726,10 @@ def generate_tune(
         click.echo("\n// Swap log:")
         for i, (cut, added) in enumerate(tuned.swaps, 1):
             click.echo(f"//   {i}. CUT {cut}  →  ADD {added}")
+        click.echo(
+            "// (per-card lift is presence-correlational, not causal; magnitudes are small — "
+            "treat swap ordering as indicative, not precise)"
+        )
     else:
         click.echo("\n// Swap log: (no swaps made)")
 
