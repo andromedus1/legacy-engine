@@ -1417,3 +1417,34 @@ class TestPeerReviewFindingsUnit2:
         with pytest.raises(ValueError, match="weights sum to"):
             blend_shares({"online": report_a, "paper": report_b}, {"online": -0.5, "paper": -0.5})
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# corpus_freshness — epic-advisory-output-honesty-transparency
+# ---------------------------------------------------------------------------
+
+
+class TestCorpusFreshness:
+    def test_empty_corpus_returns_none(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        store.init_schema(con)
+        assert corpus_freshness(con) == (None, 0)
+
+    def test_returns_max_date_and_deck_count(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        _load_online_challenge(con)
+        max_date, deck_count = corpus_freshness(con)
+        assert max_date == "2026-05-24"   # date-portion of the online challenge
+        assert deck_count >= 2            # alice + bob (at least)
+
+    def test_provenance_filter(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        _load_online_challenge(con)
+        # paper basis has no events → empty
+        assert corpus_freshness(con, provenance="paper") == (None, 0)
+        # online basis has the challenge
+        max_date, n = corpus_freshness(con, provenance="online")
+        assert max_date == "2026-05-24" and n >= 2

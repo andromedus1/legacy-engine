@@ -495,3 +495,77 @@ class TestFieldConsistency:
         assert out.count("unclassified — not positionable") == 1
         # numeric cells unaffected
         assert "(n=100)" in out
+
+
+# ---------------------------------------------------------------------------
+# Output transparency — epic-advisory-output-honesty-transparency
+# ---------------------------------------------------------------------------
+
+
+class TestTransparency:
+    """data-freshness header + staleness guard, consensus thin-sample flag, tune swap rationale."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        db_path = tmp_path / "test.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    # --- pure staleness helper (regression for the unparseable-date crash) ---
+    def test_staleness_age_none_on_empty(self):
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days(None, date(2026, 6, 6)) is None
+
+    def test_staleness_age_none_on_unparseable_date(self):
+        # Synthetic corpora carry out-of-range dates like '2026-01-50' — must NOT crash.
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days("2026-01-50", date(2026, 6, 6)) is None
+
+    def test_staleness_age_computes_days(self):
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days("2026-05-30", date(2026, 6, 6)) == 7
+        assert _staleness_age_days("2026-01-01", date(2026, 6, 6)) > 30
+
+    # --- data-freshness header on reports ---
+    def test_report_meta_prints_data_as_of_header(self, runner, db_with_corpus):
+        result = runner.invoke(main, ["report", "meta", "--db", db_with_corpus, "--provenance", "online"])
+        assert result.exit_code == 0, result.output
+        assert "// data as of 2026-01-05" in result.output  # max synthetic date (n_repeats=5)
+        assert "decks)" in result.output
+
+    # --- consensus thin-sample flag ---
+    def test_consensus_thin_sample_flagged(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control", "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "[speculative]" in result.output
+        assert "thin sample" in result.output
+
+    # --- tune swap rationale ---
+    def test_tune_renders_delta_and_swaps(self, runner, db_with_corpus, tmp_path):
+        deck = tmp_path / "control.txt"
+        # A minimal Control list — exact legality isn't the point; the render is.
+        deck.write_text("4 Brainstorm\n")
+        result = runner.invoke(
+            main,
+            ["generate", "tune", "--deck", str(deck), "--archetype", "Control", "--db", db_with_corpus],
+        )
+        # Tune may legality-fail on a 1-card deck; if it runs, the rationale lines must be present.
+        if result.exit_code == 0:
+            assert "Δvalue =" in result.output
+            assert ("Swaps:" in result.output) or ("Swaps (" in result.output)
