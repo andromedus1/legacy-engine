@@ -265,9 +265,15 @@ def report_meta(
         con.close()
 
 
+_UNCLASSIFIED_MARKER = "‡"
+_UNCLASSIFIED_FOOTNOTE = (
+    f"{_UNCLASSIFIED_MARKER} unclassified — not positionable; excluded from advisory fields"
+)
+
+
 def _print_metashare_report(report: "MetaShareReport") -> None:
     """Render a meta-share report as a labeled text table."""
-    from legacy_engine.analytics.metashare import MetaShareReport  # noqa: F401
+    from legacy_engine.analytics.metashare import MetaShareReport, _is_never_other  # noqa: F401
 
     basis_label = report.provenance if report.provenance else "all"
     click.echo(f"\n=== Meta Share [{report.definition.upper()}] basis={basis_label} ===")
@@ -282,11 +288,21 @@ def _print_metashare_report(report: "MetaShareReport") -> None:
         click.echo("(no archetypes meet the inclusion threshold)")
         return
 
+    saw_unclassified = False
     for entry in report.entries:
         fringe_marker = " *" if entry.fringe and entry.archetype != "Other" else "  "
+        if _is_never_other(entry.archetype):
+            unclassified_marker = f" {_UNCLASSIFIED_MARKER}"
+            saw_unclassified = True
+        else:
+            unclassified_marker = ""
         click.echo(
-            f"{entry.archetype:<30}  {entry.share:>6.1%}  {entry.n:>6}  {entry.tier:<12}{fringe_marker}"
+            f"{entry.archetype:<30}  {entry.share:>6.1%}  {entry.n:>6}  "
+            f"{entry.tier:<12}{fringe_marker}{unclassified_marker}"
         )
+
+    if saw_unclassified:
+        click.echo(_UNCLASSIFIED_FOOTNOTE)
 
 
 @report.command("matchups")
@@ -352,6 +368,7 @@ def report_matchups(
 
 def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matchup.MatchupMatrix
     """Render a matchup matrix as a labeled text table."""
+    from legacy_engine.analytics.metashare import _is_never_other
 
     basis_label = matrix.provenance if matrix.provenance else "all"
     click.echo(f"\n=== Matchup Matrix [{basis_label}] ===")
@@ -363,9 +380,12 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
         return
 
     archetypes = matrix.archetypes
+    has_unclassified = any(_is_never_other(a) for a in archetypes)
     col_width = max(len(a) for a in archetypes)
     col_width = max(col_width, 20)  # minimum column width for cell content
     row_label_width = max(len(a) for a in archetypes)
+    if has_unclassified:
+        row_label_width += 2  # room for the trailing " ‡" marker on unclassified rows
 
     # Header row
     header = " " * row_label_width + "  " + "  ".join(a.ljust(col_width) for a in archetypes)
@@ -373,7 +393,8 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
     click.echo("-" * len(header))
 
     for row_arch in archetypes:
-        row_parts = [row_arch.ljust(row_label_width)]
+        row_label = f"{row_arch} {_UNCLASSIFIED_MARKER}" if _is_never_other(row_arch) else row_arch
+        row_parts = [row_label.ljust(row_label_width)]
         for col_arch in archetypes:
             cell = matrix.cells.get((row_arch, col_arch))
             if cell is None:
@@ -387,6 +408,9 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
                 part = f"{pct} (n={cell.n})"
             row_parts.append(part.ljust(col_width))
         click.echo("  ".join(row_parts))
+
+    if has_unclassified:
+        click.echo(_UNCLASSIFIED_FOOTNOTE)
 
 
 @report.command("trends")
@@ -537,22 +561,39 @@ def _print_trend_series(series: "TrendSeries") -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def report_tiers(
     definition: str,
     provenance: str,
     min_share: float,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Tier list derived from the current metagame (S/A/B buckets by share)."""
     _setup_logging(verbose)
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.metashare import compute_metashare
     from legacy_engine.ingestion import store
     from legacy_engine.viz.models import _tier_model
 
     con = store.connect(db) if db else store.connect()
     try:
+        # Tiers is an advisory "what to play now" surface, so it defaults to the CURRENT ban
+        # regime (unlike descriptive `report meta`, which defaults to full corpus). This stops
+        # tiers crowning a deck that is dead in the current regime. thin_floor=0: deck-based,
+        # never degrades. --all-time / --regime / --since/--until override.
+        if not (regime or since or until or all_time):
+            regime = "current"
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time, thin_floor=0,
+        )
+        click.echo(f"// window: {win.requested_label}")
+
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -565,6 +606,8 @@ def report_tiers(
                 definition=definition,
                 provenance=basis,
                 min_share=min_share,
+                since=win.since,
+                until=win.until,
             )
             model = _tier_model(report)
             _print_tier_list(model)

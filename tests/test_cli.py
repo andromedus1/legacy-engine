@@ -375,3 +375,79 @@ class TestVizGroup:
         # The raw ValueError class name must NOT appear as an unhandled traceback
         # (it appears in the ClickException message, but not as "Traceback (most recent call last)")
         assert "Traceback (most recent call last)" not in output
+
+
+# ---------------------------------------------------------------------------
+# Field & regime consistency — epic-advisory-output-honesty-field-consistency
+# ---------------------------------------------------------------------------
+
+
+class TestFieldConsistency:
+    """tiers default→current-regime window opts + Unknown/Conflict labeling in render."""
+
+    def _meta_report(self, archetypes):
+        from legacy_engine.analytics.metashare import MetaShareEntry, MetaShareReport
+        entries = [
+            MetaShareEntry(archetype=a, share=s, n=n, tier="established", fringe=False)
+            for a, s, n in archetypes
+        ]
+        return MetaShareReport(
+            definition="raw", provenance="online", entries=entries,
+            total_decks=1000, unlabeled=0, min_share=0.02,
+        )
+
+    def test_tiers_exposes_window_opts(self, runner):
+        result = runner.invoke(main, ["report", "tiers", "--help"])
+        assert result.exit_code == 0
+        for opt in ("--all-time", "--regime", "--since", "--until"):
+            assert opt in result.output, f"{opt} missing from `report tiers --help`"
+
+    def test_metashare_render_marks_unknown(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Unknown", 0.08, 80)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        # The Unknown line carries ‡; the real archetype line does not.
+        unknown_line = next(ln for ln in out.splitlines() if ln.startswith("Unknown"))
+        delver_line = next(ln for ln in out.splitlines() if ln.startswith("Izzet Delver"))
+        assert "‡" in unknown_line
+        assert "‡" not in delver_line
+        assert out.count("unclassified — not positionable") == 1  # footnote once
+
+    def test_metashare_render_marks_conflict(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Conflict(Delver,Tempo)", 0.04, 40)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        conflict_line = next(ln for ln in out.splitlines() if ln.startswith("Conflict("))
+        assert "‡" in conflict_line
+
+    def test_metashare_render_no_footnote_when_all_classified(self, capsys):
+        from legacy_engine.cli import _print_metashare_report
+        report = self._meta_report([("Izzet Delver", 0.30, 300), ("Lands", 0.10, 100)])
+        _print_metashare_report(report)
+        out = capsys.readouterr().out
+        assert "‡" not in out
+        assert "unclassified — not positionable" not in out
+
+    def test_matchup_render_marks_unknown(self, capsys):
+        from legacy_engine.cli import _print_matchup_matrix
+        from legacy_engine.analytics.matchup import MatchupMatrix, build_cell, build_mirror_cell
+        archs = ["Izzet Delver", "Unknown"]
+        cells = {}
+        for a in archs:
+            cells[(a, a)] = build_mirror_cell(a, 50)
+            for b in archs:
+                if a != b:
+                    cells[(a, b)] = build_cell(a, b, 55, 100)
+        matrix = MatchupMatrix(
+            cells=cells, provenance=None, total_matches=200,
+            archetypes=archs, caveat="test",
+        )
+        _print_matchup_matrix(matrix)
+        out = capsys.readouterr().out
+        unknown_row = next(ln for ln in out.splitlines() if ln.startswith("Unknown"))
+        assert "Unknown ‡" in unknown_row
+        assert out.count("unclassified — not positionable") == 1
+        # numeric cells unaffected
+        assert "(n=100)" in out

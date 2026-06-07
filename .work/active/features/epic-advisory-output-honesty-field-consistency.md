@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-field-consistency
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, archetype, correctness]
 parent: epic-advisory-output-honesty
 depends_on: []
@@ -120,3 +120,11 @@ data the descriptive reports are meant to show faithfully (the decision is expli
 ## Risks
 - **Existing `report tiers` output/tests change** — the default window flips from full-corpus to current-regime, so any snapshot/expectation of tiers content shifts. **Fallback**: `--all-time` reproduces the old behavior exactly; update expectations and document the intentional default change in the header echo.
 - **`‡` is a non-ASCII glyph** — could surprise a strict-ASCII terminal/test. **Fallback**: it's display-only; if a test environment dislikes it, swap to an ASCII marker like `(unclassified)` — the footnote already spells it out.
+
+## Implementation notes
+- **Files changed**:
+  - `cli.py` — `report_tiers` gains `@_window_opts`; defaults to current regime via `resolve_advisory_window(regime="current", thin_floor=0)` when no window flag given, `--all-time`/`--regime`/`--since/--until` override; echoes the window label; passes `since/until` into all 3 `compute_metashare` bases (Unit 1). `_print_metashare_report` + `_print_matchup_matrix` label `_is_never_other` rows with a `‡` marker + a one-line footnote (Unit 2); added module-level `_UNCLASSIFIED_MARKER`/`_UNCLASSIFIED_FOOTNOTE`.
+- **Tests added**: `tests/test_cli.py::TestFieldConsistency` (6) — tiers window opts present; meta-share marks Unknown + Conflict, footnote-once, no-footnote-when-all-classified; matchup marks Unknown row + footnote, numeric cells intact. Full suite 1201 → 1206.
+- **Discrepancies from design**: none. (Test assertion adjusted to the shrunk win-rate `(n=100)` rather than raw 55% — Beta shrinkage, expected.)
+- **Adjacent issues parked**: none.
+- **Verified live**: `report tiers` → `// window: regime: current` (was full-corpus, which crowned dead Dimir Reanimator); `report tiers --all-time` → `// window: full-corpus`. Unknown/Conflict rows carry `‡` + footnote in both `report meta` and `report matchups`.
