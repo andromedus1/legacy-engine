@@ -556,3 +556,64 @@ class TestRegressionPeerReviewFixes:
         result, warnings = _normalize_shares({"A": 0.6, "B": 0.4})
         assert pytest.approx(result["A"]) == 0.6
         assert pytest.approx(result["B"]) == 0.4
+
+
+# ---------------------------------------------------------------------------
+# FieldDistribution.restrict_to — epic-advisory-output-honesty-positioning-coverage
+# ---------------------------------------------------------------------------
+
+
+class TestRestrictTo:
+    """Pure renormalization of a field over a covered subset + excluded-share accounting."""
+
+    def _field(self) -> FieldDistribution:
+        return FieldDistribution(
+            shares={"A": 0.5, "B": 0.3, "C": 0.2},
+            field_source="global",
+            counts={"A": 50, "B": 30, "C": 20},
+            no_data=frozenset({"C"}),
+            warnings=("preexisting",),
+        )
+
+    def test_renormalizes_to_one(self):
+        restricted, excluded = self._field().restrict_to({"A", "B"})
+        assert pytest.approx(sum(restricted.shares.values())) == 1.0
+        # A:B was 0.5:0.3 → renormalized 0.625:0.375
+        assert pytest.approx(restricted.shares["A"]) == 0.625
+        assert pytest.approx(restricted.shares["B"]) == 0.375
+
+    def test_excluded_share_is_dropped_mass(self):
+        _, excluded = self._field().restrict_to({"A", "B"})
+        assert pytest.approx(excluded) == 0.2  # C dropped
+
+    def test_counts_filtered_not_renormalized(self):
+        restricted, _ = self._field().restrict_to({"A", "B"})
+        assert restricted.counts == {"A": 50, "B": 30}
+
+    def test_counts_none_stays_none(self):
+        f = FieldDistribution(
+            shares={"A": 0.5, "B": 0.5}, field_source="custom",
+            counts=None, no_data=frozenset(), warnings=(),
+        )
+        restricted, _ = f.restrict_to({"A"})
+        assert restricted.counts is None
+
+    def test_no_data_intersected_and_source_preserved(self):
+        restricted, _ = self._field().restrict_to({"A", "B"})
+        assert restricted.no_data == frozenset()  # C was the only no_data, now excluded
+        assert restricted.field_source == "global"
+        assert restricted.warnings == ("preexisting",)
+
+    def test_keep_superset_is_noop(self):
+        restricted, excluded = self._field().restrict_to({"A", "B", "C", "Z"})
+        assert pytest.approx(excluded) == 0.0
+        assert pytest.approx(restricted.shares["A"]) == 0.5
+
+    def test_empty_keep_raises(self):
+        with pytest.raises(ValueError, match="zero share mass"):
+            self._field().restrict_to({"Z"})
+
+    def test_restrict_does_not_emit_normalize_warning(self):
+        # Intentional restriction must NOT add a "summed to X" data-quality warning.
+        restricted, _ = self._field().restrict_to({"A", "B"})
+        assert not any("summed to" in w for w in restricted.warnings)

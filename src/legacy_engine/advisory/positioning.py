@@ -55,6 +55,8 @@ _DIRICHLET_GAMMA: float = 0.5      # Jeffreys pseudo-count for Dirichlet
 _BETA_JEFFREYS: float = 0.5        # Jeffreys prior pseudo-count for Beta cells
 _NODATA_STRENGTH: float = 2.0      # weak pseudo-count for no-data imputation
 _THIN_ROW_THRESHOLD: float = 0.5   # warn when >50% of field archetypes are imputed
+_COVERAGE_RESTRICT_THRESHOLD: float = 0.85   # below this data_coverage, restrict S to the covered sub-field
+_PBEST_SUPPRESS_COVERAGE: float = 0.05       # below this data_coverage, P(best) is imputation noise → suppress in display
 _DEFAULT_RISK_QUANTILE: float = 0.25   # default lower-quantile for risk-adjusted ranking
 _RISK_AVERSE_QUANTILE: float = 0.05   # quantile used when risk_averse=True
 
@@ -223,18 +225,44 @@ def _sample_S(
 # ---------------------------------------------------------------------------
 
 
+def _is_covered_cell(matrix: MatchupMatrix, deck_archetype: str, opp: str) -> bool:
+    """Whether ``deck`` has trustworthy matchup data against ``opp``.
+
+    Single source of truth for "covered": the self-mirror (a fixed-0.5 cell that is never
+    imputed) counts as covered, as does any *displayed* (n ≥ DISPLAY_GATE_N), non-mirror
+    cell.  An absent or thin (n < gate) cell is NOT covered.
+    """
+    if opp == deck_archetype:
+        return True  # mirror: fixed 0.5, never imputed
+    cell = matrix.cells.get((deck_archetype, opp))
+    return cell is not None and cell.display and not cell.is_mirror
+
+
+def covered_field_archetypes(
+    matrix: MatchupMatrix,
+    field: FieldDistribution,
+    deck_archetype: str,
+) -> frozenset[str]:
+    """The keep-set for restriction: field archetypes the deck has covered data against.
+
+    Includes the deck's own archetype (the mirror) so that restricting the field to this set
+    keeps the self-mirror column rather than producing a degenerate field.
+    """
+    return frozenset(a for a in field.shares if _is_covered_cell(matrix, deck_archetype, a))
+
+
 def _compute_data_coverage(
     matrix: MatchupMatrix,
     field: FieldDistribution,
     deck_archetype: str,
 ) -> float:
-    """Fraction of field share-mass the deck has a *measured* cell against.
+    """Fraction of *non-mirror* field share-mass the deck has a measured cell against.
 
-    A cell is measured when ``cell.display`` is True (n ≥ DISPLAY_GATE_N) and
-    the opponent is not the deck itself (non-mirror).  Share-mass weighting
-    means a deck fully covered against the top-50% opponent gets ~0.5, not a
-    binary count fraction — matching the decision-relevant question "what share
-    of a random opponent does this deck have honest data for?".
+    A cell is measured per ``_is_covered_cell`` (n ≥ DISPLAY_GATE_N, non-mirror).  Share-mass
+    weighting means a deck fully covered against the top-50% opponent gets ~0.5, not a binary
+    count fraction — matching the decision-relevant question "what share of a random opponent
+    does this deck have honest data for?".  The mirror is excluded from the denominator here
+    (the coverage *ratio* is about opponents) even though it is in the keep-*set* above.
 
     Returns 1.0 when the field is empty (degenerate; no coverage needed).
     """
@@ -247,11 +275,10 @@ def _compute_data_coverage(
 
     for opp in field_archetypes:
         if opp == deck_archetype:
-            continue  # skip mirror
+            continue  # skip mirror — not part of the coverage-ratio denominator
         share = field.shares[opp]
         total_non_mirror_mass += share
-        cell = matrix.cells.get((deck_archetype, opp))
-        if cell is not None and cell.display and not cell.is_mirror:
+        if _is_covered_cell(matrix, deck_archetype, opp):
             covered_mass += share
 
     if total_non_mirror_mass <= 0.0:
@@ -291,8 +318,22 @@ class PositioningResult:
     data_coverage
         Fraction of non-mirror field share-mass the deck has a *measured*
         cell against (``cell.display``, i.e. n≥30).  1.0 = fully covered;
-        0.0 = all cells are imputed.  Use to condition on data sufficiency
-        before trusting S or the ranking.
+        0.0 = all cells are imputed.  Always computed on the FULL field — the
+        honest "you have data for X% of the real field" — even when ``s_mean``
+        is computed on a restricted sub-field.
+    restricted
+        True when ``s_mean`` was computed on the covered sub-field (because
+        ``data_coverage`` fell below the restrict threshold) rather than the
+        full field.  When False, S is the full-field score (byte-identical to
+        the pre-restriction behavior).
+    excluded_share
+        Share-mass dropped by restriction (0.0 when not restricted).
+    excluded_archetypes
+        Field archetypes excluded by restriction (empty when not restricted).
+    s_computable
+        False when there is no covered (non-mirror) opponent at all — S cannot
+        be honestly computed, so ``s_mean``/``s_ci`` are NaN and consumers must
+        present "not computable" rather than a fabricated number.
     s_samples
         Raw (n_draws,) sample array; ``None`` unless ``keep_samples=True``.
     """
@@ -306,6 +347,10 @@ class PositioningResult:
     imputed: frozenset[str]
     warnings: tuple[str, ...]
     data_coverage: float = 1.0
+    restricted: bool = False
+    excluded_share: float = 0.0
+    excluded_archetypes: frozenset[str] = frozenset()
+    s_computable: bool = True
     s_samples: np.ndarray | None = None
 
 
@@ -323,6 +368,7 @@ def positioning_score(
     gamma: float = _DIRICHLET_GAMMA,
     include_mirror: bool = True,
     robust: bool = False,
+    restrict_to_covered: bool = True,
     keep_samples: bool = False,
     seed: int | None = None,
 ) -> PositioningResult:
@@ -347,6 +393,14 @@ def positioning_score(
     robust
         Use worst observed win rate for no-data imputation (default False =
         mean vs known).
+    restrict_to_covered
+        When True (default) and ``data_coverage`` falls below
+        ``_COVERAGE_RESTRICT_THRESHOLD``, compute S over the covered sub-field
+        (renormalized) rather than the full field — so S is an honest expected
+        WR vs the part of the field that has matchup data, not a number
+        dominated by the imputation prior.  When coverage is already at/above
+        the threshold, the field is left untouched and the result is
+        byte-identical to ``restrict_to_covered=False``.
     keep_samples
         Retain the raw ``(n_draws,)`` S array in the result (default False).
     seed
@@ -361,17 +415,54 @@ def positioning_score(
     field_archetypes = list(field.shares)
     wins, n, is_mirror, no_data_list = _row_winrate_inputs(matrix, deck_archetype, field_archetypes)
 
-    # ── MC samples ──────────────────────────────────────────────────────────
-    samples = _sample_S(
-        matrix, field, deck_archetype,
-        n_draws=n_draws, gamma=gamma,
-        include_mirror=include_mirror, robust=robust,
-        rng=rng,
-    )
+    # ── data_coverage — share-mass fraction with measured (n≥30) cells (FULL field) ──
+    # Always computed on the full field: the honest "you have data for X% of the real field",
+    # independent of whether the score below is restricted to the covered sub-field.
+    data_coverage = _compute_data_coverage(matrix, field, deck_archetype)
 
-    s_mean = float(samples.mean())
-    lo, hi = np.percentile(samples, [2.5, 97.5])
-    s_ci = (float(lo), float(hi))
+    # ── Choose the scoring field: restrict to the covered sub-field when coverage is low ──
+    scoring_field = field
+    restricted = False
+    excluded_share = 0.0
+    excluded_archetypes: frozenset[str] = frozenset()
+    s_computable = True
+    restrict_warning: str | None = None
+
+    if restrict_to_covered and data_coverage < _COVERAGE_RESTRICT_THRESHOLD:
+        covered = covered_field_archetypes(matrix, field, deck_archetype)
+        non_mirror_covered = [a for a in covered if a != deck_archetype]
+        if not non_mirror_covered:
+            # Zero coverage: no honest opponent to score against — refuse rather than
+            # auto-restrict to a degenerate mirror-only field that would read 0.5.
+            s_computable = False
+            restrict_warning = (
+                "S not computable: no covered (n≥30) matchups in the field; "
+                "any score would be pure imputation prior"
+            )
+        else:
+            scoring_field, excluded_share = field.restrict_to(covered)
+            excluded_archetypes = frozenset(field_archetypes) - covered
+            restricted = True
+            restrict_warning = (
+                f"restricted S to the covered sub-field — excluded {excluded_share:.1%} of the "
+                f"field with no matchup data ({len(excluded_archetypes)} archetype(s))"
+            )
+
+    # ── MC samples (on the scoring field) ────────────────────────────────────
+    if s_computable:
+        samples = _sample_S(
+            matrix, scoring_field, deck_archetype,
+            n_draws=n_draws, gamma=gamma,
+            include_mirror=include_mirror, robust=robust,
+            rng=rng,
+        )
+        s_mean = float(samples.mean())
+        lo, hi = np.percentile(samples, [2.5, 97.5])
+        s_ci = (float(lo), float(hi))
+    else:
+        samples = np.full(n_draws, np.nan)
+        s_mean = float("nan")
+        s_ci = (float("nan"), float("nan"))
 
     # ── Ū — unweighted mean over known (n>0, non-mirror) cells ──────────────
     known_mask = (n > 0) & (~is_mirror)
@@ -394,21 +485,25 @@ def positioning_score(
             + ", ".join(sorted(all_imputed))
         )
 
-    # Thin-row warning: if more than half of field archetypes lack data
-    total_non_mirror = sum(1 for a in field_archetypes if a != deck_archetype)
-    if total_non_mirror > 0:
-        imputed_non_mirror = sum(1 for a in no_data_list if a != deck_archetype) + len(
-            field.no_data & frozenset(a for a in field_archetypes if a != deck_archetype)
-        )
-        if imputed_non_mirror / total_non_mirror > _THIN_ROW_THRESHOLD:
-            warnings_list.append(
-                f"thin row for {deck_archetype!r}: "
-                f"{imputed_non_mirror}/{total_non_mirror} opponent(s) imputed; "
-                "S is dominated by the imputation prior"
+    # Thin-row warning: if more than half of field archetypes lack data.
+    # Suppressed when we restricted (or couldn't compute) S — the "dominated by the imputation
+    # prior" framing is false once S is scored on the covered sub-field; the restrict/not-computable
+    # warning below carries the honest message instead.
+    if restricted or not s_computable:
+        if restrict_warning is not None:
+            warnings_list.append(restrict_warning)
+    else:
+        total_non_mirror = sum(1 for a in field_archetypes if a != deck_archetype)
+        if total_non_mirror > 0:
+            imputed_non_mirror = sum(1 for a in no_data_list if a != deck_archetype) + len(
+                field.no_data & frozenset(a for a in field_archetypes if a != deck_archetype)
             )
-
-    # ── data_coverage — share-mass fraction with measured (n≥30) cells ────────
-    data_coverage = _compute_data_coverage(matrix, field, deck_archetype)
+            if imputed_non_mirror / total_non_mirror > _THIN_ROW_THRESHOLD:
+                warnings_list.append(
+                    f"thin row for {deck_archetype!r}: "
+                    f"{imputed_non_mirror}/{total_non_mirror} opponent(s) imputed; "
+                    "S is dominated by the imputation prior"
+                )
 
     return PositioningResult(
         deck_archetype=deck_archetype,
@@ -420,6 +515,10 @@ def positioning_score(
         imputed=all_imputed,
         warnings=tuple(warnings_list),
         data_coverage=data_coverage,
+        restricted=restricted,
+        excluded_share=excluded_share,
+        excluded_archetypes=excluded_archetypes,
+        s_computable=s_computable,
         s_samples=samples if keep_samples else None,
     )
 
