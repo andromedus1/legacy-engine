@@ -123,6 +123,8 @@ def partition_flex(
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     since: str | None = None,
     until: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Partition a maindeck into (locked, flex) slices.
 
@@ -146,6 +148,8 @@ def partition_flex(
     since / until
         Date window for consensus frequencies; ``None`` defaults to the latest
         ban-regime window.
+    players / alias_map
+        Optional player filter (gated-additive; ``None`` → unchanged behaviour).
 
     Returns
     -------
@@ -158,7 +162,10 @@ def partition_flex(
     if since is None and until is None:
         since, until = _latest_regime_window()
 
-    freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+    freqs = card_frequencies(
+        con, archetype, board="main", since=since, until=until,
+        players=players, alias_map=alias_map,
+    )
     inclusion: dict[str, float] = {cf.name: cf.inclusion_pct for cf in freqs}
 
     locked: dict[str, int] = {}
@@ -180,6 +187,8 @@ def candidate_pool(
     *,
     since: str | None = None,
     until: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> list[str]:
     """Return observed archetype maindeck card names (the swap-in candidate pool).
 
@@ -190,12 +199,17 @@ def candidate_pool(
 
     Returns a list of card names, ordered by inclusion_pct DESC, modal_count DESC.
 
+    ``players`` / ``alias_map`` — optional player filter (gated-additive; ``None`` unchanged).
+
     AC: result = all card names from card_frequencies for this archetype (main board).
     """
     if since is None and until is None:
         since, until = _latest_regime_window()
 
-    freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+    freqs = card_frequencies(
+        con, archetype, board="main", since=since, until=until,
+        players=players, alias_map=alias_map,
+    )
     return [cf.name for cf in freqs]
 
 
@@ -577,6 +591,8 @@ def tune_deck(
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     max_swaps: int = _DEFAULT_MAX_SWAPS,
     card_winrates=None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> TunedDeck:
     """Optimise a maindeck against the field using greedy per-card-value tuning.
 
@@ -669,8 +685,12 @@ def tune_deck(
         con, archetype, maindeck,
         lock_threshold=lock_threshold,
         since=eff_since, until=eff_until,
+        players=players, alias_map=alias_map,
     )
-    pool = candidate_pool(con, archetype, since=eff_since, until=eff_until)
+    pool = candidate_pool(
+        con, archetype, since=eff_since, until=eff_until,
+        players=players, alias_map=alias_map,
+    )
     snapshot = current_banlist()
 
     # ── Per-card win-rate aggregate: compute ONCE, thread everywhere ─────────
