@@ -487,7 +487,7 @@ def _render_sideboard_plans(sb) -> list[str]:
     return lines
 
 
-def _interaction_annotation(card_name: str) -> str | None:
+def _interaction_annotation(card_name: str, con: duckdb.DuckDBPyConnection) -> str | None:
     """Return a short oracle-grounded interaction annotation for a hate card, or None.
 
     Gated-additive: only fires for graveyard-touching cards from the HOSER_CATALOG.
@@ -497,6 +497,9 @@ def _interaction_annotation(card_name: str) -> str | None:
     This is the Unit 2 + 3 wiring: oracle_text grounds the advisory rationale so the
     primer can say "one-sided graveyard hate, synergy-safe" rather than producing
     a wrong self-harm claim from memory.
+
+    ``con`` is the DuckDB connection used to look up real oracle_text from the cards
+    table — no hardcoded text cache, no memory-based reasoning.
     """
     try:
         from legacy_engine.interaction_facts import interaction_facts, verify_graveyard_claim
@@ -507,35 +510,16 @@ def _interaction_annotation(card_name: str) -> str | None:
         if hoser is None or "graveyard-reliant" not in hoser.attacks:
             return None
 
-        # Build a minimal Card from the hoser catalog oracle text (not DB — pure heuristic)
-        # We need oracle_text to be available; we look it up from the catalog card name.
-        # If we cannot resolve, return None (gated — no-op when data absent).
-        # For the advisory render we use the card name itself to derive the facts;
-        # oracle_text is looked up from a thin inline dict of the three regression cards
-        # and falls back to None for unknowns.
-        _ORACLE_TEXT_CACHE: dict[str, tuple[str, str]] = {
-            "Leyline of the Void": (
-                "Enchantment",
-                "If Leyline of the Void is in your opening hand, you may begin the game with it on the battlefield.\n"
-                "If a card would be put into an opponent's graveyard from anywhere, exile it instead.",
-            ),
-            "Nihil Spellbomb": (
-                "Artifact",
-                "{T}, Sacrifice Nihil Spellbomb: Exile target player's graveyard.\n"
-                "When Nihil Spellbomb is put into a graveyard from the battlefield, you may pay {B}. "
-                "If you do, draw a card.",
-            ),
-            "Grafdigger's Cage": (
-                "Artifact",
-                "Creatures can't enter the battlefield from graveyards or libraries.\n"
-                "Players can't cast spells from graveyards or libraries.",
-            ),
-        }
-
-        if card_name not in _ORACLE_TEXT_CACHE:
+        # Look up the real oracle_text from the DB — no hardcoded cache.
+        # If the card isn't in the DB, degrade gracefully (return None, never crash).
+        row = con.execute(
+            "SELECT oracle_text, type_line FROM cards WHERE name = ?",
+            [card_name],
+        ).fetchone()
+        if row is None or not row[0]:
             return None
 
-        type_line, oracle_text = _ORACLE_TEXT_CACHE[card_name]
+        oracle_text, type_line = row[0], row[1] or ""
         card = Card(name=card_name, type_line=type_line, oracle_text=oracle_text)
         facts = interaction_facts(card)
 
@@ -584,8 +568,14 @@ def _interaction_annotation(card_name: str) -> str | None:
         return None
 
 
-def _render_sideboard(report: FieldReadReport) -> str:
-    """Render the sideboard section."""
+def _render_sideboard(report: FieldReadReport, con: duckdb.DuckDBPyConnection | None = None) -> str:
+    """Render the sideboard section.
+
+    ``con`` is optional — when provided, oracle_text for graveyard hosers is looked
+    up from the DB and an interaction annotation is appended.  When absent (e.g. unit
+    tests that don't exercise the annotation path), the annotation is silently skipped,
+    preserving byte-identical baseline output.
+    """
     sb = report.sideboard
     lines: list[str] = [
         f"Recommended sideboard (solver={sb.solver_used}, budget={sb.budget}, "
@@ -595,7 +585,7 @@ def _render_sideboard(report: FieldReadReport) -> str:
     ]
     if sb.cards:
         for card, copies in sorted(sb.cards.items(), key=lambda kv: kv[1], reverse=True):
-            annotation = _interaction_annotation(card)
+            annotation = _interaction_annotation(card, con) if con is not None else None
             suffix = f"  {annotation}" if annotation else ""
             lines.append(f"  {copies}x {card}{suffix}")
     else:
@@ -674,11 +664,15 @@ def render_cross_venue_positioning(reports: dict[str, "FieldReadReport"]) -> str
     return "\n".join(lines)
 
 
-def render_field_read(report: FieldReadReport) -> str:
+def render_field_read(report: FieldReadReport, con: duckdb.DuckDBPyConnection | None = None) -> str:
     """Render the full Field Read & Deck Recommendation as labeled text.
 
     Sections: header → field composition → vulnerability profile →
     positioning → whattoplay → sideboard → audit trail.
+
+    ``con`` is optional — when supplied, oracle_text-grounded interaction annotations
+    are appended to graveyard hosers in the sideboard section.  When absent the output
+    is byte-identical to the pre-feature baseline (gated-additive).
     """
     sections: list[str] = []
 
@@ -704,7 +698,7 @@ def render_field_read(report: FieldReadReport) -> str:
     sections.append(_render_whattoplay(report))
 
     # Sideboard
-    sections.append(_render_sideboard(report))
+    sections.append(_render_sideboard(report, con=con))
 
     # Audit trail
     audit_lines = "\n".join(f"  {line}" for line in report.audit)

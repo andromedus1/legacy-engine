@@ -368,3 +368,151 @@ class TestGatedNoOp:
         # ok=False means the self-harm claim is *wrong* → advisory should NOT suppress Leyline
         assert check.ok is False
         assert "opponent" in check.reason.lower() or "affects" in check.reason.lower()
+
+
+# ---------------------------------------------------------------------------
+# Class 9 — Report-level wiring: _interaction_annotation reads oracle_text from DB
+# ---------------------------------------------------------------------------
+
+class TestInteractionAnnotationWiring:
+    """End-to-end payoff: _interaction_annotation uses real oracle_text from the DB.
+
+    Design requirement (feature-oracle-text-interaction-tags §Test plan):
+      "Report-level payoff assertion: render a sideboard that includes Surgical Extraction;
+       confirm the annotation is present and oracle-text-grounded."
+
+    This class exercises the wiring that was previously broken (hardcoded 3-card cache).
+    Now every graveyard-reliant hoser in the HOSER_CATALOG with a DB record gets annotated.
+    """
+
+    def _con_with_card(self, name: str, type_line: str, oracle_text: str):
+        """Return an in-memory DuckDB connection with one card loaded."""
+        from legacy_engine.ingestion import store
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        from legacy_engine.models.card import Card
+        store.load_cards(con, [Card(name=name, type_line=type_line, oracle_text=oracle_text)])
+        return con
+
+    def test_surgical_extraction_annotated_from_db(self):
+        """Surgical Extraction is a graveyard-reliant hoser; with its real oracle_text in the DB
+        _interaction_annotation should return a non-None annotation containing scope info."""
+        from legacy_engine.advisory.report import _interaction_annotation
+
+        # Real Scryfall oracle_text for Surgical Extraction
+        oracle_text = (
+            "Choose target card in a graveyard other than a basic land card. "
+            "Search its owner's graveyard, hand, and library for any number of cards "
+            "with the same name as that card and exile them. Then that player shuffles."
+        )
+        con = self._con_with_card("Surgical Extraction", "Instant", oracle_text)
+        annotation = _interaction_annotation("Surgical Extraction", con)
+        assert annotation is not None, (
+            "Expected annotation for Surgical Extraction with real oracle_text in DB"
+        )
+        # The annotation should be bracketed
+        assert annotation.startswith("[") and annotation.endswith("]")
+
+    def test_leyline_of_the_void_annotated_synergy_safe(self):
+        """Leyline of the Void is opponent-only → annotation should contain 'one-sided' and 'synergy-safe'."""
+        from legacy_engine.advisory.report import _interaction_annotation
+
+        oracle_text = (
+            "If Leyline of the Void is in your opening hand, you may begin the game with it on the battlefield.\n"
+            "If a card would be put into an opponent's graveyard from anywhere, exile it instead."
+        )
+        con = self._con_with_card("Leyline of the Void", "Enchantment", oracle_text)
+        annotation = _interaction_annotation("Leyline of the Void", con)
+        assert annotation is not None
+        assert "one-sided" in annotation
+        assert "synergy-safe" in annotation
+
+    def test_card_not_in_db_returns_none(self):
+        """When a graveyard hoser is not in the DB, _interaction_annotation returns None (graceful degrade)."""
+        from legacy_engine.advisory.report import _interaction_annotation
+        from legacy_engine.ingestion import store
+
+        # Empty DB — no cards loaded
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        annotation = _interaction_annotation("Leyline of the Void", con)
+        assert annotation is None
+
+    def test_non_graveyard_hoser_returns_none(self):
+        """A card that doesn't attack graveyard-reliant archetypes returns None regardless of DB state."""
+        from legacy_engine.advisory.report import _interaction_annotation
+        from legacy_engine.ingestion import store
+        from legacy_engine.models.card import Card
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name="Blood Moon", type_line="Enchantment",
+                                   oracle_text="Nonbasic lands are Mountains.")])
+        annotation = _interaction_annotation("Blood Moon", con)
+        assert annotation is None
+
+    def test_formerly_cached_cards_now_all_resolved(self):
+        """The three cards that were in the old _ORACLE_TEXT_CACHE still work correctly via the DB path."""
+        from legacy_engine.advisory.report import _interaction_annotation
+
+        cards = [
+            ("Leyline of the Void", "Enchantment",
+             "If Leyline of the Void is in your opening hand, you may begin the game with it on the battlefield.\n"
+             "If a card would be put into an opponent's graveyard from anywhere, exile it instead."),
+            ("Nihil Spellbomb", "Artifact",
+             "{T}, Sacrifice Nihil Spellbomb: Exile target player's graveyard.\n"
+             "When Nihil Spellbomb is put into a graveyard from the battlefield, you may pay {B}. "
+             "If you do, draw a card."),
+            ("Grafdigger's Cage", "Artifact",
+             "Creatures can't enter the battlefield from graveyards or libraries.\n"
+             "Players can't cast spells from graveyards or libraries."),
+        ]
+        for name, type_line, oracle_text in cards:
+            con = self._con_with_card(name, type_line, oracle_text)
+            annotation = _interaction_annotation(name, con)
+            assert annotation is not None, f"Expected annotation for {name}"
+            assert annotation.startswith("[") and annotation.endswith("]"), (
+                f"Expected bracketed annotation for {name}, got: {annotation!r}"
+            )
+
+    def test_formerly_skipped_hosers_now_reachable(self):
+        """The 4 hosers that were SILENTLY SKIPPED by the old 3-card cache are now reachable.
+
+        The old cache only had: Leyline of the Void, Nihil Spellbomb, Grafdigger's Cage.
+        Surgical Extraction, Faerie Macabre, Endurance were skipped entirely because they
+        weren't in _ORACLE_TEXT_CACHE and the code returned None early.
+
+        Containment Priest is excluded here: its real oracle_text doesn't mention "graveyard"
+        (it gates "wasn't cast"), so interaction_facts returns touches_graveyard=False and
+        _interaction_annotation correctly returns None (gated no-op for unknown-mechanism hosers).
+        The annotation path for Containment Priest requires a richer mechanism model — that's
+        future work, not a regression.
+
+        This test asserts the 3 previously-skipped graveyard-explicit hosers now receive annotations.
+        """
+        from legacy_engine.advisory.report import _interaction_annotation
+
+        # These 3 were previously silently skipped by the hardcoded cache
+        previously_skipped: list[tuple[str, str, str]] = [
+            ("Surgical Extraction", "Instant",
+             "Choose target card in a graveyard other than a basic land card. "
+             "Search its owner's graveyard, hand, and library for any number of cards "
+             "with the same name as that card and exile them. Then that player shuffles."),
+            ("Faerie Macabre", "Creature — Faerie Rogue",
+             "Flying\nDiscard Faerie Macabre: Exile up to two target cards from graveyards."),
+            ("Endurance", "Creature — Elemental Incarnation",
+             "Reach, flash\nWhen Endurance enters the battlefield, put all cards from all graveyards "
+             "on the bottom of their owners' libraries in a random order.\n"
+             "You may exile a green card from your hand rather than pay this spell's mana cost."),
+        ]
+
+        for name, type_line, oracle_text in previously_skipped:
+            con = self._con_with_card(name, type_line, oracle_text)
+            annotation = _interaction_annotation(name, con)
+            assert annotation is not None, (
+                f"Expected annotation for {name!r} — "
+                f"previously silently skipped by the hardcoded 3-card _ORACLE_TEXT_CACHE"
+            )
+            assert annotation.startswith("[") and annotation.endswith("]"), (
+                f"Expected bracketed annotation for {name!r}, got: {annotation!r}"
+            )

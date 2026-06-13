@@ -1870,7 +1870,7 @@ def advise_report(
                     seed=seed,
                     matrix=inputs.matrix,
                 )
-                click.echo(render_field_read(v_report))
+                click.echo(render_field_read(v_report, con=con))
                 per_venue_reports[venue.key] = v_report
 
             # Cross-venue positioning footer
@@ -1891,7 +1891,7 @@ def advise_report(
             seed=seed,
             matrix=inputs.matrix,
         )
-        click.echo(render_field_read(report))
+        click.echo(render_field_read(report, con=con))
     finally:
         con.close()
 
