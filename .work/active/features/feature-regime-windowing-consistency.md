@@ -1,7 +1,7 @@
 ---
 id: feature-regime-windowing-consistency
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, methodology]
 parent: null
 depends_on: []

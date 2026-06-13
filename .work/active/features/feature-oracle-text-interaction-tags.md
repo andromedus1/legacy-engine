@@ -1,7 +1,7 @@
 ---
 id: feature-oracle-text-interaction-tags
 kind: feature
-stage: review
+stage: done
 tags: [advisory, data-quality, methodology]
 parent: null
 depends_on: []
