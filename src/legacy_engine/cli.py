@@ -1844,6 +1844,239 @@ def generate_tune(
         click.echo(format_decklist(tuned.maindeck, tuned.sideboard, fmt=export_fmt))
 
 
+@generate.command("doctor")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Override archetype classification.",
+)
+@click.option(
+    "--board",
+    type=click.Choice(["main", "side", "both"], case_sensitive=False),
+    default="main",
+    show_default=True,
+    help="Which board(s) to compare against the field.",
+)
+@click.option(
+    "--since",
+    default=None,
+    help="Start of corpus window (YYYY-MM-DD, inclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--until",
+    default=None,
+    help="End of corpus window (YYYY-MM-DD, exclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--all-time",
+    is_flag=True,
+    default=False,
+    help="Use the full corpus (disables ban-regime windowing).",
+)
+@click.option(
+    "--min-tier",
+    type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
+    default="speculative",
+    show_default=True,
+    help="Suppress the whole report below this confidence tier; prints a note when suppressed.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def generate_doctor(
+    deck: str,
+    archetype: str | None,
+    board: str,
+    since: str | None,
+    until: str | None,
+    all_time: bool,
+    min_tier: str,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Doctor a decklist against the field's per-card copy-count distributions.
+
+    For each card in the user's list, shows how the field distributes its copy
+    counts and flags where the user's count is an outlier (off the field consensus).
+    Defaults to the latest ban-regime window (same as ``generate consensus``).
+
+    Example: legacy-engine generate doctor --deck mylist.txt --archetype "Izzet Delver"
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _classify_deck, _parse_decklist
+    from legacy_engine.generation.card_distribution import build_deck_doctor_report
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    main_counts, side_counts = _parse_decklist(deck_text)
+
+    # Resolve the effective window in the CLI layer so the orchestrator always receives
+    # explicit dates (never the (None, None) that would trigger _latest_regime_window() again).
+    #   --all-time     → full corpus: (None, None) — but we pass all_time=True to the builder
+    #   --since/--until → explicit window (passed through as-is)
+    #   neither flag   → latest ban-regime: resolve here, same as generate consensus
+    if all_time:
+        effective_since: str | None = None
+        effective_until: str | None = None
+    elif since is not None or until is not None:
+        effective_since = since
+        effective_until = until
+    else:
+        # Default: latest ban-regime — same SSOT as generate consensus.
+        from legacy_engine.generation.consensus import _latest_regime_window
+        effective_since, effective_until = _latest_regime_window()
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, main_counts, side_counts)
+            resolved_archetype = result.archetype
+            click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        boards_to_run: list[str]
+        if board == "both":
+            boards_to_run = ["main", "side"]
+        else:
+            boards_to_run = [board]
+
+        for b in boards_to_run:
+            report = build_deck_doctor_report(
+                con,
+                main_counts,
+                side_counts,
+                resolved_archetype,
+                since=effective_since,
+                until=effective_until,
+                board=b,
+                apply_default_window=not all_time,
+            )
+            _render_deck_doctor(report, min_tier=min_tier)
+    finally:
+        con.close()
+
+
+def _render_deck_doctor(report: "DeckDoctorReport", *, min_tier: str = "speculative") -> None:
+    """Render a DeckDoctorReport as a human-readable text block.
+
+    Format mirrors the validated hand output in the feature spec:
+      - Header with archetype, window, sample_n, and tier.
+      - OUTLIERS section.
+      - ON CONSENSUS section.
+      - NOT RUN BY THE FIELD section.
+      - Footer disclaimer note.
+
+    When ``tier_for_sample(report.decks_total)`` is below ``min_tier``, the whole
+    report is suppressed and a note is printed (matches ``report cards`` honesty contract).
+    """
+    from legacy_engine.confidence import tier_for_sample
+    from legacy_engine.generation.card_distribution import DeckDoctorReport  # noqa: F401
+
+    _tier_order = {"speculative": 0, "evolving": 1, "established": 2}
+    sample_tier = tier_for_sample(report.decks_total)
+
+    # Tier suppression: suppress the whole report when below the min_tier gate.
+    min_tier_rank = _tier_order[min_tier.lower()]
+    actual_tier_rank = _tier_order[sample_tier]
+    if actual_tier_rank < min_tier_rank:
+        click.echo(
+            f"\n// Deck Doctor [{report.archetype}] ({report.board}): SUPPRESSED — "
+            f"sample_n={report.decks_total} [{sample_tier}] is below --min-tier {min_tier}. "
+            "Data present; not fabricated."
+        )
+        return
+
+    # Header.
+    window_since = report.window[0] or "open"
+    window_until = report.window[1] or "current"
+    header = (
+        f"=== Deck Doctor: {report.archetype}  "
+        f"[regime {window_since} → {window_until}]  "
+        f"sample_n={report.decks_total} [{sample_tier}] ==="
+    )
+    click.echo(f"\n{header}")
+
+    if report.decks_total == 0:
+        click.echo(f"// No decks found for archetype {report.archetype!r} in this window.")
+        return
+
+    if sample_tier == "speculative":
+        click.echo(
+            f"// ⚠ thin sample (n={report.decks_total}) — distributions are unreliable; "
+            "treat outlier flags as speculative"
+        )
+
+    # Split deltas into outliers and on-consensus.
+    outliers = [d for d in report.deltas if d.is_outlier]
+    on_consensus = [d for d in report.deltas if not d.is_outlier]
+
+    def _dist_str(d) -> str:  # d: CardCountDelta
+        """Format the top-3 buckets by share descending, e.g. '(3: 68%, 4: 23%)'."""
+        top = sorted(d.field_dist.items(), key=lambda kv: -kv[1])[:3]
+        parts = [f"{cnt}: {share:.0%}" for cnt, share in top]
+        return "(" + ", ".join(parts) + ")"
+
+    def _annotation(d) -> str:  # d: CardCountDelta
+        """Short annotation: explains why something is flagged or a real camp."""
+        if d.is_outlier:
+            return f"[only {d.user_share:.0%} run {d.user_count} — outlier]"
+        elif d.delta != 0 and d.user_share >= 0.15:
+            return f"[{d.user_share:.0%} run {d.user_count} — a real camp]"
+        return ""
+
+    name_w = max(
+        (len(d.name) for d in report.deltas),
+        default=20,
+    )
+    name_w = max(name_w, 20)
+
+    def _row(d) -> str:  # d: CardCountDelta
+        delta_str = f"Δ{d.delta:+d}" if d.delta != 0 else "Δ 0"
+        annotation = _annotation(d)
+        return (
+            f"  {d.name:<{name_w}}  you run {d.user_count:<3}  "
+            f"field mode {d.field_modal:<3}  {_dist_str(d):<30}  "
+            f"{delta_str:<5}  {annotation}"
+        ).rstrip()
+
+    if outliers:
+        click.echo("\nOUTLIERS (your count is off the field consensus):")
+        for d in outliers:
+            click.echo(_row(d))
+    else:
+        click.echo("\nOUTLIERS: (none — your counts align with the field)")
+
+    if on_consensus:
+        click.echo("\nON CONSENSUS:")
+        for d in on_consensus:
+            click.echo(_row(d))
+
+    if report.not_in_field:
+        click.echo(
+            f"\nNOT RUN BY THE FIELD (this archetype, {report.board}): "
+            + ", ".join(report.not_in_field)
+        )
+
+    click.echo(
+        f"\n// distribution compared against the whole {report.archetype!r} pool "
+        "(no sub-archetype/variant split yet)"
+    )
+
+
 def _print_discovery(result: "DiscoveryResult") -> None:
     """Render the exploratory discovery section — distinct from the proven swap log."""
     from legacy_engine.generation.discovery import DiscoveryResult  # noqa: F401

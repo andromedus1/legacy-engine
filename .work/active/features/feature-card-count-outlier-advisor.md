@@ -1,7 +1,7 @@
 ---
 id: feature-card-count-outlier-advisor
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, generation]
 parent: null
 depends_on: []
@@ -259,3 +259,40 @@ Murktide at 8/10 @ 2 already gives a 0-bucket of 0.2):
   default windows the advice would contradict. Mitigation: both call the SAME `_latest_regime_window()`
   — single source of truth, asserted by a test that the two surfaces report the same window for one
   archetype.
+
+---
+
+## Implementation notes
+
+**Files created:**
+- `src/legacy_engine/generation/card_distribution.py` — `CardCountDist`, `CardCountDelta`,
+  `DeckDoctorReport` dataclasses; `card_count_distributions` DB primitive;
+  `diff_deck_vs_field` pure comparison; `build_deck_doctor_report` orchestrator.
+- `tests/test_card_distribution.py` — 38 tests (U1-U4 + CLI smoke tests).
+
+**Files modified:**
+- `src/legacy_engine/cli.py` — `generate doctor` CLI leaf + `_render_deck_doctor` renderer.
+  Added additively after `generate_tune` without restructuring the file.
+
+**`_OUTLIER_SHARE_FLOOR` = 0.20** — chosen to satisfy all four hand-validated examples:
+- Bowmasters @ 4: 23% of field → NOT outlier (23% ≥ 20%). "A real camp." ✓
+- Murktide @ 2: 79% of field → NOT outlier. ✓
+- Lands @ 18: 5% of field → outlier (5% < 20%). ✓
+- Daze @ 2: 18% of field → outlier (18% < 20%). ✓ (With 0.15, Daze would NOT be flagged —
+  contradicting the design's "flagged as the one off-consensus count" verdict.)
+
+**Window SSOT:** CLI resolves the window before calling `build_deck_doctor_report`
+(mirrors `report_cards` at cli.py:874). The `--all-time` flag passes `apply_default_window=False`
+to prevent the orchestrator from re-applying `_latest_regime_window()`. The window SSOT test
+(`TestBuildReport.test_window_ssot_matches_consensus`) asserts both surfaces resolve to the
+same `_latest_regime_window()` values.
+
+**Deviations from design:**
+- `apply_default_window` parameter added to `card_count_distributions` and
+  `build_deck_doctor_report` to distinguish "use default" from "explicit full corpus (--all-time)".
+  Required because Python has no null-sentinel distinct from None. The design spec didn't need to
+  address this since it described the CLI surface, not the internal calling convention.
+- `_tier_order` dict kept local inside `_render_deck_doctor` (a local variable, not module-level)
+  to stay additive; `report_cards` keeps its own local `_TIER_ORDER` unchanged.
+
+**gated-additive contract:** `consensus.py` untouched — `test_generation_consensus.py` green.
