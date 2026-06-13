@@ -28,4 +28,11 @@ Tron 2.2% → 9.1%). Also note: the strongest reference decklists in the corpus 
 are all from the PRIOR regime — so "copy a pro list" silently imports stale-regime tuning unless the
 regime gap is surfaced.
 
+**Specific item found this session:** the `advise sideboard` per-matchup OUT/IN plans were stuck at
+"speculative, n≥0" for nearly every opponent in the thin current regime — because those plans do NOT
+use the adaptive ban-aware window that the matchup *matrix* already uses (per-cell `valid_since`).
+Extend the adaptive window to the sideboard matchup plans so they borrow prior-regime depth the same
+way the matrix does, instead of going dark in a fresh regime. Until then, sideboard in/out guidance is
+reasoning-based, not data-derived — which should be stated honestly.
+
 Related: [[idea-consensus-window-consistency]].
