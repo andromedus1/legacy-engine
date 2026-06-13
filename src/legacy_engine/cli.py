@@ -236,11 +236,24 @@ def report() -> None:
     help="Filter to online/paper events, or all (prints each basis when 'all').",
 )
 @click.option(
+    "--venues",
+    default=None,
+    help="Comma-separated venue keys for side-by-side comparison (e.g. online,paper). "
+         "Mutually exclusive with --provenance when --venues is set.",
+)
+@click.option(
     "--min-share",
     type=float,
     default=0.02,
     show_default=True,
     help="Minimum share (0..1) for an archetype to appear in headline rows; sub-floor → Other.",
+)
+@click.option(
+    "--min-spread",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Minimum divergence spread (0..1) for an archetype to appear in the Divergence block.",
 )
 @click.option(
     "--by-variant",
@@ -259,7 +272,9 @@ def report() -> None:
 def report_meta(
     definition: str,
     provenance: str,
+    venues: str | None,
     min_share: float,
+    min_spread: float,
     by_variant: bool,
     db: str | None,
     since: str | None,
@@ -274,20 +289,79 @@ def report_meta(
     from legacy_engine.analytics.metashare import MetaShareReport, compute_all, compute_metashare
     from legacy_engine.ingestion import store
 
+    # --venues and --provenance (non-default) are mutually exclusive.
+    if venues is not None and provenance != "all":
+        raise click.ClickException(
+            "--venues and --provenance are mutually exclusive: --venues compares several "
+            "bases side by side; --provenance picks one basis. Use one or the other."
+        )
+
     con = store.connect(db) if db else store.connect()
     try:
         _echo_data_freshness(con)
+
+        # ── venues comparison mode ────────────────────────────────────────────
+        if venues is not None:
+            from legacy_engine.analytics.venue import resolve_venues, compute_venue_metashare, venue_divergence
+
+            requested_keys = [k.strip() for k in venues.split(",") if k.strip()]
+            venue_list = resolve_venues(con, requested_keys)
+
+            definitions: list[str]
+            if definition == "all":
+                definitions = ["raw", "topcut", "wrw"]
+            else:
+                definitions = [definition]
+
+            # Resolve a single window (venues mode uses one shared window).
+            win = resolve_advisory_window(
+                con, regime=regime, since=since, until=until, all_time=all_time,
+                thin_floor=0, adaptive_default=False,
+            )
+            _echo_window(win)
+            windowed = win.since is not None or win.until is not None
+
+            for defn in definitions:
+                if windowed and defn == "wrw":
+                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
+                    continue
+                if by_variant and defn == "wrw":
+                    click.echo("// --by-variant is not supported for wrw (win-rate weights are archetype-level)")
+                    continue
+
+                # Per-venue tables
+                venue_ms_list = compute_venue_metashare(
+                    con, venue_list,
+                    definition=defn,
+                    min_share=min_share,
+                    since=win.since,
+                    until=win.until,
+                )
+                for vms in venue_ms_list:
+                    click.echo(f"\n── Venue: {vms.venue.label} ──")
+                    if vms.report is None:
+                        click.echo(f"  (no data for venue '{vms.venue.key}')")
+                    else:
+                        _print_metashare_report(vms.report)
+
+                # Divergence block (uses group_other=False reports from compute_venue_metashare)
+                div = venue_divergence(venue_ms_list, min_spread=min_spread)
+                _print_venue_divergence(div)
+
+            return
+
+        # ── legacy per-basis mode (--venues unset; byte-identical baseline) ──
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
         else:
             bases = [provenance]
 
-        definitions: list[str]
+        definitions_leg: list[str]
         if definition == "all":
-            definitions = ["raw", "topcut", "wrw"]
+            definitions_leg = ["raw", "topcut", "wrw"]
         else:
-            definitions = [definition]
+            definitions_leg = [definition]
 
         for basis in bases:
             # Meta-share is deck-based (not matchup/rounds-based), so it does NOT degrade on
@@ -298,7 +372,7 @@ def report_meta(
             )
             _echo_window(win)
             windowed = win.since is not None or win.until is not None
-            for defn in definitions:
+            for defn in definitions_leg:
                 if windowed and defn == "wrw":
                     click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
                     continue
@@ -359,6 +433,55 @@ def _print_metashare_report(report: "MetaShareReport") -> None:
 
     if saw_unclassified:
         click.echo(_UNCLASSIFIED_FOOTNOTE)
+
+
+def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
+    """Render a ``VenueDivergence`` as a labeled text divergence table."""
+    from legacy_engine.analytics.venue import VenueDivergence  # noqa: F401
+
+    venue_keys = [v.key for v in div.venues]
+    venue_labels = [v.label for v in div.venues]
+
+    click.echo(f"\n=== Venue Divergence [{div.definition.upper()}] ===")
+    click.echo(f"Venues: {', '.join(venue_labels)}")
+
+    if div.notes:
+        for note in div.notes:
+            click.echo(f"// {note}")
+
+    if not div.rows:
+        click.echo("(no archetypes with spread above threshold)")
+        return
+
+    # Column widths
+    arch_w = max(max(len(r.archetype) for r in div.rows), 20)
+    share_col_w = 12
+
+    # Header
+    header = f"  {'Archetype':<{arch_w}}"
+    for label in venue_labels:
+        short = label[:share_col_w - 1]
+        header += f"  {short:>{share_col_w}}"
+    header += f"  {'Spread':>8}"
+    click.echo(header)
+    click.echo("  " + "-" * (arch_w + (share_col_w + 2) * len(venue_keys) + 10))
+
+    displayed = div.rows[:top_n]
+    for row in displayed:
+        line = f"  {row.archetype:<{arch_w}}"
+        for vk in venue_keys:
+            share = row.shares.get(vk, 0.0)
+            tier = row.tiers.get(vk, "speculative")
+            tier_marker = {"speculative": "?", "evolving": "~", "established": ""}.get(tier, "")
+            cell = f"{share:>6.1%}{tier_marker}"
+            line += f"  {cell:>{share_col_w}}"
+        line += f"  {row.spread:>8.3f}"
+        click.echo(line)
+
+    if len(div.rows) > top_n:
+        click.echo(f"  ... ({len(div.rows) - top_n} more rows below threshold)")
+
+    click.echo("  Tier markers: ? = speculative (<30 decks), ~ = evolving (30–99)")
 
 
 @report.command("matchups")
@@ -1642,6 +1765,12 @@ def advise_whattoplay(
     help="Path to a custom field file (<share> <archetype> lines).",
 )
 @click.option(
+    "--venues",
+    default=None,
+    help="Comma-separated venue keys for per-venue Field Reads (e.g. online,paper). "
+         "Mutually exclusive with --field (a custom field has no venue axis).",
+)
+@click.option(
     "--reserved",
     type=int,
     default=0,
@@ -1666,6 +1795,7 @@ def advise_report(
     deck: str,
     archetype: str | None,
     field_file: str | None,
+    venues: str | None,
     reserved: int,
     seed: int | None,
     db: str | None,
@@ -1684,9 +1814,18 @@ def advise_report(
         _parse_decklist,
         build_field_read_report,
         render_field_read,
+        render_cross_venue_positioning,
     )
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
+
+    # --field and --venues are mutually exclusive: a custom field has no venue axis.
+    if field_file is not None and venues is not None:
+        raise click.ClickException(
+            "--field and --venues are mutually exclusive: a custom field file has no "
+            "venue axis. Use --venues for per-venue corpus fields, or --field for a "
+            "single custom field."
+        )
 
     deck_text = Path(deck).read_text()
     mainboard, sideboard_cards = _parse_decklist(deck_text)
@@ -1701,6 +1840,46 @@ def advise_report(
         inputs = build_advisory_inputs(con, win)
         for line in inputs.audit:
             click.echo(line)
+
+        # ── venues comparison mode ────────────────────────────────────────────
+        if venues is not None:
+            from legacy_engine.analytics.venue import resolve_venues
+
+            requested_keys = [k.strip() for k in venues.split(",") if k.strip()]
+            venue_list = resolve_venues(con, requested_keys)
+
+            per_venue_reports: dict[str, "FieldReadReport"] = {}
+            for venue in venue_list:
+                click.echo(f"\n{'─' * 60}")
+                click.echo(f"── Venue: {venue.label} ──")
+                click.echo(f"{'─' * 60}")
+                v_field = _load_field(
+                    con,
+                    field_text=None,
+                    provenance=venue.provenance,
+                    since=inputs.field_since,
+                    until=inputs.field_until,
+                )
+                v_report = build_field_read_report(
+                    con,
+                    mainboard,
+                    sideboard_cards,
+                    v_field,
+                    archetype=archetype,
+                    reserved=reserved,
+                    seed=seed,
+                    matrix=inputs.matrix,
+                )
+                click.echo(render_field_read(v_report))
+                per_venue_reports[venue.key] = v_report
+
+            # Cross-venue positioning footer
+            if per_venue_reports:
+                click.echo(f"\n{'─' * 60}")
+                click.echo(render_cross_venue_positioning(per_venue_reports))
+            return
+
+        # ── legacy single-field mode (--venues unset; byte-identical baseline) ──
         field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
         report = build_field_read_report(
             con,
