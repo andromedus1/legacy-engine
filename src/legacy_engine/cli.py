@@ -1896,6 +1896,235 @@ def advise_report(
         con.close()
 
 
+# ── identify: player identity, strength, and history ──
+@main.group()
+def identify() -> None:
+    """Player identity, strength scoring, and archetype-history tracking."""
+
+
+@identify.command("suggest")
+@click.option(
+    "--min-overlap",
+    type=int,
+    default=4,
+    show_default=True,
+    help="Minimum normalized-stem prefix length for two handles to be considered a candidate cluster.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def identify_suggest(
+    min_overlap: int,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Propose candidate alias clusters for human curation.
+
+    Emits heuristic-suggested handle clusters (normalized-stem overlap + never co-occurring
+    in the same event on the same day) to stdout for the curator to review and paste into
+    data/players/aliases.json.  This command writes nothing; all merges are manual.
+
+    Example: legacy-engine identify suggest
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.players.identity import suggest_aliases
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        suggestions = suggest_aliases(con, min_overlap=min_overlap)
+    finally:
+        con.close()
+
+    if not suggestions:
+        click.echo("(no alias clusters found)")
+        return
+
+    click.echo(f"// {len(suggestions)} candidate alias cluster(s) — review before adding to aliases.json:")
+    click.echo("")
+    for s in suggestions:
+        click.echo(f"  Cluster ({s.reason}):")
+        for raw, norm in zip(s.handles, s.handles_norm):
+            click.echo(f"    {raw!r}  (normalized: {norm!r})")
+        click.echo("")
+
+
+@identify.command("strong")
+@click.option(
+    "--since",
+    default=None,
+    help="Window start (YYYY-MM-DD, inclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--until",
+    default=None,
+    help="Window end (YYYY-MM-DD, exclusive). Defaults to latest ban-regime.",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper"], case_sensitive=False),
+    default=None,
+    help="Filter to online or paper events (default: all).",
+)
+@click.option(
+    "--min-events",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Minimum distinct events to qualify as strong.",
+)
+@click.option(
+    "--min-tier",
+    "min_tier",
+    type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
+    default="evolving",
+    show_default=True,
+    help="Minimum confidence tier to qualify as strong.",
+)
+@click.option(
+    "--min-win-rate",
+    type=float,
+    default=0.55,
+    show_default=True,
+    help="Minimum shrunk match-win-rate to qualify as strong.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def identify_strong(
+    since: str | None,
+    until: str | None,
+    provenance: str | None,
+    min_events: int,
+    min_tier: str,
+    min_win_rate: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """List players who clear the strength gate in the requested window.
+
+    Defaults to the latest ban-regime window (same as generate consensus).
+    Shows player_id, display name, events, match record, shrunk win-rate, and tier.
+
+    Example: legacy-engine identify strong
+    Example: legacy-engine identify strong --min-events 5 --min-win-rate 0.60
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.players.identity import load_alias_map
+    from legacy_engine.analytics.players.strength import compute_player_records, is_strong
+    from legacy_engine.generation.consensus import _latest_regime_window
+    from legacy_engine.ingestion import store
+
+    eff_since = since
+    eff_until = until
+    if eff_since is None and eff_until is None:
+        eff_since, eff_until = _latest_regime_window()
+
+    alias_map = load_alias_map()
+    con = store.connect(db) if db else store.connect()
+    try:
+        records = compute_player_records(
+            con,
+            alias_map=alias_map,
+            since=eff_since,
+            until=eff_until,
+            provenance=provenance,
+        )
+    finally:
+        con.close()
+
+    strong_records = [
+        rec for rec in records.values()
+        if is_strong(rec, min_events=min_events, min_tier=min_tier, min_win_rate=min_win_rate)
+    ]
+    strong_records.sort(key=lambda r: -r.win_rate_shrunk)
+
+    click.echo(
+        f"\n=== Strong Players "
+        f"[window: {eff_since or 'open'} .. {eff_until or 'current'}] ==="
+    )
+    click.echo(
+        f"Gate: ≥{min_events} events, ≥{min_tier} tier, ≥{min_win_rate:.0%} shrunk WR"
+    )
+    click.echo(f"{'Player':<30}  {'Events':>6}  {'W-L-D':>10}  {'WR_shrunk':>9}  {'Tier':<12}")
+    click.echo("-" * 75)
+
+    if not strong_records:
+        click.echo("(no players cleared the gate in this window)")
+        return
+
+    for rec in strong_records:
+        wld = f"{rec.match_wins}-{rec.match_losses}-{rec.match_draws}"
+        click.echo(
+            f"{rec.display:<30}  {rec.events:>6}  {wld:>10}  "
+            f"{rec.win_rate_shrunk:>9.3f}  {rec.tier:<12}"
+        )
+
+
+@identify.command("track")
+@click.argument("player")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def identify_track(
+    player: str,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Show per-regime archetype history for PLAYER.
+
+    PLAYER is a handle or canonical player_id (resolved through aliases.json).
+    Shows which archetypes the player registered in each ban-list regime and how
+    many decks per archetype.
+
+    Example: legacy-engine identify track "bosh95"
+    Example: legacy-engine identify track "Andrea Mengucci"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.players.history import player_archetype_history
+    from legacy_engine.analytics.players.identity import load_alias_map, resolve_player
+    from legacy_engine.ingestion import store
+
+    alias_map = load_alias_map()
+    player_id = resolve_player(player, alias_map)
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        history = player_archetype_history(con, player_id, alias_map=alias_map)
+    finally:
+        con.close()
+
+    if not history:
+        click.echo(f"No archetype history found for player {player!r} (id={player_id!r}).")
+        return
+
+    display_name = player_id if player_id == player else f"{player} → {player_id}"
+    click.echo(f"\n=== Archetype History: {display_name} ===")
+    click.echo(f"{'Regime':<25}  {'Archetype':<35}  {'Decks':>5}")
+    click.echo("-" * 70)
+
+    current_regime = None
+    for row in history:
+        if row.regime_label != current_regime:
+            if current_regime is not None:
+                click.echo("")
+            current_regime = row.regime_label
+        arch_label = row.archetype if row.archetype is not None else "(unlabeled)"
+        click.echo(f"{row.regime_label:<25}  {arch_label:<35}  {row.deck_count:>5}")
+
+
 # ── generate: deck generation ──
 @main.group()
 def generate() -> None:
@@ -1926,6 +2155,39 @@ def generate() -> None:
     help="Scope the pool to decks with this variant tag (e.g. 'Bauble'). Requires labeler with registry.",
 )
 @click.option(
+    "--players",
+    default=None,
+    help="Comma-separated player handles/ids to restrict the deck pool to (explicit player filter).",
+)
+@click.option(
+    "--strong",
+    is_flag=True,
+    default=False,
+    help="Restrict the pool to strong players for this archetype+window (computed via strong_player_set).",
+)
+@click.option(
+    "--min-events",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Minimum distinct events for a player to qualify as strong (--strong only).",
+)
+@click.option(
+    "--min-tier",
+    "min_strength_tier",
+    type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
+    default="evolving",
+    show_default=True,
+    help="Minimum confidence tier for a player to qualify as strong (--strong only).",
+)
+@click.option(
+    "--min-win-rate",
+    type=float,
+    default=0.55,
+    show_default=True,
+    help="Minimum shrunk win-rate for a player to qualify as strong (--strong only).",
+)
+@click.option(
     "--export",
     "export_fmt",
     type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
@@ -1945,6 +2207,11 @@ def generate_consensus(
     until: str | None,
     provenance: str | None,
     variant: str | None,
+    players: str | None,
+    strong: bool,
+    min_events: int,
+    min_strength_tier: str,
+    min_win_rate: float,
     export_fmt: str | None,
     db: str | None,
     verbose: bool,
@@ -1957,16 +2224,72 @@ def generate_consensus(
     Use --variant to scope the pool to a specific sub-archetype variant (e.g. "Bauble").
     Requires that the labeler has been run with a variant registry.
 
+    Use --players "h1,h2" to restrict the pool to specific players.
+    Use --strong to restrict to players who clear the strength gate for this archetype+window.
+    When both are supplied, --players wins (explicit beats derived).
+
     Example: legacy-engine generate consensus --archetype "Izzet Delver"
     Example: legacy-engine generate consensus --archetype "Dimir Tempo" --variant "Bauble"
+    Example: legacy-engine generate consensus --archetype "Dimir Tempo" --strong
+    Example: legacy-engine generate consensus --archetype "Dimir Tempo" --players "bosh95,mengucci"
     """
     _setup_logging(verbose)
 
+    from legacy_engine.analytics.players.identity import load_alias_map
     from legacy_engine.generation.consensus import build_consensus
     from legacy_engine.ingestion import store
 
     con = store.connect(db) if db else store.connect()
     try:
+        # Resolve the player filter.
+        alias_map = load_alias_map()
+        player_set: set[str] | None = None
+
+        if players is not None and strong:
+            log.info(
+                "generate consensus: both --players and --strong supplied; "
+                "--players wins (explicit beats derived)"
+            )
+
+        if players is not None:
+            # Explicit --players wins.
+            player_set = {h.strip() for h in players.split(",") if h.strip()}
+        elif strong:
+            from legacy_engine.analytics.players.strength import (
+                compute_player_records,
+                strong_player_set,
+            )
+            from legacy_engine.generation.consensus import _latest_regime_window
+
+            # Use the same window as the consensus query.
+            eff_since = since
+            eff_until = until
+            if eff_since is None and eff_until is None:
+                eff_since, eff_until = _latest_regime_window()
+
+            records = compute_player_records(
+                con,
+                alias_map=alias_map,
+                since=eff_since,
+                until=eff_until,
+            )
+            player_set = strong_player_set(
+                records,
+                min_events=min_events,
+                min_tier=min_strength_tier,
+                min_win_rate=min_win_rate,
+            )
+            click.echo(
+                f"// --strong: {len(player_set)} strong player(s) found for window "
+                f"[{eff_since or 'open'}, {eff_until or 'current'})"
+            )
+            if not player_set:
+                raise click.ClickException(
+                    "No players cleared the strength gate for this archetype+window. "
+                    "Try relaxing --min-events, --min-tier, or --min-win-rate, "
+                    "or use --all-time for a wider window."
+                )
+
         deck = build_consensus(
             con,
             archetype,
@@ -1974,6 +2297,8 @@ def generate_consensus(
             until=until,
             provenance=provenance,
             variant=variant,
+            players=player_set,
+            alias_map=alias_map if player_set is not None else None,
         )
     finally:
         con.close()
@@ -1987,6 +2312,8 @@ def generate_consensus(
     # Print the decklist in the default readable format.
     from legacy_engine.confidence import tier_for_sample
     deck_label = f"{deck.archetype} / {variant}" if variant else deck.archetype
+    if player_set is not None:
+        deck_label += f" [player-filtered: {len(player_set)} player(s)]"
     click.echo(f"// Consensus deck: {deck_label}")
     window_since = deck.window[0] or "open"
     window_until = deck.window[1] or "current"
@@ -2018,11 +2345,18 @@ def generate_consensus(
     side_total = sum(deck.sideboard.values())
     click.echo(f"\n// Maindeck: {main_total}  Sideboard: {side_total}")
 
-    if deck.legality_errors:
-        for err in deck.legality_errors:
+    # Legality errors — distinguish the thin-pool banner from real legality failures.
+    thin_banners = [e for e in deck.legality_errors if e.startswith("⚠ THIN")]
+    real_errors = [e for e in deck.legality_errors if not e.startswith("⚠ THIN")]
+    for banner in thin_banners:
+        click.echo(f"// {banner}")
+    if real_errors:
+        for err in real_errors:
             click.echo(f"// [LEGALITY] {err}", err=True)
-    else:
+    elif not thin_banners:
         click.echo("// Legality: OK")
+    else:
+        click.echo("// Legality: OK (thin pool — see banner above)")
 
     # Optional export format output.
     if export_fmt:
@@ -2075,6 +2409,39 @@ def generate_consensus(
     help="Maximum number of greedy maindeck swap rounds.",
 )
 @click.option(
+    "--players",
+    default=None,
+    help="Comma-separated player handles/ids to restrict the consensus seed pool to.",
+)
+@click.option(
+    "--strong",
+    is_flag=True,
+    default=False,
+    help="Restrict the consensus seed pool to strong players for this archetype+window.",
+)
+@click.option(
+    "--min-events",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Minimum distinct events for a player to qualify as strong (--strong only).",
+)
+@click.option(
+    "--min-tier",
+    "min_strength_tier",
+    type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
+    default="evolving",
+    show_default=True,
+    help="Minimum confidence tier for a player to qualify as strong (--strong only).",
+)
+@click.option(
+    "--min-win-rate",
+    type=float,
+    default=0.55,
+    show_default=True,
+    help="Minimum shrunk win-rate for a player to qualify as strong (--strong only).",
+)
+@click.option(
     "--export",
     "export_fmt",
     type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
@@ -2110,6 +2477,11 @@ def generate_tune(
     until: str | None,
     lock_threshold: float,
     max_swaps: int,
+    players: str | None,
+    strong: bool,
+    min_events: int,
+    min_strength_tier: str,
+    min_win_rate: float,
     export_fmt: str | None,
     discover: bool,
     discover_cap: int,
@@ -2133,6 +2505,7 @@ def generate_tune(
     from pathlib import Path
 
     from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.analytics.players.identity import load_alias_map
     from legacy_engine.generation.tuning import tune_deck
     from legacy_engine.ingestion import store
 
@@ -2150,6 +2523,52 @@ def generate_tune(
             result = _classify_deck(con, maindeck, starting_side)
             resolved_archetype = result.archetype
             click.echo(f"Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        # Resolve the player filter.
+        alias_map_tune = load_alias_map()
+        player_set_tune: set[str] | None = None
+
+        if players is not None and strong:
+            log.info(
+                "generate tune: both --players and --strong supplied; "
+                "--players wins (explicit beats derived)"
+            )
+
+        if players is not None:
+            player_set_tune = {h.strip() for h in players.split(",") if h.strip()}
+        elif strong:
+            from legacy_engine.analytics.players.strength import (
+                compute_player_records,
+                strong_player_set,
+            )
+            from legacy_engine.generation.consensus import _latest_regime_window
+
+            eff_since_s = since
+            eff_until_s = until
+            if eff_since_s is None and eff_until_s is None:
+                eff_since_s, eff_until_s = _latest_regime_window()
+
+            records = compute_player_records(
+                con,
+                alias_map=alias_map_tune,
+                since=eff_since_s,
+                until=eff_until_s,
+            )
+            player_set_tune = strong_player_set(
+                records,
+                min_events=min_events,
+                min_tier=min_strength_tier,
+                min_win_rate=min_win_rate,
+            )
+            click.echo(
+                f"// --strong: {len(player_set_tune)} strong player(s) found for window "
+                f"[{eff_since_s or 'open'}, {eff_until_s or 'current'})"
+            )
+            if not player_set_tune:
+                raise click.ClickException(
+                    "No players cleared the strength gate for this archetype+window. "
+                    "Try relaxing --min-events, --min-tier, or --min-win-rate."
+                )
 
         # When --discover, compute the heavy per-card win-rate aggregate ONCE and reuse it
         # for both the tuner (injected) and discovery, avoiding a second full-corpus scan.
@@ -2173,6 +2592,8 @@ def generate_tune(
             lock_threshold=lock_threshold,
             max_swaps=max_swaps,
             card_winrates=shared_rates,
+            players=player_set_tune,
+            alias_map=alias_map_tune if player_set_tune is not None else None,
         )
 
         if discover:
