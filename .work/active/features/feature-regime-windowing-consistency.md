@@ -1,7 +1,14 @@
 ---
-id: idea-ban-regime-everywhere
-created: 2026-06-13
+id: feature-regime-windowing-consistency
+kind: feature
+stage: drafting
 tags: [analytics, advisory, methodology]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 **Methodology principle, not just a per-command behavior:** every analytical surface must analyze

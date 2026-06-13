@@ -1,7 +1,14 @@
 ---
-id: idea-collection-aware-engine
+id: feature-collection-aware-engine
+kind: feature
+stage: drafting
+tags: [advisory, generation, ingestion, hold-for-review]
+parent: null
+depends_on: [feature-personal-inventory-and-decks]
+release_binding: null
+gate_origin: null
 created: 2026-06-13
-tags: [advisory, generation, ingestion]
+updated: 2026-06-13
 ---
 
 The engine has **no model of what cards the user owns.** Every recommendation this session

@@ -1,7 +1,14 @@
 ---
-id: idea-personal-inventory-and-decks
+id: feature-personal-inventory-and-decks
+kind: feature
+stage: drafting
+tags: [ingestion, data-model, advisory, foundation, hold-for-review]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-06-13
-tags: [ingestion, data-model, advisory]
+updated: 2026-06-13
 ---
 
 The engine needs **persistent storage for the user's own card inventory**, plus a way to **identify
