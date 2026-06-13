@@ -1,7 +1,7 @@
 ---
 id: feature-subarchetype-variants
 kind: feature
-stage: implementing
+stage: review
 tags: [archetype]
 parent: null
 depends_on: []
@@ -260,3 +260,6 @@ pure additive consumer once the `variant` column exists; spawn it as a story onl
 
 ## Review findings (bounce 1)
 BLOCKING: the production `label` command (`cli.py:~211`) calls `label_decks(con, ruleset, client.get_card)` with NO `registry` arg, so `decks.variant` is never populated end-to-end — `report meta --by-variant` renders bare rows, `generate consensus --variant X` returns sample_n=0, `report variants` always says 'no decks match'. The new tests pass only because they bypass the CLI and set variant via direct UPDATE/label_decks(registry=...). FIX: in `label`, load `VARIANTS_REGISTRY_PATH` when it exists and pass the registry to `label_decks` (mirror the resolution logic in `report variants`); add a CLI-level test that runs `label` with the shipped registry on a Dimir Tempo / Smallpox fixture and asserts `decks.variant` is non-NULL.
+
+### Resolution
+Wired `cli.py` `label` command to load `VARIANTS_REGISTRY_PATH` when present and pass it as `registry=` to `label_decks` (gated-additive: gracefully `None` when file absent). Added `test_shipped_registry_wired_end_to_end` in `tests/test_labeler.py` — exercises the exact code path the CLI now takes: loads the shipped registry via `load_variant_registry(VARIANTS_REGISTRY_PATH)`, calls `label_decks` with a Dimir Tempo ruleset and a fixture corpus with one deck WITH Mishra's Bauble (asserts `variant="Bauble"`) and one WITHOUT (asserts `variant="non-Bauble"`). Suite: 1500 passed.

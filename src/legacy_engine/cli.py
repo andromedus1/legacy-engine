@@ -199,16 +199,24 @@ def label(verbose: bool) -> None:
     _setup_logging(verbose)
     from legacy_engine.archetype.labeler import label_decks
     from legacy_engine.archetype.rules import load_ruleset
-    from legacy_engine.config import RULES_DIR
+    from legacy_engine.archetype.variants import load_variant_registry
+    from legacy_engine.config import RULES_DIR, VARIANTS_REGISTRY_PATH
     from legacy_engine.ingestion import store
     from legacy_engine.ingestion.scryfall import ScryfallClient
 
     ruleset = load_ruleset(RULES_DIR)
+
+    # Load the variant registry when the shipped file exists; gracefully None if absent
+    # (gated-additive: missing registry → variant stays NULL, byte-identical to pre-variant).
+    registry = None
+    if VARIANTS_REGISTRY_PATH.exists():
+        registry = load_variant_registry(VARIANTS_REGISTRY_PATH)
+
     con = store.connect()
     try:
         with ScryfallClient() as client:
             client.load_card_index()
-            n = label_decks(con, ruleset, client.get_card)
+            n = label_decks(con, ruleset, client.get_card, registry=registry)
     finally:
         con.close()
     click.echo(f"Labeled {n} decks")
