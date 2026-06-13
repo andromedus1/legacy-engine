@@ -1,7 +1,7 @@
 ---
 id: feature-three-venue-meta-frame
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []

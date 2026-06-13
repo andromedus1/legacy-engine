@@ -1,7 +1,7 @@
 ---
 id: strong-player-signal-strength
 kind: story
-stage: review
+stage: done
 tags: [analytics]
 parent: feature-strong-player-signal
 depends_on: [strong-player-signal-identity]
