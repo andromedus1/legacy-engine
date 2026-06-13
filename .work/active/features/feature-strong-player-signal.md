@@ -1,7 +1,7 @@
 ---
 id: feature-strong-player-signal
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, generation]
 parent: null
 depends_on: []
@@ -277,3 +277,7 @@ Test files mirror source: `tests/analytics/players/test_identity.py`, `test_stre
 - **Heuristic vs. explicit alias table**: chose **explicit curated table + opt-in heuristic suggester** — silent false-merges poison the exact high-signal cells the feature targets; a wrong merge is worse than no merge.
 - **Decomposed into 3 child stories** because identity, strength, and integration are independently testable and mergeable, and identity is reusable beyond this feature.
 - **Regime interaction**: filter applies **on top of** windowing; default stays latest regime; no silent window-widening (directly honors [[idea-ban-regime-everywhere]]).
+
+
+## Implementation notes
+All three child stories implemented and at review: strong-player-signal-identity (alias resolution + curated aliases.json), strong-player-signal-strength (shrunk-WR strength scoring + per-regime history), strong-player-signal-consensus (--players/--strong filter into consensus/tune + `identify` CLI group). Full suite green (1492). Parent advanced to review per orchestrator Phase 9.
