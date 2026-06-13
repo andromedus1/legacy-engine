@@ -1,7 +1,7 @@
 ---
 id: strong-player-signal-strength
 kind: story
-stage: implementing
+stage: review
 tags: [analytics]
 parent: feature-strong-player-signal
 depends_on: [strong-player-signal-identity]
@@ -42,3 +42,19 @@ primitive — strong inherits the same honesty discipline as every emitted stat.
 - A single hot finish never qualifies as strong (the spec's explicit requirement).
 - Scores reuse the project shrink + tier primitives (no ad-hoc threshold philosophy).
 - `strong_player_set` computed over the consumer's window (so "strong in current regime" works).
+
+## Implementation notes
+
+**Files created:**
+- `src/legacy_engine/analytics/players/strength.py` — `PlayerRecord` dataclass, `compute_player_records`, `is_strong`, `strong_player_set`.
+- `src/legacy_engine/analytics/players/history.py` — `ArchetypeRegimeRow`, `player_archetype_history`.
+- `tests/analytics/players/test_strength.py` — 31 tests across compute, alias pooling, is_strong gates, strong_player_set.
+- `tests/analytics/players/test_history.py` — 12 tests covering regime partition, alias pooling, edge cases.
+
+**Key design decisions made during implementation:**
+- `history.py` does NOT call `resolve_player` — instead it iterates `alias_map.items()` to build `handles_norm` (all handles that map to `player_id`), then uses a SQL `IN` predicate. This avoids a DuckDB-side join and is simpler for the read-path.
+- `compute_player_records` resolves identity in Python (iterate rows, call `resolve_player` per row) rather than via a DuckDB join on `player_aliases`. This keeps the Python and SQL collation in sync and avoids requiring the derived `player_aliases` table to be materialized for every query.
+- `win_rate_shrunk` uses `prior_mean=0.5, strength=15.0` matching the `SHRINK_STRENGTH` constant in `matchup.py` for consistency.
+- `display` name is chosen as the most-frequent raw handle within the query window (not a static alias config field), so it reflects recency.
+
+**Test suite:** 43 new tests added (31 strength + 12 history). Full suite: 1458 passed (1415 baseline + 43 new). Ruff: clean. Mypy pre-existing errors in `matchup.py` not touched.
