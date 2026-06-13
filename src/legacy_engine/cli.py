@@ -243,6 +243,12 @@ def report() -> None:
     help="Minimum share (0..1) for an archetype to appear in headline rows; sub-floor → Other.",
 )
 @click.option(
+    "--by-variant",
+    is_flag=True,
+    default=False,
+    help="Split each archetype by variant tag (requires labeler to have been run with a variant registry).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -254,6 +260,7 @@ def report_meta(
     definition: str,
     provenance: str,
     min_share: float,
+    by_variant: bool,
     db: str | None,
     since: str | None,
     until: str | None,
@@ -295,6 +302,11 @@ def report_meta(
                 if windowed and defn == "wrw":
                     click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
                     continue
+                # wrw does not support group_by_variant (weights are archetype-level).
+                effective_by_variant = by_variant and defn != "wrw"
+                if by_variant and defn == "wrw":
+                    click.echo("// --by-variant is not supported for wrw (win-rate weights are archetype-level)")
+                    continue
                 report = compute_metashare(
                     con,
                     definition=defn,
@@ -302,6 +314,7 @@ def report_meta(
                     min_share=min_share,
                     since=win.since,
                     until=win.until,
+                    group_by_variant=effective_by_variant,
                 )
                 _print_metashare_report(report)
     finally:
@@ -943,6 +956,260 @@ def report_cards(
         con.close()
 
 
+@report.command("subgroup")
+@click.option("--archetype", required=True, help="Parent archetype to split (e.g. 'Dimir Tempo').")
+@click.option(
+    "--signature",
+    required=True,
+    help="Signature card whose presence defines the with-subgroup (e.g. \"Mishra's Bauble\").",
+)
+@click.option(
+    "--board",
+    type=click.Choice(["main", "side"], case_sensitive=False),
+    default="main",
+    show_default=True,
+    help="Board to check for the signature card.",
+)
+@click.option("--since", default=None, help="Window start (YYYY-MM-DD, inclusive).")
+@click.option("--until", default=None, help="Window end (YYYY-MM-DD, exclusive).")
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper"], case_sensitive=False),
+    default=None,
+    help="Filter to online or paper events (default: all).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_subgroup(
+    archetype: str,
+    signature: str,
+    board: str,
+    since: str | None,
+    until: str | None,
+    provenance: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Subgroup-diff analysis — split an archetype on a signature card.
+
+    Shows the avg-copies difference between decks with vs without the signature card,
+    sorted by |delta|.  This is the validated discovery tool for identifying sub-archetype
+    variants worth registering.
+
+    Example: legacy-engine report subgroup --archetype "Dimir Tempo" --signature "Mishra's Bauble"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.subgroup import subgroup_compositions
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        split = subgroup_compositions(
+            con,
+            archetype,
+            signature,
+            board=board,
+            since=since,
+            until=until,
+            provenance=provenance,
+        )
+    finally:
+        con.close()
+
+    _print_subgroup_report(split)
+
+
+def _print_subgroup_report(split: "SubgroupSplit") -> None:
+    """Render a SubgroupSplit as a labeled diff table."""
+    from legacy_engine.analytics.subgroup import SubgroupSplit  # noqa: F401
+
+    click.echo(
+        f"\n=== Subgroup Diff: {split.archetype!r} split on {split.signature_card!r} "
+        f"({split.board}board) ==="
+    )
+    click.echo(
+        f"  with-subgroup:    n={split.n_with}  [{split.tier_with}]"
+    )
+    click.echo(
+        f"  without-subgroup: n={split.n_without}  [{split.tier_without}]"
+    )
+
+    if split.thin:
+        click.echo(
+            "  // ⚠ thin subgroup(s) — one or both subgroups have n < 30 (speculative tier); "
+            "deltas are present-and-honest, not hidden, but treat magnitudes as unreliable"
+        )
+
+    if not split.diffs:
+        click.echo("  (no card data for this archetype/board/window)")
+        return
+
+    click.echo(
+        f"\n  {'Card':<35}  {'with-avg':>9}  {'without-avg':>11}  {'delta':>8}"
+    )
+    click.echo("  " + "-" * 70)
+
+    for d in split.diffs:
+        sign = "+" if d.delta > 0 else ""
+        click.echo(
+            f"  {d.name:<35}  {d.avg_with:>9.3f}  {d.avg_without:>11.3f}  "
+            f"{sign}{d.delta:>7.3f}"
+        )
+
+    click.echo(
+        "\n  NOTE: presence-correlational only — not a causal attribution. "
+        "Use this to identify candidate signature cards for the variant registry."
+    )
+
+
+@report.command("variants")
+@click.option(
+    "--archetype",
+    default=None,
+    help="Filter to this parent archetype (shows all parents when omitted).",
+)
+@click.option(
+    "--registry",
+    "registry_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help="Path to a variant registry JSON (defaults to data/variants/legacy.json).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_variants(
+    archetype: str | None,
+    registry_path: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """List registered variants and their current meta share within each parent archetype.
+
+    Shows, per variant: deck count carrying the tag and share of the parent archetype's decks
+    in the latest ban-regime window.  Parents with zero matching decks are flagged (drift warning).
+
+    Example: legacy-engine report variants
+    Example: legacy-engine report variants --archetype "Dimir Tempo"
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.archetype.variants import load_variant_registry
+    from legacy_engine.generation.consensus import _latest_regime_window
+    from legacy_engine.ingestion import store
+
+    # Resolve registry path.
+    if registry_path is None:
+        from legacy_engine.config import VARIANTS_REGISTRY_PATH
+        default_path = VARIANTS_REGISTRY_PATH
+        if not default_path.exists():
+            raise click.ClickException(
+                f"No variant registry found at {default_path}. "
+                "Pass --registry to specify one."
+            )
+        reg_path = default_path
+    else:
+        reg_path = Path(registry_path)
+
+    try:
+        registry = load_variant_registry(reg_path)
+    except Exception as exc:
+        raise click.ClickException(f"Failed to load variant registry: {exc}") from exc
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        since, until = _latest_regime_window()
+
+        # Collect all parents in scope.
+        parents = sorted({r.parent for r in registry.variants})
+        if archetype:
+            if archetype not in parents:
+                click.echo(
+                    f"// Warning: archetype {archetype!r} has no registered variants."
+                )
+                return
+            parents = [archetype]
+
+        click.echo(
+            f"\n=== Variant Registry [{registry.version}] "
+            f"window: {since or 'open'} .. {until or 'current'} ==="
+        )
+
+        for parent in parents:
+            rules = registry.for_parent(parent)
+            default_name = registry.defaults.get(parent)
+
+            # Total decks for this parent in the window.
+            total_row = con.execute(
+                """
+                SELECT count(*) FROM decks d
+                JOIN tournaments t ON t.id = d.tournament_id
+                WHERE d.archetype = ?
+                  AND (? IS NULL OR t.date >= ?)
+                  AND (? IS NULL OR t.date < ?)
+                """,
+                [parent, since, since, until, until],
+            ).fetchone()
+            total_parent = int(total_row[0]) if total_row else 0
+
+            click.echo(f"\n  {parent}  (total decks in window: {total_parent})")
+            if total_parent == 0:
+                click.echo("    // ⚠ no decks match this parent — registry may be drifted")
+
+            for rule in rules:
+                tagged_row = con.execute(
+                    """
+                    SELECT count(*) FROM decks d
+                    JOIN tournaments t ON t.id = d.tournament_id
+                    WHERE d.archetype = ?
+                      AND d.variant = ?
+                      AND (? IS NULL OR t.date >= ?)
+                      AND (? IS NULL OR t.date < ?)
+                    """,
+                    [parent, rule.name, since, since, until, until],
+                ).fetchone()
+                tagged_n = int(tagged_row[0]) if tagged_row else 0
+                share_str = (
+                    f"{tagged_n / total_parent:.1%}" if total_parent > 0 else "n/a"
+                )
+                click.echo(f"    {rule.name:<30}  n={tagged_n:>5}  share={share_str}")
+
+            # Show the default complement if declared.
+            if default_name:
+                default_row = con.execute(
+                    """
+                    SELECT count(*) FROM decks d
+                    JOIN tournaments t ON t.id = d.tournament_id
+                    WHERE d.archetype = ?
+                      AND d.variant = ?
+                      AND (? IS NULL OR t.date >= ?)
+                      AND (? IS NULL OR t.date < ?)
+                    """,
+                    [parent, default_name, since, since, until, until],
+                ).fetchone()
+                default_n = int(default_row[0]) if default_row else 0
+                share_str = (
+                    f"{default_n / total_parent:.1%}" if total_parent > 0 else "n/a"
+                )
+                click.echo(
+                    f"    {default_name:<30}  n={default_n:>5}  share={share_str}  (default complement)"
+                )
+    finally:
+        con.close()
+
+
 # ── advise: meta attack / advisory ──
 @main.group()
 def advise() -> None:
@@ -1475,6 +1742,11 @@ def generate() -> None:
     help="Filter to online or paper events (default: all).",
 )
 @click.option(
+    "--variant",
+    default=None,
+    help="Scope the pool to decks with this variant tag (e.g. 'Bauble'). Requires labeler with registry.",
+)
+@click.option(
     "--export",
     "export_fmt",
     type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
@@ -1493,6 +1765,7 @@ def generate_consensus(
     since: str | None,
     until: str | None,
     provenance: str | None,
+    variant: str | None,
     export_fmt: str | None,
     db: str | None,
     verbose: bool,
@@ -1502,7 +1775,11 @@ def generate_consensus(
     Aggregates modal card choices across all archetype decks in the corpus window
     and reconciles to a legal, exactly-60 maindeck + ≤15 sideboard.
 
+    Use --variant to scope the pool to a specific sub-archetype variant (e.g. "Bauble").
+    Requires that the labeler has been run with a variant registry.
+
     Example: legacy-engine generate consensus --archetype "Izzet Delver"
+    Example: legacy-engine generate consensus --archetype "Dimir Tempo" --variant "Bauble"
     """
     _setup_logging(verbose)
 
@@ -1517,6 +1794,7 @@ def generate_consensus(
             since=since,
             until=until,
             provenance=provenance,
+            variant=variant,
         )
     finally:
         con.close()
@@ -1529,7 +1807,8 @@ def generate_consensus(
 
     # Print the decklist in the default readable format.
     from legacy_engine.confidence import tier_for_sample
-    click.echo(f"// Consensus deck: {deck.archetype}")
+    deck_label = f"{deck.archetype} / {variant}" if variant else deck.archetype
+    click.echo(f"// Consensus deck: {deck_label}")
     window_since = deck.window[0] or "open"
     window_until = deck.window[1] or "current"
     sample_tier = tier_for_sample(deck.sample_n)

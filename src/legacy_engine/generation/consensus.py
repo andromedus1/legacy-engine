@@ -74,6 +74,7 @@ def card_frequencies(
     since: str | None = None,
     until: str | None = None,
     provenance: str | None = None,
+    variant: str | None = None,
 ) -> list[CardFreq]:
     """Per-card inclusion frequency for ``archetype`` in ``board`` over a date window.
 
@@ -81,6 +82,9 @@ def card_frequencies(
 
     Window defaults to the latest ban-regime when both ``since`` and ``until`` are
     ``None`` (caller passes both as None to trigger the default).
+
+    ``variant`` optionally filters to decks with ``decks.variant = variant`` (exact match).
+    ``None`` → no variant filter (unchanged, gated-additive contract).
 
     Returns a list of ``CardFreq``, sorted by inclusion_pct DESC then modal_count DESC.
     Empty list when the archetype has no decks in the window.
@@ -101,8 +105,9 @@ def card_frequencies(
           AND (? IS NULL OR t.provenance = ?)
           AND (? IS NULL OR t.date >= ?)
           AND (? IS NULL OR t.date < ?)
+          AND (? IS NULL OR d.variant = ?)
         """,
-        [archetype, provenance, provenance, since, since, until, until],
+        [archetype, provenance, provenance, since, since, until, until, variant, variant],
     ).fetchone()
     archetype_deck_count = int(arch_count_row[0]) if arch_count_row else 0
 
@@ -122,6 +127,7 @@ def card_frequencies(
               AND (? IS NULL OR t.provenance = ?)
               AND (? IS NULL OR t.date >= ?)
               AND (? IS NULL OR t.date < ?)
+              AND (? IS NULL OR d.variant = ?)
         ),
         card_counts AS (
             SELECT dc.name,
@@ -148,7 +154,7 @@ def card_frequencies(
         FROM modal
         ORDER BY decks_running DESC, modal_count DESC
         """,
-        [archetype, provenance, provenance, since, since, until, until, board],
+        [archetype, provenance, provenance, since, since, until, until, variant, variant, board],
     ).fetchall()
 
     result: list[CardFreq] = []
@@ -235,6 +241,7 @@ def build_consensus(
     provenance: str | None = None,
     main_size: int = 60,
     side_size: int = 15,
+    variant: str | None = None,
 ) -> GeneratedDeck:
     """Build a consensus baseline deck for ``archetype``.
 
@@ -245,6 +252,9 @@ def build_consensus(
       is too thin — surface via low ``sample_n``).
     * ``sideboard`` summing to ≤ ``side_size``; may be empty for thin archetypes.
     * ``legality_errors`` from ``validate_deck``; empty = legal.
+
+    ``variant`` optionally scopes the pool to decks with ``decks.variant = variant`` (exact
+    match).  ``None`` → no variant filter (unchanged, gated-additive contract).
 
     Raises ``click.ClickException`` (via caller) for unknown archetypes — this
     function returns a ``GeneratedDeck`` with ``sample_n=0`` and a legality error.
@@ -267,10 +277,12 @@ def build_consensus(
     main_freqs = card_frequencies(
         con, archetype, board="main",
         since=effective_since, until=effective_until, provenance=provenance,
+        variant=variant,
     )
     side_freqs = card_frequencies(
         con, archetype, board="side",
         since=effective_since, until=effective_until, provenance=provenance,
+        variant=variant,
     )
 
     # Derive sample_n from main-board query (decks with at least one main card).

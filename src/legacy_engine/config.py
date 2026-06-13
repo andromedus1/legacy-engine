@@ -17,6 +17,11 @@ RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData rules
 BANLIST_DIR = DATA_DIR / "banlist"    # dated WotC B&R snapshots
 DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
 
+# Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
+PACKAGE_DATA_DIR = Path(__file__).parent / "data"
+VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
+VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
+
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"
 SCRYFALL_BULK_TYPE = "oracle_cards"

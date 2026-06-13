@@ -44,6 +44,7 @@ TOURNAMENT_DDL = [
     )""",
     """CREATE TABLE IF NOT EXISTS decks (
         tournament_id VARCHAR, deck_idx INTEGER, player VARCHAR, result VARCHAR, archetype VARCHAR,
+        variant VARCHAR,
         PRIMARY KEY (tournament_id, deck_idx)
     )""",
     """CREATE TABLE IF NOT EXISTS deck_cards (
@@ -79,6 +80,9 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS toughness VARCHAR")
     for ddl in TOURNAMENT_DDL:
         con.execute(ddl)
+    # Migration: add variant column (sub-archetype tag, NULL until labeler resolves it).
+    # Idempotent — ADD COLUMN IF NOT EXISTS is a no-op on tables that already carry it.
+    con.execute("ALTER TABLE decks ADD COLUMN IF NOT EXISTS variant VARCHAR")
 
 
 # Multi-face layout classes — determine how a face name inherits attributes.
@@ -242,13 +246,14 @@ def load_tournament(con: duckdb.DuckDBPyConnection, tr: TournamentResult) -> str
     deck_rows = []
     card_rows = []
     for idx, deck in enumerate(tr.decks):
-        deck_rows.append((tid, idx, deck.player, deck.result, None))  # archetype NULL until labeled
+        # archetype + variant both NULL until the labeler runs.
+        deck_rows.append((tid, idx, deck.player, deck.result, None, None))
         for cc in deck.mainboard:
             card_rows.append((tid, idx, "main", cc.name, cc.count))
         for cc in deck.sideboard:
             card_rows.append((tid, idx, "side", cc.name, cc.count))
     if deck_rows:
-        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?)", deck_rows)
+        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
     if card_rows:
         con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
 
