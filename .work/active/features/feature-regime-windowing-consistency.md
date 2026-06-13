@@ -1,7 +1,7 @@
 ---
 id: feature-regime-windowing-consistency
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, methodology]
 parent: null
 depends_on: []
@@ -240,3 +240,37 @@ Add principle **#10. Ban-regime-aware windowing is the default, and the window i
 - **Opponent set drift.** The window-resolution top-k and `_field_matchup_values` top-k must use the
   same selection or windows won't align to opponents. Mitigation: compute the opponent list once in
   `recommend_sideboard` and pass it to both.
+
+## Implementation notes
+
+**Files modified:**
+- `src/legacy_engine/advisory/sideboard.py` — Fix B: added `adaptive_windows`/`top_opponents` params
+  to `_field_matchup_values` (per-window wr_cache with seed from pre-computed uniform aggregate);
+  added `adaptive_windows` to `_plan_matchups` (locked-core uses deck-arch window; honest-degrade
+  note names the pooled window); added `adaptive: bool = True` to `recommend_sideboard` with the
+  adaptive window resolution block (guarded by `_caller_explicit_window` so existing callers with
+  explicit `since=` stay on the single-window path byte-identically); two new additive fields on
+  `SideboardPackage` (`plan_window_label`, `plan_windows`).
+- `src/legacy_engine/cli.py` — added `@_window_opts`, `--archetype`, and window echo to
+  `advise sideboard`; Fix A window-divergence note in `generate tune` header; updated
+  `generate consensus` window echo to label as uniform/current-regime.
+- `src/legacy_engine/generation/tuning.py` — Fix A: window-divergence audit note appended to
+  both `reason` strings (greedy-converged path and no-signal fallback).
+- `docs/PRINCIPLES.md` — added principle #10 (ban-regime-aware windowing) + updated `decisions:`
+  frontmatter and `updated:` date.
+
+**Tests added (15 new, all green):**
+- `tests/test_sideboard.py::TestAdaptiveWindowSideboard` — 6 tests: adaptive=False byte-identical,
+  rounds-less no-op, per-window cache called once per distinct window (2 variants), honest-degrade
+  note names pooled window, plan_window_label set/unset correctly.
+- `tests/test_adaptive_regime.py::TestArchetypeValidSincePooling` — 2 tests: max(valid_since)
+  pool semantics, both-None means full-corpus.
+- `tests/test_cli.py::TestWindowEchoRegimeConsistency` — 7 tests: consensus echoes window +
+  sample_n + uniform label; tune echoes divergence; advise sideboard echoes adaptive/full-corpus/
+  regime window lines.
+
+**Key design decision implemented:** adaptive per-opponent windows only activate when the caller
+passes no explicit `since/until` (mirrors `resolve_advisory_window`'s default-is-adaptive rule).
+When `since` or `until` is set explicitly, the single-window path is used — preserving the
+scan-count=1 guarantee the pre-existing `test_tune_deck_computes_card_winrates_exactly_once` test
+asserts. Full suite: 1269 passed (was 1254; +15 new tests).

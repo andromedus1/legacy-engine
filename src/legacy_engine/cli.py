@@ -1102,6 +1102,11 @@ def advise_positioning(
     help="Path to a plain-text decklist file.",
 )
 @click.option(
+    "--archetype",
+    default=None,
+    help="Override archetype classification (used for adaptive per-opponent windows).",
+)
+@click.option(
     "--field",
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
@@ -1128,31 +1133,80 @@ def advise_positioning(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_window_opts
 @_verbose
 def advise_sideboard(
     deck: str,
+    archetype: str | None,
     field_file: str | None,
     reserved: int,
     solver: str,
     db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
     verbose: bool,
 ) -> None:
     """Recommend a sideboard package for an expected field."""
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.report import _load_field, _parse_decklist
+    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
     from legacy_engine.advisory.sideboard import recommend_sideboard
+    from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.ingestion import store
 
     deck_text = Path(deck).read_text()
-    mainboard, _sideboard = _parse_decklist(deck_text)
+    mainboard, _sideboard_cards = _parse_decklist(deck_text)
     field_text = Path(field_file).read_text() if field_file else None
 
     con = store.connect(db) if db else store.connect()
     try:
+        # Resolve window. Sideboard plans default to adaptive (per-opponent ban-aware);
+        # uniform/full modes disable adaptive and use the resolved since/until instead.
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+
+        # Determine whether to use adaptive per-opponent windows.
+        use_adaptive = win.mode == "adaptive"
+        plan_since = win.since
+        plan_until = win.until
+
         field = _load_field(con, field_text=field_text)
-        pkg = recommend_sideboard(con, field, mainboard, reserved=reserved, solver=solver)
+
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, mainboard, _sideboard_cards)
+            resolved_archetype = result.archetype
+            click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        pkg = recommend_sideboard(
+            con, field, mainboard,
+            reserved=reserved,
+            solver=solver,
+            archetype=resolved_archetype,
+            since=plan_since,
+            until=plan_until,
+            adaptive=use_adaptive,
+        )
+
+        # Echo adaptive audit line when adaptive mode resolved actual windows.
+        if pkg.plan_window_label:
+            click.echo(f"// plan window: {pkg.plan_window_label}")
+        if pkg.plan_windows:
+            affected = sorted(
+                (opp, w[0]) for opp, w in pkg.plan_windows.items()
+                if w[0] is not None and opp != resolved_archetype
+            )
+            if affected:
+                parts = "; ".join(f"{opp} since {s}" for opp, s in affected)
+                click.echo(f"// adaptive plan windows — {parts}; all others full-corpus")
+            else:
+                click.echo("// adaptive plan windows — no archetype ban-affected; all opponents full-corpus")
+
         click.echo(f"\n=== Sideboard Recommendation (solver={pkg.solver_used}, field_source={pkg.field_source}) ===")
         click.echo(f"  Budget: {pkg.budget}  |  Reserved: {pkg.reserved}")
         click.echo(f"  Covered weight: {pkg.covered_weight:.4f}")
@@ -1169,7 +1223,7 @@ def advise_sideboard(
             click.echo("\n  Per-matchup plans (presence-correlational — see disclaimer):")
             for opp, plan in sorted(pkg.matchup_plans.items()):
                 if plan.degraded:
-                    click.echo(f"    vs {opp}: thin data — no per-matchup plan (rely on 15 composition)")
+                    click.echo(f"    vs {opp}: {plan.note}")
                 else:
                     out_str = ", ".join(
                         f"{c}x {card}" for card, c in sorted(plan.side_out.items())
@@ -1479,7 +1533,11 @@ def generate_consensus(
     window_since = deck.window[0] or "open"
     window_until = deck.window[1] or "current"
     sample_tier = tier_for_sample(deck.sample_n)
-    click.echo(f"// Window: [{window_since}, {window_until})  sample_n={deck.sample_n} [{sample_tier}]")
+    click.echo(
+        f"// window: regime current [{window_since}..{window_until}]  "
+        f"sample_n={deck.sample_n} [{sample_tier}]  "
+        "(uniform current-regime window — deck composition surface)"
+    )
     if sample_tier == "speculative":
         click.echo(
             f"// ⚠ thin sample (n={deck.sample_n}) — modal card choices and inclusion %s are "
@@ -1678,6 +1736,14 @@ def generate_tune(
 
     # ── Header ───────────────────────────────────────────────────────────────
     click.echo(f"\n// Tuned deck: {tuned.archetype}")
+    # Fix A: echo window divergence — list window is current-regime, matchup math is adaptive.
+    # This is an intentional, defensible divergence; state it loudly, not silently.
+    click.echo(
+        f"// NOTE: tuning uses two windows: consensus/card-frequency list = "
+        f"current-regime (uniform); matchup math = adaptive (per-opponent ban-aware). "
+        "This divergence is intentional — the list reflects what is played NOW; "
+        "matchup depth borrows prior-regime data. Both are labeled here."
+    )
 
     # Primary objective: per-card field-weighted value (the real swap driver).
     click.echo(
