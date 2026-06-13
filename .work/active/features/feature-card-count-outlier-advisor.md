@@ -1,7 +1,14 @@
 ---
-id: idea-card-count-outlier-advisor
-created: 2026-06-13
+id: feature-card-count-outlier-advisor
+kind: feature
+stage: drafting
 tags: [advisory, analytics, generation]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 For a given decklist + archetype + regime, surface **each card's field copy-count DISTRIBUTION** (not

@@ -16,7 +16,7 @@ decisions:
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
 created: 2026-05-29
-updated: 2026-05-31
+updated: 2026-06-13
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -92,7 +92,7 @@ best-metagame-call). Lets a competitive player supply their *expected local fiel
 actionable read.
 
 ## Non-goals (for now)
-- Not a deck-building UI or collection manager; it's an analytics engine (CLI-first, like edh-engine).
+- Not an interactive deck-building *editor* GUI, and not a web app yet — a hosted web UI is deferred pending its own research. The engine **does** model the user's personal collection and own decks as a first-class *local* layer (so advice is buildable and actionable from what you actually own), but it stays CLI-first analytics, not a deckbuilding editor.
 - Not a full rules-correct 4-player game engine — Legacy is 1v1 and the goldfish track ships first.
 - Not Vintage, Modern, or other formats (though the card/data layer is largely format-agnostic).
 - Not live/real-time during events — all external data is pre-fetched and cached.

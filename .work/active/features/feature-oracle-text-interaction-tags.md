@@ -1,7 +1,14 @@
 ---
-id: idea-oracle-text-grounded-reasoning
-created: 2026-06-13
+id: feature-oracle-text-interaction-tags
+kind: feature
+stage: drafting
 tags: [advisory, data-quality, methodology]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 **Hurdle observed:** card-interaction reasoning done from memory is error-prone, and it produced

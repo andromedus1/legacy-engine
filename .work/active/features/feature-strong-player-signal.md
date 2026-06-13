@@ -1,7 +1,14 @@
 ---
-id: idea-strong-player-signal
-created: 2026-06-13
+id: feature-strong-player-signal
+kind: feature
+stage: drafting
 tags: [analytics, generation]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 Use **strong players as the best/strongest signal for archetype tuning.** A consensus over the whole
