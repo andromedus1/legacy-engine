@@ -722,7 +722,7 @@ class TestRecommendSideboard:
         )
         for idx in range(3):
             con.execute(
-                "INSERT INTO decks VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
                 [tid, idx, f"player{idx}", "1st", "Reanimator"],
             )
             for card_name, count in [("Reanimate", 4), ("Swamp", 10)]:

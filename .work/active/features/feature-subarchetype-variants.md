@@ -1,7 +1,7 @@
 ---
 id: feature-subarchetype-variants
 kind: feature
-stage: implementing
+stage: review
 tags: [archetype]
 parent: null
 depends_on: []
@@ -212,3 +212,47 @@ No child stories required — five tightly-coupled units in one file-cohesive fe
 module, one new archetype module, one model addition, additive edits to three existing modules, CLI).
 The single genuinely-deferrable slice (matchup `--by-variant`) is documented as a follow-up and is a
 pure additive consumer once the `variant` column exists; spawn it as a story only if a user asks.
+
+## Implementation notes
+
+**Files created:**
+- `src/legacy_engine/analytics/subgroup.py` — `SubgroupSplit`, `CardDiff`, `diff_compositions` (pure),
+  `subgroup_compositions` (DB-backed); follows objective-search-split, imports `_latest_regime_window`
+  from `generation.consensus`.
+- `src/legacy_engine/models/variant.py` — `VariantRule`, `VariantRegistry` (Pydantic, reuses `Condition`).
+- `src/legacy_engine/archetype/variants.py` — `load_variant_registry`, `resolve_variant`,
+  `AmbiguousVariantError`; reuses `evaluate_condition` + `_loads_lenient` + `KNOWN_CONDITION_TYPES` verbatim.
+- `data/variants/legacy.json` — version `2026-06-13`; seeded with Dimir Tempo (Bauble/non-Bauble) and
+  Smallpox (Loam/non-Loam) using positive+DoesNotContain complement pairs.
+- `tests/test_subgroup.py` — 17 tests (8 pure diff_compositions + 9 DB-backed).
+- `tests/test_variants.py` — 18 tests (loader, resolver, shipped-registry lint).
+
+**Files modified:**
+- `src/legacy_engine/ingestion/store.py` — added `variant VARCHAR` to `decks` DDL and `INSERT` tuple;
+  idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS variant` migration for existing DBs.
+- `src/legacy_engine/archetype/labeler.py` — optional `registry: VariantRegistry | None = None`;
+  when provided, resolves + writes variant; None → variant stays NULL (gated-additive).
+- `src/legacy_engine/analytics/metashare.py` — `group_by_variant` param threads through `_raw_counts`,
+  `_topcut_counts`, and `compute_metashare`; new `_RAW_BY_VARIANT_SQL` / `_TOPCUT_BY_VARIANT_SQL`.
+- `src/legacy_engine/generation/consensus.py` — `variant: str | None = None` param threads through
+  `card_frequencies` and `build_consensus`; adds one SQL predicate when non-None.
+- `src/legacy_engine/cli.py` — `--by-variant` on `report meta`; `--variant` on `generate consensus`;
+  new `report subgroup` and `report variants` commands.
+- `tests/test_labeler.py` — 3 variant regression tests added (no-registry → NULL, with-registry → tag,
+  archetype column unchanged). Fixed `parent` key to match `base_archetype` not display label.
+- `tests/test_metashare.py` — 5 `TestByVariantMetashare` tests added.
+- `tests/test_generation_consensus.py` — 3 `TestConsensusVariantFilter` tests added.
+- `tests/test_card_winrates.py`, `tests/test_match_results.py`, `tests/test_sideboard.py`,
+  `tests/test_whattoplay.py` — updated bare 5-column `INSERT INTO decks` statements to include `NULL`
+  for the new `variant` column (schema migration compat fix).
+
+**Deviations from design:**
+- None substantive. One design refinement: `resolve_variant` uses `result.base_archetype` (the
+  unmunged rule name, e.g. `"Tempo"`) not the color-prefixed display label (e.g. `"Dimir Tempo"`).
+  This is correct per the spec ("parent is an exact `base_archetype` string") and the shipped registry
+  reflects real archetype rule names from MTGOFormatData where "Dimir Tempo" is the rule's Name field
+  directly (not color-prefixed). The test fixture was adjusted accordingly.
+- `ALTER TABLE` migration kept even though `variant` is now in the `CREATE TABLE IF NOT EXISTS` DDL —
+  it remains needed for existing databases that were created before this feature.
+
+**Test count:** 1353 total (up from 1307), all passing. New tests: 46.

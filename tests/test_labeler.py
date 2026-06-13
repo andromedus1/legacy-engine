@@ -1,4 +1,9 @@
-"""Labeler — end-to-end: load a tournament, classify every deck, persist decks.archetype."""
+"""Labeler — end-to-end: load a tournament, classify every deck, persist decks.archetype.
+
+Extended with variant regression tests:
+- registry=None → variant column stays NULL (byte-identical to pre-variant behaviour)
+- with a registry → correct variant tag written per deck
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,7 @@ from legacy_engine.archetype.rules import ArchetypeRule, Condition, RuleSet
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
 from legacy_engine.models.card import Card
+from legacy_engine.models.variant import VariantRegistry, VariantRule
 
 # A fake card resolver (name -> Card) so the test needs no Scryfall bulk.
 CARD_DB = {
@@ -78,4 +84,86 @@ def test_idempotent_relabel():
     label_decks(con, RULES, CARD_DB.get)
     label_decks(con, RULES, CARD_DB.get)  # re-run overwrites, no dup
     assert con.execute("SELECT count(*) FROM decks").fetchone()[0] == 2
+    con.close()
+
+
+# ---------------------------------------------------------------------------
+# Variant regression tests (gated-additive contract)
+# ---------------------------------------------------------------------------
+
+# Minimal variant registry.
+# In the test RULES fixture, matching "Tempo" (the variant of "Delver") gives
+# base_archetype="Tempo" (not "Dimir Tempo" — that's the color-prefixed display label).
+# The variant registry keys on base_archetype, so parent="Tempo" is correct here.
+_VARIANT_REGISTRY = VariantRegistry(
+    version="test",
+    variants=[
+        VariantRule(
+            parent="Tempo",
+            name="Daze Variant",
+            conditions=[Condition(type="InMainboard", cards=["Daze"])],
+        ),
+        VariantRule(
+            parent="Tempo",
+            name="non-Daze",
+            conditions=[Condition(type="DoesNotContain", cards=["Daze"])],
+        ),
+    ],
+    defaults={},
+)
+
+# Alice's deck matches the "Tempo" variant rule + has Daze in main → "Daze Variant"
+ALICE_ARCHETYPE = "Dimir Tempo"
+
+
+def test_no_registry_variant_is_null():
+    """When registry=None the variant column stays NULL — byte-identical to pre-variant behaviour."""
+    con = store.connect(":memory:")
+    tid = store.load_tournament(con, parse_cache_item(TOURNEY, "MTGO"))
+    label_decks(con, RULES, CARD_DB.get, registry=None)
+
+    rows = {
+        player: variant
+        for player, variant in con.execute(
+            "SELECT player, variant FROM decks WHERE tournament_id = ? ORDER BY deck_idx", [tid]
+        ).fetchall()
+    }
+    assert rows["alice"] is None, "variant should be NULL when no registry is provided"
+    assert rows["bob"] is None
+    con.close()
+
+
+def test_with_registry_writes_variant_tag():
+    """When registry is provided, label_decks writes the resolved variant tag."""
+    con = store.connect(":memory:")
+    tid = store.load_tournament(con, parse_cache_item(TOURNEY, "MTGO"))
+    label_decks(con, RULES, CARD_DB.get, registry=_VARIANT_REGISTRY)
+
+    rows = {
+        player: variant
+        for player, variant in con.execute(
+            "SELECT player, variant FROM decks WHERE tournament_id = ? ORDER BY deck_idx", [tid]
+        ).fetchall()
+    }
+    # Alice classified as "Dimir Tempo" and has Daze in main → "Daze Variant"
+    assert rows["alice"] == "Daze Variant", f"Got variant: {rows['alice']!r}"
+    # Bob classified as "Unknown" → no matching parent in registry → NULL
+    assert rows["bob"] is None, f"Got variant for Unknown archetype: {rows['bob']!r}"
+    con.close()
+
+
+def test_archetype_column_unchanged_with_registry():
+    """Adding a registry must not alter the archetype column values."""
+    con = store.connect(":memory:")
+    tid = store.load_tournament(con, parse_cache_item(TOURNEY, "MTGO"))
+    label_decks(con, RULES, CARD_DB.get, registry=_VARIANT_REGISTRY)
+
+    rows = {
+        player: archetype
+        for player, archetype in con.execute(
+            "SELECT player, archetype FROM decks WHERE tournament_id = ? ORDER BY deck_idx", [tid]
+        ).fetchall()
+    }
+    assert rows["alice"] == "Dimir Tempo"  # unchanged
+    assert rows["bob"] == "Unknown"        # unchanged
     con.close()
