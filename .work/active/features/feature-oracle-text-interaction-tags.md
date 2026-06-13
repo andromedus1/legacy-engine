@@ -1,7 +1,7 @@
 ---
 id: feature-oracle-text-interaction-tags
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, data-quality, methodology]
 parent: null
 depends_on: []
@@ -281,3 +281,20 @@ recommendation the memory-based reasoning had wrongly suppressed.
 
 ## Review findings (bounce 1)
 BLOCKING: `advisory/report.py::_interaction_annotation` builds Card objects from a hardcoded `_ORACLE_TEXT_CACHE` of 3 demo cards instead of reading `cards.oracle_text` from the DB connection (`con`) already in scope in `build_field_read_report` — this reproduces the memory-based reasoning the feature exists to eliminate, skips 4 of 7 `graveyard-reliant` hosers (Surgical/Faerie Macabre/Endurance/Containment Priest get no annotation), and one cached text is already stale vs the real card. FIX: thread `con` into the annotation, fetch oracle_text per recommended hoser, annotate all of them. Add a report-level test exercising `_interaction_annotation` end-to-end (the design's test plan required this).
+
+### Resolution
+**Fixed.** Removed the hardcoded `_ORACLE_TEXT_CACHE` from `_interaction_annotation`. The function now takes a `con: duckdb.DuckDBPyConnection` parameter and issues `SELECT oracle_text, type_line FROM cards WHERE name = ?` to fetch real oracle_text for each recommended hoser. Gracefully degrades to `None` (no annotation) when the card isn't in the DB — never crashes.
+
+`con` is threaded through: `_render_sideboard(report, con=None)` and `render_field_read(report, con=None)` each accept an optional `con`; when absent, annotations are silently skipped (byte-identical baseline). The CLI passes `con` at both `render_field_read(v_report, con=con)` and `render_field_read(report, con=con)` call sites.
+
+**Test coverage added** (`TestInteractionAnnotationWiring` in `tests/test_interaction_facts.py`, 6 test methods):
+- `test_surgical_extraction_annotated_from_db` — previously-skipped hoser now receives annotation
+- `test_leyline_of_the_void_annotated_synergy_safe` — opponent-only annotation content verified
+- `test_card_not_in_db_returns_none` — graceful degrade
+- `test_non_graveyard_hoser_returns_none` — non-graveyard-reliant hoser correctly suppressed
+- `test_formerly_cached_cards_now_all_resolved` — the 3 old cached cards still work via DB path
+- `test_formerly_skipped_hosers_now_reachable` — Surgical Extraction, Faerie Macabre, Endurance now annotated (the 3 graveyard-explicit hosers that were silently skipped)
+
+Note: Containment Priest's real oracle_text doesn't mention "graveyard" (it gates "wasn't cast"), so `interaction_facts` returns `touches_graveyard=False` and no annotation is emitted — this is correct gated behavior, not a regression. A richer mechanism model for Containment Priest is future work.
+
+Full suite: 1498 passed (1492 baseline + 6 new).
