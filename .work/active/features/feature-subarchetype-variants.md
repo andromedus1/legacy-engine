@@ -1,7 +1,7 @@
 ---
 id: feature-subarchetype-variants
 kind: feature
-stage: review
+stage: done
 tags: [archetype]
 parent: null
 depends_on: []
