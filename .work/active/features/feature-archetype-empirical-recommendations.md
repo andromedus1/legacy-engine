@@ -1,7 +1,14 @@
 ---
-id: idea-archetype-empirical-recommendations
-created: 2026-06-13
+id: feature-archetype-empirical-recommendations
+kind: feature
+stage: drafting
 tags: [advisory, generation]
+parent: null
+depends_on: [feature-oracle-text-interaction-tags]
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 The sideboard / coverage recommender draws cards from a **global card universe** via a heuristic

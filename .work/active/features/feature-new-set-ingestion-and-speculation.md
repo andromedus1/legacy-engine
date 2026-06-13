@@ -1,7 +1,14 @@
 ---
-id: idea-new-set-ingestion-and-speculation
+id: feature-new-set-ingestion-and-speculation
+kind: feature
+stage: drafting
+tags: [ingestion, analytics, methodology, hold-for-review]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-06-13
-tags: [ingestion, analytics, methodology]
+updated: 2026-06-13
 ---
 
 **Regularly scan for upcoming set/edition releases and ingest their cards on release** — then provide

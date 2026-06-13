@@ -1,7 +1,14 @@
 ---
-id: idea-deck-tuning-refresh-workflow
-created: 2026-06-13
+id: feature-deck-tuning-refresh-workflow
+kind: feature
+stage: drafting
 tags: [advisory, generation, workflow]
+parent: null
+depends_on: [feature-regime-windowing-consistency, feature-three-venue-meta-frame, feature-archetype-empirical-recommendations, feature-card-count-outlier-advisor]
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 Build a **deck-tuning refresh workflow**: one command/run that pulls current data and emits a

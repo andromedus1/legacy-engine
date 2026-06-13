@@ -1,7 +1,14 @@
 ---
-id: idea-three-venue-meta-frame
-created: 2026-06-13
+id: feature-three-venue-meta-frame
+kind: feature
+stage: drafting
 tags: [advisory, analytics]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-13
+updated: 2026-06-13
 ---
 
 Standardize meta analysis as a default **three-lens read** rather than one global field:

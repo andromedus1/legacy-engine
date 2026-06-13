@@ -1,7 +1,14 @@
 ---
-id: idea-web-interface
+id: feature-web-interface
+kind: feature
+stage: drafting
+tags: [interface, needs-research, hold-for-review]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-06-13
-tags: [interface]
+updated: 2026-06-13
 ---
 
 Build a better way to interact with the engine than the CLI alone — most likely a **website / web
