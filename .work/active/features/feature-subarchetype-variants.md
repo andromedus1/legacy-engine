@@ -1,7 +1,7 @@
 ---
 id: feature-subarchetype-variants
 kind: feature
-stage: review
+stage: implementing
 tags: [archetype]
 parent: null
 depends_on: []
@@ -256,3 +256,7 @@ pure additive consumer once the `variant` column exists; spawn it as a story onl
   it remains needed for existing databases that were created before this feature.
 
 **Test count:** 1353 total (up from 1307), all passing. New tests: 46.
+
+
+## Review findings (bounce 1)
+BLOCKING: the production `label` command (`cli.py:~211`) calls `label_decks(con, ruleset, client.get_card)` with NO `registry` arg, so `decks.variant` is never populated end-to-end — `report meta --by-variant` renders bare rows, `generate consensus --variant X` returns sample_n=0, `report variants` always says 'no decks match'. The new tests pass only because they bypass the CLI and set variant via direct UPDATE/label_decks(registry=...). FIX: in `label`, load `VARIANTS_REGISTRY_PATH` when it exists and pass the registry to `label_decks` (mirror the resolution logic in `report variants`); add a CLI-level test that runs `label` with the shipped registry on a Dimir Tempo / Smallpox fixture and asserts `decks.variant` is non-NULL.

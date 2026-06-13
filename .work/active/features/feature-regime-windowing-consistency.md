@@ -1,7 +1,7 @@
 ---
 id: feature-regime-windowing-consistency
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, methodology]
 parent: null
 depends_on: []
@@ -274,3 +274,7 @@ passes no explicit `since/until` (mirrors `resolve_advisory_window`'s default-is
 When `since` or `until` is set explicitly, the single-window path is used — preserving the
 scan-count=1 guarantee the pre-existing `test_tune_deck_computes_card_winrates_exactly_once` test
 asserts. Full suite: 1269 passed (was 1254; +15 new tests).
+
+
+## Review findings (bounce 1)
+BLOCKING 1: `generation/tuning.py` sets `eff_since,eff_until=_latest_regime_window()` (both non-None) then calls `recommend_sideboard(...)` WITHOUT `adaptive=`, so `_caller_explicit_window` is True and tune's per-matchup plans never get the adaptive window — yet `cli.py` unconditionally prints a note claiming 'matchup math = adaptive (per-opponent ban-aware)'. That is a FALSE honesty label (the exact dishonesty this feature prevents). FIX: thread adaptive into tune (pass since=None/until=None + adaptive=True when the caller gave no explicit window), OR change the label to state plans use the uniform window. BLOCKING 2: the headline regression test is missing — assert that with adaptive=True a thin-regime opponent's plan is NON-degraded with n_basis matching the pooled cell, while adaptive=False leaves it degraded. (Also: the degrade-note test at tests/test_sideboard.py:~2358 is guarded behind `if plan.degraded` so it can pass vacuously — make it assert.)
