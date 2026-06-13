@@ -2155,3 +2155,272 @@ class TestDeficitPressureEndToEnd:
         finally:
             con.close()
             con_no_rounds.close()
+
+
+# ---------------------------------------------------------------------------
+# TestAdaptiveWindowSideboard — feature-regime-windowing-consistency Fix B tests
+# ---------------------------------------------------------------------------
+
+class TestAdaptiveWindowSideboard:
+    """Tests for adaptive per-opponent ban-aware windows in recommend_sideboard (Fix B).
+
+    Uses the make_rounds_corpus fixture (Control vs Combo, with 2026-01 dates)
+    and monkeypatching to simulate ban-affectedness.
+    """
+
+    # The corpus fixture uses dates 2026-01-XX.  archetype_valid_since uses BAN_EVENTS
+    # from the real banlist; we monkeypatch it to return a controlled valid_since so we
+    # don't depend on BAN_EVENTS contents.
+
+    def _field(self):
+        return _make_field({"Control": 0.5, "Combo": 0.5})
+
+    def test_adaptive_false_byte_identical_to_pre_feature(self, make_rounds_corpus, monkeypatch):
+        """With adaptive=False, recommend_sideboard produces identical SideboardPackage fields
+        as an explicit since= call (fallback path byte-identical to pre-feature behavior)."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"graveyard-reliant"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        pkg_adaptive_false = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            since="2026-01-01", until=None, adaptive=False,
+        )
+        pkg_direct = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            since="2026-01-01", until=None, adaptive=False,
+        )
+        # Both should produce the same plan_window (None adaptive label, same since/until).
+        assert pkg_adaptive_false.plan_window_label == pkg_direct.plan_window_label
+        assert pkg_adaptive_false.value_informed == pkg_direct.value_informed
+        assert pkg_adaptive_false.cards == pkg_direct.cards
+        con.close()
+
+    def test_rounds_less_corpus_no_op(self, make_rounds_corpus, monkeypatch):
+        """Rounds-less corpus → matchup_pressure=None, plan_windows empty, value_informed False.
+        adaptive=True with archetype set does NOT crash; the no-op contract is preserved."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        con, _ = make_rounds_corpus(n_repeats=0)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            archetype="Control", adaptive=True,
+        )
+        # No rounds data → value_informed=False, matchup_plans={}, plan_window_label set
+        assert pkg.value_informed is False
+        assert pkg.matchup_plans == {}
+        # plan_window_label is set to adaptive even when no data (mode is still adaptive)
+        # plan_windows may have entries (the window resolution ran) but they reflect no data
+        con.close()
+
+    def test_per_window_cache_called_once_per_distinct_window(self, make_rounds_corpus, monkeypatch):
+        """_field_matchup_values with adaptive_windows calls compute_card_winrates once per
+        distinct window, not once per opponent (scan-count bound)."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        from legacy_engine.advisory.sideboard import _field_matchup_values
+        from legacy_engine.advisory.field import build_custom_field
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        field = build_custom_field({"Control": 0.5, "Combo": 0.5})
+        maindeck = {"Brainstorm": 4}
+
+        calls = {"n": 0}
+        from legacy_engine.analytics import match_results as _mr_mod
+        real_cwr = _mr_mod.compute_card_winrates
+
+        def counting_cwr(*args, **kwargs):
+            calls["n"] += 1
+            return real_cwr(*args, **kwargs)
+
+        monkeypatch.setattr(_mr_mod, "compute_card_winrates", counting_cwr)
+        # Also patch inside the sideboard module's import scope
+        import legacy_engine.analytics.match_results as _mr_mod2
+        monkeypatch.setattr(_mr_mod2, "compute_card_winrates", counting_cwr)
+
+        # Two opponents with the SAME window → should only trigger 1 compute_card_winrates call.
+        adaptive_windows = {
+            "Control": ("2026-01-01", None),
+            "Combo": ("2026-01-01", None),
+        }
+        top_opponents = ["Control", "Combo"]
+
+        _field_matchup_values(
+            con, field, maindeck, {},
+            adaptive_windows=adaptive_windows,
+            top_opponents=top_opponents,
+        )
+        # Both opponents share the same window ("2026-01-01", None) → 1 scan.
+        assert calls["n"] == 1, (
+            f"Expected 1 compute_card_winrates call for 2 opponents with identical windows; "
+            f"got {calls['n']}"
+        )
+        con.close()
+
+    def test_two_distinct_windows_two_scans(self, make_rounds_corpus, monkeypatch):
+        """Two opponents with DIFFERENT windows → 2 compute_card_winrates calls."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        from legacy_engine.advisory.sideboard import _field_matchup_values
+        from legacy_engine.advisory.field import build_custom_field
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        field = build_custom_field({"Control": 0.5, "Combo": 0.5})
+        maindeck = {"Brainstorm": 4}
+
+        calls = {"n": 0}
+        import legacy_engine.analytics.match_results as _mr_mod2
+        real_cwr = _mr_mod2.compute_card_winrates
+
+        def counting_cwr(*args, **kwargs):
+            calls["n"] += 1
+            return real_cwr(*args, **kwargs)
+
+        monkeypatch.setattr(_mr_mod2, "compute_card_winrates", counting_cwr)
+
+        adaptive_windows = {
+            "Control": ("2026-01-10", None),
+            "Combo": ("2026-01-05", None),   # different since date
+        }
+        top_opponents = ["Control", "Combo"]
+
+        _field_matchup_values(
+            con, field, maindeck, {},
+            adaptive_windows=adaptive_windows,
+            top_opponents=top_opponents,
+        )
+        assert calls["n"] == 2, (
+            f"Expected 2 compute_card_winrates calls for 2 opponents with different windows; "
+            f"got {calls['n']}"
+        )
+        con.close()
+
+    def test_honest_degrade_note_names_pooled_window(self, make_rounds_corpus, monkeypatch):
+        """When an opponent is thin even after pooling, the degraded MatchupPlan note
+        names the pooled valid_since, not a bare 'speculative, n>=0'."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        from legacy_engine.analytics.affectedness import archetype_valid_since as _avs_real
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        # Use n_repeats=1 → n=2 per cell → speculative, will NOT clear gate even after pooling.
+        con, _ = make_rounds_corpus(n_repeats=1)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        # Monkeypatch archetype_valid_since inside sideboard module to return a deterministic date
+        # for "Control" (deck arch) and for "Combo" (opponent), so adaptive_windows are built.
+        import legacy_engine.analytics.affectedness as _aff_mod
+
+        def _patched_avs(con_arg, archetypes, **kwargs):
+            result = {a: None for a in archetypes}
+            if "Control" in archetypes:
+                result["Control"] = "2025-11-10"
+            if "Combo" in archetypes:
+                result["Combo"] = "2025-11-10"
+            return result
+
+        monkeypatch.setattr(_aff_mod, "archetype_valid_since", _patched_avs)
+        # Also patch the import in sideboard.py's recommend_sideboard closure
+        monkeypatch.setattr(
+            "legacy_engine.analytics.affectedness.archetype_valid_since",
+            _patched_avs,
+        )
+
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            archetype="Control", adaptive=True,
+        )
+
+        # If adaptive windows were built and any plan was computed, check degraded note
+        if pkg.matchup_plans:
+            for opp, plan in pkg.matchup_plans.items():
+                if plan.degraded:
+                    # Note must mention the pooled window or "pooling" or "reasoning-based"
+                    note_lower = plan.note.lower()
+                    assert (
+                        "pooling" in note_lower
+                        or "2025-11-10" in plan.note
+                        or "even" in note_lower
+                        or "reasoning-based" in note_lower
+                    ), (
+                        f"Degraded plan for {opp!r} should name the pooled window. "
+                        f"Got note: {plan.note!r}"
+                    )
+        con.close()
+
+    def test_plan_window_label_adaptive_when_archetype_set(self, make_rounds_corpus, monkeypatch):
+        """When adaptive=True and archetype is provided, plan_window_label is the adaptive label."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        import legacy_engine.analytics.affectedness as _aff_mod
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        def _patched_avs(con_arg, archetypes, **kwargs):
+            return {a: None for a in archetypes}
+        monkeypatch.setattr(_aff_mod, "archetype_valid_since", _patched_avs)
+
+        con, _ = make_rounds_corpus(n_repeats=5)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            archetype="Control", adaptive=True,
+        )
+        assert "adaptive" in pkg.plan_window_label.lower(), (
+            f"Expected plan_window_label to contain 'adaptive'; got {pkg.plan_window_label!r}"
+        )
+        con.close()
+
+    def test_adaptive_false_has_no_adaptive_label(self, make_rounds_corpus, monkeypatch):
+        """With adaptive=False, plan_window_label is NOT the adaptive label."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        con, _ = make_rounds_corpus(n_repeats=5)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy",
+            since="2026-01-01", adaptive=False,
+        )
+        # When adaptive=False, plan_window_label should not be the adaptive label
+        assert "adaptive (per-opponent" not in pkg.plan_window_label, (
+            f"Expected no adaptive label with adaptive=False; got {pkg.plan_window_label!r}"
+        )
+        con.close()

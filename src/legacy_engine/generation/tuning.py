@@ -708,7 +708,9 @@ def tune_deck(
             "no-signal-skip: no gate-clearing per-card matchup data found for "
             f"archetype {archetype!r} vs the current field in window "
             f"[{eff_since}, {eff_until}]. "
-            "Maindeck kept as-is (consensus); sideboard recommender still applied."
+            "Maindeck kept as-is (consensus); sideboard recommender still applied. "
+            f"[window audit: consensus/card-freq list window [{eff_since}..{eff_until}] (uniform); "
+            "matchup math uses adaptive per-opponent ban-aware windows — intentional divergence]"
         )
         log.info("tune_deck: %s", reason)
 
@@ -774,6 +776,12 @@ def tune_deck(
         f"per-card-value greedy converged after {len(swaps)} swap(s)"
         if len(swaps) < max_swaps
         else f"per-card-value greedy: max_swaps={max_swaps} reached"
+    )
+    # Fix A: note the intentional window divergence so it is never silent.
+    reason += (
+        f" [window audit: consensus/card-freq list uses current-regime window "
+        f"[{eff_since}..{eff_until}] (uniform); matchup math uses adaptive per-opponent "
+        "ban-aware windows — intentional divergence, not a bug]"
     )
 
     # ── Re-run sideboard recommender for the tuned maindeck ──────────────────

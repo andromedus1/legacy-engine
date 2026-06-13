@@ -112,6 +112,8 @@ def _field_matchup_values(
     top_k: int = 8,
     gate: tuple[str, ...] = _VALUE_GATE,
     card_winrates=None,
+    adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
+    top_opponents: "list[str] | None" = None,
 ) -> dict[str, _OppValues]:
     """Build per-opponent CardValue maps for the top_k field archetypes.
 
@@ -127,6 +129,17 @@ def _field_matchup_values(
     (e.g. ``recommend_sideboard`` reuses one across its two passes; ``tune_deck`` threads
     one through the whole tune). When None, it is computed here.
 
+    ``adaptive_windows``: optional dict mapping opponent archetype → (since, until) for that
+    opponent's adaptive ban-aware window.  When provided, a per-window ``CardWinRates``
+    cache is built (one scan per distinct window, not per opponent), and each opponent's
+    card values are sourced from its own window's aggregate.  When ``card_winrates`` is ALSO
+    provided alongside ``adaptive_windows``, it seeds the cache for ``(since, until)`` (the
+    uniform fallback window) to avoid a redundant scan when one of the adaptive windows
+    happens to match the uniform window.
+
+    ``top_opponents``: pre-computed ordered list of top-k opponents (avoids recomputing
+    it when the caller already selected them).  When None, they are computed here.
+
     Window defaults to the latest ban regime when both since/until are None.
 
     Returns {} if the per-card win-rate table cannot be built (no rounds data).
@@ -134,6 +147,59 @@ def _field_matchup_values(
     from legacy_engine.analytics.match_results import compute_card_winrates
     from legacy_engine.analytics.card_value import card_values_vs
 
+    # ── Determine top_opponents ────────────────────────────────────────────────
+    if top_opponents is None:
+        top_opponents = [
+            arch
+            for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
+        ][:top_k]
+
+    main_cards = list(deck_maindeck.keys())
+    side_cards = list(sideboard_15.keys())
+
+    # ── Adaptive-windows path (Fix B): per-window CardWinRates cache ──────────
+    if adaptive_windows is not None:
+        # Build a cache: window_tuple → CardWinRates (one scan per distinct window).
+        # Seed the cache with any pre-computed card_winrates to avoid a redundant scan when
+        # an adaptive window happens to equal the caller's uniform fallback window.
+        wr_cache: dict[tuple[str | None, str | None], object] = {}
+        if card_winrates is not None:
+            wr_cache[(since, until)] = card_winrates
+        result: dict[str, _OppValues] = {}
+        for opp in top_opponents:
+            opp_window = adaptive_windows.get(opp, (since, until))
+            if opp_window not in wr_cache:
+                try:
+                    wr_cache[opp_window] = compute_card_winrates(
+                        con, since=opp_window[0], until=opp_window[1]
+                    )
+                except Exception as exc:
+                    log.debug("_field_matchup_values (adaptive): compute_card_winrates failed for window %s: %s", opp_window, exc)
+                    wr_cache[opp_window] = None
+            r_opp = wr_cache[opp_window]
+            if r_opp is None or r_opp.coverage.decisive_matched == 0:
+                # No data for this window — degrade honestly with a note
+                result[opp] = _OppValues(
+                    opponent=opp,
+                    maindeck={},
+                    side={},
+                    cleared_gate=False,
+                )
+                continue
+            main_vals = card_values_vs(r_opp, main_cards, "main", opp, gate=gate) if main_cards else {}
+            side_vals = card_values_vs(r_opp, side_cards, "side", opp, gate=gate) if side_cards else {}
+            cleared = any(cv.tier in gate for cv in main_vals.values()) or any(
+                cv.tier in gate for cv in side_vals.values()
+            )
+            result[opp] = _OppValues(
+                opponent=opp,
+                maindeck=main_vals,
+                side=side_vals,
+                cleared_gate=cleared,
+            )
+        return result
+
+    # ── Uniform-window path (original behavior, byte-identical) ───────────────
     if card_winrates is not None:
         r = card_winrates
     else:
@@ -147,16 +213,7 @@ def _field_matchup_values(
     if r.coverage.decisive_matched == 0:
         return {}
 
-    # Top-k opponents by field share (descending).
-    top_opponents = [
-        arch
-        for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
-    ][:top_k]
-
-    main_cards = list(deck_maindeck.keys())
-    side_cards = list(sideboard_15.keys())
-
-    result: dict[str, _OppValues] = {}
+    result = {}
     for opp in top_opponents:
         main_vals = card_values_vs(r, main_cards, "main", opp, gate=gate) if main_cards else {}
         side_vals = card_values_vs(r, side_cards, "side", opp, gate=gate) if side_cards else {}
@@ -842,6 +899,7 @@ def _plan_matchups(
     since: str | None = None,
     until: str | None = None,
     catalog: Optional[dict[str, HoserCard]] = None,
+    adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
 ) -> dict[str, MatchupPlan]:
     """Build per-opponent OUT/IN swap plans for the maindeck.
 
@@ -877,13 +935,22 @@ def _plan_matchups(
 
     plans: dict[str, MatchupPlan] = {}
 
-    # Build locked core once per archetype (not per opponent)
+    # Build locked core once per archetype using the deck-archetype's own adaptive window.
+    # When adaptive_windows is provided, use the deck-archetype's own window (not an
+    # opponent's window) — the locked core describes the deck's identity, not a matchup.
     locked_core: frozenset[str] = frozenset()
     lock_note = ""
+    arch_since = since
+    arch_until = until
+    if archetype is not None and adaptive_windows is not None:
+        # Use the deck-archetype's own window (keyed by archetype itself, if present)
+        arch_win = adaptive_windows.get(archetype)
+        if arch_win is not None:
+            arch_since, arch_until = arch_win
     if archetype is not None:
         try:
             from legacy_engine.generation.consensus import card_frequencies
-            freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+            freqs = card_frequencies(con, archetype, board="main", since=arch_since, until=arch_until)
             locked_core = frozenset(
                 cf.name for cf in freqs if cf.inclusion_pct >= lock_threshold
             )
@@ -896,6 +963,20 @@ def _plan_matchups(
 
     for opp, ov in opp_values.items():
         if not ov.cleared_gate:
+            # Build an honest degraded note: name the adaptive window if one was used,
+            # so the user knows the pooling was attempted and how thin the window still is.
+            if adaptive_windows is not None and opp in adaptive_windows:
+                opp_win = adaptive_windows[opp]
+                since_label = opp_win[0] or "full-corpus"
+                note = (
+                    f"even pooling to {since_label}, the {opp} matchup is thin "
+                    f"(n<gate threshold) — guidance is reasoning-based, not data-derived"
+                )
+            else:
+                note = (
+                    f"thin data (n < gate threshold) for {opp} — "
+                    "no per-matchup plan; rely on the maindeck-aware 15 composition"
+                )
             plans[opp] = MatchupPlan(
                 opponent=opp,
                 side_out={},
@@ -904,10 +985,7 @@ def _plan_matchups(
                 n_basis=0,
                 tier="speculative",
                 degraded=True,
-                note=(
-                    f"thin data (n < gate threshold) for {opp} — "
-                    "no per-matchup plan; rely on the maindeck-aware 15 composition"
-                ),
+                note=note,
             )
             continue
 
@@ -1113,6 +1191,8 @@ class SideboardPackage:
     ``matchup_plans``: per-opponent OUT/IN plans (empty dict when no per-card data).
     ``value_informed``: True when ≥1 opponent cleared the per-card data gate.
     ``plan_window``: (since, until) window used for per-card data (both None = no data).
+    ``plan_window_label``: human-readable label for the plan window (for CLI echo).
+    ``plan_windows``: per-opponent adaptive window audit (opponent → (since, until)).
     """
 
     cards: dict[str, int]
@@ -1128,6 +1208,9 @@ class SideboardPackage:
     matchup_plans: dict[str, MatchupPlan] = dc_field(default_factory=dict)
     value_informed: bool = False
     plan_window: tuple[str | None, str | None] = (None, None)
+    # --- Additive fields (regime-windowing-consistency) ---
+    plan_window_label: str = ""                              # "" = not set; "adaptive (per-opponent ban-aware)" in adaptive mode
+    plan_windows: dict[str, tuple[str | None, str | None]] = dc_field(default_factory=dict)  # per-opponent audit
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -1163,6 +1246,12 @@ def recommend_sideboard(
     opponents: list[str] | None = None,
     max_swaps: int = 4,
     card_winrates=None,
+    # Fix B: adaptive ban-aware per-opponent windows (regime-windowing-consistency).
+    # When True and archetype is set, pool each opponent's card-value cells back to
+    # max(valid_since[archetype], valid_since[opponent]) — mirrors build_adaptive_matrix.
+    # When False (or archetype is None), falls back to the single uniform window path
+    # (byte-identical to pre-feature for existing callers).
+    adaptive: bool = True,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -1205,6 +1294,8 @@ def recommend_sideboard(
             field_source=field.field_source,
             heuristic_note=_HEURISTIC_NOTE,
             warnings=("budget ≤ 0 — all slots reserved",),
+            plan_window_label="",
+            plan_windows={},
         )
 
     warnings: list[str] = []
@@ -1245,9 +1336,67 @@ def recommend_sideboard(
             pass  # keep both None (open window)
 
     plan_window: tuple[str | None, str | None] = (eff_since, eff_until)
+    plan_window_label: str = ""
+    computed_adaptive_windows: dict[str, tuple[str | None, str | None]] | None = None
+
+    # Fix B: build per-opponent adaptive windows (ban-aware, mirrors build_adaptive_matrix).
+    # Pool each opponent's window back to max(valid_since[deck_arch], valid_since[opp]).
+    # Only computed when:
+    #   - adaptive=True and archetype is set, AND
+    #   - no explicit since/until was passed by the caller (same rule as resolve_advisory_window:
+    #     default is adaptive; explicit flags = uniform request).
+    # This preserves byte-identical behavior for all existing callers that pass since/until.
+    # Compute the top-k opponents ONCE so both _field_matchup_values passes and the
+    # adaptive-window resolution use the same set (prevents window/opponent drift).
+    _top_opponents: list[str] | None = None
+    _top_k = 8  # must match _field_matchup_values default
+
+    # Use the ORIGINAL since/until args (before regime-window defaulting) to decide whether
+    # the caller explicitly requested a specific window.
+    _caller_explicit_window = (since is not None) or (until is not None)
+    _use_adaptive = adaptive and archetype is not None and not _caller_explicit_window
+    if _use_adaptive:
+        _top_opponents = [
+            arch
+            for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
+        ][:_top_k]
+        try:
+            from legacy_engine.analytics.affectedness import archetype_valid_since as _avs
+            all_archetypes_to_check = list({archetype, *_top_opponents})
+            valid_since_map = _avs(con, all_archetypes_to_check)
+            deck_valid_since = valid_since_map.get(archetype)
+
+            computed_adaptive_windows = {}
+            for opp in _top_opponents:
+                opp_valid_since = valid_since_map.get(opp)
+                # Pool to max(valid_since[deck_arch], valid_since[opp])
+                both = [s for s in (deck_valid_since, opp_valid_since) if s is not None]
+                opp_since = max(both) if both else None
+                computed_adaptive_windows[opp] = (opp_since, None)
+            # Also record deck-archetype's own window (for locked-core in _plan_matchups)
+            if deck_valid_since is not None:
+                computed_adaptive_windows[archetype] = (deck_valid_since, None)
+
+            plan_window = (None, None)  # no single uniform window in adaptive mode
+            plan_window_label = "adaptive (per-opponent ban-aware)"
+            log.debug(
+                "recommend_sideboard: adaptive windows for %d opponents (deck_arch=%s, valid_since=%s)",
+                len(_top_opponents), archetype, deck_valid_since,
+            )
+        except Exception as exc:
+            log.debug(
+                "recommend_sideboard: adaptive window resolution failed (%s); falling back to uniform",
+                exc,
+            )
+            computed_adaptive_windows = None
+            plan_window = (eff_since, eff_until)
+            plan_window_label = ""
 
     # Compute the per-card win-rate aggregate ONCE (heavy full-corpus scan) and reuse it
     # across both _field_matchup_values passes below; callers (e.g. tune_deck) may inject one.
+    # In adaptive mode the uniform aggregate is NOT used for per-opponent values (each opponent
+    # uses its own window's aggregate via _field_matchup_values adaptive_windows param), but we
+    # still compute it here as a fallback for the pressure pass when adaptive_windows fails.
     if card_winrates is None:
         try:
             from legacy_engine.analytics.match_results import compute_card_winrates
@@ -1259,7 +1408,13 @@ def recommend_sideboard(
     try:
         opp_values_pre = _field_matchup_values(
             con, field, deck_maindeck, {},
-            since=eff_since, until=eff_until, card_winrates=card_winrates,
+            since=eff_since, until=eff_until,
+            # Pass card_winrates as a cache seed for both adaptive and uniform paths.
+            # In adaptive mode it seeds the (eff_since, eff_until) entry, avoiding a redundant
+            # scan when an opponent's adaptive window happens to equal the uniform fallback.
+            card_winrates=card_winrates,
+            adaptive_windows=computed_adaptive_windows,
+            top_opponents=_top_opponents,
         )
     except Exception as exc:
         log.debug("recommend_sideboard: _field_matchup_values failed: %s", exc)
@@ -1314,6 +1469,8 @@ def recommend_sideboard(
             warnings=tuple(warnings),
             value_informed=any_gate_cleared,
             plan_window=plan_window,
+            plan_window_label=plan_window_label,
+            plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -1349,7 +1506,10 @@ def recommend_sideboard(
         try:
             opp_values_final = _field_matchup_values(
                 con, field, deck_maindeck, final_cards,
-                since=eff_since, until=eff_until, card_winrates=card_winrates,
+                since=eff_since, until=eff_until,
+                card_winrates=card_winrates,
+                adaptive_windows=computed_adaptive_windows,
+                top_opponents=_top_opponents,
             )
             # If caller restricted to specific opponents, filter here.
             if opponents is not None:
@@ -1362,6 +1522,7 @@ def recommend_sideboard(
                 since=eff_since,
                 until=eff_until,
                 catalog=catalog,
+                adaptive_windows=computed_adaptive_windows,
             )
         except Exception as exc:
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
@@ -1380,4 +1541,6 @@ def recommend_sideboard(
         matchup_plans=matchup_plans,
         value_informed=any_gate_cleared,
         plan_window=plan_window,
+        plan_window_label=plan_window_label,
+        plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
     )
