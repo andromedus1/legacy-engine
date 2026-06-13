@@ -59,6 +59,15 @@ TOURNAMENT_DDL = [
     )""",
 ]
 
+# Derived identity table — populated by analytics.players.identity.materialize_player_aliases.
+# Declared here so init_schema always creates the empty table in a fresh DB.
+PLAYER_ALIASES_DDL = """\
+CREATE TABLE IF NOT EXISTS player_aliases (
+    handle_norm VARCHAR PRIMARY KEY,
+    player_id   VARCHAR NOT NULL
+)\
+"""
+
 
 def connect(path: Path | str = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
     """Open (creating parent dirs) a DuckDB connection. Use ":memory:" for tests."""
@@ -83,6 +92,8 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     # Migration: add variant column (sub-archetype tag, NULL until labeler resolves it).
     # Idempotent — ADD COLUMN IF NOT EXISTS is a no-op on tables that already carry it.
     con.execute("ALTER TABLE decks ADD COLUMN IF NOT EXISTS variant VARCHAR")
+    # Derived identity table — data populated by materialize_player_aliases; empty until then.
+    con.execute(PLAYER_ALIASES_DDL)
 
 
 # Multi-face layout classes — determine how a face name inherits attributes.
