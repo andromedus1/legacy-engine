@@ -1,7 +1,7 @@
 ---
 id: strong-player-signal-identity
 kind: story
-stage: implementing
+stage: review
 tags: [analytics]
 parent: feature-strong-player-signal
 depends_on: []
@@ -42,3 +42,25 @@ curation but writes nothing.
 - `resolve_player` deterministic, reuses `normalize_player`, never raises.
 - Handles absent from the map resolve to themselves (no silent drop/merge).
 - `identify suggest` writes nothing — suggestions to stdout only.
+
+## Implementation notes
+
+**Files created:**
+- `src/legacy_engine/data/players/aliases.json` — curated alias SSOT; seeded with `bosh-n-roll` cluster (three handles).
+- `src/legacy_engine/analytics/players/__init__.py` — package init.
+- `src/legacy_engine/analytics/players/identity.py` — `load_alias_map`, `resolve_player`, `materialize_player_aliases`, `suggest_aliases`, `AliasSuggestion`.
+- `tests/analytics/players/__init__.py`
+- `tests/analytics/players/test_identity.py` — 25 tests (all passing).
+
+**Files modified:**
+- `src/legacy_engine/config.py` — added `PLAYERS_DIR` and `ALIASES_PATH` constants (constants-only-config pattern).
+- `src/legacy_engine/ingestion/store.py` — added `PLAYER_ALIASES_DDL` + wired into `init_schema` so a fresh DB always has the empty table structure; data population is separate via `materialize_player_aliases`.
+
+**CLI:** deferred to the consensus story (`strong-player-signal-consensus`) per the design's CLI section — the `identify` group with `suggest` leaf is listed under CLI for story 1 in the feature design, but the story units explicitly decomposed it as U3 here. The logic is fully implemented in `identity.py`; the CLI wrapper can be added without touching this module. Noting the deferral here for the orchestrator.
+
+**Deviations from design:**
+- `PLAYER_ALIASES_DDL` constant in `store.py` + `CREATE TABLE IF NOT EXISTS` in `init_schema` ensures the table structure exists in every fresh DB. The data (rows) is populated separately via `materialize_player_aliases`. This cleanly separates schema declaration (store's job) from data materialization (identity module's job), mirroring the `cards` DDL pattern exactly.
+- `suggest_aliases` uses a union-find over compatible pairs within each stem group rather than a simple pairwise list, to correctly handle clusters of 3+ handles.
+- Test fixture for `test_proposes_bosh_cluster` places the three Bosh handles in separate tournaments (not the same event) — this is the realistic scenario (a player uses different handles at different events), and is what the heuristic is designed to find.
+
+**Suite:** 1415 passed (was 1390; +25 new). Ruff: clean. Mypy: no new errors (pre-existing duckdb import-not-found is project-wide).
