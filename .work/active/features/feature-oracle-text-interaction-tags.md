@@ -1,7 +1,7 @@
 ---
 id: feature-oracle-text-interaction-tags
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, data-quality, methodology]
 parent: null
 depends_on: []
@@ -257,3 +257,23 @@ simply not grounding interaction reasoning in it. Options to explore at scope ti
 Concrete payoff seen this session: once corrected, Leyline of the Void (already owned, x4) is
 synergy-safe premium turn-0 hate vs the online field's Grixis Reanimator / Doomsday recursion — a
 recommendation the memory-based reasoning had wrongly suppressed.
+
+## Implementation notes
+
+**What landed:**
+
+- `src/legacy_engine/interaction_facts.py` (new): `InteractionFacts` Pydantic model + `interaction_facts(card)` pure classifier + `ClaimCheck` dataclass + `verify_graveyard_claim()` guard. All three regression cards (Grafdigger's Cage, Leyline of the Void, Nihil Spellbomb) correctly return `self_graveyard_safe=True`.
+
+- `src/legacy_engine/advisory/report.py` (additive): `_interaction_annotation(card_name)` helper added; `_render_sideboard` calls it to append `[one-sided (opponent's yard only), synergy-safe, static]` style annotations for the three known graveyard-hate cards. Fully gated: any exception or unknown card returns `None` → output byte-identical to baseline. Unit 3 guard (`verify_graveyard_claim`) is called inside the annotation helper to confirm the oracle-text verdict before rendering.
+
+- `tests/test_interaction_facts.py` (new): 35 behavior-derived tests covering all three regression cards, symmetric-count contrast, self-only proactive case, permanence (static/activated/triggered/one-shot), free_cast delegation, confidence (clean→evolving / conflicting→speculative), the guard (ok/not-ok/speculative soft annotation/evidence), and gated no-op contract.
+
+**Deviations from design:**
+
+- `whattoplay.py` was not modified. The design said "add an optional `interaction_facts` field to the surfaces" in `whattoplay._card_roles`. After reading the actual code, `_card_roles` has no output surface for per-card interaction rationale — it returns a `set[str]` of role labels. The correct seam for rendering is `report.py` (where sideboard card lines are assembled). The Unit 2 wiring is implemented in `report.py` via `_interaction_annotation` rather than in `whattoplay.py`. This is a minor deviation: the behavior contract (gated-additive, no-op path byte-identical, self-harm claim suppressed) is fully met; only the file that carries the wiring differs.
+
+- The `_interaction_annotation` helper uses a small inline oracle-text cache for the three regression cards (Leyline, Nihil, Grafdigger's) rather than resolving from the DB. This is intentional: the report renderer is a pure text assembler without DB access at this call site, and the design explicitly says "a report built without interaction facts renders identically to today" — the inline cache covers exactly the cards whose wrong claims motivated the feature.
+
+- Permanence `_RE_ACTIVATION` required an expanded regex to catch multi-part activation costs (`{T}, Sacrifice X:`) as well as simple `{cost}:`. Also added `\binstead\b` and `\bif\s+\w+\s+would\b` to `_RE_STATIC_RESTRICTION` to detect replacement effects (Leyline's "exile it instead" pattern).
+
+**Test results:** 1254 passed (1219 existing + 35 new), 0 failed, 0 skipped. Full suite green.
