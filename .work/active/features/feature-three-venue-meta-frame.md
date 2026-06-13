@@ -1,7 +1,7 @@
 ---
 id: feature-three-venue-meta-frame
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics]
 parent: null
 depends_on: []
@@ -277,3 +277,36 @@ When `engine-geo-dimension` (Phase 2) lands, extend `analytics/venue.py`'s membe
 `local:<region>` and `regional` venues (the latter gated on the new event-tier dimension) and
 `resolve_venues` to accept those keys. The comparison/divergence/CLI layers consume `list[Venue]`
 and need no change. (Recorded as a forward note on the epic, not a dependency edge.)
+
+## Implementation notes
+
+**Files created:**
+- `src/legacy_engine/analytics/venue.py` — `Venue` abstraction, `ONLINE`/`PAPER` singletons,
+  `resolve_venues`, `VenueMetaShare`, `compute_venue_metashare`, `ArchetypeDivergence`,
+  `VenueDivergence`, `venue_divergence`. Pure analytics layer, no advisory import.
+- `tests/analytics/__init__.py` — package marker for new analytics test subdirectory.
+- `tests/analytics/test_venue.py` — 19 tests (pure venue_divergence hand-built inputs incl.
+  2026-06-13 regression fixture; compute_venue_metashare with in-memory split corpus;
+  resolve_venues edge cases).
+- `tests/test_cli_venues.py` — 18 tests (report meta --venues comparison mode;
+  advise report --venues per-venue Field Read + cross-venue footer; mutual exclusion guards;
+  backward-compat assertions confirming no-`--venues` paths are unaffected).
+
+**Files modified:**
+- `src/legacy_engine/advisory/report.py` — added `render_cross_venue_positioning` renderer
+  (pure text, no recompute; placed before `render_field_read`; does not disturb
+  `_interaction_annotation` or any existing renderer).
+- `src/legacy_engine/cli.py` — augmented `report meta` with `--venues`, `--min-spread`;
+  augmented `advise report` with `--venues`; added `_print_venue_divergence` renderer.
+  All edits additive and localized — legacy code paths byte-identical when `--venues` unset.
+- `.work/active/features/feature-three-venue-meta-frame.md` — `stage: implementing → review`.
+
+**Test counts:** 1390 total (1353 baseline + 37 new); all pass.
+
+**Deviations from design:**
+- `resolve_venues` accepts `con=None` for the pure lookup path (con not yet used; kept in
+  signature for forward compatibility per the design's "probe corpus" note).
+- `_print_venue_divergence` renders tier markers inline (? speculative, ~ evolving) rather
+  than a separate column — simpler and readable given the table width constraint.
+- `render_cross_venue_positioning` uses right-aligned column format with a fixed col_w=14;
+  label truncation at col_w characters keeps wide labels from breaking alignment.
