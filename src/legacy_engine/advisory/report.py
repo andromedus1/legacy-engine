@@ -609,6 +609,71 @@ def _render_sideboard(report: FieldReadReport) -> str:
     return "\n".join(lines)
 
 
+def render_cross_venue_positioning(reports: dict[str, "FieldReadReport"]) -> str:
+    """Render a compact cross-venue positioning delta footer.
+
+    Shows the deck's positioning S and best-deck-call per venue side by side —
+    the decision-relevant divergence ("your deck is well-positioned online but
+    poorly in paper").  ``reports`` maps ``venue.key`` to a ``FieldReadReport``
+    (already built per venue by the CLI orchestrator; this function is a pure
+    text renderer, no recompute).
+
+    Only emits rows for venues where positioning was computed (not None).
+    """
+    if not reports:
+        return ""
+
+    lines: list[str] = ["── Cross-venue positioning delta ──"]
+
+    # Header row
+    venue_keys = list(reports.keys())
+    col_w = 14
+    header = f"  {'Metric':<28}" + "".join(f"  {k:<{col_w}}" for k in venue_keys)
+    lines.append(header)
+    lines.append("  " + "-" * (28 + (col_w + 2) * len(venue_keys)))
+
+    # Positioning S row
+    s_parts = [f"  {'Positioning S':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        pos = r.positioning
+        if pos is None:
+            s_parts.append(f"  {'N/A':<{col_w}}")
+        elif not pos.s_computable:
+            s_parts.append(f"  {'no data':<{col_w}}")
+        else:
+            scope_note = "*" if pos.restricted else ""
+            s_parts.append(f"  {pos.s_mean:.3f}{scope_note:<{col_w - 5}}")
+    lines.append("".join(s_parts))
+
+    # Coverage row
+    cov_parts = [f"  {'Coverage':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        pos = r.positioning
+        if pos is None:
+            cov_parts.append(f"  {'N/A':<{col_w}}")
+        else:
+            cov_parts.append(f"  {pos.data_coverage:.0%}{'':>{col_w - 4}}")
+    lines.append("".join(cov_parts))
+
+    # Best-deck-call row
+    bdc_parts = [f"  {'Best-deck-call':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        bdc = r.best_deck_call
+        if bdc is None:
+            bdc_parts.append(f"  {'N/A':<{col_w}}")
+        else:
+            label = bdc.label[:col_w]
+            bdc_parts.append(f"  {label:<{col_w}}")
+    lines.append("".join(bdc_parts))
+
+    lines.append("  (* = restricted to covered sub-field)")
+
+    return "\n".join(lines)
+
+
 def render_field_read(report: FieldReadReport) -> str:
     """Render the full Field Read & Deck Recommendation as labeled text.
 
