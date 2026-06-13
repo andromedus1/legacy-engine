@@ -578,6 +578,11 @@ class TunedDeck:
     reason: str = ""                         # explanation of objective/fallback
     legality_errors: list[str] = dc_field(default_factory=list)  # ALWAYS [] on return
 
+    # Window label from the sideboard recommender (e.g. "adaptive (per-opponent ban-aware)").
+    # Empty string means the uniform current-regime window was used (e.g. caller passed
+    # an explicit --since/--until, so adaptive per-opponent pooling was disabled).
+    plan_window_label: str = ""
+
 
 def tune_deck(
     con: duckdb.DuckDBPyConnection,
@@ -649,6 +654,14 @@ def tune_deck(
     - positioning_s carried as archetype context; unchanged by card swaps (labeled).
     """
     # ── Resolve window + field ────────────────────────────────────────────────
+    # Track whether the caller supplied an explicit window.  When they did NOT,
+    # we pass since=None/until=None to recommend_sideboard so its adaptive
+    # per-opponent ban-aware path activates (the default).  When they DID pass
+    # an explicit window, we forward it so recommend_sideboard uses the same
+    # uniform window (adaptive is suppressed by _caller_explicit_window logic
+    # inside recommend_sideboard when since/until are non-None).
+    _caller_explicit_window = (since is not None) or (until is not None)
+
     if since is None and until is None:
         eff_since, eff_until = _latest_regime_window()
     else:
@@ -739,9 +752,15 @@ def tune_deck(
         v_before = sum(copies * fwv.get(card, 0.0) for card, copies in maindeck.items())
 
         # Still run the sideboard recommender for the 15.
+        # When the caller gave no explicit window, pass since=None/until=None so that
+        # recommend_sideboard's adaptive per-opponent ban-aware path can activate.
+        # When the caller gave an explicit window, forward it unchanged (adaptive stays
+        # off because recommend_sideboard sees non-None since/until as an explicit request).
+        sb_since = None if not _caller_explicit_window else eff_since
+        sb_until = None if not _caller_explicit_window else eff_until
         sb_pkg = recommend_sideboard(
             con, field, maindeck, solver="greedy",
-            archetype=archetype, since=eff_since, until=eff_until,
+            archetype=archetype, since=sb_since, until=sb_until,
             card_winrates=card_winrates,
         )
         recommended_sb = dict(sb_pkg.cards)
@@ -771,6 +790,7 @@ def tune_deck(
             fell_back=True,
             reason=reason,
             legality_errors=legality_errors,
+            plan_window_label=sb_pkg.plan_window_label,
         )
 
     # ── Greedy swap loop (per-card-value objective) ───────────────────────────
@@ -805,9 +825,13 @@ def tune_deck(
     )
 
     # ── Re-run sideboard recommender for the tuned maindeck ──────────────────
+    # Same adaptive/uniform logic as the no-signal path above: when the caller
+    # gave no explicit window, pass None so adaptive per-opponent windows activate.
+    sb_since = None if not _caller_explicit_window else eff_since
+    sb_until = None if not _caller_explicit_window else eff_until
     sb_pkg = recommend_sideboard(
         con, field, final_main, solver="greedy",
-        archetype=archetype, since=eff_since, until=eff_until,
+        archetype=archetype, since=sb_since, until=sb_until,
         card_winrates=card_winrates,
     )
     recommended_sb = dict(sb_pkg.cards)
@@ -849,4 +873,5 @@ def tune_deck(
         fell_back=False,
         reason=reason,
         legality_errors=legality_errors,
+        plan_window_label=sb_pkg.plan_window_label,
     )

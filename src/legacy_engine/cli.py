@@ -2615,13 +2615,18 @@ def generate_tune(
 
     # ── Header ───────────────────────────────────────────────────────────────
     click.echo(f"\n// Tuned deck: {tuned.archetype}")
-    # Fix A: echo window divergence — list window is current-regime, matchup math is adaptive.
-    # This is an intentional, defensible divergence; state it loudly, not silently.
+    # Echo window divergence — list window is current-regime; matchup math window depends
+    # on whether the caller gave an explicit --since/--until:
+    #   • No explicit window → recommend_sideboard uses adaptive per-opponent ban-aware pooling
+    #     (tuned.plan_window_label = "adaptive (per-opponent ban-aware)")
+    #   • Explicit --since/--until → recommend_sideboard uses the caller-supplied uniform window
+    #     (tuned.plan_window_label = "" — adaptive suppressed by explicit window)
+    _matchup_window_label = tuned.plan_window_label or "current-regime (uniform, explicit window)"
     click.echo(
         f"// NOTE: tuning uses two windows: consensus/card-frequency list = "
-        f"current-regime (uniform); matchup math = adaptive (per-opponent ban-aware). "
+        f"current-regime (uniform); matchup math = {_matchup_window_label}. "
         "This divergence is intentional — the list reflects what is played NOW; "
-        "matchup depth borrows prior-regime data. Both are labeled here."
+        "matchup depth may borrow prior-regime data. Both are labeled here."
     )
 
     # Primary objective: per-card field-weighted value (the real swap driver).
