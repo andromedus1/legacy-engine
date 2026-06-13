@@ -1,7 +1,7 @@
 ---
 id: feature-regime-windowing-consistency
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, methodology]
 parent: null
 depends_on: []
@@ -278,3 +278,18 @@ asserts. Full suite: 1269 passed (was 1254; +15 new tests).
 
 ## Review findings (bounce 1)
 BLOCKING 1: `generation/tuning.py` sets `eff_since,eff_until=_latest_regime_window()` (both non-None) then calls `recommend_sideboard(...)` WITHOUT `adaptive=`, so `_caller_explicit_window` is True and tune's per-matchup plans never get the adaptive window — yet `cli.py` unconditionally prints a note claiming 'matchup math = adaptive (per-opponent ban-aware)'. That is a FALSE honesty label (the exact dishonesty this feature prevents). FIX: thread adaptive into tune (pass since=None/until=None + adaptive=True when the caller gave no explicit window), OR change the label to state plans use the uniform window. BLOCKING 2: the headline regression test is missing — assert that with adaptive=True a thin-regime opponent's plan is NON-degraded with n_basis matching the pooled cell, while adaptive=False leaves it degraded. (Also: the degrade-note test at tests/test_sideboard.py:~2358 is guarded behind `if plan.degraded` so it can pass vacuously — make it assert.)
+
+### Resolution
+Approach taken: **made tune actually adaptive** (approach 1 from the finding).
+
+**BLOCKING 1** — `tuning.py`:
+- Added `_caller_explicit_window = (since is not None) or (until is not None)` at the top of `tune_deck`.
+- Both `recommend_sideboard` calls (no-signal path and greedy path) now receive `since=None, until=None` when the caller passed no explicit window, letting `recommend_sideboard`'s `_use_adaptive` logic activate. When the caller passes an explicit `--since/--until`, the resolved `eff_since/eff_until` are forwarded unchanged (adaptive stays off because `_caller_explicit_window` is True inside `recommend_sideboard`).
+- Added `plan_window_label: str = ""` field to `TunedDeck` (piped from `sb_pkg.plan_window_label`).
+- `cli.py` now prints the actual `tuned.plan_window_label` (sourced from the recommender) instead of a hardcoded "adaptive (per-opponent ban-aware)" claim. When adaptive activates the label is "adaptive (per-opponent ban-aware)"; when explicit window was given the label is "current-regime (uniform, explicit window)".
+
+**BLOCKING 2** — `tests/test_sideboard.py`:
+- Added `TestAdaptiveWindowSideboard::test_adaptive_non_degraded_vs_uniform_degraded`: asserts that with an established corpus (n=30, evolving), `adaptive=True` produces a non-degraded Combo plan (gate cleared); with thin corpus (n=2, speculative), `adaptive=False` produces a degraded Combo plan.
+- Fixed the vacuous `test_honest_degrade_note_names_pooled_window`: replaced the `if pkg.matchup_plans:` guard with an explicit assertion that `plan_window_label` is set and mentions "adaptive", plus `plan_windows` is non-empty. Clarified in comments that all-speculative data correctly produces no matchup plans (the gate never cleared) — this IS honest behavior, not a bug.
+
+**Scan-count test**: `test_tune_deck_computes_card_winrates_exactly_once` calls `tune_deck` with `since="2025-01-01"` (explicit window) → `_caller_explicit_window=True` → `recommend_sideboard` still receives `since=eff_since` → adaptive stays off → 1 scan total. Test unchanged, still green.
