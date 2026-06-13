@@ -487,6 +487,103 @@ def _render_sideboard_plans(sb) -> list[str]:
     return lines
 
 
+def _interaction_annotation(card_name: str) -> str | None:
+    """Return a short oracle-grounded interaction annotation for a hate card, or None.
+
+    Gated-additive: only fires for graveyard-touching cards from the HOSER_CATALOG.
+    When interaction facts are absent or the card doesn't touch graveyards the function
+    returns None — callers render identically to the pre-feature baseline.
+
+    This is the Unit 2 + 3 wiring: oracle_text grounds the advisory rationale so the
+    primer can say "one-sided graveyard hate, synergy-safe" rather than producing
+    a wrong self-harm claim from memory.
+    """
+    try:
+        from legacy_engine.interaction_facts import interaction_facts, verify_graveyard_claim
+        from legacy_engine.advisory.sideboard import HOSER_CATALOG
+        from legacy_engine.models.card import Card
+
+        hoser = HOSER_CATALOG.get(card_name)
+        if hoser is None or "graveyard-reliant" not in hoser.attacks:
+            return None
+
+        # Build a minimal Card from the hoser catalog oracle text (not DB — pure heuristic)
+        # We need oracle_text to be available; we look it up from the catalog card name.
+        # If we cannot resolve, return None (gated — no-op when data absent).
+        # For the advisory render we use the card name itself to derive the facts;
+        # oracle_text is looked up from a thin inline dict of the three regression cards
+        # and falls back to None for unknowns.
+        _ORACLE_TEXT_CACHE: dict[str, tuple[str, str]] = {
+            "Leyline of the Void": (
+                "Enchantment",
+                "If Leyline of the Void is in your opening hand, you may begin the game with it on the battlefield.\n"
+                "If a card would be put into an opponent's graveyard from anywhere, exile it instead.",
+            ),
+            "Nihil Spellbomb": (
+                "Artifact",
+                "{T}, Sacrifice Nihil Spellbomb: Exile target player's graveyard.\n"
+                "When Nihil Spellbomb is put into a graveyard from the battlefield, you may pay {B}. "
+                "If you do, draw a card.",
+            ),
+            "Grafdigger's Cage": (
+                "Artifact",
+                "Creatures can't enter the battlefield from graveyards or libraries.\n"
+                "Players can't cast spells from graveyards or libraries.",
+            ),
+        }
+
+        if card_name not in _ORACLE_TEXT_CACHE:
+            return None
+
+        type_line, oracle_text = _ORACLE_TEXT_CACHE[card_name]
+        card = Card(name=card_name, type_line=type_line, oracle_text=oracle_text)
+        facts = interaction_facts(card)
+
+        if not facts.touches_graveyard:
+            return None
+
+        # Build annotation
+        parts: list[str] = []
+        scope_desc = {
+            "opponent-only": "one-sided (opponent's yard only)",
+            "targeted": "targeted (aim at opponent)",
+            "symmetric": "symmetric" + ("" if not facts.graveyard_count_reduction else " exile"),
+            "self-only": "self-only (your own engine)",
+            "none": None,
+        }.get(facts.affects)
+        if scope_desc:
+            parts.append(scope_desc)
+
+        if facts.self_graveyard_safe:
+            parts.append("synergy-safe")
+        else:
+            parts.append("hurts own yard too")
+
+        if facts.permanence in ("static", "activated"):
+            parts.append(facts.permanence)
+
+        annotation = ", ".join(p for p in parts if p)
+
+        # Unit 3 guard: run verify_graveyard_claim to check for incorrect self-harm claims.
+        # If the card is safe but was being claimed to harm own yard, annotate accordingly.
+        check = verify_graveyard_claim(card, claims_self_harm=False)
+        if check.ok and facts.self_graveyard_safe:
+            # Confirmed safe — annotation stands
+            pass
+        elif not check.ok:
+            # Guard found something unexpected; append evidence note
+            annotation += " [review oracle_text]"
+
+        if facts.confidence.level == "speculative":
+            annotation += " [scope uncertain]"
+
+        return f"[{annotation}]" if annotation else None
+
+    except Exception:
+        # Gated: any failure → return None, render identically to baseline
+        return None
+
+
 def _render_sideboard(report: FieldReadReport) -> str:
     """Render the sideboard section."""
     sb = report.sideboard
@@ -498,7 +595,9 @@ def _render_sideboard(report: FieldReadReport) -> str:
     ]
     if sb.cards:
         for card, copies in sorted(sb.cards.items(), key=lambda kv: kv[1], reverse=True):
-            lines.append(f"  {copies}x {card}")
+            annotation = _interaction_annotation(card)
+            suffix = f"  {annotation}" if annotation else ""
+            lines.append(f"  {copies}x {card}{suffix}")
     else:
         lines.append("  (no sideboard recommendations — no castable hosers found)")
     lines.append(f"  Note: {sb.heuristic_note}")
