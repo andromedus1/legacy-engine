@@ -1,7 +1,7 @@
 ---
 id: strong-player-signal-consensus
 kind: story
-stage: implementing
+stage: review
 tags: [generation]
 parent: feature-strong-player-signal
 depends_on: [strong-player-signal-identity, strong-player-signal-strength]
@@ -46,3 +46,38 @@ of* the existing window; default stays the latest ban-regime; thin strong+window
 - No `--players`/`--strong` → existing behaviour unchanged (byte-identical).
 - Player filter composes with the existing window/provenance flags; default window stays latest regime.
 - Thin pools degrade honestly; `--all-time` is the only window-widening escape, and only when explicit.
+
+## Implementation notes
+
+### Files changed
+- `src/legacy_engine/generation/consensus.py` — added `_resolve_player_handles()` helper;
+  threaded `players: set[str] | None` and `alias_map: dict | None` through `card_frequencies`
+  and `build_consensus`.  Gated-additive: `players=None` path emits identical SQL to baseline
+  (no predicate added).  Thin-pool honest-degrade: when `players` is set and `sample_n <
+  _THIN_SAMPLE_FLOOR` (30), a `⚠ THIN PLAYER-FILTERED POOL` banner is appended to
+  `legality_errors`; window is never widened.
+
+- `src/legacy_engine/generation/tuning.py` — threaded `players`/`alias_map` through
+  `partition_flex`, `candidate_pool`, and `tune_deck` (additive kwargs; all default `None`).
+
+- `src/legacy_engine/cli.py` — added new `identify` group with three leaves:
+  - `identify suggest` → `suggest_aliases` (heuristic, writes nothing)
+  - `identify strong` → `compute_player_records` + `is_strong` tabular output
+  - `identify track <player>` → `player_archetype_history` per-regime table
+  Added `--players`, `--strong`, `--min-events`, `--min-tier`, `--min-win-rate` to
+  `generate consensus` and `generate tune`.  When `--players` + `--strong` are both
+  supplied, `--players` wins (explicit beats derived; logged).
+
+### Test file created
+- `tests/analytics/players/test_consensus_players.py` — 34 new tests across 6 classes:
+  `TestGatedAdditiveInvariant`, `TestPlayerFilterNarrowsPool`, `TestThinPoolHonestDegrade`,
+  `TestRegimeSafety`, `TestAliasResolutionInFilter`, `TestIdentifyCLI`.
+
+### Deviations from spec
+- None.  All three spec ACs satisfied.  Thin-pool banner goes into `legality_errors` (the
+  existing audit-trail field on `GeneratedDeck`) rather than a separate field — keeps the
+  data model minimal and the CLI rendering consistent.  The banner is clearly prefixed with
+  `⚠ THIN PLAYER-FILTERED POOL` so callers can distinguish it from actual legality failures.
+
+### Test count
+- Before: 1458.  After: 1492.  All 1492 pass.
