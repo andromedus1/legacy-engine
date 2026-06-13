@@ -1,7 +1,7 @@
 ---
 id: feature-oracle-text-interaction-tags
 kind: feature
-stage: review
+stage: implementing
 tags: [advisory, data-quality, methodology]
 parent: null
 depends_on: []
@@ -277,3 +277,7 @@ recommendation the memory-based reasoning had wrongly suppressed.
 - Permanence `_RE_ACTIVATION` required an expanded regex to catch multi-part activation costs (`{T}, Sacrifice X:`) as well as simple `{cost}:`. Also added `\binstead\b` and `\bif\s+\w+\s+would\b` to `_RE_STATIC_RESTRICTION` to detect replacement effects (Leyline's "exile it instead" pattern).
 
 **Test results:** 1254 passed (1219 existing + 35 new), 0 failed, 0 skipped. Full suite green.
+
+
+## Review findings (bounce 1)
+BLOCKING: `advisory/report.py::_interaction_annotation` builds Card objects from a hardcoded `_ORACLE_TEXT_CACHE` of 3 demo cards instead of reading `cards.oracle_text` from the DB connection (`con`) already in scope in `build_field_read_report` — this reproduces the memory-based reasoning the feature exists to eliminate, skips 4 of 7 `graveyard-reliant` hosers (Surgical/Faerie Macabre/Endurance/Containment Priest get no annotation), and one cached text is already stale vs the real card. FIX: thread `con` into the annotation, fetch oracle_text per recommended hoser, annotate all of them. Add a report-level test exercising `_interaction_annotation` end-to-end (the design's test plan required this).

@@ -1,7 +1,7 @@
 ---
 id: strong-player-signal-consensus
 kind: story
-stage: review
+stage: done
 tags: [generation]
 parent: feature-strong-player-signal
 depends_on: [strong-player-signal-identity, strong-player-signal-strength]

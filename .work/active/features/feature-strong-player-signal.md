@@ -1,7 +1,7 @@
 ---
 id: feature-strong-player-signal
 kind: feature
-stage: review
+stage: done
 tags: [analytics, generation]
 parent: null
 depends_on: []

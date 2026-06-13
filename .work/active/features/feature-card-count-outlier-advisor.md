@@ -1,7 +1,7 @@
 ---
 id: feature-card-count-outlier-advisor
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, generation]
 parent: null
 depends_on: []
