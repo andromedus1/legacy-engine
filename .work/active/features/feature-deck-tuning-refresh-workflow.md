@@ -1,7 +1,7 @@
 ---
 id: feature-deck-tuning-refresh-workflow
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation, workflow]
 parent: null
 depends_on: [feature-regime-windowing-consistency, feature-three-venue-meta-frame, feature-archetype-empirical-recommendations, feature-card-count-outlier-advisor]
