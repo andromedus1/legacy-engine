@@ -1729,6 +1729,177 @@ def _plan_matchups(
 
 
 # ---------------------------------------------------------------------------
+# Unit 5: ConsideringCard + _rank_considering_pool
+# ---------------------------------------------------------------------------
+
+# Maximum number of candidates to surface in the considering pool.
+# Chosen 15 + considering up to 15 = ~30 total context (as specified).
+_CONSIDERING_CAP = 15
+
+
+@dataclass(frozen=True)
+class ConsideringCard:
+    """One entry in the "considering" (bubble) pool emitted by ``recommend_sideboard``.
+
+    These are ranked candidates that the solver evaluated but did NOT select —
+    the next-best cards by marginal coverage value that were just outside the
+    chosen 15.  They represent flex options and meta-call alternatives.
+
+    ``card``:           card name.
+    ``marginal_gain``:  coverage-model marginal gain given the final solution's
+                        coverage state (what the engine would earn by adding this
+                        card next — the residual opportunity cost).
+    ``covers_elements``: frozenset of element IDs (archetype|tag or _hate:tag) this
+                        card covers that are not yet fully saturated by the solution.
+    ``label``:          human-readable "why on bubble" string (coverage contribution
+                        and value tier; e.g. "covers graveyard-reliant (Dredge 18%)").
+    ``promoted``:       True when the card was promoted from the empirical pool (not
+                        in the hand-curated catalog) — indicates best-effort attribution.
+    """
+
+    card: str
+    marginal_gain: float
+    covers_elements: frozenset[str]
+    label: str
+    promoted: bool
+
+
+def _rank_considering_pool(
+    model: CoverageModel,
+    final_cards: dict[str, int],
+    *,
+    cap: int = _CONSIDERING_CAP,
+    promoted_names: "frozenset[str] | None" = None,
+) -> "list[ConsideringCard]":
+    """Rank candidates NOT in the final 15 by residual marginal coverage gain.
+
+    Computes the coverage state from ``final_cards``, then for every candidate
+    not yet at max_copies evaluates its marginal gain given that state.
+    Returns the top-``cap`` candidates sorted by marginal_gain DESC, card_name ASC
+    (deterministic tie-break).
+
+    Pure function — no DB, no IO.  Satisfies the objective-search-split pattern
+    (the heavy DB work is already done in recommend_sideboard; this is the pure loop).
+
+    Parameters
+    ----------
+    model
+        The CoverageModel used to solve for ``final_cards``.
+    final_cards
+        The chosen sideboard (card → copies).
+    cap
+        Maximum number of candidates to return (default ``_CONSIDERING_CAP`` = 15).
+    promoted_names
+        Set of card names that were promoted from the empirical pool (not in catalog).
+        Used to set ``ConsideringCard.promoted``.
+
+    Returns
+    -------
+    list[ConsideringCard]
+        Ranked list of bubble candidates (may be shorter than ``cap`` if fewer
+        candidates exist).
+    """
+    if promoted_names is None:
+        promoted_names = frozenset()
+
+    # Build coverage counts from final solution (element → copies covered).
+    cov_counts: dict[str, int] = {}
+    for card_name, copies in final_cards.items():
+        for e in model.candidate_covers.get(card_name, frozenset()):
+            cov_counts[e] = cov_counts.get(e, 0) + copies
+
+    candidates: list[ConsideringCard] = []
+
+    for card_name, element_ids in model.candidate_covers.items():
+        current_copies = final_cards.get(card_name, 0)
+        max_copies = model.candidate_meta[card_name].max_copies
+
+        # Skip if already at max_copies (fully placed in the solution).
+        if current_copies >= max_copies:
+            continue
+
+        # Compute residual marginal gain (as if we added one more copy).
+        gain = 0.0
+        residual_elements: set[str] = set()
+        for e in element_ids:
+            w = model.element_weight.get(e, 0.0)
+            if w > 0.0:
+                cov_e = cov_counts.get(e, 0)
+                mg = _marginal_g(cov_e + 1)
+                gain += w * mg
+                if mg > 0.0:
+                    residual_elements.add(e)
+
+        if gain <= 0.0:
+            continue  # no residual coverage value → skip
+
+        # Build human-readable label for what this card covers.
+        label = _considering_label(card_name, element_ids, model, cov_counts)
+
+        candidates.append(ConsideringCard(
+            card=card_name,
+            marginal_gain=gain,
+            covers_elements=frozenset(residual_elements),
+            label=label,
+            promoted=card_name in promoted_names,
+        ))
+
+    # Sort: marginal gain DESC, card name ASC (deterministic tie-break).
+    candidates.sort(key=lambda c: (-c.marginal_gain, c.card))
+    return candidates[:cap]
+
+
+def _considering_label(
+    card_name: str,
+    element_ids: "frozenset[str]",
+    model: CoverageModel,
+    cov_counts: "dict[str, int]",
+) -> str:
+    """Build a concise label explaining why a card is on the considering bubble.
+
+    Extracts the top 1–2 highest-weight uncovered (or under-covered) elements
+    this card addresses and formats them as: "covers <tag> (<archetype> N%),
+    <tag2>".
+
+    Pure function — no DB.
+    """
+    # Collect (element_key, residual_weight) pairs for this card.
+    element_gains: list[tuple[str, float]] = []
+    for e in element_ids:
+        w = model.element_weight.get(e, 0.0)
+        if w <= 0.0:
+            continue
+        cov_e = cov_counts.get(e, 0)
+        mg = _marginal_g(cov_e + 1)
+        residual_w = w * mg
+        if residual_w > 0.0:
+            element_gains.append((e, residual_w))
+
+    if not element_gains:
+        return f"{card_name}: no uncovered elements (low residual)"
+
+    # Sort by residual weight DESC to surface the most important coverage.
+    element_gains.sort(key=lambda x: -x[1])
+
+    parts: list[str] = []
+    for e, _ in element_gains[:2]:
+        if "|" in e:
+            # Archetype|tag element — format as "tag (Archetype N%)"
+            arch, tag = e.split("|", 1)
+            w = model.element_weight.get(e, 0.0)
+            # Extract archetype share from element weight / best_swing (not directly
+            # available; approximate share from weight so label is indicative).
+            parts.append(f"{tag} ({arch})")
+        elif e.startswith("_hate:"):
+            tag = e[len("_hate:"):]
+            parts.append(f"anti-hate:{tag}")
+        else:
+            parts.append(e)
+
+    return "covers " + ", ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -1785,6 +1956,12 @@ class SideboardPackage:
     #   heuristic_note is the full note; byte-identical element weights to pre-feature.
     swing_data_informed: bool = False
     swing_overrides_count: int = 0
+    # --- Additive fields (feature-considering-cards-pool) ---
+    # considering: ranked bubble candidates NOT selected in the final 15, sorted by
+    #   residual marginal coverage gain.  Always populated (up to _CONSIDERING_CAP ≈ 15).
+    #   Empty tuple when there are no remaining candidates (degenerate / budget-filled model).
+    #   Gated-additive: existing callers that don't use this field see no change in cards/trace.
+    considering: "tuple[ConsideringCard, ...]" = dc_field(default_factory=tuple)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -2248,6 +2425,16 @@ def recommend_sideboard(
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
             warnings.append(f"per-matchup plan failed: {exc}")
 
+    # --- Step 6c: Considering pool (feature-considering-cards-pool, always-on additive) ---
+    # Rank all model candidates not fully selected in final_cards by their residual
+    # marginal gain given the final coverage state.  This is the "what would we pick
+    # next" computation — the bubble of flex / meta-call alternatives the solver weighed.
+    # Gated-additive: final_cards / model / trace are byte-identical to pre-feature.
+    _promoted_names = frozenset(promoted_candidates.keys()) if promoted_candidates else frozenset()
+    considering_pool = _rank_considering_pool(
+        model, final_cards, promoted_names=_promoted_names
+    )
+
     # --- Collection-aware annotation (gated-additive, feature-collection-aware-engine) ---
     # annotate_owned returns {} when collection is None → gate closed → byte-identical.
     from legacy_engine.advisory.collection import annotate_owned
@@ -2272,4 +2459,5 @@ def recommend_sideboard(
         collection_aware=collection is not None,
         swing_data_informed=_swing_data_informed,
         swing_overrides_count=_swing_overrides_count,
+        considering=tuple(considering_pool),
     )
