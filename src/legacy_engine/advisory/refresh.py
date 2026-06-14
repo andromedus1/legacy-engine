@@ -366,6 +366,19 @@ def _render_venue_package(pkg: VenueTuningPackage) -> str:
     else:
         lines.append("  (no sideboard recommendations — no castable hosers for this deck's colors)")
 
+    # ── Considering pool (flex / meta-call alternatives) ─────────────────
+    # Surface the bubble candidates from the sideboard solver (gated-additive:
+    # only rendered when the tuned_deck produced a sideboard package with candidates).
+    td_sb_pkg = getattr(td, "sideboard_pkg", None)
+    if td_sb_pkg is not None and getattr(td_sb_pkg, "considering", ()):
+        lines.append("\nConsidering (flex / meta-call alternatives):")
+        for cc in td_sb_pkg.considering:
+            promo_tag = "  [empirical]" if cc.promoted else ""
+            lines.append(
+                f"  {cc.card}  [gain={cc.marginal_gain:.4f}]{promo_tag}"
+                f"  — {cc.label}"
+            )
+
     # ── Card-count outlier annotations ────────────────────────────────────
     if pkg.outlier_deltas:
         lines.append("\nCard-count outliers (vs field modal):")

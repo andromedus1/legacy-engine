@@ -2471,6 +2471,17 @@ def advise_sideboard(
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")
+
+        # --- Considering pool (flex / meta-call alternatives on the bubble) ---
+        if pkg.considering:
+            click.echo("\nConsidering (flex / meta-call alternatives):")
+            for cc in pkg.considering:
+                promo_tag = "  [empirical]" if cc.promoted else ""
+                click.echo(
+                    f"  {cc.card}  [gain={cc.marginal_gain:.4f}]{promo_tag}"
+                    f"  — {cc.label}"
+                )
+
         # --- Per-matchup OUT/IN plans (only when value_informed) ---
         if pkg.value_informed and pkg.matchup_plans:
             click.echo("\n  Per-matchup plans (presence-correlational — see disclaimer):")

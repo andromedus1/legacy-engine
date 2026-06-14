@@ -638,6 +638,11 @@ class TunedDeck:
     # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
     owned: "dict[str, object]" = dc_field(default_factory=dict)
     collection_aware: bool = False
+    # --- Additive fields (feature-considering-cards-pool) ---
+    # sideboard_pkg: the full SideboardPackage from the final recommend_sideboard call,
+    #   carrying the considering pool.  None when sideboard recommendation was skipped.
+    #   Consumers (e.g. refresh.py render) use sideboard_pkg.considering for the bubble list.
+    sideboard_pkg: "object | None" = None  # SideboardPackage | None
 
 
 def tune_deck(
@@ -874,6 +879,7 @@ def tune_deck(
             plan_window_label=sb_pkg.plan_window_label,
             owned=tune_owned,
             collection_aware=collection is not None,
+            sideboard_pkg=sb_pkg,
         )
 
     # ── Greedy swap loop (per-card-value objective) ───────────────────────────
@@ -966,4 +972,5 @@ def tune_deck(
         plan_window_label=sb_pkg.plan_window_label,
         owned=tune_owned,
         collection_aware=collection is not None,
+        sideboard_pkg=sb_pkg,
     )
