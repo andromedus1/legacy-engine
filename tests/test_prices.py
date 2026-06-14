@@ -671,7 +671,8 @@ class TestPricesCLI:
     def test_refresh_help_includes_prices_option(self, runner):
         from legacy_engine.cli import main
 
-        result = runner.invoke(main, ["refresh", "--help"])
+        # `refresh` is now a group; `--prices` lives on `refresh all`.
+        result = runner.invoke(main, ["refresh", "all", "--help"])
         assert result.exit_code == 0
         assert "--prices" in result.output
 

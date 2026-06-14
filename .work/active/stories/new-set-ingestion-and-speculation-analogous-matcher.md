@@ -1,8 +1,8 @@
 ---
 id: new-set-ingestion-and-speculation-analogous-matcher
 kind: story
-stage: drafting
-tags: [analytics, methodology, hold-for-review]
+stage: review
+tags: [analytics, methodology]
 parent: feature-new-set-ingestion-and-speculation
 depends_on: []
 release_binding: null
@@ -73,3 +73,19 @@ deterministic, with a stable tie-break (sort by `(−similarity, name)`).
 ## Hold
 
 Design complete; held for human review before implementation (parent feature is `hold-for-review`).
+
+## Implementation notes
+
+Implemented 2026-06-13 as part of `feature-new-set-ingestion-and-speculation`.
+
+**Module:** `src/legacy_engine/analytics/speculation.py` — `Analogue` dataclass and `analogous_cards(target, pool, k)`.
+
+**Similarity components (all weights are auditable module constants):**
+- Card-type bucket: hard filter — cross-bucket pairs excluded (not down-weighted). Buckets: creature/instant/sorcery/enchantment/artifact/land/planeswalker.
+- Colour-set Jaccard (`W_COLOR = 0.25`).
+- CMC proximity `1/(1+|cmc_a−cmc_b|)` (`W_CMC = 0.25`); free spells treated as CMC 0.
+- Shared role-tag Jaccard over `card_tags` + `interaction_facts` signals (`W_ROLE = 0.25`); gated-additive: degrades to card_tags alone when interaction_facts unavailable.
+- Shared keyword Jaccard over oracle_text/type_line (`W_KEYWORD = 0.25`).
+- Tie-break: `(-similarity, card_name)` — deterministic, stable sort.
+
+**Tests:** 11 unit tests in `tests/test_speculation.py` class `TestAnalogousCards`. Covers: cantrip finds cantrips, dual-land hard filter, creature hard filter, empty pool, k > pool, similarity bounds, identical-card high similarity, stable tie-break, self-exclusion, free-spell affinity, no-analogue-above-gate. All pass.

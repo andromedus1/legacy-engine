@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -243,6 +244,75 @@ def load_card(con: duckdb.DuckDBPyConnection, name: str) -> Card | None:
     row["colors"] = list(colors_raw) if colors_raw else []
     row["produced_mana"] = list(produced_raw) if produced_raw else []
     return Card.model_validate(row)
+
+
+def existing_card_names(con: duckdb.DuckDBPyConnection) -> set[str]:
+    """Return the set of card names currently in the cards table.
+
+    Returns an empty set when the table does not yet exist (fresh DB), so callers
+    can call this before init_schema without raising.
+    """
+    try:
+        rows = con.execute("SELECT name FROM cards").fetchall()
+    except Exception:
+        return set()
+    return {row[0] for row in rows}
+
+
+@dataclass(frozen=True)
+class IngestDiff:
+    """Result of a diff-producing ingest run.
+
+    ``new_names``: card names present in the incoming bulk but absent from the table
+    before this load. The authoritative "new cards" signal — robust to how Scryfall's
+    bulk changed (new set, Secret Lair drop, oracle erratum adding a face alias).
+
+    ``total_after``: total number of full-name card rows in the table after the load.
+
+    ``scryfall_updated_at``: the bulk file's ``updated_at`` provenance string (from
+    metadata.json), or None if unavailable. Round-tripped for auditability.
+    """
+
+    new_names: tuple[str, ...]
+    total_after: int
+    scryfall_updated_at: str | None
+
+
+def load_cards_diff(
+    con: duckdb.DuckDBPyConnection,
+    cards: Iterable[Card],
+    *,
+    scryfall_updated_at: str | None = None,
+) -> IngestDiff:
+    """INSERT OR REPLACE all cards (idempotent, identical to load_cards) and capture the diff.
+
+    Captures the set of card names present before the load, calls load_cards, then
+    computes the set difference to yield newly-ingested names. Non-destructive: the
+    cards table is NOT dropped — this is the incremental, diff-aware path. The full
+    rebuild path (drop + reload) remains ``rebuild`` + ``load_cards``.
+
+    Args:
+        con: DuckDB connection (cards table created if absent).
+        cards: Iterable of Card objects to ingest (the full current bulk).
+        scryfall_updated_at: Provenance string from the Scryfall bulk metadata.json;
+            persisted in the returned IngestDiff for auditability.
+
+    Returns:
+        IngestDiff with new_names (sorted tuple), total_after, and scryfall_updated_at.
+    """
+    cards_list = list(cards)
+    before = existing_card_names(con)
+    load_cards(con, cards_list)
+    # Count only full-name rows (not face aliases — aliases use INSERT OR IGNORE and
+    # don't represent new playable names in the game sense).
+    total_after = con.execute("SELECT count(*) FROM cards").fetchone()[0]
+    after_names = existing_card_names(con)
+    new = tuple(sorted(after_names - before))
+    return IngestDiff(
+        new_names=new,
+        total_after=total_after,
+        scryfall_updated_at=scryfall_updated_at,
+    )
 
 
 def rebuild(con: duckdb.DuckDBPyConnection) -> None:
