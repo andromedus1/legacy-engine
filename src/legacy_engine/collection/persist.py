@@ -69,7 +69,19 @@ def save_inventory(inv: Inventory) -> None:
 
 
 def _deck_path(deck_id: str) -> Path:
-    return DECKS_DIR / f"{deck_id}.json"
+    """Return the canonical path for a deck file, rejecting path-traversal inputs.
+
+    Raises ``ValueError`` if the resolved path escapes ``DECKS_DIR``.  This is a
+    single-user local tool, but defensive validation prevents ``../`` injections from
+    reading or clobbering files outside the decks directory.
+    """
+    candidate = (DECKS_DIR / f"{deck_id}.json").resolve()
+    # resolve() normalises .., symlinks, etc.  Check that the result stays under DECKS_DIR.
+    try:
+        candidate.relative_to(DECKS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Invalid deck_id {deck_id!r}: path escapes DECKS_DIR") from None
+    return candidate
 
 
 def load_user_deck(deck_id: str) -> UserDeck | None:
