@@ -17,12 +17,6 @@ from legacy_engine.models.base import LegacyEngineModel
 if TYPE_CHECKING:
     from legacy_engine.ingestion.scryfall import ScryfallClient
 
-# ── Constants (mirrored in config.py) ─────────────────────────────────────────
-# These mirror config.py values; imports here are guarded by TYPE_CHECKING.
-# The canonical values live in config.py per the constants-only-config pattern.
-_SCRYFALL_SETS_PATH = "/sets"
-
-
 class SetRelease(LegacyEngineModel):
     """A Scryfall set record with the fields relevant to release tracking.
 

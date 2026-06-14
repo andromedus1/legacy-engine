@@ -207,14 +207,10 @@ def _classify_affects(gy_lines: list[str], all_lines: list[str]) -> tuple[Affect
         elif _RE_SYMMETRIC.search(line):
             scopes_found.add("symmetric")
         else:
-            # Unscoped graveyard line — check all_lines for symmetric global restriction phrasing
-            # (e.g. Grafdigger's "can't cast ... from graveyard" without per-player scoping)
-            # An unscoped restriction on a graveyard line with "can't" = symmetric effect
-            if _RE_STATIC_RESTRICTION.search(line):
-                scopes_found.add("symmetric")
-            else:
-                # Unscoped mention without a clear scope → symmetric (conservative)
-                scopes_found.add("symmetric")
+            # Unscoped graveyard line (no per-player scoping marker) → symmetric (conservative).
+            # Both static-restriction and bare unscoped lines resolve to symmetric; the
+            # _RE_STATIC_RESTRICTION check was redundant (both branches added "symmetric").
+            scopes_found.add("symmetric")
 
     has_conflict = len(scopes_found) > 1
 

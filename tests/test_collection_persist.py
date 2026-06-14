@@ -198,3 +198,37 @@ class TestUserDeckRoundTrip:
         from legacy_engine.collection.persist import find_deck_by_name
 
         assert find_deck_by_name("Does Not Exist") is None
+
+
+# ---------------------------------------------------------------------------
+# _deck_path path-traversal hardening
+# ---------------------------------------------------------------------------
+
+
+class TestDeckPathTraversalRejection:
+    """_deck_path must reject deck_id values that escape DECKS_DIR."""
+
+    def test_normal_id_is_accepted(self, patch_collection_paths):
+        from legacy_engine.collection.persist import _deck_path
+        import legacy_engine.collection.persist as persist_mod
+
+        path = _deck_path("deck-abc123")
+        assert path.parent == persist_mod.DECKS_DIR.resolve()
+
+    def test_dotdot_id_is_rejected(self, patch_collection_paths):
+        from legacy_engine.collection.persist import _deck_path
+
+        with pytest.raises(ValueError, match="escapes DECKS_DIR"):
+            _deck_path("../../../etc/passwd")
+
+    def test_dotdot_in_middle_is_rejected(self, patch_collection_paths):
+        from legacy_engine.collection.persist import _deck_path
+
+        with pytest.raises(ValueError, match="escapes DECKS_DIR"):
+            _deck_path("subdir/../../evil")
+
+    def test_absolute_path_is_rejected(self, patch_collection_paths):
+        from legacy_engine.collection.persist import _deck_path
+
+        with pytest.raises(ValueError, match="escapes DECKS_DIR"):
+            _deck_path("/etc/passwd")

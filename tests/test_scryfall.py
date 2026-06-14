@@ -7,7 +7,7 @@ import json
 import pytest
 
 from legacy_engine.ingestion import scryfall
-from legacy_engine.ingestion.scryfall import ScryfallClient, normalize_name
+from legacy_engine.ingestion.scryfall import ScryfallClient, _validate_scryfall_uri, normalize_name
 from legacy_engine.models.card import Card
 
 NORMAL = {"name": "Brainstorm", "type_line": "Instant", "colors": ["U"], "mana_cost": "{U}", "cmc": 1.0}
@@ -176,10 +176,40 @@ def test_download_bulk_data_mocked(tmp_path, monkeypatch):
 
     with ScryfallClient() as client:
         monkeypatch.setattr(
-            client, "_fetch_bulk_metadata", lambda: {"download_uri": "http://x/bulk", "updated_at": "2026-05-29"}
+            client, "_fetch_bulk_metadata",
+            lambda: {"download_uri": "https://api.scryfall.com/bulk-data/oracle-cards-test.json", "updated_at": "2026-05-29"}
         )
         monkeypatch.setattr(client.client, "get", lambda *a, **k: FakeResp())
         path = client.download_bulk_data()
         assert path.exists()
         idx = client.load_card_index()
     assert "Brainstorm" in idx and "Volcanic Island" in idx
+
+
+# ---------------------------------------------------------------------------
+# _validate_scryfall_uri — SSRF host allowlist
+# ---------------------------------------------------------------------------
+
+
+class TestValidateScryfallUri:
+    """_validate_scryfall_uri must accept Scryfall-owned hosts and reject others."""
+
+    @pytest.mark.parametrize("uri", [
+        "https://api.scryfall.com/bulk-data/oracle_cards",
+        "https://c2.scryfall.com/file/scryfall-bulk/oracle-cards-20260101.json",
+        "https://data.scryfall.io/oracle-cards-20260101.json",
+        "https://cdn.scryfall.com/file/oracle-cards.json",
+    ])
+    def test_scryfall_hosts_accepted(self, uri):
+        _validate_scryfall_uri(uri)  # must not raise
+
+    @pytest.mark.parametrize("uri", [
+        "https://evil.com/malicious",
+        "https://169.254.169.254/latest/meta-data/",
+        "http://localhost/admin",
+        "http://internal.corp/secret",
+        "https://notscryfall.com/file.json",
+    ])
+    def test_non_scryfall_hosts_rejected(self, uri):
+        with pytest.raises(ValueError, match="not in the allowlist"):
+            _validate_scryfall_uri(uri)

@@ -37,6 +37,9 @@ from legacy_engine.advisory.sideboard import (
     is_anti_synergistic,
     _empirical_sideboard_pool,
     _LOW_CURVE_CMC_THRESHOLD,
+    _derive_attacks_for_promoted,
+    _build_promoted_candidates,
+    _FALLBACK_ATTACKS,
     recommend_sideboard,
 )
 from legacy_engine.ingestion import store
@@ -3198,3 +3201,585 @@ class TestEmpiricalSideboardPool:
             "Surgical Extraction (100% adoption) should be in the pool"
         )
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestDeriveAttacksForPromoted — pure oracle_text attribution function
+# ---------------------------------------------------------------------------
+
+class TestDeriveAttacksForPromoted:
+    """_derive_attacks_for_promoted: pure heuristic attribution from oracle_text."""
+
+    def test_counter_magic_maps_to_combo_and_storm(self):
+        """Force of Negation oracle_text → combo + storm-reliant."""
+        attacks = _derive_attacks_for_promoted(
+            "Force of Negation",
+            "If it's not your turn, you may exile a blue card from your hand rather than pay this spell's mana cost. Counter target noncreature spell.",
+            "Instant",
+        )
+        assert "combo" in attacks, f"Expected 'combo' in {attacks}"
+        assert "storm-reliant" in attacks, f"Expected 'storm-reliant' in {attacks}"
+
+    def test_consign_to_memory_counter_magic(self):
+        """Consign to Memory: counter target spell → combo + storm-reliant."""
+        attacks = _derive_attacks_for_promoted(
+            "Consign to Memory",
+            "Counter target spell. If you control no permanents, draw a card.",
+            "Instant",
+        )
+        assert "combo" in attacks, f"Expected 'combo' in {attacks}"
+        assert "storm-reliant" in attacks, f"Expected 'storm-reliant' in {attacks}"
+
+    def test_graveyard_exile_maps_to_graveyard_reliant(self):
+        """A card that exiles from graveyard → graveyard-reliant."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Graveyard Hater",
+            "Exile target card from a graveyard.",
+            "Instant",
+        )
+        assert "graveyard-reliant" in attacks, f"Expected 'graveyard-reliant' in {attacks}"
+
+    def test_creature_removal_maps_to_creature_based(self):
+        """Destroy target creature → creature-based."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Removal",
+            "Destroy target creature.",
+            "Instant",
+        )
+        assert "creature-based" in attacks, f"Expected 'creature-based' in {attacks}"
+
+    def test_free_interaction_staple_role(self):
+        """Force of Negation has staple_role=='free_interaction' → combo + storm-reliant (via role)."""
+        attacks = _derive_attacks_for_promoted(
+            "Force of Negation",
+            "Counter target noncreature spell.",
+            "Instant",
+        )
+        # staple_role path should fire for Force of Negation even with minimal oracle text
+        assert "combo" in attacks or "storm-reliant" in attacks, (
+            f"Expected combo/storm-reliant from free_interaction role; got {attacks}"
+        )
+
+    def test_artifact_removal_maps_to_greedy_manabase(self):
+        """Destroy target artifact → greedy-manabase (answers lock pieces)."""
+        attacks = _derive_attacks_for_promoted(
+            "Smash to Dust",
+            "Destroy target artifact.",
+            "Sorcery",
+        )
+        assert "greedy-manabase" in attacks, f"Expected 'greedy-manabase' in {attacks}"
+
+    def test_fallback_returns_conservative_set_on_unknown(self):
+        """Unrecognized oracle_text → _FALLBACK_ATTACKS (conservative, non-empty)."""
+        attacks = _derive_attacks_for_promoted(
+            "Totally Unknown Card",
+            "Do something weird and format-specific.",
+            "Sorcery",
+        )
+        assert attacks == _FALLBACK_ATTACKS, (
+            f"Expected fallback {_FALLBACK_ATTACKS} for unrecognized oracle_text; got {attacks}"
+        )
+        assert len(attacks) > 0, "attacks must always be non-empty"
+
+    def test_empty_oracle_text_returns_fallback(self):
+        """Empty oracle_text → _FALLBACK_ATTACKS (not an empty frozenset)."""
+        attacks = _derive_attacks_for_promoted("Mystery Card", "", "Creature")
+        assert attacks == _FALLBACK_ATTACKS
+        assert len(attacks) > 0
+
+    def test_result_is_always_frozenset(self):
+        """Return type is always a frozenset."""
+        attacks = _derive_attacks_for_promoted("X", "Counter target spell.", "Instant")
+        assert isinstance(attacks, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# TestBuildPromotedCandidates — DB-backed promotion builder
+# ---------------------------------------------------------------------------
+
+def _build_fon_corpus():
+    """Corpus: Dimir Tempo archetype with Force of Negation + Consign to Memory
+    in >5% of sideboards.  Both cards are absent from HOSER_CATALOG.
+
+    Also seeds Reanimator and ANT Storm decks with appropriate cards so
+    ``field_vulnerability_tags`` can classify them (needed for the recommend_sideboard
+    integration test where the field contains those archetypes).
+
+    Returns (con, archetype_name).
+    """
+    import uuid
+
+    con = store.connect(":memory:")
+    store.init_schema(con)
+
+    # Load all cards used by the corpus
+    cards = [
+        # --- Dimir Tempo sideboard staples (NOT in HOSER_CATALOG) ---
+        Card(
+            name="Force of Negation",
+            type_line="Instant",
+            oracle_text=(
+                "If it's not your turn, you may exile a blue card from your hand rather than "
+                "pay this spell's mana cost. Counter target noncreature spell."
+            ),
+            cmc=3.0,
+            colors=["U"],
+        ),
+        Card(
+            name="Consign to Memory",
+            type_line="Instant",
+            oracle_text="Counter target spell. If you control no permanents, draw a card.",
+            cmc=1.0,
+            colors=["U"],
+        ),
+        # --- Catalog card also run by Dimir Tempo ---
+        Card(
+            name="Surgical Extraction",
+            type_line="Instant",
+            oracle_text=(
+                "You may pay 2 life rather than pay this spell's mana cost. "
+                "Exile target card from a graveyard. Search its owner's library, hand, "
+                "and graveyard for all cards with the same name and exile them."
+            ),
+            cmc=1.0,
+            colors=["B"],
+            castable_any_color=True,
+        ),
+        # --- UB maindeck cards (so deck colors resolve to U+B) ---
+        Card(
+            name="Brainstorm",
+            type_line="Instant",
+            oracle_text="Draw three cards, then put two cards from your hand on top of your library in any order.",
+            cmc=1.0,
+            colors=["U"],
+        ),
+        Card(
+            name="Underground Sea",
+            type_line="Land — Island Swamp",
+            oracle_text="{T}: Add {U} or {B}.",
+            cmc=0.0,
+            produced_mana=["U", "B"],
+        ),
+        # --- Reanimator archetype cards (graveyard-reliant) ---
+        Card(
+            name="Reanimate",
+            type_line="Sorcery",
+            oracle_text=(
+                "Put target creature card from a graveyard onto the battlefield under your control. "
+                "You lose life equal to its mana value."
+            ),
+            cmc=1.0,
+            colors=["B"],
+        ),
+        Card(
+            name="Entomb",
+            type_line="Instant",
+            oracle_text="Search your library for a card and put that card into your graveyard.",
+            cmc=1.0,
+            colors=["B"],
+        ),
+        Card(
+            name="Swamp",
+            type_line="Basic Land — Swamp",
+            oracle_text="{T}: Add {B}.",
+            cmc=0.0,
+            produced_mana=["B"],
+        ),
+        # --- ANT Storm archetype cards (combo/storm-reliant) ---
+        Card(
+            name="Tendrils of Agony",
+            type_line="Sorcery",
+            oracle_text="Target player loses 2 life and you gain 2 life. Storm.",
+            cmc=4.0,
+            colors=["B"],
+        ),
+        Card(
+            name="Dark Ritual",
+            type_line="Instant",
+            oracle_text="Add {B}{B}{B}.",
+            cmc=1.0,
+            colors=["B"],
+        ),
+        Card(
+            name="Ponder",
+            type_line="Sorcery",
+            oracle_text="Look at the top three cards of your library, then put them back or shuffle.",
+            cmc=1.0,
+            colors=["U"],
+        ),
+    ]
+    store.load_cards(con, cards)
+
+    tid = str(uuid.uuid4())
+    con.execute(
+        "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [tid, "Test Event", "2026-01-01", None, "Legacy", "test", "test"],
+    )
+
+    idx = 0
+
+    # 10 Dimir Tempo decks, all running FoN (2 copies) + Consign (1 copy) + Surgical (2 copies)
+    for i in range(10):
+        con.execute(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+            [tid, idx, f"player{idx}", "top8", "Dimir Tempo"],
+        )
+        for card_name, count in [("Brainstorm", 4), ("Underground Sea", 4)]:
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                        [tid, idx, "main", card_name, count])
+        for card_name, count in [("Force of Negation", 2), ("Consign to Memory", 1), ("Surgical Extraction", 2)]:
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                        [tid, idx, "side", card_name, count])
+        idx += 1
+
+    # 5 Reanimator decks (graveyard-reliant: Reanimate + Entomb + Swamp)
+    for i in range(5):
+        con.execute(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+            [tid, idx, f"player{idx}", "top8", "Reanimator"],
+        )
+        for card_name, count in [("Reanimate", 4), ("Entomb", 4), ("Swamp", 12)]:
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                        [tid, idx, "main", card_name, count])
+        idx += 1
+
+    # 5 ANT Storm decks (combo/storm-reliant: Tendrils + Dark Ritual + Ponder)
+    for i in range(5):
+        con.execute(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+            [tid, idx, f"player{idx}", "top8", "ANT Storm"],
+        )
+        for card_name, count in [("Tendrils of Agony", 4), ("Dark Ritual", 4), ("Ponder", 4)]:
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                        [tid, idx, "main", card_name, count])
+        idx += 1
+
+    return con, "Dimir Tempo"
+
+
+class TestBuildPromotedCandidates:
+    """Unit tests for _build_promoted_candidates."""
+
+    def test_returns_empty_when_pool_is_subset_of_catalog(self):
+        """When all pool cards are already in the catalog, nothing to promote."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        # Pool only contains catalog cards
+        pool = frozenset({"Surgical Extraction", "Grafdigger's Cage"})
+        promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, {}, con)
+        assert promoted == {}
+        assert warnings == []
+        con.close()
+
+    def test_promotes_fon_and_consign_not_in_catalog(self):
+        """Force of Negation and Consign to Memory are absent from catalog → promoted."""
+        con, _ = _build_fon_corpus()
+        pool = frozenset({"Force of Negation", "Consign to Memory", "Surgical Extraction"})
+        freq_map = {"Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
+        promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        assert "Force of Negation" in promoted, (
+            "Force of Negation (absent from catalog) must be promoted"
+        )
+        assert "Consign to Memory" in promoted, (
+            "Consign to Memory (absent from catalog) must be promoted"
+        )
+        # Surgical is in HOSER_CATALOG → not promoted
+        assert "Surgical Extraction" not in promoted, (
+            "Surgical Extraction (in catalog) must NOT be promoted"
+        )
+        con.close()
+
+    def test_promoted_fon_attacks_combo_and_storm(self):
+        """Promoted Force of Negation has attacks ⊇ {combo, storm-reliant}."""
+        con, _ = _build_fon_corpus()
+        pool = frozenset({"Force of Negation"})
+        freq_map = {"Force of Negation": 2}
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        assert "Force of Negation" in promoted
+        fon = promoted["Force of Negation"]
+        assert "combo" in fon.attacks, f"Expected 'combo' in FoN attacks; got {fon.attacks}"
+        assert "storm-reliant" in fon.attacks, f"Expected 'storm-reliant' in FoN attacks; got {fon.attacks}"
+        con.close()
+
+    def test_promoted_fon_is_blue(self):
+        """Promoted Force of Negation has colors={'U'}."""
+        con, _ = _build_fon_corpus()
+        pool = frozenset({"Force of Negation"})
+        freq_map = {"Force of Negation": 2}
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        fon = promoted["Force of Negation"]
+        assert fon.colors == frozenset({"U"}), f"Expected colors={{'U'}}; got {fon.colors}"
+        con.close()
+
+    def test_promoted_max_copies_from_freq_map(self):
+        """Promoted card's max_copies comes from freq_map (modal count), capped at 4."""
+        con, _ = _build_fon_corpus()
+        pool = frozenset({"Force of Negation"})
+        # modal_count=3
+        freq_map = {"Force of Negation": 3}
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        fon = promoted["Force of Negation"]
+        assert fon.max_copies == 3, f"Expected max_copies=3 from freq_map; got {fon.max_copies}"
+        con.close()
+
+    def test_promoted_max_copies_capped_at_4(self):
+        """modal_count > 4 is capped at 4."""
+        con, _ = _build_fon_corpus()
+        pool = frozenset({"Force of Negation"})
+        freq_map = {"Force of Negation": 10}  # unrealistically large
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        fon = promoted["Force of Negation"]
+        assert fon.max_copies <= 4, f"max_copies must be capped at 4; got {fon.max_copies}"
+        con.close()
+
+    def test_promoted_card_not_in_db_uses_fallback(self):
+        """Card not in DB is still promoted with empty colors and fallback attacks."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        pool = frozenset({"Some Mystery Card"})
+        freq_map = {"Some Mystery Card": 2}
+        promoted, warnings = _build_promoted_candidates(pool, {}, freq_map, con)
+        assert "Some Mystery Card" in promoted
+        mc = promoted["Some Mystery Card"]
+        assert mc.colors == frozenset(), "Card not in DB → empty colors (colorless)"
+        assert len(mc.attacks) > 0, "attacks must be non-empty even for DB-miss"
+        # Should have a warning about unknown attribution
+        assert any("Some Mystery Card" in w for w in warnings), (
+            f"Expected warning about unknown attribution; got {warnings}"
+        )
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestEmpiricalPromotion (CORE failing-then-passing tests)
+# ---------------------------------------------------------------------------
+
+class TestEmpiricalPromotion:
+    """ROOT-CAUSE FIX: empirical pool cards absent from HOSER_CATALOG are now SURFACEABLE.
+
+    These tests were FAILING before fix-sideboard-surface-field-staples because
+    _build_coverage_model only INTERSECTED the catalog with the empirical pool —
+    it could never ADD a card that wasn't already in HOSER_CATALOG.
+
+    After the fix, high-adoption archetype sideboard cards (Force of Negation, Consign
+    to Memory) are PROMOTED into the candidate universe even when absent from the catalog.
+    """
+
+    def test_fon_and_consign_surfaced_by_recommend_sideboard(self):
+        """FAILING BEFORE FIX: recommend_sideboard must surface FoN/Consign when
+        the archetype's empirical pool has them at >5% adoption.
+
+        Corpus: Dimir Tempo with 10 decks, all running FoN(2) + Consign(1) + Surgical(2)
+        in the sideboard → 100% adoption for all three.  Field is pure Dimir Tempo vs
+        itself (simplest possible scenario).  Deck maindeck is UB.
+
+        Before fix: FoN and Consign are absent from HOSER_CATALOG → structurally
+        unsurfaceable.  After fix: both are promoted and appear in pkg.cards.
+        """
+        con, archetype = _build_fon_corpus()
+        # Simple field that has combo archetypes so elements fire
+        field = _make_field({"Reanimator": 0.4, "ANT Storm": 0.4, "Delver": 0.2})
+        # UB deck (Dimir Tempo) — can cast U and B cards
+        deck_maindeck = {"Brainstorm": 4, "Underground Sea": 4}
+        pkg = recommend_sideboard(
+            con, field, deck_maindeck,
+            archetype=archetype,
+            since="2026-01-01",
+            solver="greedy",
+        )
+        cards_in_pkg = set(pkg.cards.keys())
+        assert "Force of Negation" in cards_in_pkg, (
+            f"Force of Negation must be surfaced by recommend_sideboard after the fix; "
+            f"got cards={sorted(cards_in_pkg)}"
+        )
+        assert "Consign to Memory" in cards_in_pkg, (
+            f"Consign to Memory must be surfaced by recommend_sideboard after the fix; "
+            f"got cards={sorted(cards_in_pkg)}"
+        )
+        con.close()
+
+    def test_fon_or_consign_in_candidate_universe(self):
+        """FoN/Consign enter the candidate universe (even if not all selected by solver)."""
+        con, archetype = _build_fon_corpus()
+        from legacy_engine.advisory.sideboard import (
+            _build_promoted_candidates,
+            _EMPIRICAL_POOL_MIN_ADOPTION,
+        )
+        from legacy_engine.generation.consensus import card_frequencies as _cf
+
+        freqs = _cf(con, archetype, board="side", since="2026-01-01")
+        freq_map = {f.name: f.modal_count for f in freqs}
+        pool = frozenset(f.name for f in freqs if f.inclusion_pct >= _EMPIRICAL_POOL_MIN_ADOPTION)
+
+        assert "Force of Negation" in pool, "FoN must appear in empirical pool"
+        assert "Consign to Memory" in pool, "Consign must appear in empirical pool"
+
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        assert "Force of Negation" in promoted, "FoN must be promoted (not in catalog)"
+        assert "Consign to Memory" in promoted, "Consign must be promoted (not in catalog)"
+        con.close()
+
+    def test_gated_additive_no_archetype_is_catalog_only(self):
+        """GATED-ADDITIVE: when archetype=None, no empirical pool, no promotion.
+        Output is byte-identical to catalog-only behavior.
+        """
+        con, _ = _build_fon_corpus()
+        field = _make_field({"Reanimator": 0.4, "ANT Storm": 0.4, "Delver": 0.2})
+        deck_maindeck = {"Brainstorm": 4, "Underground Sea": 4}
+
+        # With archetype=None: no pool, no promotion
+        pkg_no_arch = recommend_sideboard(
+            con, field, deck_maindeck,
+            archetype=None,
+            since="2026-01-01",
+            solver="greedy",
+        )
+
+        # Catalog-only reference (explicit catalog, no archetype)
+        pkg_catalog = recommend_sideboard(
+            con, field, deck_maindeck,
+            archetype=None,
+            since="2026-01-01",
+            solver="greedy",
+            catalog=HOSER_CATALOG,
+        )
+
+        # Both must be byte-identical (same cards set)
+        assert set(pkg_no_arch.cards.keys()) == set(pkg_catalog.cards.keys()), (
+            "archetype=None must produce catalog-only output (no promotion)"
+        )
+        # FoN and Consign must NOT appear (no promotion without archetype)
+        assert "Force of Negation" not in pkg_no_arch.cards, (
+            "FoN must NOT appear when archetype=None (gated-additive no-op)"
+        )
+        assert "Consign to Memory" not in pkg_no_arch.cards, (
+            "Consign must NOT appear when archetype=None (gated-additive no-op)"
+        )
+        con.close()
+
+    def test_anti_synergy_still_filters_catalog_cards(self):
+        """Anti-synergy filter (Chalice/Back-to-Basics/Defense Grid) still works
+        after the promotion path is added.
+
+        Dimir Tempo is a low-curve reactive deck — Chalice of the Void and Back to
+        Basics must be dropped by the anti-synergy filter even when the pool is active.
+        """
+        con, archetype = _build_fon_corpus()
+        field = _make_field({"Reanimator": 0.4, "ANT Storm": 0.4, "Delver": 0.2})
+        # Dimir Tempo maindeck: lots of 1-CMC spells → low_curve=True, reactive=True
+        # Underground Sea + Brainstorm → nonbasic-heavy
+        deck_maindeck = {"Brainstorm": 4, "Underground Sea": 4}
+        pkg = recommend_sideboard(
+            con, field, deck_maindeck,
+            archetype=archetype,
+            since="2026-01-01",
+            solver="greedy",
+        )
+        # Chalice of the Void should be filtered (low-curve deck self-harms)
+        assert "Chalice of the Void" not in pkg.cards, (
+            "Chalice of the Void must be filtered by anti-synergy (low-curve Dimir Tempo deck)"
+        )
+        # Back to Basics should be filtered (nonbasic-heavy manabase would lock itself)
+        assert "Back to Basics" not in pkg.cards, (
+            "Back to Basics must be filtered by anti-synergy (nonbasic-heavy deck)"
+        )
+        con.close()
+
+    def test_promoted_cards_go_through_color_filter(self):
+        """Promoted off-color cards are NOT admitted to a deck that can't cast them.
+
+        Seed a corpus where a Green card (Endurance — not in catalog as a promoted card,
+        but we use a hand-built promoted entry to simulate an off-color promoted card)
+        is in the empirical pool.  When the deck is mono-Red, the Blue FoN must be dropped.
+        """
+        con, _ = _build_fon_corpus()
+        # A purely Red deck can't cast Force of Negation (Blue)
+        field = _make_field({"Reanimator": 0.5, "ANT Storm": 0.5})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        # Simulate the post-3d state by calling _build_coverage_model directly
+        fon_hoser = HoserCard(
+            name="Force of Negation",
+            attacks=frozenset({"combo", "storm-reliant"}),
+            colors=frozenset({"U"}),
+            max_copies=2,
+            swing=_SWING_SOFT,
+        )
+        promoted = {"Force of Negation": fon_hoser}
+
+        # Mono-Red deck (no U or B)
+        model = _build_coverage_model(
+            field,
+            archetype_tags,
+            deck_colors=frozenset({"R"}),
+            deck_tags=frozenset(),
+            catalog={},
+            promoted_candidates=promoted,
+        )
+        # FoN is blue → must be dropped for a Red deck
+        assert "Force of Negation" not in model.candidate_covers, (
+            "Promoted Force of Negation must be color-filtered for a mono-Red deck"
+        )
+        con.close()
+
+    def test_promoted_free_spell_bypasses_color_filter(self):
+        """Promoted free spell (castable_any_color=True) bypasses the color filter."""
+        field = _make_field({"ANT Storm": 1.0})
+        archetype_tags = {"ANT Storm": frozenset({"combo", "storm-reliant"})}
+
+        # Simulate a promoted card with castable_any_color=True (like Surgical Extraction)
+        free_hoser = HoserCard(
+            name="Free Counter",
+            attacks=frozenset({"combo", "storm-reliant"}),
+            colors=frozenset({"U"}),   # requires Blue...
+            max_copies=2,
+            swing=_SWING_SOFT,
+            castable_any_color=True,   # ...but free cast bypasses color requirement
+        )
+        promoted = {"Free Counter": free_hoser}
+
+        # Mono-Red deck
+        model = _build_coverage_model(
+            field,
+            archetype_tags,
+            deck_colors=frozenset({"R"}),
+            deck_tags=frozenset(),
+            catalog={},
+            promoted_candidates=promoted,
+        )
+        # castable_any_color=True → still admitted
+        assert "Free Counter" in model.candidate_covers, (
+            "Free spell (castable_any_color=True) must bypass color filter even in Red deck"
+        )
+
+    def test_gated_additive_no_promoted_candidates_is_noop(self):
+        """promoted_candidates=None → _build_coverage_model output is byte-identical
+        to calling without the param (pre-fix behavior).
+        """
+        field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        deck_colors = frozenset({"U", "B"})
+
+        # Baseline (pre-fix signature, no promoted_candidates)
+        baseline = _build_coverage_model(
+            field, archetype_tags, deck_colors, frozenset()
+        )
+        # With promoted_candidates=None (explicit no-op)
+        with_none = _build_coverage_model(
+            field, archetype_tags, deck_colors, frozenset(),
+            promoted_candidates=None,
+        )
+        assert baseline.element_weight == with_none.element_weight, (
+            "promoted_candidates=None must leave element_weight byte-identical"
+        )
+        assert baseline.candidate_covers == with_none.candidate_covers, (
+            "promoted_candidates=None must leave candidate_covers byte-identical"
+        )
+        assert set(baseline.candidate_meta.keys()) == set(with_none.candidate_meta.keys()), (
+            "promoted_candidates=None must leave candidate_meta byte-identical"
+        )
