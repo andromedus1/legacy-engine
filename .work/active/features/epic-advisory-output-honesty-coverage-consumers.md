@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty-coverage-consumers
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-advisory-output-honesty
 depends_on: [epic-advisory-output-honesty-positioning-coverage]
