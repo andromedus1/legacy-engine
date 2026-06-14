@@ -315,6 +315,64 @@ def load_cards_diff(
     )
 
 
+def persist_ingest_diff(diff: IngestDiff, path: "Path | None" = None) -> None:
+    """Write an IngestDiff to a small JSON file for cross-run hand-off.
+
+    Serialises new_names (sorted list), total_after, scryfall_updated_at, and a
+    persisted_at timestamp (UTC ISO). Overwrites any previous file — only the latest
+    diff is kept (the hand-off is "what just changed", not a full history).
+
+    Follows the constants-only-config path convention: path defaults to
+    ``INGEST_DIFF_PATH`` from config, but callers may override for testing.
+    """
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path as _Path
+
+    if path is None:
+        from legacy_engine.config import INGEST_DIFF_PATH
+        path = INGEST_DIFF_PATH
+
+    path = _Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "new_names": list(diff.new_names),
+        "total_after": diff.total_after,
+        "scryfall_updated_at": diff.scryfall_updated_at,
+        "persisted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.write_text(json.dumps(payload, indent=2))
+
+
+def load_ingest_diff(path: "Path | None" = None) -> "IngestDiff | None":
+    """Read the persisted IngestDiff from disk, or return None if the file is absent.
+
+    Degrades gracefully: callers should treat None as "no diff recorded yet — run
+    `refresh cards`" and fall back to whatever proxy they used before.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    if path is None:
+        from legacy_engine.config import INGEST_DIFF_PATH
+        path = INGEST_DIFF_PATH
+
+    path = _Path(path)
+    if not path.exists():
+        return None
+
+    try:
+        data = json.loads(path.read_text())
+        return IngestDiff(
+            new_names=tuple(data.get("new_names", [])),
+            total_after=int(data.get("total_after", 0)),
+            scryfall_updated_at=data.get("scryfall_updated_at"),
+        )
+    except Exception:
+        return None
+
+
 def rebuild(con: duckdb.DuckDBPyConnection) -> None:
     """Drop and recreate the cards table (raw JSON remains the source of truth)."""
     con.execute("DROP TABLE IF EXISTS cards")

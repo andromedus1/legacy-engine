@@ -46,6 +46,9 @@ SCRYFALL_PRICES_META_PATH = SCRYFALL_DIR / "prices_metadata.json"
 PRICE_STALE_DAYS = 30  # days before a PriceQuote is flagged stale (advisory, not hard error)
 PRICE_OVERRIDE_PATH = DATA_DIR / "prices" / "overrides.json"  # optional curated fallback; absent by default
 
+# Persisted ingest-diff hand-off: refresh cards writes this; report new-cards / speculate --new read it.
+INGEST_DIFF_PATH = DATA_DIR / "last_ingest_diff.json"
+
 # ── Vendored / mirrored external sources ──
 FBETTEGA_CACHE_REPO = "https://github.com/fbettega/MTG_decklistcache"
 MTGOFORMATDATA_REPO = "https://github.com/Badaro/MTGOFormatData"
