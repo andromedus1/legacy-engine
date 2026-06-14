@@ -41,7 +41,7 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
       - low_curve deck (avg non-land CMC < 1.5) → Chalice of the Void blocked
       - nonbasic_heavy deck (>50% non-basic lands) → Back to Basics blocked
-      - reactive deck (reactive fraction > 0.55) → Defense Grid blocked
+      - reactive deck (reactive fraction > 0.40) → Defense Grid blocked
 
   (B) Empirical archetype sideboard pool filter: when ``archetype`` is known and
       the DB has regime-windowed sideboard data, ``_empirical_sideboard_pool`` returns the
@@ -89,6 +89,8 @@ from typing import Optional
 
 import duckdb
 
+import re
+
 from legacy_engine.advisory.field import FieldDistribution
 from legacy_engine.advisory.whattoplay import (
     field_vulnerability_tags,
@@ -96,6 +98,19 @@ from legacy_engine.advisory.whattoplay import (
     _load_deck_cards,
 )
 from legacy_engine.colors import compute_deck_colors
+
+# Alternative-cost ("pitch") spell detection — mirrors card_tags._FREE_SPELL_RE.
+# Force of Will (CMC 5), Force of Negation (CMC 3), Daze (CMC 2), etc. are playable
+# for free by pitching a card; their nominal CMC does not predict Chalice self-harm.
+# Imported here as a module-level constant to avoid importing card_tags (circular risk).
+_PITCH_SPELL_RE = re.compile(
+    r"rather than pay this spell's mana cost"
+    r"|without paying its mana cost"
+    r"|without paying \(its|their\) mana cost"
+    r"|you may exile .+ rather than pay"
+    r"|you may return .+ to its owner's hand rather than pay",
+    re.IGNORECASE,
+)
 
 log = logging.getLogger(__name__)
 
@@ -617,7 +632,14 @@ def compute_deck_anti_synergy_signals(
                 total_nonbasic_land_count += count
         else:
             total_nonland_count += count
-            total_nonland_cmc += cmc * count
+            # Exclude free pitch spells (Force of Will, Daze, Force of Negation, etc.)
+            # from the CMC average.  Their nominal CMC (5, 2, 3 …) inflates the average
+            # and prevents low_curve from firing for decks that ARE vulnerable to Chalice
+            # @1 — they run 4x Brainstorm/Ponder at CMC 1 alongside 4x FoW at CMC 5.
+            # Pitch spells are playable for free so their CMC does not predict self-harm.
+            is_pitch = bool(_PITCH_SPELL_RE.search(oracle_text))
+            if not is_pitch:
+                total_nonland_cmc += cmc * count
             # Reactive role detection (inline, avoids circular import with whattoplay).
             # Keywords that mark interaction-on-opponent's-turn play patterns.
             is_reactive = any(kw in oracle_text for kw in (

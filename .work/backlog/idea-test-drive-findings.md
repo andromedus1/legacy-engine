@@ -35,3 +35,5 @@ end-to-end with the honest primer). But the drive surfaced real quality gaps:
 
 4. **(Low) Venue divergence note is too verbose** — it lists every archetype's spread/tier on one line.
    Truncate to the top-N high-spread rows (the summary table below it already does the useful part).
+   **RESOLVED (2026-06-14):** `venue_divergence` now truncates the note to top-8 rows, appending "+K more"
+   when truncated.
