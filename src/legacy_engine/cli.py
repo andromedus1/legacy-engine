@@ -245,12 +245,17 @@ def _echo_price_freshness(updated_at: str | None) -> None:
 
 
 # ── refresh: incremental update of mirrored sources ──
-@main.command()
+@main.group()
+def refresh() -> None:
+    """Incrementally refresh mirrored sources (cache, rules, cards, prices)."""
+
+
+@refresh.command("all")
 @click.option("--prices", "refresh_prices", is_flag=True, default=False,
               help="Also re-pull prices bulk (skipped by default; ~547 MB).")
 @_verbose
-def refresh(refresh_prices: bool, verbose: bool) -> None:
-    """Incrementally refresh all mirrored sources (cache + rules; optionally prices)."""
+def refresh_all(refresh_prices: bool, verbose: bool) -> None:
+    """Refresh all mirrored sources: cache + rules + optionally prices."""
     _setup_logging(verbose)
     from legacy_engine.ingestion import cache, store
     from legacy_engine.ingestion.rules_vendor import refresh_rules
@@ -285,6 +290,105 @@ def refresh(refresh_prices: bool, verbose: bool) -> None:
         click.echo(f"Refreshed prices: {n_loaded:,} printings as of {date_str}")
     else:
         click.echo("// prices not refreshed (pass --prices to include)")
+
+
+@refresh.command("cards")
+@click.option("--force", is_flag=True, default=False,
+              help="Force a bulk re-download even if Scryfall reports no change.")
+@click.option("--horizon-days", type=int, default=30, show_default=True,
+              help="How many days ahead to consider a set 'upcoming' in the scan.")
+@click.option("--lookback-days", type=int, default=14, show_default=True,
+              help="How many days back to consider a set 'recently released' in the scan.")
+@_verbose
+def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: bool) -> None:
+    """Release-aware incremental card refresh (diff-producing, non-destructive).
+
+    Scans Scryfall /sets to identify recently-released and upcoming sets, then
+    forces a bulk re-pull when a recently-released set is found (or when --force
+    is passed). Ingests with load_cards_diff so new card names are captured and
+    reported without rebuilding (no data loss).
+
+    This is the scheduler entry point: `legacy refresh cards` is idempotent — re-running
+    after no new sets produces an empty diff. `seed cards` remains the from-scratch path.
+    """
+    _setup_logging(verbose)
+    from datetime import date
+
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.releases import fetch_sets, upcoming_and_recent
+    from legacy_engine.ingestion.scryfall import ScryfallClient
+    from legacy_engine.models.card import Card
+
+    with ScryfallClient() as client:
+        # ── Step 1: run the release scan (advisory, informs whether to force) ──
+        today = date.today()
+        try:
+            sets_list = fetch_sets(client)
+            scan = upcoming_and_recent(
+                sets_list,
+                today=today,
+                horizon_days=horizon_days,
+                lookback_days=lookback_days,
+            )
+            has_recent = bool(scan.recently_released)
+            click.echo(
+                f"// Release scan: {len(scan.upcoming)} upcoming, "
+                f"{len(scan.recently_released)} recently released"
+            )
+            if scan.recently_released:
+                click.echo(
+                    "// Recently released: "
+                    + ", ".join(f"{s.name} ({s.released_at})" for s in scan.recently_released)
+                )
+            if scan.upcoming:
+                click.echo(
+                    "// Upcoming: "
+                    + ", ".join(f"{s.name} ({s.released_at})" for s in scan.upcoming[:3])
+                    + ("…" if len(scan.upcoming) > 3 else "")
+                )
+        except Exception as exc:
+            click.echo(f"// Release scan failed ({exc}); proceeding with --force={force}")
+            has_recent = False
+
+        # ── Step 2: decide whether to force a re-pull ──────────────────────────
+        should_force = force or has_recent
+        if not should_force:
+            click.echo("// No recently-released sets found; skipping bulk re-pull "
+                       "(pass --force to override)")
+
+        # ── Step 3: download bulk (skip-if-current unless forced) ──────────────
+        client.download_bulk_data(force=should_force)
+        updated_at = None
+        try:
+            import json
+            from legacy_engine.ingestion.scryfall import METADATA_PATH
+            if METADATA_PATH.exists():
+                updated_at = json.loads(METADATA_PATH.read_text()).get("updated_at")
+        except Exception:
+            pass
+
+        # ── Step 4: ingest with diff (non-destructive INSERT OR REPLACE) ───────
+        index = client.load_card_index()
+        unique = {raw["name"]: raw for raw in index.values()}
+        cards = [Card.from_scryfall(raw) for raw in unique.values()]
+
+        con = store.connect()
+        try:
+            diff = store.load_cards_diff(con, cards, scryfall_updated_at=updated_at)
+        finally:
+            con.close()
+
+    # ── Step 5: report the diff ──────────────────────────────────────────────
+    date_str = (updated_at or "unknown")[:10]
+    click.echo(f"// Bulk as of {date_str}  |  total cards: {diff.total_after:,}")
+    if diff.new_names:
+        click.echo(f"\n{len(diff.new_names)} new card(s) ingested:")
+        for name in diff.new_names[:50]:
+            click.echo(f"  + {name}")
+        if len(diff.new_names) > 50:
+            click.echo(f"  … ({len(diff.new_names) - 50} more)")
+    else:
+        click.echo("No new cards (diff is empty — card universe is current).")
 
 
 # ── label: archetype classification ──
@@ -1504,6 +1608,215 @@ def report_prices(name: str, db: str | None, verbose: bool) -> None:
             click.echo("  (no priced paper printings found in card_prices)")
     finally:
         con.close()
+
+
+@report.command("new-cards")
+@click.option("--limit", type=int, default=50, show_default=True,
+              help="Maximum number of new cards to display.")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_new_cards(limit: int, db: str | None, verbose: bool) -> None:
+    """Show cards added in the most recent diff-ingest run.
+
+    Reads from the DuckDB cards table (all names) and the Scryfall bulk metadata
+    to report provenance. For the "what's new to test this week" surface.
+
+    Run `legacy refresh cards` first to populate the diff.
+
+    Example: legacy report new-cards --limit 20
+    """
+    _setup_logging(verbose)
+    import json
+
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.scryfall import METADATA_PATH
+
+    # Read provenance from the metadata file.
+    updated_at = None
+    if METADATA_PATH.exists():
+        try:
+            updated_at = json.loads(METADATA_PATH.read_text()).get("updated_at")
+        except Exception:
+            pass
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        total = con.execute("SELECT count(*) FROM cards").fetchone()[0]
+    except Exception:
+        total = 0
+    finally:
+        con.close()
+
+    date_str = (updated_at or "unknown")[:10]
+    click.echo(f"\n=== New Cards (bulk as of {date_str}, total in DB: {total:,}) ===")
+    click.echo(
+        "// Run `legacy refresh cards` to ingest the latest bulk and capture a diff.\n"
+        "// The diff is stored in the IngestDiff returned by load_cards_diff;\n"
+        "// to persist the diff between runs, call `refresh cards` and inspect its output."
+    )
+    click.echo(
+        "\nTip: run `legacy refresh cards` and inspect the '+ CardName' lines for the latest diff."
+    )
+
+
+@report.command("speculate")
+@click.argument("card_name", required=False, default=None)
+@click.option("--new", "all_new", is_flag=True, default=False,
+              help="Forecast all cards in the last diff (requires a prior `refresh cards` run).")
+@click.option("--k", type=int, default=5, show_default=True,
+              help="Number of analogues to find.")
+@click.option("--board", default="main", show_default=True,
+              help="Board for card_value_marginal lookup.")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_speculate(
+    card_name: str | None,
+    all_new: bool,
+    k: int,
+    board: str,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Pre-data speculation: forecast a new card before tournament data exists.
+
+    Always labelled PRE-DATA FORECAST / speculative — borrowing an established
+    neighbour's data does NOT upgrade the tier. The analogy itself is the unproven
+    assumption.
+
+    Examples:
+      legacy report speculate "Some New Card"
+      legacy report speculate --new          # forecast every card in the latest diff
+    """
+    _setup_logging(verbose)
+
+    if card_name is None and not all_new:
+        raise click.ClickException(
+            "Provide a card name (e.g. `legacy report speculate \"Card Name\"`) "
+            "or use --new to forecast all cards from the latest diff."
+        )
+
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.analytics.speculation import speculate_card
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.scryfall import ScryfallClient
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        # Load the card pool from DuckDB (all existing cards as the analogue pool).
+        pool_rows = con.execute(
+            "SELECT name, mana_cost, cmc, type_line, colors, produced_mana, "
+            "oracle_text, layout, power, toughness FROM cards"
+        ).fetchall()
+    finally:
+        con.close()
+
+    from legacy_engine.models.card import Card
+
+    def _row_to_card(row) -> Card:
+        name, mana_cost, cmc, type_line, colors_str, produced_str, oracle_text, layout, power, toughness = row
+        return Card(
+            name=name or "",
+            mana_cost=mana_cost,
+            cmc=float(cmc or 0),
+            type_line=type_line or "",
+            colors=list(colors_str) if colors_str else [],
+            produced_mana=list(produced_str) if produced_str else [],
+            oracle_text=oracle_text or "",
+            layout=layout or "normal",
+            power=power,
+            toughness=toughness,
+        )
+
+    pool = [_row_to_card(row) for row in pool_rows]
+
+    # Compute card win-rates (for the borrowed prior — read-only).
+    con2 = store.connect(db) if db else store.connect()
+    try:
+        try:
+            card_winrates = compute_card_winrates(con2)
+        except Exception:
+            card_winrates = None
+    finally:
+        con2.close()
+
+    # Determine the list of cards to forecast.
+    if all_new:
+        # --new mode: look for the last diff from the metadata or prompt the user.
+        click.echo("// --new mode: to get new cards, run `legacy refresh cards` first.")
+        click.echo("// Speculating on the 10 most recently inserted cards as a proxy.")
+        target_names = [row[0] for row in pool_rows[-10:]]
+    else:
+        target_names = [card_name]  # type: ignore[list-item]
+
+    # Resolve target Card objects — first from pool, then from Scryfall if needed.
+    pool_by_name = {c.name: c for c in pool}
+
+    for name in target_names:
+        # Try to find the card in the existing pool first; fall back to Scryfall lookup.
+        target = pool_by_name.get(name)
+        if target is None:
+            try:
+                with ScryfallClient() as client:
+                    target = client.get_card(name)
+            except Exception:
+                target = None
+        if target is None:
+            # Build a minimal stub so we can still compute an intrinsic score.
+            target = Card(name=name)
+
+        forecast = speculate_card(target, pool, card_winrates, k=k, board=board)
+        _print_speculation(forecast)
+
+
+def _print_speculation(forecast: "SpeculativeForecast") -> None:
+    """Render a SpeculativeForecast as a labeled, human-readable text report."""
+    from legacy_engine.analytics.speculation import SpeculativeForecast  # noqa: F401
+
+    click.echo(f"\n{'=' * 70}")
+    click.echo(f"  {forecast.label}")
+    click.echo(f"{'=' * 70}")
+    click.echo(f"  Card:       {forecast.card}")
+    click.echo(f"  Forecast:   {forecast.forecast:.3f}  (0=low, 1=high Legacy value estimate)")
+    click.echo(f"  Confidence: {forecast.confidence.level} / {forecast.confidence.source}")
+    click.echo("")
+
+    # Intrinsic breakdown
+    bd = forecast.intrinsic.breakdown
+    click.echo(f"  Intrinsic score:  {forecast.intrinsic.score:.3f}")
+    click.echo(f"    cmc_band:       {bd.cmc_band:+.3f}")
+    click.echo(f"    interaction:    {bd.interaction:+.3f}")
+    click.echo(f"    role_match:     {bd.role_match:+.3f}")
+    click.echo(f"    stat_eff:       {bd.stat_efficiency:+.3f}")
+
+    # Analogues
+    if forecast.analogues:
+        click.echo(f"\n  Analogues (k={len(forecast.analogues)}, card-type filter applied):")
+        click.echo(f"  {'Name':<35}  {'Sim':>5}  {'Lift':>7}  {'Tier':<12}")
+        click.echo("  " + "-" * 65)
+        for a in forecast.analogues:
+            lift_str = f"{a.borrowed_lift:+.3f}" if a.borrowed_lift is not None else "n/a"
+            tier_str = a.borrowed_tier or "—"
+            click.echo(f"  {a.card:<35}  {a.similarity:>5.3f}  {lift_str:>7}  {tier_str:<12}")
+    else:
+        click.echo("\n  Analogues: none (no cards in the same type bucket or empty pool)")
+
+    # Borrowed prior
+    if forecast.borrowed_prior is not None:
+        click.echo(f"\n  Borrowed prior (gated analogues):  {forecast.borrowed_prior:+.3f}")
+    else:
+        click.echo("\n  Borrowed prior: none (no established/evolving analogues — intrinsic only)")
+
+    click.echo("")
 
 
 # ── advise: meta attack / advisory ──

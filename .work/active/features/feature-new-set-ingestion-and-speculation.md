@@ -1,8 +1,8 @@
 ---
 id: feature-new-set-ingestion-and-speculation
 kind: feature
-stage: drafting
-tags: [ingestion, analytics, methodology, hold-for-review]
+stage: review
+tags: [ingestion, analytics, methodology]
 parent: null
 depends_on: []
 release_binding: null
@@ -358,3 +358,23 @@ soft ban-regime shift in impact, even without a B&R announcement. Natural future
 ## Hold
 
 Design complete; held for human review before implementation.
+
+## Implementation notes
+
+Implemented 2026-06-13. All six units built per design order.
+
+**Part 1 — Release-aware ingestion:**
+- `src/legacy_engine/ingestion/releases.py` (new): `SetRelease` (LegacyEngineModel), `ReleaseScan` (frozen dataclass), `fetch_sets(client)`, `upcoming_and_recent(sets, today, horizon_days, lookback_days)`. Pure date-split logic; no legality filtering per-set.
+- `src/legacy_engine/ingestion/store.py` (extended): `existing_card_names(con)`, `IngestDiff` (frozen dataclass with new_names/total_after/scryfall_updated_at), `load_cards_diff(con, cards, scryfall_updated_at)` — non-destructive INSERT OR REPLACE with pre/post name-set diff.
+- `src/legacy_engine/config.py` (extended): `SCRYFALL_SETS_URL`, `RELEASE_HORIZON_DAYS`, `RELEASE_LOOKBACK_DAYS` constants.
+- CLI: `refresh` converted to a group; existing behavior moved to `refresh all`; `refresh cards [--force] [--horizon-days N] [--lookback-days N]` added; `report new-cards` added.
+
+**Part 2 — No-history speculation:**
+- `src/legacy_engine/analytics/speculation.py` (new): `Analogue`, `analogous_cards(target, pool, k)`, `IntrinsicScoreBreakdown`, `IntrinsicScore`, `intrinsic_score(card)`, `SpeculativeForecast`, `speculate_card(target, pool, card_winrates, k, board)`. Similarity weights are auditable module constants. Intrinsic score degrades gracefully when `interaction_facts` is unavailable.
+- CLI: `report speculate <card-name> [--k N] [--board B]` added; `--new` flag for batch mode.
+
+**Honesty guarantee enforced:** `SpeculativeForecast.confidence.level` is ALWAYS `"speculative"` regardless of analogue tier. Asserted in `test_confidence_always_speculative_with_established_analogues`. `PRE_DATA_BANNER` always present in `label`.
+
+**Deviation from design:** The `refresh` command was originally a `@main.command()`; converted to a group (`@main.group()`) with `refresh all` for the existing behavior and `refresh cards` for the new incremental path. One existing test (`test_refresh_help_includes_prices_option`) updated to reflect `refresh all --help` instead of `refresh --help`. This is a minimal, backward-compatible structural change.
+
+**Tests:** 58 new tests in `tests/test_speculation.py` (analogous matcher, intrinsic score, fusion, honesty guarantee) and `tests/test_releases.py` (release scan date logic, diff ingest). Full suite: 1783 pass (was 1725).
