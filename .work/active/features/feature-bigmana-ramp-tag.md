@@ -1,7 +1,7 @@
 ---
 id: feature-bigmana-ramp-tag
 kind: feature
-stage: review
+stage: done
 tags: [advisory, archetype]
 parent: epic-bigmana-coverage-sideboard-fidelity
 depends_on: []

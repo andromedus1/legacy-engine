@@ -61,3 +61,7 @@ This epic makes preparing for a *specific local meta* a first-class, supported w
   dimension, a `regional` member) to `resolve_venues`; the comparison/divergence/CLI layers consume
   `list[Venue]` and need no change. This is a forward note, NOT a build dependency —
   `feature-three-venue-meta-frame` is independently shippable on existing data.
+
+
+## Status (2026-06-14)
+Phase 1 COMPLETE + done: feature-advise-provenance-flag, feature-standalone-field-read, feature-custom-field-counts-normalization. The local-meta paper-prep workflow is now first-class. Only Phase 2 remains: feature-engine-geo-dimension (DEFERRED — needs a location data source + foundation roll; tagged needs-research). Epic stays open until geo is built or explicitly dropped.

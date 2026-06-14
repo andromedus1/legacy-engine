@@ -1,7 +1,7 @@
 ---
 id: feature-standalone-field-read
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-local-meta-support
 depends_on: [feature-advise-provenance-flag]
