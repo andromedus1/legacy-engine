@@ -686,11 +686,24 @@ class TestCLICollection:
         assert result.exit_code != 0
 
     def test_advise_acquire_smoke(self, tmp_path):
-        """advise acquire runs and produces a buy list section."""
+        """advise acquire runs and produces a buy list section.
+
+        Hermetic: passes --db with an isolated tmp DuckDB so we never touch
+        data/legacy.duckdb and the test is deterministic under the full suite
+        (no lock contention).  An empty corpus is fine — acquire_plan degrades
+        gracefully and always emits the "Acquisition Plan" section header.
+        """
         from click.testing import CliRunner
         from legacy_engine.cli import main
+        from legacy_engine.ingestion import store
 
-        # Owns nothing → buy list has candidates.
+        # Seed an isolated, empty DB with the schema so the CLI finds valid tables.
+        db_path = tmp_path / "test_acquire.duckdb"
+        con = store.connect(str(db_path))
+        store.init_schema(con)
+        con.close()
+
+        # Owns nothing → buy list has candidates (empty corpus → empty plan; header still printed).
         coll_file = self._make_collection_file(tmp_path, "4 Brainstorm\n")
 
         runner = CliRunner()
@@ -698,6 +711,7 @@ class TestCLICollection:
             "advise", "acquire",
             "--collection", coll_file,
             "--archetype", "Dimir Tempo",
+            "--db", str(db_path),
         ])
         # Should complete (exit 0 or 1 for an empty corpus; not a crash/exception).
         assert "Error: " not in result.output or "not implemented" not in result.output
