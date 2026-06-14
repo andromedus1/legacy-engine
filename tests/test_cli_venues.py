@@ -389,3 +389,63 @@ class TestBackwardCompatibility:
         assert "Cross-venue positioning delta" not in result_without.output
         # No venue banners in baseline mode
         assert "── Venue: Online" not in result_without.output
+
+
+# ---------------------------------------------------------------------------
+# Tests: clean error on bad venue key (item 4)
+# ---------------------------------------------------------------------------
+
+
+class TestBadVenueKeyCleanError:
+    """Bad --venues key must produce a clean click.ClickException (no traceback, lists valid keys)."""
+
+    def test_report_meta_bad_venue_key_exits_nonzero(self, runner, venue_db):
+        """A bad venue key exits non-zero (no traceback)."""
+        result = runner.invoke(
+            main,
+            ["report", "meta", "--db", venue_db, "--venues", "online,badkey",
+             "--definition", "raw", "--all-time"],
+        )
+        assert result.exit_code != 0, (
+            f"Expected non-zero exit for bad venue key; got exit_code=0; output:\n{result.output}"
+        )
+
+    def test_report_meta_bad_venue_key_no_traceback(self, runner, venue_db):
+        """A bad venue key does not produce a Python traceback in the output."""
+        result = runner.invoke(
+            main,
+            ["report", "meta", "--db", venue_db, "--venues", "online,totally_wrong",
+             "--definition", "raw", "--all-time"],
+        )
+        assert result.exit_code != 0
+        # Click errors must not produce a raw Traceback block
+        assert "Traceback" not in result.output, (
+            f"Bad venue key must produce a clean ClickException, not a traceback; "
+            f"output:\n{result.output}"
+        )
+
+    def test_report_meta_bad_venue_key_lists_valid_keys(self, runner, venue_db):
+        """Error message for a bad venue key lists the valid options (online, paper)."""
+        result = runner.invoke(
+            main,
+            ["report", "meta", "--db", venue_db, "--venues", "online,garbage_venue",
+             "--definition", "raw", "--all-time"],
+        )
+        assert result.exit_code != 0
+        output_lower = result.output.lower()
+        # The error must mention valid keys so the user knows what to use
+        assert "online" in output_lower or "paper" in output_lower, (
+            f"Error message must list valid venue keys (online, paper); got:\n{result.output}"
+        )
+
+    def test_advise_report_bad_venue_key_clean_error(self, runner, venue_db, deck_file):
+        """advise report --venues with a bad key also produces a clean error."""
+        result = runner.invoke(
+            main,
+            ["advise", "report", "--db", venue_db, "--deck", deck_file,
+             "--venues", "online,no_such_venue", "--all-time"],
+        )
+        assert result.exit_code != 0
+        assert "Traceback" not in result.output, (
+            f"advise report bad venue key must not produce a traceback; got:\n{result.output}"
+        )
