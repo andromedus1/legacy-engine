@@ -1,7 +1,7 @@
 ---
 id: new-set-ingestion-and-speculation-analogous-matcher
 kind: story
-stage: review
+stage: done
 tags: [analytics, methodology]
 parent: feature-new-set-ingestion-and-speculation
 depends_on: []

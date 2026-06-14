@@ -1,7 +1,7 @@
 ---
 id: feature-personal-inventory-and-decks
 kind: feature
-stage: review
+stage: implementing
 tags: [ingestion, data-model, advisory, foundation]
 parent: null
 depends_on: []
@@ -394,3 +394,7 @@ to avoid collision with DuckDB reserved word.
 **ARCHITECTURE.md:** rolled forward — `collection/` module-map section added, layer diagram updated,
 `data/collection/` added to data box, `models/` section updated for collection entities +
 `models/decklist.py`, Conventions CLI list updated.
+
+
+## Review findings (bounce 1)
+BLOCKING: `cli.py` `collection show --free-only` is broken by operator chaining: `if free_only and free_cnt > 0 == 0:` parses as `free_only and (free_cnt>0) and (0==0)` so it `continue`s on every card that HAS free copies → `--free-only` shows nothing. FIX the predicate (should skip cards with free_cnt==0 under --free-only) and add a spec-derived regression test (own N, allocate 0 → --free-only shows N). Round-trip + model + ARCHITECTURE roll-forward all verified good.

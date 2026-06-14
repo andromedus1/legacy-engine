@@ -1,7 +1,7 @@
 ---
 id: personal-inventory-and-decks-my-deck-integration
 kind: story
-stage: review
+stage: done
 tags: [advisory, data-model, foundation, hold-for-review]
 parent: feature-personal-inventory-and-decks
 depends_on: [feature-personal-inventory-and-decks]
