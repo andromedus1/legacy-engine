@@ -4515,8 +4515,6 @@ def collection_show(free_only: bool, card_name: str | None, verbose: bool) -> No
         free_cnt = free.get(name, 0)
         if card_name and card_name.lower() not in name.lower():
             continue
-        if free_only and free_cnt > 0 == 0:
-            continue
         if free_only and free_cnt == 0:
             continue
         click.echo(f"{name:<40}  {owned_cnt:>5}  {alloc_cnt:>5}  {free_cnt:>5}")

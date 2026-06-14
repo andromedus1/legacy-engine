@@ -102,6 +102,38 @@ class TestCollectionShow:
         assert result.exit_code == 0, result.output
         assert "Brainstorm" in result.output
 
+    def test_free_only_shows_unallocated_cards(self, cli_collection_env, tmp_path):
+        """Regression: --free-only must show cards with free copies, not skip them.
+
+        Own 4 Brainstorm, allocate 0 to any deck → --free-only lists Brainstorm.
+        Own 2 Force of Will, allocate all 2 to a deck → --free-only does NOT list FoW.
+
+        Spec: a card appears under --free-only iff free_cnt > 0.
+        """
+        runner, base = cli_collection_env
+
+        # Import inventory: 4 Brainstorm (unallocated) + 2 Force of Will.
+        inv_file = base / "binder.txt"
+        inv_file.write_text("4 Brainstorm\n2 Force of Will\n")
+        runner.invoke(main, ["collection", "import", "--file", str(inv_file)])
+
+        # Save a deck that uses all 2 Force of Will (fully allocates it).
+        deck_file = base / "deck.txt"
+        deck_file.write_text("2 Force of Will\n12 Island\n")
+        runner.invoke(main, ["deck", "save", "--name", "Test Deck", "--deck", str(deck_file)])
+
+        result = runner.invoke(main, ["collection", "show", "--free-only"])
+        assert result.exit_code == 0, result.output
+
+        # Brainstorm has 4 free copies → must appear.
+        assert "Brainstorm" in result.output, (
+            "--free-only failed to show Brainstorm (4 owned, 0 allocated, 4 free)"
+        )
+        # Force of Will is fully allocated (2 owned, 2 in deck, 0 free) → must NOT appear.
+        assert "Force of Will" not in result.output, (
+            "--free-only wrongly showed Force of Will (2 owned, 2 allocated, 0 free)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # deck save + list + show + versions
