@@ -29,6 +29,12 @@ SCRYFALL_API_BASE = "https://api.scryfall.com"
 SCRYFALL_BULK_TYPE = "oracle_cards"
 SCRYFALL_API_DELAY = 0.1  # seconds between REST requests (bulk has no limit)
 USER_AGENT = "LegacyEngine/0.1.0"
+SCRYFALL_SETS_URL = f"{SCRYFALL_API_BASE}/sets"   # GET /sets — the release calendar
+
+# Release-scan windows: how far to look ahead (upcoming) and behind (recently-released).
+# Advisory only — the diff is the authoritative "what's new" signal.
+RELEASE_HORIZON_DAYS = 30   # days forward for "upcoming" sets
+RELEASE_LOOKBACK_DAYS = 14  # days back for "recently released" sets
 
 # Per-printing price bulk (default_cards: one object per printing, English/printed-language).
 # Separate from the oracle bulk (oracle_cards) which carries one object per Oracle ID — that
