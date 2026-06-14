@@ -47,6 +47,8 @@ from legacy_engine.advisory.sideboard import (
 from legacy_engine.cli import main
 from legacy_engine.generation.tuning import (
     TunedDeck,
+    _INCLUSION_CUT_RESISTANCE,
+    _MIN_SWAP_GAIN,
     _greedy_tune,
     _legal_swap_maindeck,
     candidate_pool,
@@ -644,6 +646,156 @@ class TestGreedyTune:
         # After swap: FlexCard -> PoolCard; value_after = 1 * 0.4 + 59 * 0.0 = 0.4
         assert v_after == pytest.approx(0.4, abs=1e-9)
         assert v_after > v_before  # strict improvement
+
+    # ── Core-protection tests (fix-tuner-core-protection) ────────────────────
+
+    def test_epsilon_gain_does_not_cut_high_inclusion_flex_card(self):
+        """A high-inclusion flex card (60% archetype adoption) must NOT be cut when the
+        only available swap gains are sub-threshold (epsilon lift).
+
+        This is the failing-then-passing test for fix-tuner-core-protection:
+        - Nethergoyf-equivalent: inclusion=0.60, fwv=0.10 (positive, but modest)
+        - PoolReplacement: fwv=0.10 + epsilon (trivially better by 0.001)
+        - required gain for cut = max(_MIN_SWAP_GAIN, 0.60 * _INCLUSION_CUT_RESISTANCE)
+        - At calibrated thresholds: required > 0.001 → swap is BLOCKED.
+
+        The core card should remain in the maindeck at its original count.
+        """
+        epsilon = 0.001
+        high_inclusion = 0.60
+        fwv = {"Nethergoyf": 0.10, "PoolReplacement": 0.10 + epsilon}
+        inclusion_pcts = {"Nethergoyf": high_inclusion}
+
+        locked = {}
+        flex = {"Nethergoyf": 3}
+        maindeck = {"Nethergoyf": 3}
+        for i in range(57):
+            k = f"Pad{i}"
+            locked[k] = 1
+            maindeck[k] = 1
+        assert sum(maindeck.values()) == 60
+
+        pool = ["PoolReplacement"]
+
+        final_main, swaps, v_before, v_after = _greedy_tune(
+            fwv, maindeck, locked, flex, pool,
+            max_swaps=8,
+            legal_swap=self._trivial_legal_swap,
+            inclusion_pcts=inclusion_pcts,
+        )
+
+        # The sub-threshold swap must be BLOCKED by the core-protection gate.
+        assert swaps == [], (
+            f"High-inclusion flex card should NOT be cut on epsilon lift "
+            f"(gain={epsilon:.4f} < required={max(_MIN_SWAP_GAIN, high_inclusion * _INCLUSION_CUT_RESISTANCE):.4f}); "
+            f"swaps={swaps}"
+        )
+        assert final_main.get("Nethergoyf") == 3, (
+            f"Nethergoyf must stay at 3 copies; final_main={final_main}"
+        )
+
+    def test_large_gain_still_cuts_high_inclusion_flex_card(self):
+        """A clearly superior swap (large gain >> threshold) MUST still execute even for
+        a high-inclusion flex card.  The protection must not over-freeze the deck.
+
+        Scenario: Nethergoyf at 60% inclusion, fwv=0.05.  PoolBetter at fwv=0.30.
+        Gain = 0.25.  Required gate = max(0.02, 0.60 * 0.08) = max(0.02, 0.048) = 0.048.
+        0.25 >> 0.048 → swap proceeds.
+        """
+        fwv = {"Nethergoyf": 0.05, "PoolBetter": 0.30}
+        inclusion_pcts = {"Nethergoyf": 0.60}
+
+        locked = {}
+        flex = {"Nethergoyf": 3}
+        maindeck = {"Nethergoyf": 3}
+        for i in range(57):
+            k = f"Pad{i}"
+            locked[k] = 1
+            maindeck[k] = 1
+        assert sum(maindeck.values()) == 60
+
+        pool = ["PoolBetter"]
+
+        final_main, swaps, v_before, v_after = _greedy_tune(
+            fwv, maindeck, locked, flex, pool,
+            max_swaps=8,
+            legal_swap=self._trivial_legal_swap,
+            inclusion_pcts=inclusion_pcts,
+        )
+
+        # The large-gain swap MUST proceed (no over-freezing).
+        assert len(swaps) > 0, (
+            f"A clearly superior swap (gain=0.25 >> required) must still execute "
+            f"for a high-inclusion flex card; swaps={swaps}"
+        )
+        assert v_after > v_before, (
+            f"value must improve on a legitimate large-gain swap; "
+            f"v_before={v_before:.4f} v_after={v_after:.4f}"
+        )
+
+    def test_flat_noise_floor_blocks_epsilon_on_zero_inclusion_card(self):
+        """The flat _MIN_SWAP_GAIN floor blocks epsilon swaps even on cards with 0% inclusion
+        (e.g. user-injected cards with no archetype history).
+
+        Gain = 0.001 < _MIN_SWAP_GAIN → blocked regardless of inclusion.
+        """
+        epsilon = 0.001
+        fwv = {"UserCard": 0.10, "PoolCard": 0.10 + epsilon}
+        inclusion_pcts = {}  # no data for UserCard → 0.0 inclusion
+
+        locked = {}
+        flex = {"UserCard": 1}
+        maindeck = {"UserCard": 1}
+        for i in range(59):
+            k = f"Pad{i}"
+            locked[k] = 1
+            maindeck[k] = 1
+        assert sum(maindeck.values()) == 60
+
+        pool = ["PoolCard"]
+
+        final_main, swaps, _v_before, _v_after = _greedy_tune(
+            fwv, maindeck, locked, flex, pool,
+            max_swaps=8,
+            legal_swap=self._trivial_legal_swap,
+            inclusion_pcts=inclusion_pcts,
+        )
+
+        assert swaps == [], (
+            f"Epsilon gain ({epsilon}) must be blocked by the flat _MIN_SWAP_GAIN floor "
+            f"({_MIN_SWAP_GAIN}); swaps={swaps}"
+        )
+
+    def test_inclusion_pcts_none_uses_flat_floor_only(self):
+        """When inclusion_pcts is None (old callers / tests), only the flat floor applies.
+        A gain just above _MIN_SWAP_GAIN must proceed.
+        """
+        gain = _MIN_SWAP_GAIN + 0.01  # just above the flat floor
+        fwv = {"FlexCard": 0.0, "PoolCard": gain}
+        # No inclusion_pcts supplied (None) — backward-compatible path.
+
+        locked = {}
+        flex = {"FlexCard": 1}
+        maindeck = {"FlexCard": 1}
+        for i in range(59):
+            k = f"Pad{i}"
+            locked[k] = 1
+            maindeck[k] = 1
+        assert sum(maindeck.values()) == 60
+
+        pool = ["PoolCard"]
+
+        final_main, swaps, _v_before, _v_after = _greedy_tune(
+            fwv, maindeck, locked, flex, pool,
+            max_swaps=8,
+            legal_swap=self._trivial_legal_swap,
+            inclusion_pcts=None,   # backward-compatible: no inclusion data
+        )
+
+        assert len(swaps) == 1, (
+            f"A gain just above _MIN_SWAP_GAIN ({gain:.4f} > {_MIN_SWAP_GAIN}) must "
+            f"proceed when inclusion_pcts=None; swaps={swaps}"
+        )
 
 
 # ---------------------------------------------------------------------------
