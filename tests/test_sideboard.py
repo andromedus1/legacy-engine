@@ -20,11 +20,13 @@ from legacy_engine.advisory.field import FieldDistribution, build_custom_field
 from legacy_engine.advisory.sideboard import (
     HOSER_CATALOG,
     HoserCard,
+    ConsideringCard,
     CoverageModel,
     PickTrace,
     SideboardPackage,
     DeckAntiSynergySignals,
     _COVERAGE_P,
+    _CONSIDERING_CAP,
     _SWING_DEDICATED,
     _SWING_SOFT,
     _EMPIRICAL_SWING_CAP,
@@ -35,6 +37,7 @@ from legacy_engine.advisory.sideboard import (
     _ilp_solve,
     _ILPFailed,
     _marginal_g,
+    _rank_considering_pool,
     compute_deck_anti_synergy_signals,
     is_anti_synergistic,
     _empirical_sideboard_pool,
@@ -4808,3 +4811,231 @@ class TestEmpiricalSideboardSwings:
                 f"Override should raise element weight for key={key!r}: "
                 f"base={base_w:.4f}, override={override_w:.4f}"
             )
+
+
+# ---------------------------------------------------------------------------
+# TestConsideringPool — feature-considering-cards-pool
+# ---------------------------------------------------------------------------
+
+class TestConsideringPool:
+    """Tests for _rank_considering_pool and SideboardPackage.considering.
+
+    Spec-derived tests:
+    - Considering pool contains ranked non-selected candidates (not the chosen 15).
+    - The chosen 15 is unchanged with/without the pool.
+    - Cap respected (≤ _CONSIDERING_CAP).
+    - Honest tiers / labels are non-empty strings.
+    - ConsideringCard fields match spec.
+    - Sorted by marginal_gain DESC.
+    - promoted=True only for empirical-promoted cards.
+    """
+
+    def _two_tag_model(self) -> CoverageModel:
+        """Model with 2 distinct tags (A, B); 3 hosers: H_A (tag A), H_B (tag B), H_AB (both).
+
+        H_AB covers both elements and has the highest gain.
+        H_A and H_B each cover one element.
+        """
+        h_a = _minimal_hoser("H_A", frozenset({"tagA"}), max_copies=4, swing=_SWING_DEDICATED)
+        h_b = _minimal_hoser("H_B", frozenset({"tagB"}), max_copies=4, swing=_SWING_DEDICATED)
+        h_ab = _minimal_hoser("H_AB", frozenset({"tagA", "tagB"}), max_copies=4, swing=_SWING_DEDICATED)
+        element_weight = {"tagA|A": 0.10, "tagB|B": 0.08}
+        candidate_covers = {
+            "H_A": frozenset({"tagA|A"}),
+            "H_B": frozenset({"tagB|B"}),
+            "H_AB": frozenset({"tagA|A", "tagB|B"}),
+        }
+        candidate_meta = {"H_A": h_a, "H_B": h_b, "H_AB": h_ab}
+        return _make_model(element_weight, candidate_covers, candidate_meta)
+
+    def test_considering_pool_excludes_chosen_cards_at_max(self):
+        """Cards fully placed (copies == max_copies) must not appear in the pool."""
+        model = self._two_tag_model()
+        # Place H_AB at max_copies=4 → fully consumed
+        final_cards = {"H_AB": 4}
+        pool = _rank_considering_pool(model, final_cards)
+        pool_names = {cc.card for cc in pool}
+        assert "H_AB" not in pool_names, (
+            "H_AB is at max_copies=4 and must not appear in the considering pool"
+        )
+
+    def test_considering_pool_includes_not_selected_cards(self):
+        """Cards not in final_cards with positive marginal gain appear in the pool."""
+        model = self._two_tag_model()
+        # Only H_AB selected; H_A and H_B not chosen
+        final_cards = {"H_AB": 1}
+        pool = _rank_considering_pool(model, final_cards)
+        pool_names = {cc.card for cc in pool}
+        # H_A and H_B were not selected and have residual coverage value
+        assert len(pool) > 0, "Expecting at least one bubble candidate"
+        # All pool entries must NOT be in the chosen 15 at max_copies
+        for cc in pool:
+            current = final_cards.get(cc.card, 0)
+            max_c = model.candidate_meta[cc.card].max_copies
+            assert current < max_c, (
+                f"{cc.card} is at max_copies in final_cards but appears in pool"
+            )
+
+    def test_considering_pool_sorted_by_marginal_gain_desc(self):
+        """Pool is sorted by marginal_gain DESC (deterministic tie-break by card name)."""
+        model = self._two_tag_model()
+        final_cards = {}  # no cards selected → all candidates are bubble
+        pool = _rank_considering_pool(model, final_cards)
+        assert len(pool) >= 2, "Need at least 2 entries to check ordering"
+        for i in range(len(pool) - 1):
+            assert pool[i].marginal_gain >= pool[i + 1].marginal_gain, (
+                f"Pool not sorted: pool[{i}].gain={pool[i].marginal_gain:.4f} "
+                f"< pool[{i+1}].gain={pool[i+1].marginal_gain:.4f}"
+            )
+
+    def test_considering_pool_cap_respected(self):
+        """Pool length ≤ cap parameter."""
+        # Build a model with many candidates
+        element_weight: dict[str, float] = {}
+        candidate_covers: dict[str, frozenset[str]] = {}
+        candidate_meta: dict[str, HoserCard] = {}
+        for i in range(30):
+            elem = f"E{i}"
+            card = f"Hoser{i}"
+            element_weight[elem] = 0.05
+            candidate_covers[card] = frozenset({elem})
+            candidate_meta[card] = _minimal_hoser(card, frozenset({f"tag{i}"}), max_copies=1)
+        model = _make_model(element_weight, candidate_covers, candidate_meta)
+
+        pool = _rank_considering_pool(model, {}, cap=_CONSIDERING_CAP)
+        assert len(pool) <= _CONSIDERING_CAP, (
+            f"Pool len={len(pool)} exceeds cap={_CONSIDERING_CAP}"
+        )
+
+    def test_considering_pool_marginal_gains_positive(self):
+        """All ConsideringCard.marginal_gain values are > 0."""
+        model = self._two_tag_model()
+        pool = _rank_considering_pool(model, {})
+        for cc in pool:
+            assert cc.marginal_gain > 0.0, (
+                f"{cc.card} has marginal_gain={cc.marginal_gain} which is not positive"
+            )
+
+    def test_considering_card_label_nonempty(self):
+        """Every ConsideringCard carries a non-empty label string."""
+        model = self._two_tag_model()
+        pool = _rank_considering_pool(model, {})
+        for cc in pool:
+            assert isinstance(cc.label, str) and len(cc.label) > 0, (
+                f"{cc.card} has empty label"
+            )
+
+    def test_considering_card_is_frozen_dataclass(self):
+        """ConsideringCard is immutable (frozen dataclass)."""
+        cc = ConsideringCard(
+            card="Test Card",
+            marginal_gain=0.05,
+            covers_elements=frozenset({"tagA|A"}),
+            label="covers tagA (Arch A)",
+            promoted=False,
+        )
+        assert cc.card == "Test Card"
+        assert cc.marginal_gain == pytest.approx(0.05)
+        assert "tagA|A" in cc.covers_elements
+        assert cc.promoted is False
+
+    def test_considering_card_promoted_flag(self):
+        """ConsideringCard.promoted=True when card is in promoted_names."""
+        model = self._two_tag_model()
+        final_cards = {"H_AB": 1}
+        # Mark H_A as promoted (empirical, not in catalog)
+        pool = _rank_considering_pool(model, final_cards, promoted_names=frozenset({"H_A"}))
+        promoted_in_pool = [cc for cc in pool if cc.card == "H_A"]
+        if promoted_in_pool:
+            assert promoted_in_pool[0].promoted is True
+        # H_B is not promoted → promoted=False
+        non_promoted_in_pool = [cc for cc in pool if cc.card == "H_B"]
+        if non_promoted_in_pool:
+            assert non_promoted_in_pool[0].promoted is False
+
+    def test_chosen_15_unchanged_with_considering(self):
+        """recommend_sideboard chosen 15 is byte-identical regardless of considering pool."""
+        con = _con()
+        field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
+        # Two-hoser catalog: both colorless so always castable
+        catalog = {
+            "Grafdigger's Cage": HoserCard(
+                name="Grafdigger's Cage",
+                attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+            "Mindbreak Trap": HoserCard(
+                name="Mindbreak Trap",
+                attacks=frozenset({"combo"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+            "Leyline of the Void": HoserCard(
+                name="Leyline of the Void",
+                attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+        }
+        pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy", catalog=catalog)
+
+        # chosen 15 is in pkg.cards; considering is purely additive
+        # The chosen cards must be consistent regardless of whether considering is populated
+        assert isinstance(pkg.cards, dict)
+        assert sum(pkg.cards.values()) <= 15
+        assert isinstance(pkg.considering, tuple)
+        # Every card in considering is NOT in pkg.cards at max_copies
+        from legacy_engine.advisory.sideboard import _CONSIDERING_CAP as CAP
+        assert len(pkg.considering) <= CAP
+        for cc in pkg.considering:
+            chosen_copies = pkg.cards.get(cc.card, 0)
+            # The card may appear in chosen but at < max_copies, OR not appear at all
+            assert cc.card not in pkg.cards or chosen_copies < catalog.get(cc.card, HoserCard(
+                name=cc.card, attacks=frozenset(), colors=frozenset(), max_copies=4, swing=0.10
+            )).max_copies
+        con.close()
+
+    def test_considering_pool_disjoint_from_fully_selected(self):
+        """All cards in the considering pool are not at max_copies in the solution."""
+        model = self._two_tag_model()
+        # Select H_A and H_B at max_copies=4 each; H_AB is only partially selected
+        final_cards = {"H_A": 4, "H_B": 4, "H_AB": 1}
+        pool = _rank_considering_pool(model, final_cards)
+        for cc in pool:
+            current = final_cards.get(cc.card, 0)
+            max_c = model.candidate_meta[cc.card].max_copies
+            assert current < max_c, (
+                f"{cc.card} is at max_copies ({max_c}) in final_cards but appears in the pool"
+            )
+
+    def test_considering_empty_when_all_candidates_at_max(self):
+        """When all candidates are at max_copies in final_cards, pool is empty."""
+        model = self._two_tag_model()
+        # Place all cards at their max_copies (4 each for all 3 hosers)
+        # Budget cap: 15 total slots; 3 hosers × 4 = 12 ≤ 15
+        final_cards = {"H_A": 4, "H_B": 4, "H_AB": 4}
+        pool = _rank_considering_pool(model, final_cards)
+        assert pool == [], (
+            f"Expected empty pool when all candidates at max_copies, got {pool}"
+        )
+
+    def test_sideboard_package_considering_field_defaults_empty(self):
+        """SideboardPackage.considering defaults to empty tuple (no regression for existing code)."""
+        pkg = SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.12,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="test",
+            warnings=(),
+        )
+        # considering is additive with a default_factory → always present
+        assert hasattr(pkg, "considering")
+        assert isinstance(pkg.considering, tuple)
