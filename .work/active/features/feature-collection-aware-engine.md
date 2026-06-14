@@ -1,7 +1,7 @@
 ---
 id: feature-collection-aware-engine
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, generation, ingestion]
 parent: null
 depends_on: [feature-personal-inventory-and-decks]
@@ -400,3 +400,6 @@ Implemented 2026-06-13. All four units shipped per design.
 
 ## Review findings (bounce 1)
 BLOCKING: `tests/test_collection_aware_engine.py::test_advise_acquire_smoke` is non-hermetic — the `advise acquire` CLI invocation passes no `--db`, so it connects to the real data/legacy.duckdb and fails under the full suite on lock contention (this is the lone suite failure: 1840 passed, 1 failed). FIX: make the smoke test use an isolated DB (`--db` with a tmp/fixture path or :memory:), like the orchestrator tests do. Production logic + byte-identical no-op invariant verified good; only the test is at fault.
+
+### Resolution
+Fixed 2026-06-13. Seeded an isolated DuckDB in `tmp_path` (`store.init_schema` → empty corpus), passed `--db str(db_path)` to the CLI runner. Assertion `"Acquisition Plan" in result.output` kept unchanged and meaningful — `acquire_plan` degrades gracefully on an empty corpus and always emits the section header. Test is now fully hermetic and deterministic under the full suite.
