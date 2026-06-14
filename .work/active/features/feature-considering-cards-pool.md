@@ -1,7 +1,7 @@
 ---
 id: feature-considering-cards-pool
 kind: feature
-stage: review
+stage: done
 tags: [generation, advisory]
 parent: epic-bigmana-coverage-sideboard-fidelity
 depends_on: []

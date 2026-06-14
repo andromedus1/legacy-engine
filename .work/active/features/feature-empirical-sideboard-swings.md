@@ -1,7 +1,7 @@
 ---
 id: feature-empirical-sideboard-swings
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-bigmana-coverage-sideboard-fidelity
 depends_on: []

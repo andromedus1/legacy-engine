@@ -1,7 +1,7 @@
 ---
 id: feature-hoser-catalog-expansion
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: epic-bigmana-coverage-sideboard-fidelity
 depends_on: [feature-bigmana-ramp-tag]
