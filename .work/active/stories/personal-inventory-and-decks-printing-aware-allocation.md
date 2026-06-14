@@ -1,7 +1,7 @@
 ---
 id: personal-inventory-and-decks-printing-aware-allocation
 kind: story
-stage: review
+stage: done
 tags: [data-model, foundation, hold-for-review]
 parent: feature-personal-inventory-and-decks
 depends_on: [feature-personal-inventory-and-decks]

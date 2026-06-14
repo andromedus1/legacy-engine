@@ -1,7 +1,7 @@
 ---
 id: feature-new-set-ingestion-and-speculation
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, analytics, methodology]
 parent: null
 depends_on: []
