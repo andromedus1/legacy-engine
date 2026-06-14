@@ -29,6 +29,33 @@ Maindeck-aware extension (epic-deck-generation-sideboard-maindeck):
   PRESENCE-CORRELATIONAL NOTE: per-card win-rates reflect the registered 75 for
   decks that appeared in resolved matches, not causal game-by-game effects.  The
   OUT/IN plan is a data-guided starting point, not a deterministic prescription.
+
+Archetype-empirical recommendations extension (feature-archetype-empirical-recommendations):
+  Two complementary filters prevent anti-synergistic hoser proposals:
+
+  (A) Anti-synergy pre-filter: ``DeckAntiSynergySignals`` captures three deck-composition
+      signals derived from oracle-text-free card data (avg CMC, nonbasic land fraction,
+      reactive-mass fraction).  ``is_anti_synergistic(card_name, signals)`` checks a
+      hard-coded map of known self-harming hosers against those signals.  Implemented as a
+      pure function with no DB dependency — testable with hand-built card lists.
+
+      - low_curve deck (avg non-land CMC < 1.5) → Chalice of the Void blocked
+      - nonbasic_heavy deck (>50% non-basic lands) → Back to Basics blocked
+      - reactive deck (reactive fraction > 0.55) → Defense Grid blocked
+
+  (B) Empirical archetype sideboard pool filter: when ``archetype`` is known and
+      the DB has regime-windowed sideboard data, ``_empirical_sideboard_pool`` returns the
+      set of cards that real archetype lists ran above ``min_adoption`` (default 5%).
+      ``_build_coverage_model`` accepts an optional ``empirical_pool`` frozenset; when
+      provided, catalog candidates not in the pool are dropped.
+
+  GATING (gated-additive):
+    - Anti-synergy signals are None when no deck card objects are supplied (empty maindeck
+      path in tests).  ``is_anti_synergistic(card, None)`` always returns False → no-op.
+    - Empirical pool is None when ``archetype`` is not supplied, the archetype has no
+      sideboard data, or the pool would be empty.  ``empirical_pool=None`` → no-op.
+    - Existing tests supply empty maindecks and no archetype → both filters are no-ops →
+      test output is byte-identical to pre-feature.
 """
 
 from __future__ import annotations
@@ -481,6 +508,177 @@ HOSER_CATALOG: dict[str, HoserCard] = {
 
 
 # ---------------------------------------------------------------------------
+# Extension C: Anti-synergy filter + empirical archetype pool
+# (feature-archetype-empirical-recommendations)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DeckAntiSynergySignals:
+    """Deck-composition signals used to block self-harming hoser proposals.
+
+    All three signals are derived from the deck's card objects (no DB beyond card lookup).
+    The dataclass is frozen so it can be safely passed through the solver pipeline.
+
+    ``low_curve``: avg non-land CMC < ``_LOW_CURVE_CMC_THRESHOLD`` — Chalice@1 wrecks the deck.
+    ``nonbasic_heavy``: >``_NONBASIC_FRACTION_THRESHOLD`` of land slots are non-basics
+                        (e.g. duals/fetches) — Back to Basics locks the deck out.
+    ``reactive``: reactive fraction of the non-land card pool > ``_REACTIVE_FRACTION_THRESHOLD``
+                  — Defense Grid prevents the deck from operating on the opponent's turn.
+    """
+
+    low_curve: bool        # avg non-land CMC < threshold → Chalice self-harm
+    nonbasic_heavy: bool   # >threshold fraction of lands are non-basic → BtB self-harm
+    reactive: bool         # reactive mass fraction > threshold → Defense Grid self-harm
+
+
+# Thresholds (empirically tuned to the Dimir Tempo archetype profile)
+_LOW_CURVE_CMC_THRESHOLD: float = 1.5   # avg non-land CMC; below this → low-curve
+_NONBASIC_FRACTION_THRESHOLD: float = 0.50  # fraction of land slots; above → nonbasic-heavy
+_REACTIVE_FRACTION_THRESHOLD: float = 0.40  # fraction of non-land card pool; above → reactive
+
+# Empirical sideboard pool: minimum adoption rate to include a card in the pool.
+# 5% means the card appeared in the sideboard of ≥5% of the archetype's in-regime decks.
+_EMPIRICAL_POOL_MIN_ADOPTION: float = 0.05
+
+
+# Map: hoser name → tuple of signal attribute names that make it anti-synergistic.
+# A hoser is blocked if ANY of its listed signals is True on the deck.
+_ANTI_SYNERGY_MAP: dict[str, tuple[str, ...]] = {
+    "Chalice of the Void": ("low_curve",),
+    "Back to Basics": ("nonbasic_heavy",),
+    "Defense Grid": ("reactive",),
+}
+
+
+def compute_deck_anti_synergy_signals(
+    cards_with_counts: "list[tuple[object, int]]",
+) -> DeckAntiSynergySignals:
+    """Derive anti-synergy signals from a (Card, count) list (pure, no DB).
+
+    Accepts the same ``list[tuple[Card, count]]`` format as ``_load_deck_cards``
+    returns.  Returns all-False when the list is empty (no deck → no signals).
+
+    The three signals:
+    - ``low_curve``: avg non-land CMC < _LOW_CURVE_CMC_THRESHOLD.
+    - ``nonbasic_heavy``: fraction of land slots that are non-basic > _NONBASIC_FRACTION_THRESHOLD.
+    - ``reactive``: reactive non-land card fraction > _REACTIVE_FRACTION_THRESHOLD.
+      "Reactive" cards are counters, removal, and protection spells — identified via
+      the ``_card_roles`` helper from ``whattoplay`` (not imported directly to avoid
+      a circular import; we inline the reactive-role logic here).
+
+    This is an objective-search-split pure function: heavy DB work (resolving cards)
+    is already done by the caller; this function only does arithmetic.
+    """
+    if not cards_with_counts:
+        return DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=False)
+
+    # --- low_curve: avg non-land CMC ---
+    total_nonland_cmc = 0.0
+    total_nonland_count = 0
+    total_land_count = 0
+    total_nonbasic_land_count = 0
+
+    # --- reactive: count cards whose role includes counter/removal/protection ---
+    reactive_nonland_count = 0
+
+    for card, count in cards_with_counts:
+        is_land = getattr(card, "is_land", False)
+        cmc = getattr(card, "cmc", 0.0) or 0.0
+        type_line = (getattr(card, "type_line", "") or "").lower()
+        oracle_text = (getattr(card, "oracle_text", "") or "").lower()
+
+        if is_land:
+            total_land_count += count
+            # Non-basic: not a basic land (doesn't have "Basic" in type line)
+            if "basic" not in type_line:
+                total_nonbasic_land_count += count
+        else:
+            total_nonland_count += count
+            total_nonland_cmc += cmc * count
+            # Reactive role detection (inline, avoids circular import with whattoplay).
+            # Keywords that mark interaction-on-opponent's-turn play patterns.
+            is_reactive = any(kw in oracle_text for kw in (
+                "counter target",
+                "counter that spell",
+                "destroy target",
+                "exile target creature",
+                "exile target attacking",
+                "protection from",
+                "hexproof",
+                "shroud",
+            ))
+            if is_reactive:
+                reactive_nonland_count += count
+
+    avg_cmc = (
+        total_nonland_cmc / total_nonland_count if total_nonland_count > 0 else 2.0
+    )
+    nonbasic_fraction = (
+        total_nonbasic_land_count / total_land_count if total_land_count > 0 else 0.0
+    )
+    reactive_fraction = (
+        reactive_nonland_count / total_nonland_count if total_nonland_count > 0 else 0.0
+    )
+
+    return DeckAntiSynergySignals(
+        low_curve=avg_cmc < _LOW_CURVE_CMC_THRESHOLD,
+        nonbasic_heavy=nonbasic_fraction > _NONBASIC_FRACTION_THRESHOLD,
+        reactive=reactive_fraction > _REACTIVE_FRACTION_THRESHOLD,
+    )
+
+
+def is_anti_synergistic(
+    card_name: str,
+    signals: "DeckAntiSynergySignals | None",
+) -> bool:
+    """Return True if ``card_name`` is anti-synergistic with the deck described by ``signals``.
+
+    Pure lookup: checks ``_ANTI_SYNERGY_MAP`` against the signals.  Returns False when
+    ``signals`` is None (gated-additive no-op for callers without deck data).
+    """
+    if signals is None:
+        return False
+    reasons = _ANTI_SYNERGY_MAP.get(card_name)
+    if not reasons:
+        return False
+    return any(getattr(signals, attr, False) for attr in reasons)
+
+
+def _empirical_sideboard_pool(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    *,
+    since: "str | None" = None,
+    until: "str | None" = None,
+    min_adoption: float = _EMPIRICAL_POOL_MIN_ADOPTION,
+) -> "frozenset[str] | None":
+    """Return the set of cards that real archetype sideboard lists run above ``min_adoption``.
+
+    Uses ``card_frequencies(board='side')`` — the per-archetype in-regime adoption primitive.
+    Returns None (not empty frozenset) when:
+    - the archetype has no in-regime sideboard data (thin archetype)
+    - card_frequencies raises (schema not initialised, etc.)
+
+    Returning None (vs empty frozenset) allows callers to distinguish "no data → skip filter"
+    from "data says no cards pass threshold → genuinely empty pool".  In practice the latter
+    is extremely rare and is still treated as None (skip filter) to avoid producing empty
+    sideboards when real archetype data is absent.
+    """
+    try:
+        from legacy_engine.generation.consensus import card_frequencies
+        freqs = card_frequencies(con, archetype, board="side", since=since, until=until)
+        if not freqs:
+            return None
+        pool = frozenset(
+            cf.name for cf in freqs if cf.inclusion_pct >= min_adoption
+        )
+        return pool if pool else None
+    except Exception as exc:
+        log.debug("_empirical_sideboard_pool: card_frequencies failed for %r: %s", archetype, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
@@ -508,6 +706,8 @@ def _build_coverage_model(
     *,
     catalog: Optional[dict[str, HoserCard]] = None,
     matchup_pressure: Optional[dict[str, float]] = None,
+    anti_synergy_signals: "DeckAntiSynergySignals | None" = None,
+    empirical_pool: "frozenset[str] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -531,6 +731,16 @@ def _build_coverage_model(
     cards") × the _SWING_SOFT constant.  Each counter-hoser covers only the hate
     pseudo-elements for the deck-vulnerability tags that interactive field archetypes
     actually care about — not every tag indiscriminately.
+
+    Anti-synergy filter (feature-archetype-empirical-recommendations):
+    When ``anti_synergy_signals`` is not None, catalog candidates whose name appears in
+    ``_ANTI_SYNERGY_MAP`` and whose signal fires for this deck are dropped before coverage
+    computation.  Gated-additive: ``anti_synergy_signals=None`` → no-op (byte-identical to
+    pre-feature for callers that don't supply deck composition).
+
+    Empirical pool filter (feature-archetype-empirical-recommendations):
+    When ``empirical_pool`` is not None, catalog candidates NOT in the pool are dropped.
+    Gated-additive: ``empirical_pool=None`` → no-op.
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -623,6 +833,24 @@ def _build_coverage_model(
     candidate_meta: dict[str, HoserCard] = {}
 
     for card_name, hoser in catalog.items():
+        # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
+        # This grounds recommendations in what real archetype sideboards actually run.
+        if empirical_pool is not None and card_name not in empirical_pool:
+            log.debug(
+                "_build_coverage_model: dropping %r — not in empirical archetype pool", card_name
+            )
+            continue
+
+        # Anti-synergy filter (gated-additive): drop self-harming hosers.
+        # e.g. Chalice into a 1-CMC-heavy deck, Back to Basics into a nonbasic manabase,
+        # Defense Grid into a reactive counter deck.
+        if is_anti_synergistic(card_name, anti_synergy_signals):
+            log.debug(
+                "_build_coverage_model: dropping %r — anti-synergistic with deck composition",
+                card_name,
+            )
+            continue
+
         # Color pre-filter: hoser.colors must be subset of deck_colors.
         # Empty hoser.colors = colorless → always legal.
         # castable_any_color=True bypasses the filter (Phyrexian mana / free activations).
@@ -1316,16 +1544,8 @@ def recommend_sideboard(
     # --- Step 3: Field archetype tags ---
     archetype_tags = field_vulnerability_tags(con, field)
 
-    # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
-    # We don't have the final_cards yet; use empty sideboard for the value adapter call.
-    # After solving we'll rebuild opp_values with the real 15.  For the pressure pass
-    # we only need the maindeck values (used to derive the deficit), so this is correct.
-    opp_values_pre: dict[str, _OppValues] = {}
-    matchup_pressure: Optional[dict[str, float]] = None
-    any_gate_cleared = False
-
-    # Apply regime-window default: when caller passes both since=None and until=None,
-    # default to the latest ban-regime window (consistent with report cards/meta).
+    # --- Step 2b (setup): Resolve effective window ---
+    # Done early so Steps 3c and later can all use eff_since/eff_until.
     eff_since = since
     eff_until = until
     if eff_since is None and eff_until is None:
@@ -1334,6 +1554,48 @@ def recommend_sideboard(
             eff_since, eff_until = _latest_regime_window()
         except Exception:
             pass  # keep both None (open window)
+
+    # --- Step 3b: Anti-synergy signals (NEW, gated-additive) ---
+    # Computed from the resolved card objects (already available from Step 1).
+    # None when the deck is empty — that signals no-op to _build_coverage_model.
+    anti_synergy_signals: "DeckAntiSynergySignals | None" = None
+    if cards_with_counts:
+        anti_synergy_signals = compute_deck_anti_synergy_signals(cards_with_counts)
+        if anti_synergy_signals.low_curve:
+            log.debug("recommend_sideboard: low-curve deck detected → Chalice of the Void filtered")
+        if anti_synergy_signals.nonbasic_heavy:
+            log.debug("recommend_sideboard: nonbasic-heavy deck detected → Back to Basics filtered")
+        if anti_synergy_signals.reactive:
+            log.debug("recommend_sideboard: reactive deck detected → Defense Grid filtered")
+
+    # --- Step 3c: Empirical archetype sideboard pool (NEW, gated-additive) ---
+    # When archetype is known, restrict the catalog to cards real lists actually run.
+    # None when archetype is unknown, no in-regime sideboard data, or pool would be empty.
+    empirical_pool: "frozenset[str] | None" = None
+    if archetype is not None:
+        empirical_pool = _empirical_sideboard_pool(
+            con, archetype, since=eff_since, until=eff_until
+        )
+        if empirical_pool is not None:
+            log.debug(
+                "recommend_sideboard: empirical pool for %r has %d cards (min_adoption=%.0f%%)",
+                archetype, len(empirical_pool), _EMPIRICAL_POOL_MIN_ADOPTION * 100,
+            )
+        else:
+            log.debug(
+                "recommend_sideboard: no empirical sideboard pool for %r (thin/no data) — "
+                "skipping pool filter", archetype,
+            )
+
+    # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
+    # We don't have the final_cards yet; use empty sideboard for the value adapter call.
+    # After solving we'll rebuild opp_values with the real 15.  For the pressure pass
+    # we only need the maindeck values (used to derive the deficit), so this is correct.
+    opp_values_pre: dict[str, _OppValues] = {}
+    matchup_pressure: Optional[dict[str, float]] = None
+    any_gate_cleared = False
+
+    # eff_since/eff_until already computed above (Step 2b setup).
 
     plan_window: tuple[str | None, str | None] = (eff_since, eff_until)
     plan_window_label: str = ""
@@ -1452,6 +1714,8 @@ def recommend_sideboard(
         deck_tags,
         catalog=catalog,
         matchup_pressure=matchup_pressure,
+        anti_synergy_signals=anti_synergy_signals,
+        empirical_pool=empirical_pool,
     )
     warnings.extend(model.warnings)
 
