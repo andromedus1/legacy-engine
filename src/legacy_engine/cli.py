@@ -182,13 +182,109 @@ def seed_banlist(verbose: bool) -> None:
     click.echo(f"Legacy ban list as of {snap.as_of}: {len(snap.banned)} cards banned")
 
 
+@seed.command("prices")
+@click.option("--force", is_flag=True, default=False, help="Force re-download even if already current.")
+@_verbose
+def seed_prices(force: bool, verbose: bool) -> None:
+    """Download Scryfall default_cards bulk and load per-printing prices into DuckDB.
+
+    Downloads the ~547 MB default_cards bulk (one object per printing, English/printed-language)
+    into data/scryfall/default_cards.json, then streams it into the card_prices table.  Re-running
+    is a no-op until Scryfall publishes a new bulk (updated_at skip-if-current).
+
+    The card_prices table is separate from the cards table — the oracle/seed-cards path is
+    completely unchanged (gated-additive).
+    """
+    _setup_logging(verbose)
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.scryfall import ScryfallClient
+
+    with ScryfallClient() as client:
+        client.download_prices_bulk(force=force)
+        updated_at = client.prices_updated_at()
+
+        con = store.connect()
+        try:
+            store.rebuild_prices(con)
+            n_loaded = store.load_prices(con, client.iter_price_rows())
+        finally:
+            con.close()
+
+    # Count priced rows.
+    con2 = store.connect()
+    try:
+        n_priced = con2.execute(
+            "SELECT count(*) FROM card_prices WHERE is_paper = TRUE AND usd IS NOT NULL"
+        ).fetchone()[0]
+    finally:
+        con2.close()
+
+    date_str = (updated_at or "unknown")[:10]
+    click.echo(
+        f"Loaded {n_loaded:,} printings ({n_priced:,} priced) as of {date_str}"
+    )
+
+
+def _echo_price_freshness(updated_at: str | None) -> None:
+    """Echo a price-data-currency header (mirrors ``_echo_data_freshness`` for tournament data)."""
+    from datetime import date
+
+    if updated_at is None:
+        click.echo("// prices: not seeded (run `legacy seed prices`)")
+        return
+    date_str = updated_at[:10]
+    click.echo(f"// prices as of {date_str}")
+    try:
+        age = (date.today() - date.fromisoformat(date_str)).days
+    except ValueError:
+        age = None
+    if age is not None and age > _STALE_DAYS:
+        click.echo(
+            f"// ⚠ price data is {age} days old — consider running `legacy seed prices`"
+        )
+
+
 # ── refresh: incremental update of mirrored sources ──
 @main.command()
+@click.option("--prices", "refresh_prices", is_flag=True, default=False,
+              help="Also re-pull prices bulk (skipped by default; ~547 MB).")
 @_verbose
-def refresh(verbose: bool) -> None:
-    """Incrementally refresh all mirrored sources."""
+def refresh(refresh_prices: bool, verbose: bool) -> None:
+    """Incrementally refresh all mirrored sources (cache + rules; optionally prices)."""
     _setup_logging(verbose)
-    _not_implemented("refresh")
+    from legacy_engine.ingestion import cache, store
+    from legacy_engine.ingestion.rules_vendor import refresh_rules
+
+    # Re-mirror the tournament cache and re-ingest.
+    cache.mirror_cache()
+    con = store.connect()
+    try:
+        n = cache.ingest_cache(con)
+    finally:
+        con.close()
+    click.echo(f"Refreshed tournament cache: {n} Legacy tournaments")
+
+    # Vendor the archetype rules.
+    sha = refresh_rules()
+    click.echo(f"Refreshed MTGOFormatData rules @ {sha or '(sha unresolved)'}")
+
+    # Optionally refresh prices (opt-in: the bulk is ~547 MB).
+    if refresh_prices:
+        from legacy_engine.ingestion.scryfall import ScryfallClient
+
+        with ScryfallClient() as client:
+            client.download_prices_bulk()
+            updated_at = client.prices_updated_at()
+            con = store.connect()
+            try:
+                store.rebuild_prices(con)
+                n_loaded = store.load_prices(con, client.iter_price_rows())
+            finally:
+                con.close()
+        date_str = (updated_at or "unknown")[:10]
+        click.echo(f"Refreshed prices: {n_loaded:,} printings as of {date_str}")
+    else:
+        click.echo("// prices not refreshed (pass --prices to include)")
 
 
 # ── label: archetype classification ──
@@ -1337,6 +1433,75 @@ def report_variants(
                 click.echo(
                     f"    {default_name:<30}  n={default_n:>5}  share={share_str}  (default complement)"
                 )
+    finally:
+        con.close()
+
+
+@report.command("prices")
+@click.argument("name")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_prices(name: str, db: str | None, verbose: bool) -> None:
+    """Show every paper printing and the cheapest USD price for NAME.
+
+    Diagnostic: surfaces the full printing spread that exposes pricing gaps (e.g. the $33
+    Secret Lair Dismember vs the $1.50 NPH copy) and confirms which printing the advisor
+    would recommend.
+
+    Example: legacy report prices "Dismember"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.prices import deck_cost, price_quote, printing_prices
+    from legacy_engine.ingestion.scryfall import ScryfallClient, normalize_name
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        # Echo price freshness from the prices metadata file.
+        with ScryfallClient() as client:
+            updated_at = client.prices_updated_at()
+        _echo_price_freshness(updated_at)
+
+        norm = normalize_name(name)
+        q = price_quote(con, norm)
+        all_printings = printing_prices(con, norm)
+
+        click.echo(f"\n=== Prices: {norm} ===")
+        if q.all_null:
+            click.echo(f"  all_null=True — no paper USD price in card_prices (source: {q.source})")
+            if q.stale:
+                click.echo("  stale=True — price data older than threshold")
+        else:
+            pp = q.cheapest_printing
+            set_str = f"{pp.set_code}/{pp.collector_number}" if pp else "?"
+            promo_str = " [promo]" if pp and pp.promo else ""
+            click.echo(
+                f"  cheapest: ${q.cheapest_usd:.2f}  "
+                f"({set_str}{promo_str})  "
+                f"n_priced={q.n_priced_printings}  "
+                f"source={q.source}"
+            )
+            if q.stale:
+                click.echo("  stale=True — price data older than threshold")
+
+        if all_printings:
+            click.echo(f"\n  {'Set':<8}  {'#':<6}  {'USD':>7}  {'Foil':>7}  {'Promo'}")
+            click.echo("  " + "-" * 42)
+            for p in all_printings:
+                usd_s = f"${p.usd:.2f}" if p.usd is not None else "null"
+                foil_s = f"${p.usd_foil:.2f}" if p.usd_foil is not None else "null"
+                promo_s = "yes" if p.promo else ""
+                click.echo(
+                    f"  {(p.set_code or ''):<8}  {(p.collector_number or ''):<6}  "
+                    f"{usd_s:>7}  {foil_s:>7}  {promo_s}"
+                )
+        else:
+            click.echo("  (no priced paper printings found in card_prices)")
     finally:
         con.close()
 

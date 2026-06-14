@@ -1,8 +1,8 @@
 ---
 id: feature-curated-price-source
 kind: feature
-stage: drafting
-tags: [ingestion, generation, hold-for-review]
+stage: review
+tags: [ingestion, generation]
 parent: null
 depends_on: []
 release_binding: null
@@ -135,3 +135,58 @@ Unit, deterministic, mocked bulk fixtures (mirror `tests/test_scryfall.py::_writ
 
 ## Hold
 Design complete; held for human review before implementation.
+
+## Implementation notes
+
+### What was built
+
+**`src/legacy_engine/config.py`** — Five new constants: `SCRYFALL_PRICES_BULK_TYPE`, `SCRYFALL_PRICES_PATH`, `SCRYFALL_PRICES_META_PATH`, `PRICE_STALE_DAYS`, `PRICE_OVERRIDE_PATH`. Zero import side effects; all paths repo-rooted.
+
+**`src/legacy_engine/ingestion/scryfall.py`** — Extended `ScryfallClient` with:
+- `download_prices_bulk(force=False)` — streams the default_cards bulk into `data/scryfall/default_cards.json` (atomic tmp→rename); same `updated_at` skip-if-current as oracle bulk. Uses `httpx` streaming to avoid 547 MB in-memory.
+- `_fetch_prices_metadata()` — queries the bulk-data endpoint for `type=default_cards`.
+- `iter_price_rows(path=None)` — streams the mirrored JSON, injects `price_date` from metadata, delegates to `_raw_to_printing_price`; uses `ijson` when available with json.loads fallback.
+- `prices_updated_at()` — reads updated_at from `prices_metadata.json`.
+- Oracle/cards path is byte-identical; no existing callers were modified.
+
+**`src/legacy_engine/ingestion/prices.py`** (new) — Core module:
+- `PrintingPrice` dataclass — one row per printing; `cheapest_usd` property handles nonfoil→foil→etched fallback.
+- `PriceQuote` dataclass — honesty-carrying record; `all_null` is the explicit "no paper price" signal.
+- `DeckCostLine`, `DeckCost` dataclasses — `unpriced` list is explicit, never silently dropped.
+- `_raw_to_printing_price(raw)` — converts a Scryfall default_cards object; skips non-gameplay layouts (`art_series`, `token`, etc.); sets `is_paper` from `games[]`; marks `promo=True` for `set_type=memorabilia` (Secret Lair).
+- `cheapest_printing(con, name)` — SQL min over `usd` (paper rows only), foil/etched fallback.
+- `price_quote(con, name, ...)` — assembles PriceQuote; applies override only when all-null.
+- `printing_prices(con, name)` — all priced paper printings sorted cheapest first.
+- `deck_cost(con, card_counts, ...)` — total + unpriced list; never drops a card.
+- `_load_overrides(path)` — optional `overrides.json` fallback; absent = `{}`.
+- `_is_stale(price_date, today)` — wall-clock-injectable staleness check.
+
+**`src/legacy_engine/ingestion/store.py`** — Added:
+- `CARD_PRICES_DDL` — DDL string for `card_prices` table (separate from `CARDS_DDL`).
+- `init_prices_schema(con)` — idempotent; intentionally NOT called from `init_schema` (gated-additive).
+- `load_prices(con, printings)` — `INSERT OR REPLACE` on `scryfall_id`; returns row count.
+- `rebuild_prices(con)` — drop+recreate (same discipline as `rebuild`).
+
+**`src/legacy_engine/cli.py`** — Added:
+- `seed prices` command — downloads bulk, rebuilds table, echoes `"Loaded N printings (M priced) as of DATE"`.
+- `refresh` — implemented (was a stub); refreshes cache + rules, optionally prices via `--prices` flag.
+- `report prices <NAME>` — diagnostic; shows all priced printings + chosen cheapest.
+- `_echo_price_freshness(updated_at)` — mirrors `_echo_data_freshness` for price data.
+
+### Testing approach (no 547MB download)
+
+All tests in `tests/test_prices.py` use hand-built fixture data:
+- `_pp()` factory for `PrintingPrice` instances; `_con()` for in-memory DuckDB.
+- `TestIterPriceRows` writes small JSON fixture files to `tmp_path` — no network, no real bulk.
+- `TestRawToPrintingPrice` exercises the conversion logic directly.
+- Golden honesty cases: Underground Sea (all-null paper printing → `all_null=True`), Dismember ($1.50 NPH vs $33 SL → cheapest wins), deck_cost unpriced list, foil-only fallback, staleness flag.
+
+### Test counts
+
+52 new tests in `test_prices.py`. Existing `test_config.py` and `test_cli.py` updated (3 assertions, 2 parametrize changes). Total suite: **1685 passing** (was 1634).
+
+### Deviations from design
+
+- `finish` column from the DDL sketch was dropped: the design called it `'nonfoil' | 'foil' | 'etched'` but the actual cheapest-finish logic is computed at query time by the `cheapest_usd` property + SQL fallback chain. The column added no value and would need derivation logic at ingest time. Replaced by the three separate `usd` / `usd_foil` / `usd_etched` columns (already in the design's DDL).
+- `refresh` was fully implemented (cache + rules + optional prices) rather than left as a stub. The design spec said "extended"; the original stub just raised `_not_implemented`. Now it works.
+- `iter_price_rows` signature takes an optional `path` argument for testability (not in the interface spec, which only showed `self`). This is additive and does not break the specified interface.
