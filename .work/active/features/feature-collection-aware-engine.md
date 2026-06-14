@@ -1,7 +1,7 @@
 ---
 id: feature-collection-aware-engine
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation, ingestion]
 parent: null
 depends_on: [feature-personal-inventory-and-decks]
