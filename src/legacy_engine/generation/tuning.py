@@ -638,6 +638,11 @@ class TunedDeck:
     # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
     owned: "dict[str, object]" = dc_field(default_factory=dict)
     collection_aware: bool = False
+    # --- Additive fields (feature-considering-cards-pool) ---
+    # sideboard_pkg: the full SideboardPackage from the final recommend_sideboard call,
+    #   carrying the considering pool.  None when sideboard recommendation was skipped.
+    #   Consumers (e.g. refresh.py render) use sideboard_pkg.considering for the bubble list.
+    sideboard_pkg: "object | None" = None  # SideboardPackage | None
 
 
 def tune_deck(
@@ -733,12 +738,14 @@ def tune_deck(
     matrix = build_matrix(con)
 
     # ── Positioning S (archetype context; unchanged by card swaps) ───────────
+    # Gate on s_computable: when coverage is zero, pos.s_mean is NaN.  Fall back
+    # to None rather than leaking NaN into the serialized TunedDeck output.
     positioning_s: float | None = None
     if archetype in matrix.archetypes:
         try:
             from legacy_engine.advisory.positioning import positioning_score
             pos = positioning_score(matrix, field, archetype, seed=42)
-            positioning_s = pos.s_mean
+            positioning_s = pos.s_mean if pos.s_computable else None
         except Exception as exc:
             log.warning("tune_deck: positioning_score failed for %r: %s", archetype, exc)
 
@@ -872,6 +879,7 @@ def tune_deck(
             plan_window_label=sb_pkg.plan_window_label,
             owned=tune_owned,
             collection_aware=collection is not None,
+            sideboard_pkg=sb_pkg,
         )
 
     # ── Greedy swap loop (per-card-value objective) ───────────────────────────
@@ -964,4 +972,5 @@ def tune_deck(
         plan_window_label=sb_pkg.plan_window_label,
         owned=tune_owned,
         collection_aware=collection is not None,
+        sideboard_pkg=sb_pkg,
     )

@@ -257,6 +257,25 @@ def build_matrix(
     )
 
 
+def lookup_head_to_head(
+    matrix: MatchupMatrix,
+    archetype_a: str,
+    archetype_b: str,
+) -> MatchupCell | None:
+    """Return the directed ``MatchupCell`` for archetype_a vs archetype_b.
+
+    Returns ``None`` when either archetype is not included in the matrix (below
+    the row-inclusion threshold).  The returned cell may have ``display=False``
+    when ``n < DISPLAY_GATE_N`` (speculative data is present-and-honest, not
+    hidden).
+
+    Pure function over ``MatchupMatrix`` — no DB access.
+    """
+    if archetype_a not in matrix.archetypes or archetype_b not in matrix.archetypes:
+        return None
+    return matrix.cells.get((archetype_a, archetype_b))
+
+
 @dataclass
 class AdaptiveMatrix:
     """A matchup matrix whose cells are sourced over per-pair ban-aware windows.

@@ -486,8 +486,38 @@ class TestPositioningScore:
         assert r1.s_mean != r2.s_mean
 
     def test_no_data_opponent_listed_in_imputed(self):
-        """Archetypes with no matchup data are listed in result.imputed."""
-        # X has data vs A but not vs B
+        """Archetypes with no matchup data in the SCORING field are listed in result.imputed.
+
+        When coverage ≥ 0.85 (no restriction) a no-data opponent in the scoring field appears
+        in result.imputed.  When coverage < 0.85 the result is restricted — excluded opponents
+        appear in excluded_archetypes, not imputed (Fix 2: imputed is scoped to the scoring field).
+
+        Use a field where X has high coverage (A at 90%) so restriction is NOT triggered, then
+        add C (n=0 in the field) as a thin-tail opponent — it should appear in imputed.
+        """
+        # X has data vs A (n=100), no data vs C (n=0). B is only in opponent rows.
+        # Field: A=0.9, C=0.1 → coverage = 0.9 ≥ 0.85 → NOT restricted
+        archetypes = ["X", "A", "C"]
+        winrates = {
+            ("X", "A"): (60, 100),
+            ("A", "X"): (40, 100),
+            ("A", "C"): (50, 100),
+            ("C", "A"): (50, 100),
+            # X vs C: no data
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.9, "C": 0.1})
+        result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert result.restricted is False  # coverage=0.9 ≥ 0.85 → no restriction
+        assert "C" in result.imputed  # no-data in the full scoring field → imputed
+
+    def test_no_data_opponent_in_excluded_when_restricted(self):
+        """When restricted=True, excluded opponents appear in excluded_archetypes, not imputed.
+
+        Fix 2: imputed is scoped to the scoring (restricted) field so consumers don't see
+        misleading 'imputed N no-data opponent(s)' for opponents that were never scored against.
+        """
+        # X has data vs A (n=100) but not B — coverage = 0.5 < 0.85 → restricted
         archetypes = ["X", "A", "B"]
         winrates = {
             ("X", "A"): (60, 100),
@@ -498,7 +528,9 @@ class TestPositioningScore:
         matrix = _simple_matrix(archetypes, winrates)
         field = _custom_field({"A": 0.5, "B": 0.5})
         result = positioning_score(matrix, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
-        assert "B" in result.imputed
+        assert result.restricted is True
+        assert "B" in result.excluded_archetypes  # correctly excluded, not scored
+        assert "B" not in result.imputed          # Fix 2: not listed as imputed
 
     def test_dirichlet_shares_global_field(self):
         """Global field (counts!=None) → Dirichlet share sampling → wider CI than custom."""
@@ -1194,3 +1226,186 @@ class TestPositioningCoverageRestrict:
         r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED, restrict_to_covered=False)
         assert r.restricted is False
         assert r.s_computable is True  # falls back to full-field imputed S
+
+
+# ===========================================================================
+# TestCoverageConsumers — epic-advisory-output-honesty-coverage-consumers
+# ===========================================================================
+
+from legacy_engine.advisory.positioning import _COVERAGE_RESTRICT_THRESHOLD  # noqa: E402
+
+
+class TestCoverageConsumers:
+    """Coverage-honesty propagated to rank_decks, imputed, audit line, tuning, and viz.
+
+    spec-derived — one test per Fix in the feature brief.
+    """
+
+    # ── Fix 1: rank_decks coverage_caveated ─────────────────────────────────
+
+    def test_rank_decks_low_coverage_in_coverage_caveated(self):
+        """Deck with data_coverage < 0.85 threshold appears in coverage_caveated."""
+        # X has data vs A only (share 0.5) → coverage = 0.5 < 0.85 → caveated
+        archetypes = ["X", "Y", "A", "B"]
+        winrates = {
+            ("X", "A"): (60, 100),                  # X measured vs A only
+            ("Y", "A"): (50, 100), ("Y", "B"): (50, 100),  # Y fully measured
+            ("A", "X"): (40, 100), ("A", "Y"): (50, 100), ("A", "B"): (50, 100),
+            ("B", "Y"): (50, 100), ("B", "A"): (50, 100),
+        }
+        matrix = _simple_matrix(archetypes, winrates)
+        field = _custom_field({"A": 0.5, "B": 0.5})
+
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+
+        cov_x = ranking.data_coverage["X"]
+        assert cov_x < _COVERAGE_RESTRICT_THRESHOLD, (
+            f"X coverage should be < {_COVERAGE_RESTRICT_THRESHOLD}, got {cov_x}"
+        )
+        assert "X" in ranking.coverage_caveated, (
+            "X with coverage < 0.85 threshold must appear in coverage_caveated"
+        )
+        assert "Y" not in ranking.coverage_caveated, (
+            "Y (fully covered) must not appear in coverage_caveated"
+        )
+
+    def test_rank_decks_full_coverage_not_caveated(self):
+        """Deck with data_coverage == 1.0 is not in coverage_caveated."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        # All cells have n=100 ≥ 30 → full coverage for X and Y
+        assert "X" not in ranking.coverage_caveated
+        assert "Y" not in ranking.coverage_caveated
+
+    def test_rank_decks_shared_field_mc_unchanged(self):
+        """Adding coverage_caveated does not alter S values, p_best, or pairwise."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+
+        # Core MC invariants still hold
+        total_pbest = sum(ranking.p_best.values())
+        assert abs(total_pbest - 1.0) < _TOL_PROB
+        assert "X" in ranking.s_mean and "Y" in ranking.s_mean
+        assert ("X", "Y") in ranking.pairwise
+        p_xy = ranking.pairwise[("X", "Y")]
+        p_yx = ranking.pairwise[("Y", "X")]
+        assert abs(p_xy + p_yx - 1.0) < _TOL_PROB
+
+    def test_rank_decks_coverage_caveated_empty_when_all_covered(self):
+        """Empty coverage_caveated when all decks exceed the restrict threshold."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, ["X", "Y"], n_draws=_TEST_DRAWS, seed=SEED)
+        assert ranking.coverage_caveated == set()
+
+    def test_rank_decks_empty_candidates_coverage_caveated_empty(self):
+        """Empty candidate list → coverage_caveated is an empty set (not an error)."""
+        matrix = _worked_matrix()
+        field = _worked_field()
+        ranking = rank_decks(matrix, field, [], n_draws=_TEST_DRAWS, seed=SEED)
+        assert ranking.coverage_caveated == set()
+
+    # ── Fix 2: imputed scoped to scoring field ───────────────────────────────
+
+    def test_imputed_empty_when_not_computable(self):
+        """Zero-coverage deck (s_computable=False) → imputed is empty, not misleading."""
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (5, 10)})  # thin, display=False
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+        assert r.s_computable is False
+        assert r.imputed == frozenset(), (
+            f"Zero-coverage deck: imputed should be empty, got {r.imputed}"
+        )
+
+    def test_imputed_excludes_restricted_opponents(self):
+        """Restricted result: excluded opponents NOT in imputed (they were never scored)."""
+        # X covered vs A (n=100), uncovered vs B (n=0)
+        # coverage = 0.5 < 0.85 → restricted; B excluded entirely
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (70, 100)})
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+
+        assert r.restricted is True
+        assert "B" in r.excluded_archetypes  # correctly tracked as excluded
+        assert "B" not in r.imputed           # Fix 2: NOT reported as imputed
+
+    def test_imputed_warning_absent_when_restricted_and_nothing_imputed(self):
+        """When restricted and scoring field has no no-data opponents, the 'imputed' warning
+        must not fire (the excluded opponents were not imputed)."""
+        m = _simple_matrix(["X", "A", "B"], {("X", "A"): (70, 100)})
+        field = _custom_field({"A": 0.5, "B": 0.5})
+        r = positioning_score(m, field, "X", n_draws=_TEST_DRAWS, seed=SEED)
+
+        assert r.restricted is True
+        # The scoring field is just {A:1.0} — A has data → nothing imputed in it
+        assert r.imputed == frozenset()
+        imputed_warnings = [w for w in r.warnings if "imputed" in w and "no-data" in w]
+        assert imputed_warnings == [], (
+            f"'imputed' warning should not fire when nothing was imputed; got: {imputed_warnings}"
+        )
+
+    # ── Fix 3: audit line gated on s_computable ─────────────────────────────
+
+    def test_audit_line_gated_when_not_computable(self):
+        """build_field_read_report audit line must not contain 's_mean=nan' at zero coverage.
+
+        Trigger: archetype 'MyDeck' vs opponent 'Opp' in the field, but the matchup
+        cell has n=0 (empty matrix) — data_coverage=0.0, s_computable=False.
+
+        We bypass the full DB setup by directly patching positioning_score to return a
+        result with s_computable=False, then verify the audit line is gated.
+        """
+        import math
+        from unittest.mock import patch
+        from legacy_engine.advisory.report import build_field_read_report
+        from legacy_engine.advisory.positioning import PositioningResult
+        from legacy_engine.ingestion import store as _store
+        from legacy_engine.advisory.field import build_custom_field as _bcf
+
+        con = _store.connect(":memory:")
+        _store.init_schema(con)
+
+        field = _bcf({"Opp": 1.0})
+        mainboard = {"Brainstorm": 4, "Island": 12}
+
+        # Build a fake PositioningResult with s_computable=False (as if zero coverage).
+        fake_result = PositioningResult(
+            deck_archetype="MyDeck",
+            s_mean=float("nan"),
+            s_ci=(float("nan"), float("nan")),
+            u_bar=0.5,
+            field_source="custom",
+            n_draws=100,
+            imputed=frozenset(),
+            warnings=("S not computable: no covered (n≥30) matchups in the field; "
+                      "any score would be pure imputation prior",),
+            data_coverage=0.0,
+            restricted=False,
+            excluded_share=0.0,
+            excluded_archetypes=frozenset(),
+            s_computable=False,
+            s_samples=None,
+        )
+
+        with patch(
+            "legacy_engine.advisory.positioning.positioning_score",
+            return_value=fake_result,
+        ):
+            report = build_field_read_report(
+                con, mainboard, {}, field,
+                archetype="MyDeck",
+                seed=42,
+            )
+
+        audit_text = "\n".join(report.audit)
+        # Fix 3: the audit line must not contain NaN
+        assert "s_mean=nan" not in audit_text, (
+            f"Audit line must not contain 's_mean=nan'; got:\n{audit_text}"
+        )
+        # The gated alternative must mention 'not computable'
+        assert "not computable" in audit_text, (
+            f"Audit line should mention 'not computable' when s_computable=False; got:\n{audit_text}"
+        )
+        con.close()

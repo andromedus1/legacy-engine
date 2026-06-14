@@ -394,7 +394,7 @@ def proactivity_score(
 # ---------------------------------------------------------------------------
 
 VulnerabilityTag = str  # graveyard-reliant | combo | low-curve | greedy-manabase
-                        # | creature-based | low-interaction | storm-reliant
+                        # | creature-based | low-interaction | storm-reliant | ramp
 
 # Thresholds for vulnerability classification (documented, module constants)
 _GY_RECURSION_DENSITY = 0.08   # graveyard_recursion slots / total maindeck >= threshold → gy-reliant
@@ -406,6 +406,27 @@ _GREEDY_MANABASE_MIN_FAST = 4  # cards with fast_mana/dual land tags >= threshol
 _GREEDY_NONBASIC_MIN = 8       # nonbasic lands count >= threshold → greedy manabase
 _STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → storm-reliant
                                # (density gate kills false positives from stray storm cards in aggregates)
+_RAMP_BIGMANA_LAND_MIN = 4     # big-mana land copies >= threshold → ramp tag
+                               # (Urzatron: 12 pieces; Cloudpost: 4+; Eldrazi: 4+)
+
+# Named lands that are diagnostic of colorless big-mana / ramp strategies.
+# Urzatron pieces, Cloudpost/Glimmerpost, Eldrazi accelerants.
+# Detection by name (not oracle text) — these cards have no common textual signature.
+# Kept tight to archetypes that specifically exploit colorless ramp (not general fast-mana lands
+# like Ancient Tomb, which already seed greedy-manabase via fast_mana_cards).
+_BIGMANA_LAND_NAMES: frozenset[str] = frozenset({
+    # Urzatron
+    "Urza's Tower",
+    "Urza's Mine",
+    "Urza's Power Plant",
+    # Cloudpost / Loam-Post
+    "Cloudpost",
+    "Glimmerpost",
+    "Vesuva",        # used to copy Cloudpost / Urza pieces in those strategies
+    # Eldrazi accelerants (lands)
+    "Eldrazi Temple",
+    "Eye of Ugin",
+})
 
 
 def _archetype_composition(
@@ -479,6 +500,7 @@ def _vulnerability_from_composition(
     creature_slots = 0
     fast_mana_cards = 0
     nonbasic_land_count = 0
+    bigmana_land_count = 0   # copies of diagnostic big-mana / ramp lands
     total_nonland = 0
     total_nonland_mv = 0.0
 
@@ -504,6 +526,9 @@ def _vulnerability_from_composition(
                 or card.name in {"Plains", "Island", "Swamp", "Mountain", "Forest"}
             ):
                 nonbasic_land_count += count
+            # Big-mana / ramp land detection: named diagnostic lands (Urzatron, Cloudpost, Eldrazi)
+            if card.name in _BIGMANA_LAND_NAMES:
+                bigmana_land_count += count
         else:
             total_nonland += count
             total_nonland_mv += card.cmc * count
@@ -562,6 +587,11 @@ def _vulnerability_from_composition(
     # low-interaction
     if total_cards > 0 and counter_removal_slots / total_cards <= _LOW_INTERACTION_MAX:
         tags.add("low-interaction")
+
+    # ramp (big-mana): significant density of colorless big-mana lands (Urzatron / Cloudpost / Eldrazi)
+    # Gated-additive: fires only when bigmana_land_count clears the threshold; no other tag is affected.
+    if bigmana_land_count >= _RAMP_BIGMANA_LAND_MIN:
+        tags.add("ramp")
 
     return frozenset(tags)
 

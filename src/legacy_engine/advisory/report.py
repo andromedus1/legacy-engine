@@ -73,33 +73,148 @@ def _load_field(
     since: str | None = None,
     until: str | None = None,
 ) -> FieldDistribution:
-    """Custom field from ``field_text`` (``<share> <archetype>`` lines) else the global field.
+    """Custom field from ``field_text`` else the global field.
 
-    ``since``/``until`` window the global field (half-open ``[since, until)``); both ``None`` =
-    full corpus. A custom ``field_text`` is user-specified and unaffected by the window.
+    Field file format (``<share> <archetype>`` lines):
+
+    - Share-only (backward-compatible)::
+
+        0.35 Delver
+        0.25 Lands
+        0.20 Reanimator
+
+    - Per-line counts (optional 3rd token, positive integer)::
+
+        0.35 Delver 42
+        0.25 Lands 30
+        0.20 Reanimator 24
+
+    - Global effective-N header (distributes N proportionally across archetypes)::
+
+        # effective_n: 120
+        0.35 Delver
+        0.25 Lands
+        0.20 Reanimator
+
+    Per-line counts and ``# effective_n`` are mutually exclusive; if both are
+    present, ``# effective_n`` is ignored and a warning is attached.
+
+    Share-only lines produce ``counts=None`` (point-shares fallback; gated-additive
+    — byte-identical to existing behavior).  Any line with a count causes
+    ``FieldDistribution.counts`` to be populated, enabling the Dirichlet-backed
+    field-share uncertainty model in positioning.
+
+    ``since``/``until`` window the global field (half-open ``[since, until)``);
+    both ``None`` = full corpus.  A custom ``field_text`` is unaffected by the window.
     """
     if field_text is None:
         return build_global_field(con, provenance=provenance, since=since, until=until)
 
     shares: dict[str, float] = {}
+    raw_counts: dict[str, int] = {}
+    effective_n: int | None = None
+    has_per_line_counts = False
+
     for raw_line in field_text.splitlines():
         line = raw_line.strip()
-        if not line or line.startswith("#"):
+        if not line:
             continue
-        parts = line.split(None, 1)
-        if len(parts) != 2:
-            raise ValueError(f"_load_field: malformed line {line!r} (expected '<share> <archetype>')")
+        if line.startswith("#"):
+            # Check for # effective_n: N directive
+            rest = line[1:].strip()
+            if rest.lower().startswith("effective_n:"):
+                val_str = rest[len("effective_n:"):].strip()
+                try:
+                    effective_n = int(val_str)
+                    if effective_n < 1:
+                        raise ValueError(f"_load_field: # effective_n must be ≥ 1, got {effective_n}")
+                except ValueError as exc:
+                    if "effective_n" in str(exc):
+                        raise
+                    raise ValueError(
+                        f"_load_field: # effective_n value must be a positive integer, got {val_str!r}"
+                    )
+            continue
+
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            raise ValueError(f"_load_field: malformed line {line!r} (expected '<share> <archetype> [count]')")
         try:
             share = float(parts[0])
         except ValueError:
             raise ValueError(f"_load_field: non-numeric share {parts[0]!r} in line {line!r}")
-        archetype = parts[1].strip()
+
+        if len(parts) == 3:
+            # 3-token form: <share> <archetype> <count>
+            # archetype may contain spaces only if it were at position 2 with no trailing token;
+            # here parts[1] is the first space-delimited token after share, parts[2] is the rest.
+            # We treat parts[1] as archetype and parts[2] as count — but archetype could itself
+            # have been split.  The format spec is "<share> <archetype> <count>" where count is
+            # the LAST token; reconstruct: split the remainder (parts[1]+' '+parts[2]) from the
+            # right to isolate the count.
+            remainder = parts[1] + " " + parts[2]
+            remainder_parts = remainder.rsplit(None, 1)
+            if len(remainder_parts) == 2:
+                try:
+                    count = int(remainder_parts[1])
+                    if count < 1:
+                        raise ValueError(
+                            f"_load_field: count must be a positive integer on line {line!r}, "
+                            f"got {count}"
+                        )
+                    archetype = remainder_parts[0].strip()
+                    has_per_line_counts = True
+                except ValueError as exc:
+                    if "count" in str(exc) and "positive" in str(exc):
+                        raise
+                    # Not a valid integer — treat remainder as archetype (no count), allow fallback
+                    # to the 2-token path below.  This preserves backward-compat for archetype
+                    # names that happen to look like a number in the last token (unlikely but safe).
+                    archetype = remainder.strip()
+                    count = 0
+            else:
+                archetype = remainder.strip()
+                count = 0
+        else:
+            archetype = parts[1].strip()
+            count = 0
+
         shares[archetype] = shares.get(archetype, 0.0) + share
+        if count > 0:
+            raw_counts[archetype] = raw_counts.get(archetype, 0) + count
 
     if not shares:
         raise ValueError("_load_field: no field entries parsed from field_text")
 
-    return build_custom_field(shares)
+    # Resolve counts: prefer per-line counts; fall back to effective_n header.
+    resolved_counts: dict[str, int] | None = None
+
+    if has_per_line_counts:
+        if effective_n is not None:
+            log.warning(
+                "_load_field: both per-line counts and # effective_n: %d are present; "
+                "per-line counts take precedence — # effective_n is ignored",
+                effective_n,
+            )
+        # Fill any archetypes that had no per-line count with count=1 (weakest prior) so
+        # the counts dict covers all keys (required by build_custom_field).
+        resolved_counts = {a: raw_counts.get(a, 1) for a in shares}
+    elif effective_n is not None:
+        # Distribute effective_n proportionally by share; each archetype gets at least 1.
+        total_share = sum(shares.values())
+        resolved_counts = {}
+        allocated = 0
+        archetype_list = list(shares)
+        for i, a in enumerate(archetype_list):
+            if i < len(archetype_list) - 1:
+                n_a = max(1, round(effective_n * shares[a] / total_share))
+            else:
+                # Last archetype gets the remainder to prevent rounding drift.
+                n_a = max(1, effective_n - allocated)
+            resolved_counts[a] = n_a
+            allocated += n_a
+
+    return build_custom_field(shares, counts=resolved_counts)
 
 
 # ---------------------------------------------------------------------------
@@ -224,16 +339,25 @@ def build_field_read_report(
     if archetype_resolvable:
         try:
             positioning = positioning_score(matrix, field, resolved_archetype, seed=seed)
-            audit.append(
-                f"positioning: s_mean={positioning.s_mean:.3f}, "
-                f"s_ci=[{positioning.s_ci[0]:.3f}, {positioning.s_ci[1]:.3f}], "
-                f"u_bar={positioning.u_bar:.3f}, "
-                f"n_draws={positioning.n_draws}, "
-                f"imputed={len(positioning.imputed)} opponents, "
-                f"coverage={positioning.data_coverage:.2f}, "
-                f"restricted={positioning.restricted} (excluded_share={positioning.excluded_share:.2f}), "
-                f"field_source={positioning.field_source!r}"
-            )
+            if positioning.s_computable:
+                audit.append(
+                    f"positioning: s_mean={positioning.s_mean:.3f}, "
+                    f"s_ci=[{positioning.s_ci[0]:.3f}, {positioning.s_ci[1]:.3f}], "
+                    f"u_bar={positioning.u_bar:.3f}, "
+                    f"n_draws={positioning.n_draws}, "
+                    f"imputed={len(positioning.imputed)} opponents, "
+                    f"coverage={positioning.data_coverage:.2f}, "
+                    f"restricted={positioning.restricted} (excluded_share={positioning.excluded_share:.2f}), "
+                    f"field_source={positioning.field_source!r}"
+                )
+            else:
+                audit.append(
+                    f"positioning: s not computable — no covered (n≥30) matchups in field; "
+                    f"coverage={positioning.data_coverage:.2f}, "
+                    f"u_bar={positioning.u_bar:.3f}, "
+                    f"n_draws={positioning.n_draws}, "
+                    f"field_source={positioning.field_source!r}"
+                )
             if positioning.warnings:
                 audit.extend(f"positioning warning: {w}" for w in positioning.warnings)
         except Exception as exc:

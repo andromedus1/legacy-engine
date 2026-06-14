@@ -36,10 +36,17 @@ from legacy_engine.analytics.metashare import (
     compute_all,
     compute_metashare,
 )
+from legacy_engine.analytics.affectedness import (
+    AffectednessExplanation,
+    explain_valid_since,
+)
+from legacy_engine.analytics.matchup import lookup_head_to_head
 from legacy_engine.analytics.trends import (
+    BiggestMover,
     RegimeWindow,
     TrendCell,
     TrendSeries,
+    biggest_movers,
     compute_trends,
     regime_windows,
 )
@@ -70,6 +77,7 @@ __all__ = [
     "build_cell",
     "build_matrix",
     "build_mirror_cell",
+    "lookup_head_to_head",
     "wilson_or_jeffreys_ci",
     # metashare
     "MetaShareEntry",
@@ -78,9 +86,14 @@ __all__ = [
     "compute_all",
     "compute_metashare",
     # trends
+    "BiggestMover",
     "RegimeWindow",
     "TrendCell",
     "TrendSeries",
+    "biggest_movers",
     "compute_trends",
     "regime_windows",
+    # affectedness
+    "AffectednessExplanation",
+    "explain_valid_since",
 ]

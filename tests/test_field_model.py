@@ -617,3 +617,152 @@ class TestRestrictTo:
         # Intentional restriction must NOT add a "summed to X" data-quality warning.
         restricted, _ = self._field().restrict_to({"A", "B"})
         assert not any("summed to" in w for w in restricted.warnings)
+
+
+# ---------------------------------------------------------------------------
+# TestBuildCustomFieldCounts — feature-custom-field-counts-normalization
+# ---------------------------------------------------------------------------
+
+
+class TestBuildCustomFieldCountsFieldModel:
+    """build_custom_field(counts=...) tests at the field model level."""
+
+    def test_counts_none_produces_share_only_field(self):
+        """Default (no counts) → counts=None, share-only warning present."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4})
+        assert fd.counts is None
+        point_warns = [w for w in fd.warnings if "point shares" in w]
+        assert len(point_warns) == 1
+
+    def test_counts_provided_produces_dirichlet_backed_field(self):
+        """When counts are provided, counts is populated and Dirichlet warning is emitted."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40})
+        assert fd.counts == {"A": 60, "B": 40}
+        dirichlet_warns = [w for w in fd.warnings if "Dirichlet" in w or "dirichlet" in w.lower()]
+        assert len(dirichlet_warns) >= 1
+
+    def test_counts_field_no_point_shares_warning(self):
+        """When counts are provided, the 'point shares' warning must NOT appear."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40})
+        point_warns = [w for w in fd.warnings if "point shares" in w]
+        assert len(point_warns) == 0
+
+    def test_counts_with_normalization_warning(self):
+        """When shares need renormalization AND counts are provided, both warnings appear."""
+        fd = build_custom_field({"A": 0.4, "B": 0.4}, counts={"A": 40, "B": 40})
+        norm_warns = [w for w in fd.warnings if "normalized to 1.0" in w]
+        dirichlet_warns = [w for w in fd.warnings if "Dirichlet" in w or "dirichlet" in w.lower()]
+        assert len(norm_warns) >= 1
+        assert len(dirichlet_warns) >= 1
+
+    def test_counts_with_known_archetypes_and_no_data(self):
+        """counts + known_archetypes: no_data is still populated for unknown archetypes."""
+        known = frozenset({"A"})
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, known_archetypes=known, counts={"A": 60, "B": 40})
+        assert "B" in fd.no_data
+        assert fd.counts == {"A": 60, "B": 40}
+
+    def test_single_archetype_with_counts(self):
+        """Single-archetype field with counts works correctly."""
+        fd = build_custom_field({"Solo": 0.8}, counts={"Solo": 50})
+        assert fd.counts == {"Solo": 50}
+        assert abs(fd.shares["Solo"] - 1.0) < 1e-9
+
+    def test_counts_missing_archetype_raises_with_message(self):
+        """Missing archetype in counts raises ValueError mentioning 'missing keys'."""
+        with pytest.raises(ValueError, match="missing keys"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60})
+
+    def test_counts_extra_archetype_raises_with_message(self):
+        """Extra archetype in counts raises ValueError mentioning 'extra keys'."""
+        with pytest.raises(ValueError, match="extra keys"):
+            build_custom_field({"A": 0.6}, counts={"A": 60, "B": 40})
+
+    def test_counts_float_raises(self):
+        """Float counts (e.g. 10.5) must raise ValueError."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.5, "B": 0.5}, counts={"A": 10, "B": 10.5})
+
+    def test_counts_zero_raises(self):
+        """Zero count raises ValueError."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.5, "B": 0.5}, counts={"A": 10, "B": 0})
+
+    def test_counts_negative_raises(self):
+        """Negative count raises ValueError."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.5, "B": 0.5}, counts={"A": 10, "B": -1})
+
+    def test_gated_additive_share_only_unchanged(self):
+        """Share-only path (counts=None) produces byte-identical results to pre-feature behavior.
+
+        Verifies the gated-additive contract: no new fields, same shares, same warnings
+        as the original build_custom_field(shares) call.
+        """
+        shares = {"Delver": 0.35, "Lands": 0.25, "Reanimator": 0.40}
+        fd_original = build_custom_field(shares)
+        fd_new = build_custom_field(shares, counts=None)
+
+        assert fd_original.shares == fd_new.shares
+        assert fd_original.counts == fd_new.counts
+        assert fd_original.field_source == fd_new.field_source
+        assert fd_original.no_data == fd_new.no_data
+        assert fd_original.warnings == fd_new.warnings
+
+
+# ---------------------------------------------------------------------------
+# TestNormalizeSharesEdgeCases — additional normalization edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSharesEdgeCases:
+    """Additional _normalize_shares edge cases for zero-sum, renorm warnings,
+    and non-finite inputs (the tightened normalization from this feature).
+    These complement TestNormalizeShares above.
+    """
+
+    def test_zero_sum_error_message_mentions_all_zero(self):
+        """Zero-sum error message names the problem."""
+        with pytest.raises(ValueError, match="all-zero or zero-sum"):
+            _normalize_shares({"A": 0.0, "B": 0.0})
+
+    def test_zero_sum_single_archetype(self):
+        """Single-archetype with share=0.0 → zero-sum ValueError."""
+        with pytest.raises(ValueError):
+            _normalize_shares({"Only": 0.0})
+
+    def test_renormalization_warning_names_original_sum(self):
+        """Renormalization warning includes the original sum as a 4-decimal string."""
+        _, warnings = _normalize_shares({"A": 0.3, "B": 0.3})
+        assert any("0.6000" in w for w in warnings), (
+            f"Expected '0.6000' in renorm warning; got: {warnings}"
+        )
+
+    def test_renormalization_warning_not_emitted_within_tolerance(self):
+        """Within _SUM_TOLERANCE (1e-6) of 1.0, no renormalization warning."""
+        _, warnings = _normalize_shares({"A": 1.0 + 9e-7})
+        assert all("normalized" not in w for w in warnings)
+
+    def test_non_finite_nan_raises(self):
+        """NaN share raises ValueError with 'non-finite' in the message."""
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"X": float("nan"), "Y": 0.5})
+
+    def test_non_finite_inf_raises(self):
+        """Positive infinity raises ValueError."""
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"X": float("inf")})
+
+    def test_non_finite_neg_inf_raises(self):
+        """Negative infinity raises ValueError before the sign check."""
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_shares({"X": float("-inf")})
+
+    def test_many_archetypes_renormalize_correctly(self):
+        """10 equal shares each 0.05 (sum=0.5) renormalize to 0.1 each."""
+        raw = {str(i): 0.05 for i in range(10)}
+        result, warnings = _normalize_shares(raw)
+        assert len(warnings) == 1
+        assert abs(sum(result.values()) - 1.0) < 1e-9
+        for v in result.values():
+            assert abs(v - 0.1) < 1e-9
