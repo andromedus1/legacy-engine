@@ -591,3 +591,286 @@ class TestAdviseCLI:
         assert "cov=" in result.output, (
             f"Expected coverage column 'cov=...' in output; got:\n{result.output}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestLoadFieldCounts — feature-custom-field-counts-normalization
+# ---------------------------------------------------------------------------
+
+
+class TestLoadFieldCounts:
+    """_load_field parsing tests for per-line counts and # effective_n: header."""
+
+    def test_share_only_lines_counts_none(self):
+        """Share-only lines (no 3rd token) produce counts=None — gated-additive baseline."""
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver\n0.4 Lands")
+        assert field.counts is None
+        assert field.field_source == "custom"
+
+    def test_share_only_shares_correct(self):
+        """Share-only field shares are normalized correctly (byte-identical to pre-feature)."""
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver\n0.4 Lands")
+        assert abs(field.shares["Delver"] - 0.6) < 1e-9
+        assert abs(field.shares["Lands"] - 0.4) < 1e-9
+
+    def test_per_line_counts_populated(self):
+        """Lines with 3rd token produce counts dict with those integer values."""
+        con = _con()
+        field = _load_field(con, field_text="0.35 Delver 42\n0.25 Lands 30\n0.40 Reanimator 48")
+        assert field.counts is not None
+        assert field.counts["Delver"] == 42
+        assert field.counts["Lands"] == 30
+        assert field.counts["Reanimator"] == 48
+
+    def test_per_line_counts_shares_normalized(self):
+        """Shares in the counts-carrying field sum to 1.0."""
+        con = _con()
+        field = _load_field(con, field_text="0.35 Delver 42\n0.25 Lands 30\n0.40 Reanimator 48")
+        assert abs(sum(field.shares.values()) - 1.0) < 1e-9
+
+    def test_mixed_lines_missing_count_defaults_to_one(self):
+        """An archetype without a per-line count gets count=1 (weakest prior) when other lines carry counts."""
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver 60\n0.4 Lands")
+        assert field.counts is not None
+        assert field.counts["Delver"] == 60
+        assert field.counts["Lands"] == 1
+
+    def test_effective_n_header_distributes_proportionally(self):
+        """# effective_n: N header distributes N across archetypes proportional to their shares."""
+        con = _con()
+        field = _load_field(con, field_text="# effective_n: 100\n0.60 Delver\n0.40 Lands")
+        assert field.counts is not None
+        # Delver gets round(0.60 * 100 / 1.0) = 60, Lands gets remainder = 40
+        assert field.counts["Delver"] == 60
+        assert field.counts["Lands"] == 40
+
+    def test_effective_n_total_equals_n(self):
+        """effective_n distribution: sum of counts == effective_n."""
+        con = _con()
+        field = _load_field(con, field_text="# effective_n: 100\n0.60 Delver\n0.40 Lands")
+        assert sum(field.counts.values()) == 100
+
+    def test_effective_n_each_archetype_gets_at_least_one(self):
+        """Even a very small share gets count=1 (never zero)."""
+        con = _con()
+        # 5-archetype field, one with tiny share
+        text = "# effective_n: 10\n0.50 A\n0.49 B\n0.005 C\n0.003 D\n0.002 E"
+        field = _load_field(con, field_text=text)
+        assert field.counts is not None
+        for a, c in field.counts.items():
+            assert c >= 1, f"archetype {a!r} got count {c}"
+
+    def test_per_line_counts_over_effective_n_per_line_wins(self):
+        """When both # effective_n and per-line counts are present, per-line counts take precedence."""
+        con = _con()
+        text = "# effective_n: 999\n0.6 Delver 42\n0.4 Lands 28"
+        field = _load_field(con, field_text=text)
+        # Per-line counts must be used; effective_n is ignored (warned only in log)
+        assert field.counts is not None
+        assert field.counts["Delver"] == 42
+        assert field.counts["Lands"] == 28
+
+    def test_comment_lines_skipped(self):
+        """Non-directive comment lines are ignored."""
+        con = _con()
+        field = _load_field(con, field_text="# my Boulder field\n0.6 Delver\n0.4 Lands")
+        assert set(field.shares.keys()) == {"Delver", "Lands"}
+        assert field.counts is None
+
+    def test_negative_count_raises(self):
+        """A negative count on a line raises ValueError."""
+        con = _con()
+        with pytest.raises(ValueError, match="positive"):
+            _load_field(con, field_text="0.6 Delver -5\n0.4 Lands 10")
+
+    def test_zero_count_raises(self):
+        """A zero count on a line raises ValueError (counts must be ≥ 1)."""
+        con = _con()
+        with pytest.raises(ValueError, match="positive"):
+            _load_field(con, field_text="0.6 Delver 0\n0.4 Lands 10")
+
+    def test_effective_n_zero_raises(self):
+        """# effective_n: 0 raises ValueError."""
+        con = _con()
+        with pytest.raises(ValueError, match="effective_n"):
+            _load_field(con, field_text="# effective_n: 0\n0.6 Delver\n0.4 Lands")
+
+    def test_effective_n_non_integer_raises(self):
+        """# effective_n: 10.5 raises ValueError."""
+        con = _con()
+        with pytest.raises(ValueError, match="positive integer"):
+            _load_field(con, field_text="# effective_n: 10.5\n0.6 Delver\n0.4 Lands")
+
+    def test_archetype_with_spaces_in_name_share_only(self):
+        """Multi-word archetype names work in share-only format."""
+        con = _con()
+        field = _load_field(con, field_text="0.5 Death's Shadow\n0.5 Izzet Delver")
+        assert "Death's Shadow" in field.shares
+        assert "Izzet Delver" in field.shares
+
+
+# ---------------------------------------------------------------------------
+# TestBuildCustomFieldCounts — build_custom_field counts parameter
+# ---------------------------------------------------------------------------
+
+
+class TestBuildCustomFieldCounts:
+    """build_custom_field(counts=...) unit tests."""
+
+    def test_counts_none_is_share_only_unchanged(self):
+        """counts=None → counts=None on FieldDistribution (gated-additive)."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4})
+        assert fd.counts is None
+
+    def test_counts_provided_stored_on_distribution(self):
+        """counts dict is stored on the returned FieldDistribution."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40})
+        assert fd.counts == {"A": 60, "B": 40}
+
+    def test_counts_warning_differs_from_share_only_warning(self):
+        """With counts, the 'Dirichlet' warning is emitted (not the point-shares warning)."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40})
+        dirichlet_warnings = [w for w in fd.warnings if "Dirichlet" in w or "dirichlet" in w.lower()]
+        point_warnings = [w for w in fd.warnings if "point shares" in w]
+        assert len(dirichlet_warnings) >= 1
+        assert len(point_warnings) == 0
+
+    def test_share_only_still_emits_point_shares_warning(self):
+        """Without counts, the 'point shares' warning is still emitted (unchanged)."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4})
+        point_warnings = [w for w in fd.warnings if "point shares" in w]
+        assert len(point_warnings) == 1
+
+    def test_counts_missing_key_raises(self):
+        """counts missing an archetype from shares raises ValueError."""
+        with pytest.raises(ValueError, match="missing keys"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60})
+
+    def test_counts_extra_key_raises(self):
+        """counts with extra keys not in shares raises ValueError."""
+        with pytest.raises(ValueError, match="extra keys"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40, "C": 10})
+
+    def test_counts_zero_raises(self):
+        """A count of 0 raises ValueError (must be positive integer)."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 0})
+
+    def test_counts_negative_raises(self):
+        """A negative count raises ValueError."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": -1})
+
+    def test_counts_float_raises(self):
+        """A float count raises ValueError (must be integer)."""
+        with pytest.raises(ValueError, match="positive integer"):
+            build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40.5})
+
+    def test_field_source_is_custom_with_counts(self):
+        """field_source remains 'custom' even when counts are provided."""
+        fd = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 60, "B": 40})
+        assert fd.field_source == "custom"
+
+
+# ---------------------------------------------------------------------------
+# TestCustomFieldCountsPositioning — Dirichlet vs point-shares CI behavior
+# ---------------------------------------------------------------------------
+
+
+class TestCustomFieldCountsPositioning:
+    """Spec-derived behavioral test: a custom field WITH counts produces a wider CI
+    than a share-only field (Dirichlet sampling vs fixed point shares).
+
+    The key invariant: when field.counts is not None, _sample_S samples
+    W ~ Dirichlet(counts + gamma), which introduces per-draw share variance and
+    widens the CI compared to tiled point shares.  This is the Dirichlet backing.
+    """
+
+    def _make_matrix(self):
+        """Minimal MatchupMatrix: Delver vs Lands with meaningful matchup data."""
+        from legacy_engine.analytics.matchup import MatchupMatrix, build_cell, build_mirror_cell
+        cells = {
+            ("Delver", "Lands"): build_cell("Delver", "Lands", wins=60, n=100),
+            ("Lands", "Delver"): build_cell("Lands", "Delver", wins=40, n=100),
+            ("Delver", "Delver"): build_mirror_cell("Delver", n=0),
+            ("Lands", "Lands"): build_mirror_cell("Lands", n=0),
+        }
+        return MatchupMatrix(
+            cells=cells,
+            provenance=None,
+            total_matches=100,
+            archetypes=["Delver", "Lands"],
+            caveat="test matrix",
+        )
+
+    def test_counts_field_produces_wider_ci_than_share_only(self):
+        """A custom field with counts has a wider S CI than the same field share-only.
+
+        This is the core Dirichlet-backing invariant: Dirichlet weight sampling adds
+        variance to S; fixed point shares have zero weight variance so CI width is
+        narrower (driven only by Beta-cell sampling over matchup uncertainty).
+        """
+        from legacy_engine.advisory.positioning import positioning_score
+        matrix = self._make_matrix()
+
+        shares = {"Delver": 0.5, "Lands": 0.5}
+        # Large counts: Dirichlet concentrates near the shares but still has non-zero variance
+        counts = {"Delver": 200, "Lands": 200}
+
+        fd_share_only = build_custom_field(shares)
+        fd_with_counts = build_custom_field(shares, counts=counts)
+
+        result_share = positioning_score(matrix, fd_share_only, "Delver", n_draws=10_000, seed=42)
+        result_counts = positioning_score(matrix, fd_with_counts, "Delver", n_draws=10_000, seed=42)
+
+        ci_width_share = result_share.s_ci[1] - result_share.s_ci[0]
+        ci_width_counts = result_counts.s_ci[1] - result_counts.s_ci[0]
+
+        # With Dirichlet backing, CI width must be wider than fixed point shares
+        assert ci_width_counts > ci_width_share, (
+            f"Expected Dirichlet-backed CI ({ci_width_counts:.4f}) to be wider than "
+            f"point-share CI ({ci_width_share:.4f})"
+        )
+
+    def test_share_only_field_ci_zero_weight_variance(self):
+        """Share-only field: weight matrix is tiled (no Dirichlet sampling)."""
+        from legacy_engine.advisory.positioning import positioning_score, _sample_S
+        import numpy as np
+
+        matrix = self._make_matrix()
+        fd = build_custom_field({"Delver": 0.5, "Lands": 0.5})
+
+        # Build W twice with the same seed — should be identical for point shares
+        rng1 = np.random.default_rng(7)
+        rng2 = np.random.default_rng(7)
+        s1 = _sample_S(matrix, fd, "Delver", n_draws=500, rng=rng1)
+        s2 = _sample_S(matrix, fd, "Delver", n_draws=500, rng=rng2)
+        # Same seed → same samples (deterministic)
+        np.testing.assert_array_equal(s1, s2)
+
+    def test_counts_field_uses_dirichlet_path(self):
+        """FieldDistribution.counts is not None when counts are provided, enabling Dirichlet path."""
+        fd = build_custom_field({"Delver": 0.6, "Lands": 0.4}, counts={"Delver": 60, "Lands": 40})
+        assert fd.counts is not None
+
+    def test_s_mean_similar_between_share_only_and_counts_field(self):
+        """S means are close between share-only and counts fields (same expected weights)."""
+        from legacy_engine.advisory.positioning import positioning_score
+        matrix = self._make_matrix()
+
+        shares = {"Delver": 0.5, "Lands": 0.5}
+        counts = {"Delver": 1000, "Lands": 1000}  # very concentrated → near point shares
+
+        fd_share = build_custom_field(shares)
+        fd_counts = build_custom_field(shares, counts=counts)
+
+        r_share = positioning_score(matrix, fd_share, "Delver", n_draws=20_000, seed=1)
+        r_counts = positioning_score(matrix, fd_counts, "Delver", n_draws=20_000, seed=1)
+
+        # With 1000 counts the Dirichlet is very concentrated → means should be within 1%
+        assert abs(r_share.s_mean - r_counts.s_mean) < 0.01, (
+            f"S means diverged: share_only={r_share.s_mean:.4f}, counts={r_counts.s_mean:.4f}"
+        )
