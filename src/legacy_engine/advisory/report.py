@@ -224,16 +224,25 @@ def build_field_read_report(
     if archetype_resolvable:
         try:
             positioning = positioning_score(matrix, field, resolved_archetype, seed=seed)
-            audit.append(
-                f"positioning: s_mean={positioning.s_mean:.3f}, "
-                f"s_ci=[{positioning.s_ci[0]:.3f}, {positioning.s_ci[1]:.3f}], "
-                f"u_bar={positioning.u_bar:.3f}, "
-                f"n_draws={positioning.n_draws}, "
-                f"imputed={len(positioning.imputed)} opponents, "
-                f"coverage={positioning.data_coverage:.2f}, "
-                f"restricted={positioning.restricted} (excluded_share={positioning.excluded_share:.2f}), "
-                f"field_source={positioning.field_source!r}"
-            )
+            if positioning.s_computable:
+                audit.append(
+                    f"positioning: s_mean={positioning.s_mean:.3f}, "
+                    f"s_ci=[{positioning.s_ci[0]:.3f}, {positioning.s_ci[1]:.3f}], "
+                    f"u_bar={positioning.u_bar:.3f}, "
+                    f"n_draws={positioning.n_draws}, "
+                    f"imputed={len(positioning.imputed)} opponents, "
+                    f"coverage={positioning.data_coverage:.2f}, "
+                    f"restricted={positioning.restricted} (excluded_share={positioning.excluded_share:.2f}), "
+                    f"field_source={positioning.field_source!r}"
+                )
+            else:
+                audit.append(
+                    f"positioning: s not computable — no covered (n≥30) matchups in field; "
+                    f"coverage={positioning.data_coverage:.2f}, "
+                    f"u_bar={positioning.u_bar:.3f}, "
+                    f"n_draws={positioning.n_draws}, "
+                    f"field_source={positioning.field_source!r}"
+                )
             if positioning.warnings:
                 audit.extend(f"positioning warning: {w}" for w in positioning.warnings)
         except Exception as exc:
