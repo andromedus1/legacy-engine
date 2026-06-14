@@ -1,7 +1,7 @@
 ---
 id: epic-bigmana-coverage-sideboard-fidelity
 kind: epic
-stage: drafting
+stage: done
 tags: [advisory, archetype, generation]
 parent: null
 depends_on: []

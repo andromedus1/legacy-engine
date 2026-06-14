@@ -1,7 +1,7 @@
 ---
 id: feature-advise-provenance-flag
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-local-meta-support
 depends_on: []
