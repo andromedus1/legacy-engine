@@ -303,8 +303,8 @@ def load_cards_diff(
     cards_list = list(cards)
     before = existing_card_names(con)
     load_cards(con, cards_list)
-    # Count only full-name rows (not face aliases — aliases use INSERT OR IGNORE and
-    # don't represent new playable names in the game sense).
+    # Count all rows (includes face aliases stored by INSERT OR IGNORE); total_after
+    # is an approximate deck-count signal, not the exact playable-name count.
     total_after = con.execute("SELECT count(*) FROM cards").fetchone()[0]
     after_names = existing_card_names(con)
     new = tuple(sorted(after_names - before))
@@ -313,6 +313,64 @@ def load_cards_diff(
         total_after=total_after,
         scryfall_updated_at=scryfall_updated_at,
     )
+
+
+def persist_ingest_diff(diff: IngestDiff, path: "Path | None" = None) -> None:
+    """Write an IngestDiff to a small JSON file for cross-run hand-off.
+
+    Serialises new_names (sorted list), total_after, scryfall_updated_at, and a
+    persisted_at timestamp (UTC ISO). Overwrites any previous file — only the latest
+    diff is kept (the hand-off is "what just changed", not a full history).
+
+    Follows the constants-only-config path convention: path defaults to
+    ``INGEST_DIFF_PATH`` from config, but callers may override for testing.
+    """
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path as _Path
+
+    if path is None:
+        from legacy_engine.config import INGEST_DIFF_PATH
+        path = INGEST_DIFF_PATH
+
+    path = _Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "new_names": list(diff.new_names),
+        "total_after": diff.total_after,
+        "scryfall_updated_at": diff.scryfall_updated_at,
+        "persisted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.write_text(json.dumps(payload, indent=2))
+
+
+def load_ingest_diff(path: "Path | None" = None) -> "IngestDiff | None":
+    """Read the persisted IngestDiff from disk, or return None if the file is absent.
+
+    Degrades gracefully: callers should treat None as "no diff recorded yet — run
+    `refresh cards`" and fall back to whatever proxy they used before.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    if path is None:
+        from legacy_engine.config import INGEST_DIFF_PATH
+        path = INGEST_DIFF_PATH
+
+    path = _Path(path)
+    if not path.exists():
+        return None
+
+    try:
+        data = json.loads(path.read_text())
+        return IngestDiff(
+            new_names=tuple(data.get("new_names", [])),
+            total_after=int(data.get("total_after", 0)),
+            scryfall_updated_at=data.get("scryfall_updated_at"),
+        )
+    except Exception:
+        return None
 
 
 def rebuild(con: duckdb.DuckDBPyConnection) -> None:

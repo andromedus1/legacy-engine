@@ -292,7 +292,9 @@ def build_field_read_report(
             audit.append(f"best-deck-call: ERROR — {exc}")
 
     # ── Sideboard ────────────────────────────────────────────────────────────
-    sideboard_pkg = recommend_sideboard(con, field, mainboard, reserved=reserved)
+    sideboard_pkg = recommend_sideboard(
+        con, field, mainboard, reserved=reserved, archetype=resolved_archetype
+    )
     audit.append(
         f"sideboard: solver={sideboard_pkg.solver_used!r}, "
         f"budget={sideboard_pkg.budget}, "
