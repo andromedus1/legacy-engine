@@ -83,8 +83,10 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 from typing import Optional
 
 import duckdb
@@ -366,220 +368,139 @@ class HoserCard:
     castable_any_color: bool = False
 
 
-# Seeded from docs/briefs/legacy-metagame.md §6 "Hosers by target"
-# Colors use single WUBRG chars; empty = colorless.
-# swing: _SWING_DEDICATED (0.20) for dedicated hate, _SWING_SOFT (0.10) for soft/partial answers.
-HOSER_CATALOG: dict[str, HoserCard] = {
-    # --- Graveyard hate → graveyard-reliant ---
-    "Surgical Extraction": HoserCard(
-        name="Surgical Extraction",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-        # Phyrexian mana: castable for 2 life in any deck regardless of color identity.
-        castable_any_color=True,
-    ),
-    "Faerie Macabre": HoserCard(
-        name="Faerie Macabre",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-        # Free discard activation: usable at zero mana cost in any deck.
-        castable_any_color=True,
-    ),
-    "Leyline of the Void": HoserCard(
-        name="Leyline of the Void",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Endurance": HoserCard(
-        name="Endurance",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Containment Priest": HoserCard(
-        name="Containment Priest",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"W"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Grafdigger's Cage": HoserCard(
-        name="Grafdigger's Cage",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Nihil Spellbomb": HoserCard(
-        name="Nihil Spellbomb",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Combo hate → combo + storm-reliant ---
-    "Force of Will": HoserCard(
-        name="Force of Will",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Flusterstorm": HoserCard(
-        name="Flusterstorm",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Mindbreak Trap": HoserCard(
-        name="Mindbreak Trap",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-    ),
-    "Thoughtseize": HoserCard(
-        name="Thoughtseize",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Duress": HoserCard(
-        name="Duress",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Counter-hosers → _hate pseudo-elements ---
-    # These defend the deck against opposing hate rather than attacking archetypes.
-    "Veil of Summer": HoserCard(
-        name="Veil of Summer",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Defense Grid": HoserCard(
-        name="Defense Grid",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Carpet of Flowers": HoserCard(
-        name="Carpet of Flowers",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Greedy-manabase hate → greedy-manabase ---
-    "Blood Moon": HoserCard(
-        name="Blood Moon",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"R"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Back to Basics": HoserCard(
-        name="Back to Basics",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Wasteland": HoserCard(
-        name="Wasteland",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset(),          # colorless land
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Artifact/enchantment removal → greedy-manabase (answers Blood Moon/Back to Basics/Chalice) ---
-    "Force of Vigor": HoserCard(
-        name="Force of Vigor",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Krosan Grip": HoserCard(
-        name="Krosan Grip",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"G"}),
-        max_copies=3,
-        swing=_SWING_SOFT,
-    ),
-    # --- Additional useful hosers ---
-    "Pyroblast": HoserCard(
-        name="Pyroblast",
-        attacks=frozenset({"combo", "low-interaction"}),
-        colors=frozenset({"R"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Hydroblast": HoserCard(
-        name="Hydroblast",
-        attacks=frozenset({"greedy-manabase", "low-interaction"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Chalice of the Void": HoserCard(
-        name="Chalice of the Void",
-        attacks=frozenset({"combo", "storm-reliant", "low-curve"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-    ),
-    # --- Big-mana / ramp hate → ramp ---
-    # Harbinger of the Seas: "Lands opponents control that aren't Islands don't untap during their
-    # untap step" — locks Urzatron and Cloudpost out of their mana entirely.
-    "Harbinger of the Seas": HoserCard(
-        name="Harbinger of the Seas",
-        attacks=frozenset({"ramp"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    # Damping Sphere: nonbasic, non-island lands produce only {C}; each spell costs {1} more per
-    # spell cast this turn — hoses both Tron/Cloudpost mana production AND storm chains.
-    "Damping Sphere": HoserCard(
-        name="Damping Sphere",
-        attacks=frozenset({"ramp", "storm-reliant"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    # Pithing Needle: names Eye of Ugin / Eldrazi Temple activated abilities; staxes planeswalkers
-    # and utility lands across the board.  Soft swing — flexible answer, not dedicated to ramp alone.
-    "Pithing Needle": HoserCard(
-        name="Pithing Needle",
-        attacks=frozenset({"ramp"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=2,
-        swing=_SWING_SOFT,
-    ),
-    # Null Rod: shuts down mana artifacts (Mox Diamond, Chrome Mox, Grim Monolith, etc.) common in
-    # Eldrazi and Cloudpost shells; also hits greedy-manabase fast-mana artifacts.
-    "Null Rod": HoserCard(
-        name="Null Rod",
-        attacks=frozenset({"ramp", "greedy-manabase"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
+# ---------------------------------------------------------------------------
+# Hoser catalog loader — reads from the editable JSON data file.
+# Mirrors the variants-registry load pattern (config.HOSERS_REGISTRY_PATH).
+# ---------------------------------------------------------------------------
+
+# Swing-alias map: JSON authors write "dedicated" / "soft" instead of raw floats
+# so the data file is self-documenting and immune to constant renames in code.
+_SWING_ALIAS: dict[str, float] = {
+    "dedicated": _SWING_DEDICATED,
+    "soft": _SWING_SOFT,
 }
+
+_VALID_COLORS = frozenset("WUBRG")
+
+
+def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
+    """Load and validate a hoser catalog from a JSON data file.
+
+    Format: ``{"version": "<date>", "hosers": [ { ... }, ... ]}``.
+
+    Each hoser entry must have:
+      ``name``          (str)
+      ``attacks``       (list of tag strings; non-empty)
+      ``colors``        (list of WUBRG single-char strings; empty = colorless)
+      ``max_copies``    (int ≥ 1)
+      ``swing``         (float in (0,1) OR the aliases "dedicated" / "soft")
+
+    Optional:
+      ``castable_any_color`` (bool, default False)
+      ``_comment``           (str, ignored)
+
+    Raises ``ValueError`` on schema violations (bad swing alias, empty attacks,
+    invalid colors, max_copies < 1) or ``FileNotFoundError`` when the path is absent.
+    Duplicate names raise ``ValueError`` so catalog integrity is enforced at load time.
+
+    This is a module-level loader called once at import; the result is cached as
+    ``HOSER_CATALOG``.  Callers that need a different catalog can call
+    ``load_hoser_catalog`` directly.
+    """
+    path = Path(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+
+    hosers_raw = raw.get("hosers")
+    if not isinstance(hosers_raw, list):
+        raise ValueError(f"load_hoser_catalog: 'hosers' must be a list in {path}")
+
+    catalog: dict[str, HoserCard] = {}
+    for idx, entry in enumerate(hosers_raw):
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"load_hoser_catalog: entry[{idx}] missing or empty 'name'")
+
+        if name in catalog:
+            raise ValueError(
+                f"load_hoser_catalog: duplicate hoser name {name!r} at entry[{idx}] in {path}"
+            )
+
+        attacks_raw = entry.get("attacks")
+        if not isinstance(attacks_raw, list) or not attacks_raw:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'attacks' must be a non-empty list"
+            )
+        attacks = frozenset(str(t) for t in attacks_raw)
+
+        colors_raw = entry.get("colors")
+        if not isinstance(colors_raw, list):
+            raise ValueError(f"load_hoser_catalog: {name!r} 'colors' must be a list")
+        colors: frozenset[str] = frozenset(
+            c for c in (str(x) for x in colors_raw) if c in _VALID_COLORS
+        )
+        # Warn on unrecognized color chars (silently drop; not a hard error).
+        unknown = [x for x in colors_raw if str(x) not in _VALID_COLORS]
+        if unknown:
+            log.warning(
+                "load_hoser_catalog: %r has unrecognized color chars %s (dropped)", name, unknown
+            )
+
+        max_copies = entry.get("max_copies")
+        if not isinstance(max_copies, int) or max_copies < 1:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'max_copies' must be an int ≥ 1"
+            )
+
+        swing_raw = entry.get("swing")
+        if isinstance(swing_raw, str):
+            if swing_raw not in _SWING_ALIAS:
+                raise ValueError(
+                    f"load_hoser_catalog: {name!r} swing alias {swing_raw!r} unknown; "
+                    f"use 'dedicated', 'soft', or a float"
+                )
+            swing = _SWING_ALIAS[swing_raw]
+        elif isinstance(swing_raw, (int, float)):
+            swing = float(swing_raw)
+        else:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'swing' must be a float or alias string"
+            )
+        if not (0.0 < swing < 1.0):
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} swing={swing} out of (0, 1)"
+            )
+
+        castable_any_color = bool(entry.get("castable_any_color", False))
+
+        catalog[name] = HoserCard(
+            name=name,
+            attacks=attacks,
+            colors=colors,
+            max_copies=max_copies,
+            swing=swing,
+            castable_any_color=castable_any_color,
+        )
+
+    return catalog
+
+
+# Load the catalog from the shipped data file at module import time.
+# The path is resolved from config so tests can override HOSERS_REGISTRY_PATH.
+# Inline the default path here (same pattern as variants: no runtime import of config
+# in the hot path — the path is a constant once the module loads).
+def _load_default_hoser_catalog() -> "dict[str, HoserCard]":
+    """Load HOSER_CATALOG from the shipped data file; fall back to empty dict on error."""
+    try:
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+        return load_hoser_catalog(HOSERS_REGISTRY_PATH)
+    except Exception as exc:
+        log.error(
+            "HOSER_CATALOG: failed to load from data file — returning empty catalog: %s", exc
+        )
+        return {}
+
+
+HOSER_CATALOG: dict[str, HoserCard] = _load_default_hoser_catalog()
 
 
 # ---------------------------------------------------------------------------
