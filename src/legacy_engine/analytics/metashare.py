@@ -226,7 +226,11 @@ def _unlabeled_count(
 
 
 def _wrw_weights(
-    con: duckdb.DuckDBPyConnection, *, provenance: str | None
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> tuple[dict[str, float], dict[str, int], list[str]]:
     """Return (weight_by_archetype, matchup_n_by_archetype, excluded_no_match_data).
 
@@ -239,18 +243,22 @@ def _wrw_weights(
     as the third element so callers can surface them as ``excluded_no_match_data``
     coverage metadata rather than silently dropping them with only a debug log.
 
+    ``since``/``until`` window both the raw deck counts and the match-results scan
+    over the same half-open ``[since, until)`` date interval so wrw can be windowed
+    to a ban regime.  Both ``None`` = full corpus (default, byte-identical to before).
+
     The caller renormalises weights to sum to 1.
     """
     # Import here to avoid circular deps at module load time
     from legacy_engine.analytics.match_results import compute_match_results
 
-    raw = _raw_counts(con, provenance=provenance)
+    raw = _raw_counts(con, provenance=provenance, since=since, until=until)
     total_decks = sum(raw.values())
 
     if total_decks == 0:
         return {}, {}, []
 
-    match_res = compute_match_results(con, provenance=provenance)
+    match_res = compute_match_results(con, provenance=provenance, since=since, until=until)
 
     weights: dict[str, float] = {}
     matchup_n: dict[str, int] = {}
@@ -464,19 +472,9 @@ def compute_metashare(
     ``"{archetype} / {variant}"``; decks with no variant keep the bare archetype key.
     Default (False) → unchanged, byte-identical to the pre-variant path.
 
-    ``definition="wrw"`` with a date window raises ``NotImplementedError`` — windowed
-    win-rate-weighted share is incoherent here because this path weights by the full-corpus
-    win-rate aggregate rather than a per-window one; use raw/topcut for windowed/trend views.
-
     Returns a fully-labeled ``MetaShareReport`` with confidence tiers and the
     inclusion floor applied.
     """
-    if definition == "wrw" and (since is not None or until is not None):
-        raise NotImplementedError(
-            "windowed wrw is unsupported here — this path weights by the full-corpus win-rate "
-            "aggregate, not a per-window one; use raw/topcut for windowed/trend views"
-        )
-
     unlabeled = _unlabeled_count(con, provenance=provenance, since=since, until=until)
 
     if definition == "raw":
@@ -520,7 +518,9 @@ def compute_metashare(
         )
 
     elif definition == "wrw":
-        weights, matchup_n, excluded = _wrw_weights(con, provenance=provenance)
+        weights, matchup_n, excluded = _wrw_weights(
+            con, provenance=provenance, since=since, until=until
+        )
         # Renormalise weights to sum to 1.0
         weight_total = sum(weights.values())
         if weight_total == 0:

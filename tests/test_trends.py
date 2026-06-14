@@ -475,28 +475,31 @@ class TestMetashareWindowing:
         assert arches_unwindowed == arches_no_kwargs
         con.close()
 
-    def test_windowed_wrw_raises_not_implemented(self):
-        """compute_metashare(definition='wrw', since=...) raises NotImplementedError."""
-        import pytest
+    def test_windowed_wrw_does_not_raise(self):
+        """compute_metashare(definition='wrw', since=...) is now supported (finding: wrw-windowed).
 
+        Previously raised NotImplementedError; now computes over the windowed deck+match data.
+        """
         con = _con()
         _load_and_label(con, _REGIME_A_T1, "MTGO",
                         {"p1": "Delver", "p2": "Lands", "p3": "Reanimator",
                          "p4": "Control", "p5": "Delver", "p6": "Delver"})
-        with pytest.raises(NotImplementedError, match="windowed wrw"):
-            compute_metashare(con, definition="wrw", since="2024-09-01")
+        # Must not raise; returns a MetaShareReport (may be empty if no match data in window).
+        report = compute_metashare(con, definition="wrw", since="2024-09-01")
+        assert report.definition == "wrw"
         con.close()
 
-    def test_windowed_wrw_until_raises_not_implemented(self):
-        """compute_metashare(definition='wrw', until=...) raises NotImplementedError."""
-        import pytest
+    def test_windowed_wrw_until_does_not_raise(self):
+        """compute_metashare(definition='wrw', until=...) is now supported (finding: wrw-windowed).
 
+        Previously raised NotImplementedError; now computes over the windowed deck+match data.
+        """
         con = _con()
         _load_and_label(con, _REGIME_A_T1, "MTGO",
                         {"p1": "Delver", "p2": "Lands", "p3": "Reanimator",
                          "p4": "Control", "p5": "Delver", "p6": "Delver"})
-        with pytest.raises(NotImplementedError, match="windowed wrw"):
-            compute_metashare(con, definition="wrw", until="2025-01-01")
+        report = compute_metashare(con, definition="wrw", until="2025-01-01")
+        assert report.definition == "wrw"
         con.close()
 
 

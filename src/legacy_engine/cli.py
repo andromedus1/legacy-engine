@@ -544,12 +544,8 @@ def report_meta(
                 thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
-            windowed = win.since is not None or win.until is not None
 
             for defn in definitions:
-                if windowed and defn == "wrw":
-                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
-                    continue
                 if by_variant and defn == "wrw":
                     click.echo("// --by-variant is not supported for wrw (win-rate weights are archetype-level)")
                     continue
@@ -596,11 +592,7 @@ def report_meta(
                 provenance=basis, thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
-            windowed = win.since is not None or win.until is not None
             for defn in definitions_leg:
-                if windowed and defn == "wrw":
-                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
-                    continue
                 # wrw does not support group_by_variant (weights are archetype-level).
                 effective_by_variant = by_variant and defn != "wrw"
                 if by_variant and defn == "wrw":
@@ -725,6 +717,18 @@ def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
     help="Minimum share of matches for an archetype to appear as a row/column.",
 )
 @click.option(
+    "--a",
+    "archetype_a",
+    default=None,
+    help="Head-to-head mode: archetype A (use with --b).",
+)
+@click.option(
+    "--b",
+    "archetype_b",
+    default=None,
+    help="Head-to-head mode: archetype B (use with --a).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -735,6 +739,8 @@ def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
 def report_matchups(
     provenance: str,
     min_row_share: float,
+    archetype_a: str | None,
+    archetype_b: str | None,
     db: str | None,
     since: str | None,
     until: str | None,
@@ -742,11 +748,21 @@ def report_matchups(
     all_time: bool,
     verbose: bool,
 ) -> None:
-    """Archetype matchup matrix with confidence intervals."""
+    """Archetype matchup matrix with confidence intervals.
+
+    Head-to-head mode: pass --a <archetype> and --b <archetype> to look up a single pair
+    directly instead of printing the full matrix.
+    """
     _setup_logging(verbose)
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
-    from legacy_engine.analytics.matchup import MatchupMatrix
+    from legacy_engine.analytics.matchup import lookup_head_to_head
     from legacy_engine.ingestion import store
+
+    # Validate head-to-head flag pair
+    if (archetype_a is None) != (archetype_b is None):
+        raise click.ClickException("--a and --b must be used together (both or neither).")
+
+    head_to_head = archetype_a is not None and archetype_b is not None
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -766,7 +782,12 @@ def report_matchups(
             for line in inputs.audit:
                 click.echo(line)
             matrix = inputs.matrix
-            _print_matchup_matrix(matrix)
+
+            if head_to_head:
+                cell = lookup_head_to_head(matrix, archetype_a, archetype_b)
+                _print_head_to_head(matrix, archetype_a, archetype_b, cell)
+            else:
+                _print_matchup_matrix(matrix)
     finally:
         con.close()
 
@@ -818,6 +839,154 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
         click.echo(_UNCLASSIFIED_FOOTNOTE)
 
 
+def _print_head_to_head(
+    matrix: "MatchupMatrix",
+    archetype_a: str,
+    archetype_b: str,
+    cell: "MatchupCell | None",
+) -> None:
+    """Render a single head-to-head matchup cell."""
+    from legacy_engine.analytics.matchup import MatchupMatrix, DISPLAY_GATE_N  # noqa: F401
+    from legacy_engine.models import MatchupCell  # noqa: F401
+
+    basis_label = matrix.provenance if matrix.provenance else "all"
+    click.echo(f"\n=== Head-to-Head [{basis_label}]: {archetype_a!r} vs {archetype_b!r} ===")
+    click.echo(f"Caveat: {matrix.caveat}")
+
+    if cell is None:
+        if archetype_a not in matrix.archetypes or archetype_b not in matrix.archetypes:
+            missing = [
+                a for a in (archetype_a, archetype_b) if a not in matrix.archetypes
+            ]
+            click.echo(
+                f"  (archetype(s) not in matrix — below row-inclusion threshold or no data: "
+                f"{', '.join(missing)})"
+            )
+        else:
+            click.echo("  (pair not found in matrix)")
+        return
+
+    click.echo(f"  {archetype_a!r} win-rate vs {archetype_b!r}:")
+    click.echo(f"    n              = {cell.n}")
+    click.echo(f"    wins           = {cell.wins}")
+    click.echo(f"    tier           = {cell.tier}")
+
+    if not cell.display:
+        click.echo(
+            f"    NOTE: n={cell.n} < {DISPLAY_GATE_N} (speculative) — "
+            "rate present-and-honest but unreliable; treat as indicative only"
+        )
+    if cell.p_raw is not None:
+        click.echo(f"    p_raw          = {cell.p_raw:.3f} ({cell.p_raw:.1%})")
+    if cell.p_shrunk is not None:
+        click.echo(f"    p_shrunk       = {cell.p_shrunk:.3f} ({cell.p_shrunk:.1%})")
+    if cell.ci_low is not None and cell.ci_high is not None:
+        click.echo(f"    95% CI         = [{cell.ci_low:.3f}, {cell.ci_high:.3f}]")
+
+    # Also show the reverse direction
+    rev = matrix.cells.get((archetype_b, archetype_a))
+    if rev is not None and rev.p_shrunk is not None:
+        click.echo(
+            f"  {archetype_b!r} win-rate vs {archetype_a!r}: "
+            f"{rev.p_shrunk:.1%} (n={rev.n})"
+        )
+
+
+@report.command("affectedness")
+@click.option(
+    "--archetype",
+    required=True,
+    help="Archetype to explain (e.g. 'Dimir Reanimator').",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper"], case_sensitive=False),
+    default=None,
+    help="Filter to online or paper events (default: all).",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=0.25,
+    show_default=True,
+    help="Inclusion rate threshold above which a ban is considered materially affecting (0..1).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_affectedness(
+    archetype: str,
+    provenance: str | None,
+    threshold: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Explain which bans drove an archetype's valid_since (ban-affectedness derivation).
+
+    Shows, for each ban event, how many of the archetype's pre-ban decks ran any
+    banned card — the inclusion rate that determined whether the ban materially
+    affected the archetype's matchup history.
+
+    Example: legacy report affectedness --archetype "Dimir Reanimator"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.affectedness import explain_valid_since
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        explanations = explain_valid_since(
+            con, archetype, provenance=provenance, affect_threshold=threshold
+        )
+        _print_affectedness_explain(archetype, explanations, threshold=threshold)
+    finally:
+        con.close()
+
+
+def _print_affectedness_explain(
+    archetype: str,
+    explanations: "list[AffectednessExplanation]",
+    *,
+    threshold: float,
+) -> None:
+    """Render the affectedness derivation as a labeled per-ban-event table."""
+    from legacy_engine.analytics.affectedness import AffectednessExplanation  # noqa: F401
+
+    click.echo(f"\n=== Affectedness Derivation: {archetype!r} (threshold={threshold:.0%}) ===")
+
+    if not explanations:
+        click.echo("  (no ban events in BAN_EVENTS — nothing to explain)")
+        return
+
+    # Determine valid_since: latest ban_date where affected=True
+    affected_dates = [e.ban_date for e in explanations if e.affected]
+    valid_since = max(affected_dates) if affected_dates else None
+    click.echo(f"  Derived valid_since: {valid_since or 'None (full history — no affecting ban)'}")
+    click.echo("")
+    click.echo(
+        f"  {'Ban date':<12}  {'Pre-ban decks':>13}  {'Run banned':>10}  "
+        f"{'Rate':>6}  {'Affected?':<10}  Cards banned"
+    )
+    click.echo("  " + "-" * 90)
+
+    for e in explanations:
+        affected_str = "YES ***" if e.affected else "no"
+        rate_str = f"{e.inclusion_rate:.1%}"
+        cards_str = ", ".join(e.banned_cards)
+        window_str = f"{e.prev_ban_date or 'open'} → {e.ban_date}"
+        click.echo(
+            f"  {e.ban_date:<12}  {e.pre_ban_decks:>13}  {e.running_decks:>10}  "
+            f"{rate_str:>6}  {affected_str:<10}  {cards_str}"
+        )
+        if e.pre_ban_decks == 0:
+            click.echo(f"    (no pre-ban deck data for window {window_str})")
+
+
 @report.command("trends")
 @click.option(
     "--definition",
@@ -846,17 +1015,26 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@click.option(
+    "--movers",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Append a biggest-movers digest comparing the two most recent regimes (top N by |delta|). "
+         "0 = off.",
+)
 @_verbose
 def report_trends(
     definition: str,
     provenance: str,
     min_share: float,
     db: str | None,
+    movers: int,
     verbose: bool,
 ) -> None:
     """Meta-share evolution across ban-list regimes (version-stamped)."""
     _setup_logging(verbose)
-    from legacy_engine.analytics.trends import compute_trends
+    from legacy_engine.analytics.trends import biggest_movers, compute_trends
     from legacy_engine.ingestion import store
 
     con = store.connect(db) if db else store.connect()
@@ -876,6 +1054,9 @@ def report_trends(
                 min_share=min_share,
             )
             _print_trend_series(series)
+            if movers > 0:
+                top = biggest_movers(series, n=movers)
+                _print_biggest_movers(top)
     finally:
         con.close()
 
@@ -937,6 +1118,29 @@ def _print_trend_series(series: "TrendSeries") -> None:
                 thin_marker = "*" if regime.thin else " "
                 row_parts.append(f"{cell.share:>6.1%}{thin_marker}".rjust(col_w))
         click.echo("  ".join(row_parts))
+
+
+def _print_biggest_movers(movers: "list[BiggestMover]") -> None:
+    """Render a biggest-movers digest as a compact labeled table."""
+    from legacy_engine.analytics.trends import BiggestMover  # noqa: F401
+
+    if not movers:
+        click.echo("\n  (biggest-movers: fewer than 2 regimes — nothing to compare)")
+        return
+
+    # Derive the regime labels from the first entry (all share the same pair).
+    prev_label = movers[0].prev_regime
+    curr_label = movers[0].curr_regime
+    click.echo(f"\n── Biggest Movers: {prev_label!r} → {curr_label!r} ──")
+    click.echo(f"  {'Archetype':<30}  {'Prev':>7}  {'Curr':>7}  {'Delta':>7}")
+    click.echo("  " + "-" * 58)
+
+    for m in movers:
+        prev_str = f"{m.prev_share:.1%}" if m.prev_share is not None else "new"
+        curr_str = f"{m.curr_share:.1%}" if m.curr_share is not None else "gone"
+        sign = "+" if m.delta > 0 else ""
+        delta_str = f"{sign}{m.delta:.1%}"
+        click.echo(f"  {m.archetype:<30}  {prev_str:>7}  {curr_str:>7}  {delta_str:>7}")
 
 
 @report.command("tiers")
