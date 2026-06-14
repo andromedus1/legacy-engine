@@ -303,8 +303,8 @@ def load_cards_diff(
     cards_list = list(cards)
     before = existing_card_names(con)
     load_cards(con, cards_list)
-    # Count only full-name rows (not face aliases — aliases use INSERT OR IGNORE and
-    # don't represent new playable names in the game sense).
+    # Count all rows (includes face aliases stored by INSERT OR IGNORE); total_after
+    # is an approximate deck-count signal, not the exact playable-name count.
     total_after = con.execute("SELECT count(*) FROM cards").fetchone()[0]
     after_names = existing_card_names(con)
     new = tuple(sorted(after_names - before))

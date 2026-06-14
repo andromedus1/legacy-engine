@@ -3783,3 +3783,250 @@ class TestEmpiricalPromotion:
         assert set(baseline.candidate_meta.keys()) == set(with_none.candidate_meta.keys()), (
             "promoted_candidates=None must leave candidate_meta byte-identical"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestPitchSpellExclusionFromLowCurve — item 2 (Chalice low_curve fix)
+# ---------------------------------------------------------------------------
+
+
+class TestPitchSpellExclusionFromLowCurve:
+    """Verify that free pitch spells are excluded from the avg-non-land-CMC calculation.
+
+    Force of Will (CMC 5) and other pitch spells inflate the average, hiding the
+    low_curve signal for Dimir Tempo-style decks.  The fix excludes cards whose
+    oracle_text contains the free-alternative-cost pattern from the CMC average so
+    that avg_cmc is computed only over spells that must pay their mana cost.
+    """
+
+    def _make_dimir_tempo_with_fow(self) -> list[tuple[Card, int]]:
+        """Dimir Tempo-like deck: many 1-CMC spells + 4x Force of Will (CMC 5).
+
+        Without the fix, avg CMC ≈ 1.86 → low_curve=False.
+        With the fix (FoW excluded), avg CMC ≈ 1.0 → low_curve=True.
+        """
+        brainstorm = Card(
+            name="Brainstorm",
+            type_line="Instant",
+            oracle_text="Draw three cards, then put two cards from your hand on top of your library in any order.",
+            cmc=1.0,
+            colors=["U"],
+        )
+        ponder = Card(
+            name="Ponder",
+            type_line="Sorcery",
+            oracle_text="Look at the top three cards of your library, then put them back or shuffle. Draw a card.",
+            cmc=1.0,
+            colors=["U"],
+        )
+        preordain = Card(
+            name="Preordain",
+            type_line="Sorcery",
+            oracle_text="Scry 2, then draw a card.",
+            cmc=1.0,
+            colors=["U"],
+        )
+        fatal_push = Card(
+            name="Fatal Push",
+            type_line="Instant",
+            oracle_text=(
+                "Destroy target creature if it has mana value 2 or less. "
+                "Revolt — Destroy that creature if it has mana value 4 or less instead."
+            ),
+            cmc=1.0,
+            colors=["B"],
+        )
+        # Force of Will: CMC 5 but playable for free via pitch
+        force_of_will = Card(
+            name="Force of Will",
+            type_line="Instant",
+            oracle_text=(
+                "You may pay 1 life and exile a blue card from your hand "
+                "rather than pay this spell's mana cost. Counter target spell."
+            ),
+            cmc=5.0,
+            colors=["U"],
+        )
+        underground_sea = Card(
+            name="Underground Sea",
+            type_line="Land — Island Swamp",
+            oracle_text="{T}: Add {U} or {B}.",
+            cmc=0.0,
+            produced_mana=["U", "B"],
+        )
+        polluted_delta = Card(
+            name="Polluted Delta",
+            type_line="Land",
+            oracle_text="{T}, Pay 1 life, Sacrifice Polluted Delta: Search your library for an Island or Swamp card, put it onto the battlefield, then shuffle.",
+            cmc=0.0,
+            produced_mana=[],
+        )
+        return [
+            (brainstorm, 4),
+            (ponder, 4),
+            (preordain, 2),
+            (fatal_push, 4),
+            (force_of_will, 4),     # CMC 5, but should be EXCLUDED from avg
+            (underground_sea, 4),
+            (polluted_delta, 4),
+        ]
+
+    def test_dimir_tempo_with_fow_has_low_curve_true(self):
+        """A Dimir Tempo list with 4x FoW must now compute low_curve=True.
+
+        Without the pitch-spell fix, FoW's CMC 5 lifts avg non-land CMC to ~2.1,
+        producing low_curve=False.  After the fix, FoW is excluded from the average
+        and avg CMC ≈ 1.0 → low_curve=True.
+        """
+        cards = self._make_dimir_tempo_with_fow()
+        signals = compute_deck_anti_synergy_signals(cards)
+        assert signals.low_curve is True, (
+            "Dimir Tempo with 4x FoW must have low_curve=True after excluding pitch spells "
+            f"from CMC average (signals={signals})"
+        )
+
+    def test_chalice_blocked_for_dimir_tempo_with_fow(self):
+        """Chalice of the Void is blocked for a Dimir Tempo list containing 4x FoW.
+
+        End-to-end check: low_curve=True → Chalice is anti-synergistic → the
+        anti-synergy filter drops it from the coverage model.
+        """
+        cards = self._make_dimir_tempo_with_fow()
+        signals = compute_deck_anti_synergy_signals(cards)
+        assert is_anti_synergistic("Chalice of the Void", signals) is True, (
+            "Chalice must be anti-synergistic for a deck where low_curve=True "
+            f"(signals={signals})"
+        )
+
+    def test_non_pitch_high_cmc_card_does_not_trigger_low_curve(self):
+        """A deck whose only high-CMC card is NOT a pitch spell does NOT get low_curve=True.
+
+        Verifies the filter is pitch-oracle-text based, not a blanket CMC exclusion.
+        """
+        # 2-CMC vanilla, not a pitch spell
+        dark_ritual = Card(
+            name="Dark Ritual",
+            type_line="Instant",
+            oracle_text="Add {B}{B}{B}.",
+            cmc=1.0,
+            colors=["B"],
+        )
+        # Goblin Guide at CMC 1 — not a pitch spell either
+        high_cmc = Card(
+            name="Hymn to Tourach",
+            type_line="Sorcery",
+            oracle_text="Target player discards two cards at random.",
+            cmc=2.0,
+            colors=["B"],
+        )
+        cards = [(dark_ritual, 4), (high_cmc, 4)]
+        signals = compute_deck_anti_synergy_signals(cards)
+        # avg CMC = (1.0*4 + 2.0*4) / 8 = 1.5 — not below 1.5, so low_curve=False
+        assert signals.low_curve is False, (
+            "Deck with avg CMC 1.5 (not a pitch spell inflating it) must have low_curve=False"
+        )
+
+    def test_pure_one_cmc_deck_still_triggers_low_curve(self):
+        """Sanity: a deck of pure 1-CMC non-pitch spells still gets low_curve=True."""
+        one_cmc = Card(
+            name="Lightning Bolt",
+            type_line="Instant",
+            oracle_text="Lightning Bolt deals 3 damage to any target.",
+            cmc=1.0,
+            colors=["R"],
+        )
+        cards = [(one_cmc, 4)]
+        signals = compute_deck_anti_synergy_signals(cards)
+        assert signals.low_curve is True
+
+
+# ---------------------------------------------------------------------------
+# TestReportPathArchetypeForwarded — item 1 (archetype forwarded in report path)
+# ---------------------------------------------------------------------------
+
+
+class TestReportPathArchetypeForwarded:
+    """Verify that build_field_read_report forwards resolved_archetype to recommend_sideboard.
+
+    The empirical-pool filter (feature-archetype-empirical-recommendations) is a silent
+    no-op in the advise report path when archetype is not threaded through — fixing it
+    wires the archetype so the filter actually fires.
+    """
+
+    def test_archetype_is_passed_to_recommend_sideboard(self, monkeypatch):
+        """build_field_read_report passes archetype=resolved_archetype to recommend_sideboard.
+
+        Monkeypatch the sideboard module's function (the function is imported locally
+        inside build_field_read_report, so we patch the source in sideboard module).
+        """
+        import legacy_engine.advisory.sideboard as sideboard_mod
+        from legacy_engine.advisory.report import build_field_read_report
+        from legacy_engine.advisory.field import build_custom_field
+        from legacy_engine.ingestion import store
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+
+        captured_kwargs: list[dict] = []
+        original_recommend = sideboard_mod.recommend_sideboard
+
+        def _capturing_recommend_sideboard(con, field, maindeck, **kwargs):
+            captured_kwargs.append(dict(kwargs))
+            return original_recommend(con, field, maindeck, **kwargs)
+
+        monkeypatch.setattr(sideboard_mod, "recommend_sideboard", _capturing_recommend_sideboard)
+
+        field = build_custom_field({"Control": 1.0})
+        mainboard = {"Brainstorm": 4}
+
+        build_field_read_report(
+            con, mainboard, {}, field, archetype="Dimir Tempo", seed=42
+        )
+
+        assert len(captured_kwargs) >= 1, "recommend_sideboard was not called"
+        assert captured_kwargs[0].get("archetype") == "Dimir Tempo", (
+            f"Expected archetype='Dimir Tempo' forwarded to recommend_sideboard; "
+            f"got kwargs={captured_kwargs[0]}"
+        )
+        con.close()
+
+    def test_unresolved_archetype_still_passes_archetype_kwarg(self, monkeypatch):
+        """Even when archetype resolves to a conflict label, the kwarg is passed (not None-gated)."""
+        import legacy_engine.advisory.sideboard as sideboard_mod
+        import legacy_engine.advisory.report as report_mod
+        from legacy_engine.advisory.report import build_field_read_report
+        from legacy_engine.advisory.field import build_custom_field
+        from legacy_engine.ingestion import store
+        from legacy_engine.archetype.rules import ArchetypeRule, Condition, RuleSet
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+
+        captured_kwargs: list[dict] = []
+        original_recommend = sideboard_mod.recommend_sideboard
+
+        def _capturing(con, field, maindeck, **kwargs):
+            captured_kwargs.append(dict(kwargs))
+            return original_recommend(con, field, maindeck, **kwargs)
+
+        monkeypatch.setattr(sideboard_mod, "recommend_sideboard", _capturing)
+
+        # Conflict ruleset: two rules both match Brainstorm
+        rule_a = ArchetypeRule(name="Alpha", conditions=[Condition(type="InMainboard", cards=["Brainstorm"])])
+        rule_b = ArchetypeRule(name="Beta", conditions=[Condition(type="InMainboard", cards=["Brainstorm"])])
+        conflict_ruleset = RuleSet(archetypes=[rule_a, rule_b])
+
+        original_load = report_mod.load_ruleset
+        report_mod.load_ruleset = lambda _: conflict_ruleset
+        try:
+            field = build_custom_field({"Control": 1.0})
+            build_field_read_report(con, {"Brainstorm": 4}, {}, field, seed=42)
+        finally:
+            report_mod.load_ruleset = original_load
+
+        assert len(captured_kwargs) >= 1
+        # archetype kwarg must be present (even if the value is the conflict label)
+        assert "archetype" in captured_kwargs[0], (
+            "recommend_sideboard must always receive archetype= kwarg from build_field_read_report"
+        )
+        con.close()

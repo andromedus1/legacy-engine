@@ -513,7 +513,10 @@ def report_meta(
             from legacy_engine.analytics.venue import resolve_venues, compute_venue_metashare, venue_divergence
 
             requested_keys = [k.strip() for k in venues.split(",") if k.strip()]
-            venue_list = resolve_venues(con, requested_keys)
+            try:
+                venue_list = resolve_venues(con, requested_keys)
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
 
             definitions: list[str]
             if definition == "all":
@@ -1795,7 +1798,7 @@ def _print_speculation(forecast: "SpeculativeForecast") -> None:
     click.echo(f"  {forecast.label}")
     click.echo(f"{'=' * 70}")
     click.echo(f"  Card:       {forecast.card}")
-    click.echo(f"  Forecast:   {forecast.forecast:.3f}  (0=low, 1=high Legacy value estimate)")
+    click.echo(f"  Forecast:   {forecast.forecast:.3f}  (rough fused score: 0=low, 1=high Legacy value estimate)")
     click.echo(f"  Confidence: {forecast.confidence.level} / {forecast.confidence.source}")
     click.echo("")
 
@@ -2456,7 +2459,10 @@ def advise_report(
             from legacy_engine.analytics.venue import resolve_venues
 
             requested_keys = [k.strip() for k in venues.split(",") if k.strip()]
-            venue_list = resolve_venues(con, requested_keys)
+            try:
+                venue_list = resolve_venues(con, requested_keys)
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
 
             per_venue_reports: dict[str, "FieldReadReport"] = {}
             for venue in venue_list:
@@ -3078,12 +3084,12 @@ def generate() -> None:
 @click.option(
     "--variant",
     default=None,
-    help="Scope the pool to decks with this variant tag (e.g. 'Bauble'). Requires labeler with registry.",
+    help="Scope the pool to decks with this variant tag (e.g. 'Bauble'). Combines with --players as an AND-filter. Requires labeler with registry.",
 )
 @click.option(
     "--players",
     default=None,
-    help="Comma-separated player handles/ids to restrict the deck pool to (explicit player filter).",
+    help="Comma-separated player handles/ids to restrict the deck pool to (explicit player filter). Combines with --variant as an AND-filter.",
 )
 @click.option(
     "--strong",
@@ -4411,10 +4417,7 @@ def export_deck(
 
     from legacy_engine.generation.export import format_decklist
 
-    try:
-        maindeck, sideboard = _resolve_deck_boards(deck_file, my_deck, "export deck")
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+    maindeck, sideboard = _resolve_deck_boards(deck_file, my_deck, "export deck")
 
     output = format_decklist(maindeck, sideboard, fmt=fmt)
 
