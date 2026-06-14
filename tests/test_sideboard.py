@@ -3516,8 +3516,9 @@ class TestBuildPromotedCandidates:
         assert warnings == []
         con.close()
 
-    def test_promotes_fon_and_consign_not_in_catalog(self):
-        """Force of Negation and Consign to Memory are absent from catalog → promoted."""
+    def test_promotes_fon_not_in_catalog_consign_in_catalog(self):
+        """Force of Negation (absent from catalog) is promoted; Consign to Memory is now a catalog
+        card (added in feature-hoser-catalog-expansion) so it is NOT promoted."""
         con, _ = _build_fon_corpus()
         pool = frozenset({"Force of Negation", "Consign to Memory", "Surgical Extraction"})
         freq_map = {"Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
@@ -3525,8 +3526,12 @@ class TestBuildPromotedCandidates:
         assert "Force of Negation" in promoted, (
             "Force of Negation (absent from catalog) must be promoted"
         )
-        assert "Consign to Memory" in promoted, (
-            "Consign to Memory (absent from catalog) must be promoted"
+        # Consign to Memory is now in HOSER_CATALOG → NOT promoted (catalog card)
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be in HOSER_CATALOG as a catalog entry"
         )
         # Surgical is in HOSER_CATALOG → not promoted
         assert "Surgical Extraction" not in promoted, (
@@ -3644,7 +3649,13 @@ class TestEmpiricalPromotion:
         con.close()
 
     def test_fon_or_consign_in_candidate_universe(self):
-        """FoN/Consign enter the candidate universe (even if not all selected by solver)."""
+        """FoN/Consign are accessible in the candidate universe.
+
+        Consign to Memory was added to HOSER_CATALOG in feature-hoser-catalog-expansion,
+        so it is now a catalog card (not a promoted card).  FoN remains absent from the
+        catalog and is promoted from the empirical pool.  Both must appear in the empirical
+        pool.
+        """
         con, archetype = _build_fon_corpus()
         from legacy_engine.advisory.sideboard import (
             _build_promoted_candidates,
@@ -3660,8 +3671,15 @@ class TestEmpiricalPromotion:
         assert "Consign to Memory" in pool, "Consign must appear in empirical pool"
 
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        # FoN is absent from HOSER_CATALOG → promoted from empirical pool
         assert "Force of Negation" in promoted, "FoN must be promoted (not in catalog)"
-        assert "Consign to Memory" in promoted, "Consign must be promoted (not in catalog)"
+        # Consign is now in HOSER_CATALOG → NOT promoted (catalog card); verify catalog membership
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be present in HOSER_CATALOG as a catalog entry"
+        )
         con.close()
 
     def test_gated_additive_no_archetype_is_catalog_only(self):
@@ -3693,12 +3711,15 @@ class TestEmpiricalPromotion:
         assert set(pkg_no_arch.cards.keys()) == set(pkg_catalog.cards.keys()), (
             "archetype=None must produce catalog-only output (no promotion)"
         )
-        # FoN and Consign must NOT appear (no promotion without archetype)
+        # FoN must NOT appear (not in catalog; no promotion without archetype)
         assert "Force of Negation" not in pkg_no_arch.cards, (
             "FoN must NOT appear when archetype=None (gated-additive no-op)"
         )
-        assert "Consign to Memory" not in pkg_no_arch.cards, (
-            "Consign must NOT appear when archetype=None (gated-additive no-op)"
+        # Consign to Memory is now in HOSER_CATALOG — it CAN appear via the catalog path
+        # even without archetype (not gated by the promotion mechanism).
+        # The gated-additive no-op only applies to empirically-promoted cards like FoN.
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be a catalog card (not gated by empirical promotion)"
         )
         con.close()
 
@@ -4075,3 +4096,351 @@ class TestReportPathArchetypeForwarded:
             "recommend_sideboard must always receive archetype= kwarg from build_field_read_report"
         )
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestHoserCatalogExpansion — feature-hoser-catalog-expansion
+# ---------------------------------------------------------------------------
+
+class TestHoserCatalogExpansion:
+    """Tests for feature-hoser-catalog-expansion: JSON data file loader + new staples.
+
+    Spec-derived — no gamed tests:
+    (a) Catalog loads from data file (entry count matches JSON).
+    (b) New staples present with correct tags.
+    (c) Catalog + empirical compose without duplication.
+    (d) Dimir Tempo field surfaces correct staples.
+    """
+
+    # ── (a) Catalog loads from data file ──────────────────────────────────────
+
+    def test_catalog_loads_from_data_file(self):
+        """HOSER_CATALOG is populated from the JSON data file (not inline code)."""
+        import json
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+
+        raw = json.loads(HOSERS_REGISTRY_PATH.read_text(encoding="utf-8"))
+        json_count = len(raw["hosers"])
+        assert len(HOSER_CATALOG) == json_count, (
+            f"HOSER_CATALOG has {len(HOSER_CATALOG)} entries but legacy.json has {json_count}"
+        )
+
+    def test_load_hoser_catalog_returns_correct_types(self):
+        """load_hoser_catalog produces dict[str, HoserCard] with correct field types."""
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        catalog = load_hoser_catalog(HOSERS_REGISTRY_PATH)
+        assert isinstance(catalog, dict)
+        for name, hc in catalog.items():
+            assert isinstance(hc, HoserCard)
+            assert isinstance(hc.name, str)
+            assert isinstance(hc.attacks, frozenset)
+            assert len(hc.attacks) > 0
+            assert isinstance(hc.colors, frozenset)
+            assert isinstance(hc.max_copies, int)
+            assert hc.max_copies >= 1
+            assert isinstance(hc.swing, float)
+            assert 0.0 < hc.swing < 1.0
+
+    def test_load_hoser_catalog_swing_alias_dedicated(self):
+        """'dedicated' swing alias resolves to _SWING_DEDICATED (0.20)."""
+        from pathlib import Path
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {
+                    "name": "TestCard",
+                    "attacks": ["combo"],
+                    "colors": [],
+                    "max_copies": 4,
+                    "swing": "dedicated",
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            catalog = load_hoser_catalog(f.name)
+        os.unlink(f.name)
+        assert catalog["TestCard"].swing == pytest.approx(_SWING_DEDICATED)
+
+    def test_load_hoser_catalog_swing_alias_soft(self):
+        """'soft' swing alias resolves to _SWING_SOFT (0.10)."""
+        from pathlib import Path
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {
+                    "name": "TestCard2",
+                    "attacks": ["graveyard-reliant"],
+                    "colors": ["B"],
+                    "max_copies": 2,
+                    "swing": "soft",
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            catalog = load_hoser_catalog(f.name)
+        os.unlink(f.name)
+        assert catalog["TestCard2"].swing == pytest.approx(_SWING_SOFT)
+
+    def test_load_hoser_catalog_rejects_duplicate_names(self):
+        """Duplicate names in the JSON raise ValueError at load time."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "DupCard", "attacks": ["combo"], "colors": [], "max_copies": 2, "swing": "soft"},
+                {"name": "DupCard", "attacks": ["ramp"], "colors": ["G"], "max_copies": 4, "swing": "dedicated"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            with pytest.raises(ValueError, match="duplicate"):
+                load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+
+    def test_load_hoser_catalog_rejects_bad_swing_alias(self):
+        """Unknown swing alias raises ValueError."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "BadSwing", "attacks": ["combo"], "colors": [], "max_copies": 2, "swing": "turbo"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            with pytest.raises(ValueError, match="turbo"):
+                load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+
+    # ── (b) New staples present with correct tags ─────────────────────────────
+
+    def test_consign_to_memory_attacks_combo_and_storm(self):
+        """Consign to Memory → combo + storm-reliant (new catalog entry)."""
+        assert "Consign to Memory" in HOSER_CATALOG
+        h = HOSER_CATALOG["Consign to Memory"]
+        assert "combo" in h.attacks
+        assert "storm-reliant" in h.attacks
+        assert frozenset({"U"}) == h.colors
+
+    def test_engineered_explosives_attacks_combo_and_greedy_manabase(self):
+        """Engineered Explosives → combo + greedy-manabase + creature-based; colorless."""
+        assert "Engineered Explosives" in HOSER_CATALOG
+        h = HOSER_CATALOG["Engineered Explosives"]
+        assert "combo" in h.attacks
+        assert "greedy-manabase" in h.attacks
+        assert "creature-based" in h.attacks
+        assert h.colors == frozenset(), "Engineered Explosives must be colorless"
+
+    def test_sheoldreds_edict_attacks_creature_based(self):
+        """Sheoldred's Edict → creature-based (edict effect bypasses hexproof/indestructible)."""
+        assert "Sheoldred's Edict" in HOSER_CATALOG
+        h = HOSER_CATALOG["Sheoldred's Edict"]
+        assert "creature-based" in h.attacks
+        assert "B" in h.colors
+
+    def test_toxic_deluge_attacks_creature_based(self):
+        """Toxic Deluge → creature-based (board wipe bypassing indestructible)."""
+        assert "Toxic Deluge" in HOSER_CATALOG
+        h = HOSER_CATALOG["Toxic Deluge"]
+        assert "creature-based" in h.attacks
+        assert "B" in h.colors
+
+    def test_dauthi_voidwalker_attacks_graveyard(self):
+        """Dauthi Voidwalker → graveyard-reliant (exiles cards as they go to GY)."""
+        assert "Dauthi Voidwalker" in HOSER_CATALOG
+        h = HOSER_CATALOG["Dauthi Voidwalker"]
+        assert "graveyard-reliant" in h.attacks
+        assert "B" in h.colors
+
+    def test_all_new_staples_have_valid_swing(self):
+        """All newly added staples have swing in (0, 1)."""
+        new_staples = [
+            "Consign to Memory",
+            "Engineered Explosives",
+            "Sheoldred's Edict",
+            "Toxic Deluge",
+            "Dauthi Voidwalker",
+        ]
+        for name in new_staples:
+            assert name in HOSER_CATALOG, f"{name} missing from HOSER_CATALOG"
+            h = HOSER_CATALOG[name]
+            assert 0.0 < h.swing < 1.0, f"{name} swing={h.swing} out of (0, 1)"
+
+    def test_all_new_staples_have_max_copies_at_least_one(self):
+        """All new staples have max_copies ≥ 1."""
+        new_staples = [
+            "Consign to Memory",
+            "Engineered Explosives",
+            "Sheoldred's Edict",
+            "Toxic Deluge",
+            "Dauthi Voidwalker",
+        ]
+        for name in new_staples:
+            assert HOSER_CATALOG[name].max_copies >= 1
+
+    def test_ramp_hosers_still_present_after_expansion(self):
+        """Big-mana hosers added by feature-bigmana-ramp-tag are still in catalog."""
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            assert name in HOSER_CATALOG, f"{name} missing after catalog expansion"
+            assert "ramp" in HOSER_CATALOG[name].attacks, f"{name} must attack 'ramp'"
+
+    # ── (c) Catalog + empirical compose without duplication ───────────────────
+
+    def test_catalog_cards_not_promoted(self):
+        """Cards in HOSER_CATALOG are never double-promoted (pool_not_in_catalog excludes them)."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        # Pool contains only catalog cards → nothing to promote
+        pool = frozenset(HOSER_CATALOG.keys())
+        promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, {}, con)
+        assert promoted == {}, (
+            "No catalog card should appear in promoted_candidates — no double-listing"
+        )
+        con.close()
+
+    def test_no_duplicate_card_names_in_coverage_model(self):
+        """After promotion, candidate_covers has no card name appearing more than once.
+
+        CoverageModel.candidate_covers is a dict — keys are unique by construction.
+        The test verifies that catalog cards and promoted candidates don't share names
+        (the promotion path is conditioned on pool_not_in_catalog).
+        """
+        con = store.connect(":memory:")
+        store.init_schema(con)
+
+        # Simulate: empirical pool = catalog cards + one non-catalog card
+        non_catalog_name = "__NonCatalogCard__"
+        pool = frozenset(HOSER_CATALOG.keys()) | {non_catalog_name}
+        freq_map = {non_catalog_name: 2}
+
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+
+        # promoted must NOT contain any catalog card name
+        overlap = set(promoted.keys()) & set(HOSER_CATALOG.keys())
+        assert overlap == set(), (
+            f"Promoted candidates must not overlap with catalog: overlap={overlap}"
+        )
+        con.close()
+
+    def test_consign_in_catalog_not_in_promoted(self):
+        """Consign to Memory in empirical pool → not promoted (it's in catalog)."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        pool = frozenset({"Consign to Memory", "Force of Negation"})
+        freq_map = {"Consign to Memory": 2, "Force of Negation": 2}
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory is a catalog card — must not be in promoted_candidates"
+        )
+        # FoN is NOT in catalog → it WILL be promoted (if oracle-text lookup succeeds)
+        # (only verify the catalog-vs-promoted boundary, not FoN oracle-text enrichment here)
+        con.close()
+
+    # ── (d) Dimir Tempo field surfaces the right staples ─────────────────────
+
+    def test_dimir_tempo_field_surfaces_gy_hate(self):
+        """Dimir Tempo (UB) field with a Reanimator-heavy metagame surfaces graveyard hate."""
+        con = _con()
+        field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.2, "Elves": 0.2})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        # UB deck — can cast U and B hosers
+        deck_colors = frozenset({"U", "B"})
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=deck_colors,
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        # Graveyard hate that's UB-legal: Surgical, Faerie Macabre (castable_any_color),
+        # Leyline of the Void (B), Dauthi Voidwalker (B), Nihil Spellbomb (B)
+        gy_hosers = {n for n, h in HOSER_CATALOG.items() if "graveyard-reliant" in h.attacks}
+        ub_legal_gy = {
+            n for n in gy_hosers
+            if not HOSER_CATALOG[n].colors
+               or HOSER_CATALOG[n].colors.issubset(deck_colors)
+               or HOSER_CATALOG[n].castable_any_color
+        }
+        covered_gy = set(model.candidate_covers.keys()) & ub_legal_gy
+        assert len(covered_gy) >= 2, (
+            f"Expected ≥2 GY-hate hosers in coverage model for UB deck; got {covered_gy}"
+        )
+
+    def test_dimir_tempo_field_surfaces_combo_hate(self):
+        """Dimir Tempo (UB) field with combo-heavy metagame surfaces combo hate.
+
+        Consign to Memory (U) and Flusterstorm (U) must be in the candidate set for a
+        UB deck facing a combo-heavy field — both are now catalog entries.
+        """
+        con = _con()
+        field = _make_field({"ANT Storm": 0.5, "Reanimator": 0.3, "Elves": 0.2})
+        archetype_tags = {
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Consign to Memory" in model.candidate_covers, (
+            "Consign to Memory (U, combo+storm-reliant) must be in candidate set for UB deck"
+        )
+        assert "Flusterstorm" in model.candidate_covers, (
+            "Flusterstorm (U, combo+storm-reliant) must be in candidate set for UB deck"
+        )
+
+    def test_dimir_tempo_field_surfaces_creature_removal(self):
+        """Dimir Tempo (UB) field with creature-based metagame surfaces edict effects.
+
+        Sheoldred's Edict (B) and Toxic Deluge (B) must be in the candidate set for a
+        UB deck facing an Elves-heavy field.
+        """
+        con = _con()
+        field = _make_field({"Elves": 0.6, "Reanimator": 0.2, "ANT Storm": 0.2})
+        archetype_tags = {
+            "Elves": frozenset({"creature-based"}),
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Sheoldred's Edict" in model.candidate_covers, (
+            "Sheoldred's Edict (B, creature-based) must be in candidate set for UB deck"
+        )
+        assert "Toxic Deluge" in model.candidate_covers, (
+            "Toxic Deluge (B, creature-based) must be in candidate set for UB deck"
+        )
