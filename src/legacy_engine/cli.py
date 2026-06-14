@@ -1904,6 +1904,134 @@ def advise_report(
         con.close()
 
 
+@advise.command("refresh")
+@click.option(
+    "--deck",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file (consensus shell or user list).",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Archetype name; if omitted the deck is classified automatically.",
+)
+@click.option(
+    "--venues",
+    default=None,
+    help="Comma-separated venue keys (e.g. online,paper). Defaults to online and paper.",
+)
+@click.option(
+    "--lock-threshold",
+    type=float,
+    default=0.65,
+    show_default=True,
+    help="Inclusion fraction at or above which a maindeck card is locked (0..1).",
+)
+@click.option(
+    "--max-swaps",
+    type=int,
+    default=8,
+    show_default=True,
+    help="Maximum greedy maindeck swap rounds.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_window_opts
+@_verbose
+def advise_refresh(
+    deck: str,
+    archetype: str | None,
+    venues: str | None,
+    lock_threshold: float,
+    max_swaps: int,
+    db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Full deck-tuning refresh: per-venue maindeck + sideboard + plain-speak primer.
+
+    Pulls current data and emits a ready-to-play tuning package for each requested
+    venue (default: online and paper).  Each package includes:
+
+      1. Recommended maindeck (field-tuned, current-regime-aware).
+      2. Recommended sideboard (15, field-tuned).
+      3. A concise plain-speak primer explaining how the sideboard attacks each
+         meaningful opponent — including the exact OUT/IN swaps and WHY.
+
+    Ban-regime-correct by default (adaptive per-opponent ban-aware windows).
+    Loudly labels thin/no-data matchups — never fabricates numbers.
+
+    Example:
+      legacy-engine advise refresh --deck shell.txt --archetype "Dimir Tempo"
+      legacy-engine advise refresh --deck shell.txt --venues online,paper
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.refresh import RefreshResult, run_refresh, render_refresh_result
+    from legacy_engine.advisory.report import _classify_deck, _parse_decklist
+    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.analytics.venue import resolve_venues
+    from legacy_engine.ingestion import store
+
+    deck_text = Path(deck).read_text()
+    maindeck, sideboard_in = _parse_decklist(deck_text)
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+
+        # Resolve window (default: adaptive — ban-regime-correct per-opponent).
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+
+        # Resolve archetype.
+        resolved_archetype = archetype
+        if resolved_archetype is None:
+            result = _classify_deck(con, maindeck, sideboard_in)
+            resolved_archetype = result.archetype
+            click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        # Resolve venues.
+        venue_keys = [k.strip() for k in venues.split(",")] if venues else None
+        venue_list = resolve_venues(con, venue_keys)
+
+        # Determine the window to pass (None = adaptive within tune_deck/recommend_sideboard).
+        # When the caller gave an explicit window, forward it; otherwise let adaptive activate.
+        use_since = win.since if win.mode != "adaptive" else None
+        use_until = win.until if win.mode != "adaptive" else None
+
+        refresh = run_refresh(
+            con,
+            maindeck,
+            sideboard_in,
+            archetype=resolved_archetype,
+            venues=venue_list,
+            since=use_since,
+            until=use_until,
+            lock_threshold=lock_threshold,
+            max_swaps=max_swaps,
+        )
+
+        click.echo(render_refresh_result(refresh))
+
+        if refresh.warnings:
+            for w in refresh.warnings:
+                click.echo(f"// [warn] {w}", err=True)
+    finally:
+        con.close()
+
+
 # ── identify: player identity, strength, and history ──
 @main.group()
 def identify() -> None:
