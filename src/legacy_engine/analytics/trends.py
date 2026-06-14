@@ -321,3 +321,89 @@ def compute_trends(
         cells=cells,
         archetypes=archetypes,
     )
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 — Biggest-movers digest
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BiggestMover:
+    """One archetype's share change between two adjacent regimes.
+
+    ``delta`` is positive when the archetype grew, negative when it shrank.
+    ``prev_regime`` and ``curr_regime`` are the regime labels used for the
+    diff.  ``prev_share`` is ``None`` when the archetype was absent in the
+    previous regime (new entrant); ``curr_share`` is ``None`` when it exited.
+    """
+
+    archetype: str
+    delta: float          # curr_share - prev_share (treating absent as 0)
+    prev_share: float | None
+    curr_share: float | None
+    prev_regime: str
+    curr_regime: str
+
+
+def biggest_movers(
+    series: TrendSeries,
+    *,
+    n: int = 5,
+    between: tuple[str, str] | None = None,
+) -> list[BiggestMover]:
+    """Return the top-N biggest share movers between adjacent regimes.
+
+    By default compares the two most recent regimes (``series.regimes[-2]``
+    and ``series.regimes[-1]``).  Pass ``between=(prev_label, curr_label)``
+    to compare any two regimes by label.
+
+    Returns an empty list if the series has fewer than two regimes or if the
+    specified labels are not found.
+
+    Absent archetypes are treated as 0 share (new entrant or exit), so the
+    digest captures both arrivals and departures.  The result is sorted by
+    ``|delta|`` descending, then top-N sliced.
+
+    Pure function over ``TrendSeries`` — no DB access.
+    """
+    if len(series.regimes) < 2:
+        return []
+
+    if between is not None:
+        prev_label, curr_label = between
+        prev_regimes = [r for r in series.regimes if r.label == prev_label]
+        curr_regimes = [r for r in series.regimes if r.label == curr_label]
+        if not prev_regimes or not curr_regimes:
+            return []
+        prev_regime = prev_regimes[0]
+        curr_regime = curr_regimes[0]
+    else:
+        prev_regime = series.regimes[-2]
+        curr_regime = series.regimes[-1]
+
+    # Collect archetypes present in either regime.
+    prev_archs = {k[1] for k in series.cells if k[0] == prev_regime.label}
+    curr_archs = {k[1] for k in series.cells if k[0] == curr_regime.label}
+    all_archs = prev_archs | curr_archs
+
+    movers: list[BiggestMover] = []
+    for arch in all_archs:
+        prev_cell = series.cells.get((prev_regime.label, arch))
+        curr_cell = series.cells.get((curr_regime.label, arch))
+        prev_share = prev_cell.share if prev_cell is not None else None
+        curr_share = curr_cell.share if curr_cell is not None else None
+        delta = (curr_share or 0.0) - (prev_share or 0.0)
+        movers.append(
+            BiggestMover(
+                archetype=arch,
+                delta=delta,
+                prev_share=prev_share,
+                curr_share=curr_share,
+                prev_regime=prev_regime.label,
+                curr_regime=curr_regime.label,
+            )
+        )
+
+    movers.sort(key=lambda m: abs(m.delta), reverse=True)
+    return movers[:n]
