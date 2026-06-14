@@ -174,10 +174,32 @@ class TestWrwWindowed:
 
     def test_cli_report_meta_wrw_with_since(self, tmp_path):
         """CLI: report meta --definition wrw --since <date> must succeed (no longer skipped)."""
+        # Seed a tmp-file DuckDB so CI doesn't depend on the default data/legacy.duckdb.
+        db_path = tmp_path / "t.duckdb"
+        con = store.connect(str(db_path))
+        for raw in (_REGIME_A_TOURNAMENT, _REGIME_B_TOURNAMENT):
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            con.execute(
+                "UPDATE decks SET archetype = 'Control' "
+                "WHERE tournament_id = ? AND player IN ('alice', 'carol')",
+                [tid],
+            )
+            con.execute(
+                "UPDATE decks SET archetype = 'Combo' "
+                "WHERE tournament_id = ? AND player IN ('bob', 'dave')",
+                [tid],
+            )
+        con.close()
+
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["report", "meta", "--definition", "wrw", "--since", "2024-12-16"],
+            [
+                "report", "meta",
+                "--definition", "wrw",
+                "--since", "2024-12-16",
+                "--db", str(db_path),
+            ],
         )
         # Should succeed (or warn about empty corpus / thin data, not hard-fail on wrw window).
         assert result.exit_code == 0, result.output
@@ -321,8 +343,31 @@ class TestBiggestMovers:
 
     def test_cli_report_trends_movers_flag(self, tmp_path):
         """CLI: report trends --movers 5 runs without error (even on empty corpus)."""
+        # Seed a tmp-file DuckDB with a two-regime corpus so CI doesn't depend on
+        # the default data/legacy.duckdb.  An empty file is also valid (the CLI
+        # prints "no events in corpus" and exits 0), but seeding data exercises
+        # the movers path as well.
+        db_path = tmp_path / "t.duckdb"
+        con = store.connect(str(db_path))
+        for raw in (_REGIME_A_TOURNAMENT, _REGIME_B_TOURNAMENT):
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            con.execute(
+                "UPDATE decks SET archetype = 'Control' "
+                "WHERE tournament_id = ? AND player IN ('alice', 'carol')",
+                [tid],
+            )
+            con.execute(
+                "UPDATE decks SET archetype = 'Combo' "
+                "WHERE tournament_id = ? AND player IN ('bob', 'dave')",
+                [tid],
+            )
+        con.close()
+
         runner = CliRunner()
-        result = runner.invoke(main, ["report", "trends", "--movers", "5"])
+        result = runner.invoke(
+            main,
+            ["report", "trends", "--movers", "5", "--db", str(db_path)],
+        )
         # An empty corpus produces "no events in corpus" — exit 0 is expected.
         assert result.exit_code == 0, result.output
 
@@ -493,12 +538,54 @@ class TestHeadToHeadLookup:
         assert result.wins == 20
         assert result.n == 30
 
-    def test_cli_report_matchups_a_b_flags(self):
+    def test_cli_report_matchups_a_b_flags(self, tmp_path):
         """CLI: report matchups --a X --b Y runs without error."""
+        # Seed a tmp-file DuckDB with matchup data so CI doesn't depend on the
+        # default data/legacy.duckdb.  Reuse _make_matchup_corpus's seeding logic
+        # written to a file path instead of :memory:.
+        db_path = tmp_path / "t.duckdb"
+        con = store.connect(str(db_path))
+        n_matches = 35
+        for i in range(n_matches):
+            raw = {
+                "Tournament": {
+                    "Name": f"H2H Corpus {i+1}",
+                    "Date": f"2026-01-{(i % 28) + 1:02d}",
+                    "Uri": f"https://www.mtgo.com/decklist/h2h-{i+1:03d}",
+                    "Formats": "Legacy",
+                },
+                "Decks": [
+                    {
+                        "Player": "alice",
+                        "Result": "1st",
+                        "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                        "Sideboard": [],
+                    },
+                    {
+                        "Player": "bob",
+                        "Result": "2nd",
+                        "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}],
+                        "Sideboard": [],
+                    },
+                ],
+                "Rounds": [{"Player1": "alice", "Player2": "bob", "Result": "2-1"}],
+                "Standings": [],
+            }
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            con.execute(
+                "UPDATE decks SET archetype = 'Control' WHERE tournament_id = ? AND player = 'alice'",
+                [tid],
+            )
+            con.execute(
+                "UPDATE decks SET archetype = 'Combo' WHERE tournament_id = ? AND player = 'bob'",
+                [tid],
+            )
+        con.close()
+
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["report", "matchups", "--a", "Control", "--b", "Combo"],
+            ["report", "matchups", "--a", "Control", "--b", "Combo", "--db", str(db_path)],
         )
         assert result.exit_code == 0, result.output
 
@@ -692,12 +779,29 @@ class TestAffectednessExplain:
         finally:
             con.close()
 
-    def test_cli_report_affectedness(self):
+    def test_cli_report_affectedness(self, tmp_path):
         """CLI: report affectedness --archetype X runs without error."""
+        # Seed a tmp-file DuckDB with affectedness data so CI doesn't depend on
+        # the default data/legacy.duckdb.  Reuse _make_affectedness_corpus's
+        # seeding logic written to a file path instead of :memory:.
+        db_path = tmp_path / "t.duckdb"
+        con = store.connect(str(db_path))
+        tid1 = store.load_tournament(con, parse_cache_item(_REANIMATOR_PRE_BAN, "Paper"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Reanimator' WHERE tournament_id = ?",
+            [tid1],
+        )
+        tid2 = store.load_tournament(con, parse_cache_item(_CONTROL_PRE_BAN, "Paper"))
+        con.execute(
+            "UPDATE decks SET archetype = 'Control' WHERE tournament_id = ?",
+            [tid2],
+        )
+        con.close()
+
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["report", "affectedness", "--archetype", "Reanimator"],
+            ["report", "affectedness", "--archetype", "Reanimator", "--db", str(db_path)],
         )
         assert result.exit_code == 0, result.output
         assert "Affectedness Derivation" in result.output
