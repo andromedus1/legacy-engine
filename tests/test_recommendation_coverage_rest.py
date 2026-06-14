@@ -322,17 +322,6 @@ class TestTuneDeckPlayerFilter:
         assert result.legality_errors == []
         assert isinstance(result.maindeck, dict)
 
-    @pytest.mark.xfail(
-        reason=(
-            "BUG fix-cli-log-undefined: cli.py uses log.info() in the --players+--strong "
-            "precedence branch (lines 3187, 3499) but `log` is not defined at module level "
-            "(missing: log = logging.getLogger(__name__)). Crashes with NameError. "
-            "Park: add log = logging.getLogger(__name__) after the imports in cli.py. "
-            "Test is intentionally NOT weakened — will auto-green when fixed. "
-            "Discovered: 2026-06-14 via test_recommendation_coverage_rest."
-        ),
-        strict=False,
-    )
     def test_cli_players_wins_over_strong(self, bauble_db_path, tmp_path):
         """CLI: when both --players and --strong are given, --players wins.
 
