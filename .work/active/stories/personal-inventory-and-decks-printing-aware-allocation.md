@@ -1,7 +1,7 @@
 ---
 id: personal-inventory-and-decks-printing-aware-allocation
 kind: story
-stage: drafting
+stage: review
 tags: [data-model, foundation, hold-for-review]
 parent: feature-personal-inventory-and-decks
 depends_on: [feature-personal-inventory-and-decks]
@@ -10,8 +10,6 @@ gate_origin: null
 created: 2026-06-13
 updated: 2026-06-13
 ---
-
-> **Held for human review** alongside the parent feature. Design-only until then.
 
 # Printing/condition-aware allocation (the $33-vs-$2 Dismember refinement)
 
@@ -36,6 +34,26 @@ pin specific printings. Adds the value hooks the later acquisition advisor needs
 - Contention reports surface printing-specific overlaps ("both decks claim the foil mh3:62 copy").
 - Tests: pure-layer tables over mixed printing-present / printing-absent inventories.
 
-## Hold
-Design complete at parent; this child is held for human review before implementation. Stage stays
-`drafting`.
+## Implementation notes
+
+**New primitive**: `PhysicalKey(name, printing, condition, foil)` — a `NamedTuple` in `collection/allocation.py`. All four fields match `InventoryEntry`'s identity tuple. Usable as a dict key.
+
+**New builder helpers** (pure, no I/O):
+- `inventory_to_physical(entries)` — `list[InventoryEntry]` → `dict[PhysicalKey, int]`
+- `deck_to_physical(cards)` — `list[DeckCardRef]` → `dict[PhysicalKey, int]` (printing-pinned refs carry the pin; unpinned refs get `printing=None`)
+
+**New printing-aware allocation functions** (gated-additive):
+- `free_binder_physical(owned, allocated)` — `PhysicalKey`-keyed dicts → free counts per physical copy
+- `contention_physical(per_deck_physical, owned)` → `list[ContentionEntry]` where each entry has `physical_key` set
+
+**`ContentionEntry` extended**: added `physical_key: PhysicalKey | None = None` field (defaults to `None`). Entries produced by the original name-level `contention()` have `physical_key=None`; entries from `contention_physical()` always have it set.
+
+**Name-level functions unchanged**: `buildability`, `free_binder`, `contention`, `aggregate_owned` are byte-identical to the parent feature's baseline (gated-additive — no behaviour change when printing absent).
+
+**Tests**: `tests/test_printing_aware_allocation.py` — 34 pure-layer tests:
+- `PhysicalKey` identity/equality
+- `inventory_to_physical`/`deck_to_physical` builders (including aggregation, foil separation, condition separation)
+- `free_binder_physical`: only matching printing reduced; over-committed floors at 0
+- `contention_physical`: same-printing contested; different-printing not crossed; foil/non-foil tracked independently; sorted by shortfall
+- Mixed presence: printing-absent entries get `None` key; no cross-printing bleed
+- Regression: all name-level functions produce identical results; `contention()` sets `physical_key=None`
