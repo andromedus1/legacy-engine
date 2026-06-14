@@ -44,6 +44,12 @@ RULES_PINNED_SHA = ""
 # silent drift when the upstream repo advances.
 MTGOFORMATDATA_SHA = "e056bc7d63c0138091986ce1696c705bc7dee296"
 
+# ── Collection (user's personal inventory + decks) ──
+COLLECTION_DIR = DATA_DIR / "collection"
+INVENTORY_PATH = COLLECTION_DIR / "inventory.json"
+DECKS_DIR = COLLECTION_DIR / "decks"
+LOCAL_OWNER = "local"  # single-user default; future multi-user: pass a real user id
+
 # ── Visualization ──
 VIZ_DIR = DATA_DIR / "viz"                 # default output dir; mkdir at write time, never on import
 VIZ_PNG_SCALE = 2.0                        # vl_convert PNG scale multiplier (2x for crisp raster)

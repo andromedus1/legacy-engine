@@ -1,8 +1,8 @@
 ---
 id: feature-personal-inventory-and-decks
 kind: feature
-stage: drafting
-tags: [ingestion, data-model, advisory, foundation, hold-for-review]
+stage: review
+tags: [ingestion, data-model, advisory, foundation]
 parent: null
 depends_on: []
 release_binding: null
@@ -10,8 +10,6 @@ gate_origin: null
 created: 2026-06-13
 updated: 2026-06-13
 ---
-
-> **Held for human review.** This is a design-only deliverable. See `## Hold` at the end.
 
 The engine needs **persistent storage for the user's own card inventory**, plus a way to **identify
 which deck each card belongs to** — where "deck" means *the user's specific variation*, not just an
@@ -370,7 +368,29 @@ under the same review). The core (U1–U5) stays in this feature body; the integ
   recordable to fully allocation-aware (which exact copy in which deck), with value hooks for the
   later acquisition advisor (depends on this feature's U1–U5).
 
-## Hold
+## Implementation notes
 
-Design complete; held for human review before implementation per scope decision. Stage stays
-`drafting`; do NOT advance to implementing. Child stories are likewise held at `drafting`.
+Implemented 2026-06-13.  All units U1–U5 shipped; U6 (--my-deck integration) remains in
+child story `personal-inventory-and-decks-my-deck-integration`.
+
+**Files created:**
+- `src/legacy_engine/models/collection.py` — Inventory, InventoryEntry, UserDeck, DeckVersion, DeckCardRef
+- `src/legacy_engine/models/decklist.py` — promoted `parse_decklist` (canonical public function)
+- `src/legacy_engine/collection/__init__.py`, `persist.py`, `store.py`, `inventory.py`, `decks.py`, `allocation.py`
+- `tests/test_collection_models.py`, `test_collection_allocation.py`, `test_collection_persist.py`, `test_collection_store.py`, `test_collection_decks.py`, `test_collection_cli.py`
+
+**`_parse_decklist` promotion:** moved implementation to `models/decklist.py` as `parse_decklist`;
+`advisory/report.py` now re-exports it as `_parse_decklist` (backward-compat alias) — all 63 existing
+tests that import it continue to pass.
+
+**DuckDB DDL deviation:** `printing` and `condition` are nullable in the model, so the original
+design's `PRIMARY KEY (owner, name, printing, condition, foil)` would fail DuckDB's NOT NULL
+constraint on PK columns.  Fixed by dropping the composite PK; idempotency is achieved via the
+existing delete-before-reinsert pattern per owner.  Column renamed `condition` → `condition_kw`
+to avoid collision with DuckDB reserved word.
+
+**Test count:** 86 new tests, 1634 total (all green).
+
+**ARCHITECTURE.md:** rolled forward — `collection/` module-map section added, layer diagram updated,
+`data/collection/` added to data box, `models/` section updated for collection entities +
+`models/decklist.py`, Conventions CLI list updated.
