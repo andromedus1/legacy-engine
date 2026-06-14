@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-02T04:04:09Z'
+generated_at: '2026-06-14T13:45:44Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -12,20 +12,27 @@ documents:
       for advisory and DuckDB as an embedded analytical store (the one justified divergence,
       driven by the
 
-      matchup-matrix rounds-join workload). MVP arc: ingestion/ (Scryfall + fbettega
-      cache + vendored
+      matchup-matrix rounds-join workload). Full arc: ingestion/ (Scryfall + prices
+      + fbettega cache + vendored
 
-      MTGOFormatData rules + ban-list) → archetype/ (ported MTGOArchetypeParser matcher)
-      → analytics/
+      MTGOFormatData rules + ban-list + releases) → archetype/ (ported MTGOArchetypeParser
+      matcher + variant
 
-      (meta-share, matchup matrix, per-card value) + advisory/ (positioning, maindeck-aware
-      sideboard, what-to-play)
+      tagging) → analytics/ (meta-share, matchup matrix, per-card value, subgroup/venue/speculation,
 
-      + generation/ (consensus, export, field-tuning, gap-discovery) → models/ → data/.
-      goldfish/ is the
+      players/{identity,strength,history}) + advisory/ (positioning, maindeck-aware
+      sideboard, what-to-play,
 
-      deferred pillar; only goldfish-validated candidate-validation remains deferred
-      behind it.
+      collection-aware acquire, refresh, primer) + generation/ (consensus, export,
+      field-tuning, gap-discovery,
+
+      card_distribution) → models/ (incl. collection, variant) → data/. collection/
+      is the personal-layer peer
+
+      of ingestion/. goldfish/ is the deferred pillar; only goldfish-validated candidate-validation
+      remains
+
+      deferred behind it.
 
       '
     decisions:
@@ -33,14 +40,15 @@ documents:
       + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and
       vl-convert-python (Vega-Lite viz render).
     - 'STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/,
-      data/scryfall/, data/rules/, data/banlist/); a rebuildable embedded DuckDB (data/legacy.duckdb)
-      is the analytical layer for meta-share + matchup-matrix joins. The one justified
-      divergence from edh-engine''s pure-files approach, driven by the rounds-join
-      matchup workload.'
+      data/scryfall/, data/rules/, data/banlist/, data/collection/); a rebuildable
+      embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share
+      + matchup-matrix + prices + collection joins. The one justified divergence from
+      edh-engine''s pure-files approach, driven by the rounds-join matchup workload.'
     - 'archetype/ is the novel subsystem: vendor MTGOFormatData rules-as-JSON pinned
       to a SHA (data/rules/ + manifest), reimplement only the ~210-line MTGOArchetypeParser
       Detect matcher in Python, golden-test to >=99% label agreement against the archived
-      C# parser''s published labels (fallback: hand-curated fixtures).'
+      C# parser''s published labels (fallback: hand-curated fixtures). variants.py
+      adds sub-archetype tagging (e.g. Bauble) driven by a card-presence registry.'
     - 'Scryfall ADR RESOLVED: EXTEND edh-engine''s ingestion/scryfall.py (every needed
       function verified to exist), index the WHOLE oracle pool (~30k+ IDs, not a fixed
       subset); do NOT adopt Scrython (bulk index makes the API path rare) or mtg_parser
@@ -55,15 +63,28 @@ documents:
     - 'Ingestion mirror-and-decouple: consume the fbettega cache JSON (not mtgo.com),
       behind an ingestion/ port so a replacement source swaps in without touching
       analytics/advisory.'
-    - MVP = ingestion + archetype + analytics + advisory + generation (consensus/export/field-tuning/gap-discovery
-      mode 3); goldfish/ (port edh-engine's mana solver + straight-London mulligan)
-      is the deferred pillar; only goldfish-validated candidate-validation remains
-      deferred behind it.
+    - MVP + advisory-honesty-transparency = ingestion + archetype + analytics (incl.
+      subgroup/venue/speculation/players) + advisory (incl. collection/acquire/refresh/primer)
+      + generation (consensus/export/field-tuning/gap-discovery mode 3 + card_distribution);
+      goldfish/ (port edh-engine's mana solver + straight-London mulligan) is the
+      deferred pillar; only goldfish-validated candidate-validation remains deferred
+      behind it.
     - 'VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML
       via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col
-      tile/layout) that replaces matplotlib-based charting; headline deliverable is
-      a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
-      No server, no cloud (mirrors the knowledge-graph/board HTML precedent).'
+      tile/layout); headline deliverable is a reusable per-deck dashboard composing
+      meta-share/matchups/trends/positioning/consensus. No server, no cloud (mirrors
+      the knowledge-graph/board HTML precedent).'
+    - 'PRICES: ingestion/prices.py + seed prices + ingestion/releases.py serve the
+      acquisition and new-card surface; PriceQuote.all_null is the honest-null signal
+      (never a silent 0).'
+    - 'PLAYER SUBSYSTEM: analytics/players/{identity,strength,history}.py classifies
+      player handles via alias resolution, gates strength scoring on confidence tier,
+      and tracks per-regime archetype history — drives generate consensus --strong
+      and identify suggest|strong|track.'
+    - 'HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag
+      + named reason + suppressed magnitude. No silent zeros. Applies in window.py
+      (thin-regime banner), primer/sideboard (degraded=True note), speculation (PRE-DATA
+      FORECAST label), prices (all_null flag), venue divergence.'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
@@ -137,6 +158,10 @@ documents:
       flagged, not silently shown.
     - Advisory is first-class — 'how to attack the field' is a headline product surface,
       not a footnote to descriptive stats.
+    - Ban-regime-aware windowing is the default, and the window is always stated —
+      adaptive for matrix-backed surfaces, uniform for explicit --regime/--since windows,
+      full for deck-based descriptive surfaces; a thin window may never silently claim
+      depth it doesn't have.
     related:
     - slug: docs/VISION.md
       relationship: depends-on
@@ -184,26 +209,38 @@ documents:
     summary: 'Capability spec for legacy-engine. Defines the system''s capabilities
       across four pillars, the core
 
-      domain entities (Card, Decklist, Archetype, TournamentResult, MatchupCell, DeckDefinition,
+      domain entities (Card, Decklist, Archetype, Variant, TournamentResult, MatchupCell,
+      InteractionFacts,
 
-      SideboardPackage), the MVP slice (ingestion + meta analytics + advisory), and
-      non-functional
+      Player, Venue, SideboardPackage, Inventory, UserDeck), the built capability
+      set (ingestion + meta
 
-      requirements (reproducibility, version-stamped legality, sample-size confidence
-      gating).
+      analytics + advisory + collection/prices/players/variant/venue/speculation subsystems
+      + all deck
+
+      generation modes), and non-functional requirements (reproducibility, version-stamped
+      legality,
+
+      sample-size confidence gating, honest-degrade policy).
 
       '
     decisions:
-    - MVP capability set = card-data ingestion, tournament-results ingestion, archetype
-      parsing, meta analytics (tier list / meta-% / matchup matrix / per-card win-rate),
-      the advisory layer (positioning score + maindeck-aware sideboard recommender
-      + what-to-play), and deck generation modes 1+2+export (consensus baseline, field-tuned
-      decklist, Moxfield/Archidekt export).
-    - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); deck generation
-      gap-discovery (mode 3) and goldfish-validated candidate-validation remain deferred
-      until goldfish/ ships.
-    - 'Core entities: Card, Decklist (75-card maindeck+sideboard), Archetype, TournamentResult,
-      MatchupCell, DeckDefinition (deck-as-data for sim), SideboardPackage, BanListSnapshot.'
+    - Built capability set = card-data ingestion, prices ingestion, tournament-results
+      ingestion, archetype parsing + variant tagging, meta analytics (tier list /
+      meta-% / matchup matrix / per-card win-rate / subgroup split / venue divergence
+      / new-card speculation), the advisory layer (positioning + maindeck-aware sideboard
+      + what-to-play + field-read report + collection-aware acquire + refresh + primer),
+      player-strength + history, and all deck generation modes 1+2+3+export (consensus
+      baseline with --variant/--players/--strong, field-tuned decklist, gap-discovery,
+      deck doctor).
+    - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); goldfish-validated
+      candidate-validation remains deferred until goldfish/ ships. Gap-discovery (mode
+      3) itself is built.
+    - 'Core entities: Card, Decklist (75-card maindeck+sideboard), Archetype, Variant
+      (sub-archetype tag), TournamentResult, MatchupCell, InteractionFacts (pure card
+      interaction classifier), Player (resolved identity + strength record), Venue
+      (online/paper), DeckDefinition (deck-as-data for sim — later), SideboardPackage,
+      BanListSnapshot, Inventory, UserDeck.'
     - Meta-% is computed under multiple definitions (raw entry count, top-cut presence,
       win-rate-weighted) and every report is labeled online/paper/blend — never a
       single unlabeled number.
@@ -212,9 +249,17 @@ documents:
     - 'Reproducibility is an NFR: deterministic given inputs+seed; all external data
       pre-fetched and cached; legality validated against a dated BanListSnapshot.'
     - Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML
-      via vega-embed + static PNG via vl-convert), superseding the matplotlib charts;
-      headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
+      via vega-embed + static PNG via vl-convert); headline deliverable is a reusable
+      per-deck dashboard composing meta-share/matchups/trends/positioning/consensus.
       Self-contained + offline; no server, no editing GUI.
+    - 'HONEST-DEGRADE NFR: thin/absent signal surfaces a labeled banner or degraded
+      flag with a named reason. No silent zeros, no fabricated numbers. Applies in
+      the advisory window (thin-regime banner), sideboard/primer (degraded=True note),
+      speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence
+      (labeled).'
+    - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
+      user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
+      is the honest-null signal.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on
