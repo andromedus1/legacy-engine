@@ -42,7 +42,7 @@ def _make_meta(entries):
     return m
 
 
-def _make_ranking(decks, s_q_map=None, low_coverage=None):
+def _make_ranking(decks, s_q_map=None, low_coverage=None, coverage_caveated=None):
     """Build a minimal DeckRanking for unit tests."""
     from legacy_engine.advisory.positioning import DeckRanking
 
@@ -56,6 +56,7 @@ def _make_ranking(decks, s_q_map=None, low_coverage=None):
         quantile_level=0.05,
         data_coverage={d: 0.9 for d in decks},
         low_coverage=low_coverage or set(),
+        coverage_caveated=coverage_caveated or set(),
         pairwise={},
         field_source="global",
     )
@@ -289,6 +290,7 @@ class TestPrimerSummaryUnit:
             quantile_level=0.05,
             data_coverage={"Control": 0.0},
             low_coverage={"Control"},
+            coverage_caveated={"Control"},
             pairwise={},
             field_source="global",
         )
@@ -297,6 +299,29 @@ class TestPrimerSummaryUnit:
         html = _primer_summary("Control", meta, rows, r, subj)
         # Must mention low coverage — not pretend the number is reliable
         assert "low data coverage" in html.lower() or "coverage" in html.lower()
+
+    def test_primer_labels_s_as_full_field_when_coverage_caveated(self):
+        """Fix 4b: when the deck is in coverage_caveated, the primer labels S as
+        'S (full-field, low coverage)' rather than the bare 'S' that positioning_score
+        would show (where S is the restricted sub-field estimate).
+
+        This ensures the ranking path and the single-deck path present consistent
+        semantics to the user even though rank_decks cannot per-deck-restrict.
+        """
+        meta = _make_meta([_make_meta_entry("Delver", 0.30, tier="established")])
+        # Delver is in coverage_caveated — low data coverage in the ranking
+        ranking = _make_ranking(
+            ["Delver", "Control"],
+            s_q_map={"Delver": 0.48, "Control": 0.52},
+            coverage_caveated={"Delver"},
+        )
+        subj = _make_subj("Delver", data_coverage=0.5)
+        rows = []
+        html = _primer_summary("Delver", meta, rows, ranking, subj)
+        # Must label S as full-field for the caveated deck
+        assert "full-field" in html.lower(), (
+            f"Primer should label low-coverage S as 'full-field'; got:\n{html}"
+        )
 
 
 # ---------------------------------------------------------------------------

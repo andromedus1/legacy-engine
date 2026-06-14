@@ -1,0 +1,250 @@
+{
+  "version": "2026-06-14",
+  "_comment": "Hand-curated sideboard hoser catalog for Legacy. Each entry maps to a HoserCard in advisory/sideboard.py. swing: 'dedicated' = 0.20, 'soft' = 0.10. colors: WUBRG single-char list; empty = colorless. castable_any_color: true bypasses the color pre-filter (Phyrexian mana, free-activation abilities).",
+  "hosers": [
+    {
+      "name": "Surgical Extraction",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["B"],
+      "max_copies": 2,
+      "swing": "dedicated",
+      "castable_any_color": true,
+      "_comment": "Phyrexian mana: castable for 2 life in any deck regardless of color identity."
+    },
+    {
+      "name": "Faerie Macabre",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["B"],
+      "max_copies": 2,
+      "swing": "dedicated",
+      "castable_any_color": true,
+      "_comment": "Free discard activation: usable at zero mana cost in any deck."
+    },
+    {
+      "name": "Leyline of the Void",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Endurance",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["G"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Containment Priest",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["W"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Grafdigger's Cage",
+      "attacks": ["graveyard-reliant"],
+      "colors": [],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Colorless artifact — always castable."
+    },
+    {
+      "name": "Nihil Spellbomb",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "soft"
+    },
+    {
+      "name": "Dauthi Voidwalker",
+      "attacks": ["graveyard-reliant"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Exiles cards from graveyards as they go there; creature body provides additional pressure."
+    },
+    {
+      "name": "Force of Will",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Flusterstorm",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Mindbreak Trap",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["U"],
+      "max_copies": 2,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Consign to Memory",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Counters spells regardless of protection or hexproof; can counter multiple spells in a storm chain."
+    },
+    {
+      "name": "Thoughtseize",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "soft"
+    },
+    {
+      "name": "Duress",
+      "attacks": ["combo", "storm-reliant"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "soft"
+    },
+    {
+      "name": "Veil of Summer",
+      "attacks": ["_hate"],
+      "colors": ["G"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Counter-hoser: defends the deck against opposing interaction."
+    },
+    {
+      "name": "Defense Grid",
+      "attacks": ["_hate"],
+      "colors": [],
+      "max_copies": 4,
+      "swing": "soft",
+      "_comment": "Colorless artifact — counter-hoser."
+    },
+    {
+      "name": "Carpet of Flowers",
+      "attacks": ["_hate"],
+      "colors": ["G"],
+      "max_copies": 4,
+      "swing": "soft",
+      "_comment": "Counter-hoser."
+    },
+    {
+      "name": "Blood Moon",
+      "attacks": ["greedy-manabase"],
+      "colors": ["R"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Back to Basics",
+      "attacks": ["greedy-manabase"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated"
+    },
+    {
+      "name": "Wasteland",
+      "attacks": ["greedy-manabase"],
+      "colors": [],
+      "max_copies": 4,
+      "swing": "soft",
+      "_comment": "Colorless land — always legal."
+    },
+    {
+      "name": "Force of Vigor",
+      "attacks": ["greedy-manabase"],
+      "colors": ["G"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Answers Blood Moon / Back to Basics / Chalice."
+    },
+    {
+      "name": "Krosan Grip",
+      "attacks": ["greedy-manabase"],
+      "colors": ["G"],
+      "max_copies": 3,
+      "swing": "soft"
+    },
+    {
+      "name": "Pyroblast",
+      "attacks": ["combo", "low-interaction"],
+      "colors": ["R"],
+      "max_copies": 4,
+      "swing": "soft"
+    },
+    {
+      "name": "Hydroblast",
+      "attacks": ["greedy-manabase", "low-interaction"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "soft"
+    },
+    {
+      "name": "Chalice of the Void",
+      "attacks": ["combo", "storm-reliant", "low-curve"],
+      "colors": [],
+      "max_copies": 2,
+      "swing": "dedicated",
+      "_comment": "Colorless artifact — always castable. Anti-synergy: blocked for low-curve decks."
+    },
+    {
+      "name": "Engineered Explosives",
+      "attacks": ["combo", "greedy-manabase", "creature-based"],
+      "colors": [],
+      "max_copies": 3,
+      "swing": "soft",
+      "_comment": "Colorless artifact; sunburst lets it answer permanents at any CMC. Flexible removal vs Elves, Humans, tokens, lock pieces."
+    },
+    {
+      "name": "Sheoldred's Edict",
+      "attacks": ["creature-based"],
+      "colors": ["B"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Edict effect that bypasses hexproof/indestructible by making opponent sacrifice; hits creature-based strategies."
+    },
+    {
+      "name": "Toxic Deluge",
+      "attacks": ["creature-based"],
+      "colors": ["B"],
+      "max_copies": 3,
+      "swing": "dedicated",
+      "_comment": "One-sided board wipe that bypasses indestructible; scales CMC to handle any size threats."
+    },
+    {
+      "name": "Harbinger of the Seas",
+      "attacks": ["ramp"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Lands opponents control that aren't Islands don't untap — locks Tron and Cloudpost out of their mana."
+    },
+    {
+      "name": "Damping Sphere",
+      "attacks": ["ramp", "storm-reliant"],
+      "colors": [],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "_comment": "Colorless artifact. Nonbasic, non-island lands produce only {C}; each additional spell costs {1} more — hoses Tron/Post mana AND storm chains."
+    },
+    {
+      "name": "Pithing Needle",
+      "attacks": ["ramp"],
+      "colors": [],
+      "max_copies": 2,
+      "swing": "soft",
+      "_comment": "Colorless artifact. Names Eye of Ugin / Eldrazi Temple activated abilities; staxes planeswalkers and utility lands."
+    },
+    {
+      "name": "Null Rod",
+      "attacks": ["ramp", "greedy-manabase"],
+      "colors": ["G"],
+      "max_copies": 4,
+      "swing": "soft",
+      "_comment": "Shuts down mana artifacts (Mox Diamond, Chrome Mox, Grim Monolith) common in Eldrazi and Cloudpost shells."
+    }
+  ]
+}

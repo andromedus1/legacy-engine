@@ -249,15 +249,16 @@ class TestReportMetaVenues:
         assert result.exit_code == 0, result.output
         assert "// window: full-corpus" in result.output
 
-    def test_venues_wrw_skipped_under_window(self, runner, venue_db):
-        """wrw is skipped under a time window — same guard as baseline behavior."""
+    def test_venues_wrw_now_computes_under_window(self, runner, venue_db):
+        """wrw under a time window now computes (finding: wrw-windowed) — no longer skipped."""
         result = runner.invoke(
             main,
             ["report", "meta", "--db", venue_db, "--venues", "online,paper",
              "--definition", "wrw", "--since", "2026-01-01", "--until", "2026-12-31"],
         )
         assert result.exit_code == 0, result.output
-        assert "skipping wrw" in result.output
+        # The old skip message must be absent now that wrw is windowed.
+        assert "skipping wrw" not in result.output
 
     def test_venue_paper_no_data_shows_note(self, runner, tmp_path):
         """A venue with no corpus data shows 'no data' note rather than crashing."""

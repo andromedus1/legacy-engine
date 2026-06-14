@@ -21,6 +21,8 @@ DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
 PACKAGE_DATA_DIR = Path(__file__).parent / "data"
 VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
 VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
+HOSERS_DIR = PACKAGE_DATA_DIR / "hosers"
+HOSERS_REGISTRY_PATH = HOSERS_DIR / "legacy.json"      # shipped hoser catalog (curated SSOT)
 PLAYERS_DIR = PACKAGE_DATA_DIR / "players"
 ALIASES_PATH = PLAYERS_DIR / "aliases.json"             # shipped player-alias map (curated SSOT)
 

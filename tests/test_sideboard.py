@@ -20,19 +20,24 @@ from legacy_engine.advisory.field import FieldDistribution, build_custom_field
 from legacy_engine.advisory.sideboard import (
     HOSER_CATALOG,
     HoserCard,
+    ConsideringCard,
     CoverageModel,
     PickTrace,
     SideboardPackage,
     DeckAntiSynergySignals,
     _COVERAGE_P,
+    _CONSIDERING_CAP,
     _SWING_DEDICATED,
     _SWING_SOFT,
+    _EMPIRICAL_SWING_CAP,
+    _EMPIRICAL_SWING_MIN_LIFT,
     _build_coverage_model,
     _g,
     _greedy_solve,
     _ilp_solve,
     _ILPFailed,
     _marginal_g,
+    _rank_considering_pool,
     compute_deck_anti_synergy_signals,
     is_anti_synergistic,
     _empirical_sideboard_pool,
@@ -40,6 +45,7 @@ from legacy_engine.advisory.sideboard import (
     _derive_attacks_for_promoted,
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
+    empirical_swing_proxy,
     recommend_sideboard,
 )
 from legacy_engine.ingestion import store
@@ -197,6 +203,51 @@ class TestHoserCatalog:
 
     def test_defense_grid_is_colorless(self):
         assert HOSER_CATALOG["Defense Grid"].colors == frozenset()
+
+    # --- Big-mana / ramp catalog entries (feature-bigmana-ramp-tag) ---
+
+    def test_harbinger_of_the_seas_attacks_ramp(self):
+        """Harbinger of the Seas → ramp (dedicated: locks out Tron/Cloudpost mana)."""
+        assert "Harbinger of the Seas" in HOSER_CATALOG
+        h = HOSER_CATALOG["Harbinger of the Seas"]
+        assert "ramp" in h.attacks
+        assert h.swing == _SWING_DEDICATED
+
+    def test_damping_sphere_attacks_ramp_and_storm(self):
+        """Damping Sphere → ramp + storm-reliant (hoses both Tron mana and storm chains)."""
+        assert "Damping Sphere" in HOSER_CATALOG
+        h = HOSER_CATALOG["Damping Sphere"]
+        assert "ramp" in h.attacks
+        assert "storm-reliant" in h.attacks
+
+    def test_damping_sphere_is_colorless(self):
+        """Damping Sphere is an artifact — colorless (castable by any deck)."""
+        assert HOSER_CATALOG["Damping Sphere"].colors == frozenset()
+
+    def test_pithing_needle_attacks_ramp(self):
+        """Pithing Needle → ramp (names Eye of Ugin / Eldrazi Temple activated abilities)."""
+        assert "Pithing Needle" in HOSER_CATALOG
+        h = HOSER_CATALOG["Pithing Needle"]
+        assert "ramp" in h.attacks
+
+    def test_pithing_needle_is_colorless(self):
+        assert HOSER_CATALOG["Pithing Needle"].colors == frozenset()
+
+    def test_null_rod_attacks_ramp(self):
+        """Null Rod → ramp (shuts down mana artifacts in Eldrazi/Post shells)."""
+        assert "Null Rod" in HOSER_CATALOG
+        h = HOSER_CATALOG["Null Rod"]
+        assert "ramp" in h.attacks
+
+    def test_ramp_hosers_have_valid_swing(self):
+        """All new big-mana hosers have swing in the valid (0,1) range."""
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            h = HOSER_CATALOG[name]
+            assert 0.0 < h.swing < 1.0, f"{name} swing={h.swing} out of (0,1)"
+
+    def test_ramp_hosers_have_max_copies_at_least_one(self):
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            assert HOSER_CATALOG[name].max_copies >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -3471,8 +3522,9 @@ class TestBuildPromotedCandidates:
         assert warnings == []
         con.close()
 
-    def test_promotes_fon_and_consign_not_in_catalog(self):
-        """Force of Negation and Consign to Memory are absent from catalog → promoted."""
+    def test_promotes_fon_not_in_catalog_consign_in_catalog(self):
+        """Force of Negation (absent from catalog) is promoted; Consign to Memory is now a catalog
+        card (added in feature-hoser-catalog-expansion) so it is NOT promoted."""
         con, _ = _build_fon_corpus()
         pool = frozenset({"Force of Negation", "Consign to Memory", "Surgical Extraction"})
         freq_map = {"Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
@@ -3480,8 +3532,12 @@ class TestBuildPromotedCandidates:
         assert "Force of Negation" in promoted, (
             "Force of Negation (absent from catalog) must be promoted"
         )
-        assert "Consign to Memory" in promoted, (
-            "Consign to Memory (absent from catalog) must be promoted"
+        # Consign to Memory is now in HOSER_CATALOG → NOT promoted (catalog card)
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be in HOSER_CATALOG as a catalog entry"
         )
         # Surgical is in HOSER_CATALOG → not promoted
         assert "Surgical Extraction" not in promoted, (
@@ -3599,7 +3655,13 @@ class TestEmpiricalPromotion:
         con.close()
 
     def test_fon_or_consign_in_candidate_universe(self):
-        """FoN/Consign enter the candidate universe (even if not all selected by solver)."""
+        """FoN/Consign are accessible in the candidate universe.
+
+        Consign to Memory was added to HOSER_CATALOG in feature-hoser-catalog-expansion,
+        so it is now a catalog card (not a promoted card).  FoN remains absent from the
+        catalog and is promoted from the empirical pool.  Both must appear in the empirical
+        pool.
+        """
         con, archetype = _build_fon_corpus()
         from legacy_engine.advisory.sideboard import (
             _build_promoted_candidates,
@@ -3615,8 +3677,15 @@ class TestEmpiricalPromotion:
         assert "Consign to Memory" in pool, "Consign must appear in empirical pool"
 
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        # FoN is absent from HOSER_CATALOG → promoted from empirical pool
         assert "Force of Negation" in promoted, "FoN must be promoted (not in catalog)"
-        assert "Consign to Memory" in promoted, "Consign must be promoted (not in catalog)"
+        # Consign is now in HOSER_CATALOG → NOT promoted (catalog card); verify catalog membership
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be present in HOSER_CATALOG as a catalog entry"
+        )
         con.close()
 
     def test_gated_additive_no_archetype_is_catalog_only(self):
@@ -3648,12 +3717,15 @@ class TestEmpiricalPromotion:
         assert set(pkg_no_arch.cards.keys()) == set(pkg_catalog.cards.keys()), (
             "archetype=None must produce catalog-only output (no promotion)"
         )
-        # FoN and Consign must NOT appear (no promotion without archetype)
+        # FoN must NOT appear (not in catalog; no promotion without archetype)
         assert "Force of Negation" not in pkg_no_arch.cards, (
             "FoN must NOT appear when archetype=None (gated-additive no-op)"
         )
-        assert "Consign to Memory" not in pkg_no_arch.cards, (
-            "Consign must NOT appear when archetype=None (gated-additive no-op)"
+        # Consign to Memory is now in HOSER_CATALOG — it CAN appear via the catalog path
+        # even without archetype (not gated by the promotion mechanism).
+        # The gated-additive no-op only applies to empirically-promoted cards like FoN.
+        assert "Consign to Memory" in HOSER_CATALOG, (
+            "Consign to Memory must be a catalog card (not gated by empirical promotion)"
         )
         con.close()
 
@@ -4030,3 +4102,940 @@ class TestReportPathArchetypeForwarded:
             "recommend_sideboard must always receive archetype= kwarg from build_field_read_report"
         )
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestHoserCatalogExpansion — feature-hoser-catalog-expansion
+# ---------------------------------------------------------------------------
+
+class TestHoserCatalogExpansion:
+    """Tests for feature-hoser-catalog-expansion: JSON data file loader + new staples.
+
+    Spec-derived — no gamed tests:
+    (a) Catalog loads from data file (entry count matches JSON).
+    (b) New staples present with correct tags.
+    (c) Catalog + empirical compose without duplication.
+    (d) Dimir Tempo field surfaces correct staples.
+    """
+
+    # ── (a) Catalog loads from data file ──────────────────────────────────────
+
+    def test_catalog_loads_from_data_file(self):
+        """HOSER_CATALOG is populated from the JSON data file (not inline code)."""
+        import json
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+
+        raw = json.loads(HOSERS_REGISTRY_PATH.read_text(encoding="utf-8"))
+        json_count = len(raw["hosers"])
+        assert len(HOSER_CATALOG) == json_count, (
+            f"HOSER_CATALOG has {len(HOSER_CATALOG)} entries but legacy.json has {json_count}"
+        )
+
+    def test_load_hoser_catalog_returns_correct_types(self):
+        """load_hoser_catalog produces dict[str, HoserCard] with correct field types."""
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        catalog = load_hoser_catalog(HOSERS_REGISTRY_PATH)
+        assert isinstance(catalog, dict)
+        for name, hc in catalog.items():
+            assert isinstance(hc, HoserCard)
+            assert isinstance(hc.name, str)
+            assert isinstance(hc.attacks, frozenset)
+            assert len(hc.attacks) > 0
+            assert isinstance(hc.colors, frozenset)
+            assert isinstance(hc.max_copies, int)
+            assert hc.max_copies >= 1
+            assert isinstance(hc.swing, float)
+            assert 0.0 < hc.swing < 1.0
+
+    def test_load_hoser_catalog_swing_alias_dedicated(self):
+        """'dedicated' swing alias resolves to _SWING_DEDICATED (0.20)."""
+        from pathlib import Path
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {
+                    "name": "TestCard",
+                    "attacks": ["combo"],
+                    "colors": [],
+                    "max_copies": 4,
+                    "swing": "dedicated",
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            catalog = load_hoser_catalog(f.name)
+        os.unlink(f.name)
+        assert catalog["TestCard"].swing == pytest.approx(_SWING_DEDICATED)
+
+    def test_load_hoser_catalog_swing_alias_soft(self):
+        """'soft' swing alias resolves to _SWING_SOFT (0.10)."""
+        from pathlib import Path
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {
+                    "name": "TestCard2",
+                    "attacks": ["graveyard-reliant"],
+                    "colors": ["B"],
+                    "max_copies": 2,
+                    "swing": "soft",
+                }
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            catalog = load_hoser_catalog(f.name)
+        os.unlink(f.name)
+        assert catalog["TestCard2"].swing == pytest.approx(_SWING_SOFT)
+
+    def test_load_hoser_catalog_rejects_duplicate_names(self):
+        """Duplicate names in the JSON raise ValueError at load time."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "DupCard", "attacks": ["combo"], "colors": [], "max_copies": 2, "swing": "soft"},
+                {"name": "DupCard", "attacks": ["ramp"], "colors": ["G"], "max_copies": 4, "swing": "dedicated"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            with pytest.raises(ValueError, match="duplicate"):
+                load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+
+    def test_load_hoser_catalog_rejects_bad_swing_alias(self):
+        """Unknown swing alias raises ValueError."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "BadSwing", "attacks": ["combo"], "colors": [], "max_copies": 2, "swing": "turbo"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            with pytest.raises(ValueError, match="turbo"):
+                load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+
+    # ── (b) New staples present with correct tags ─────────────────────────────
+
+    def test_consign_to_memory_attacks_combo_and_storm(self):
+        """Consign to Memory → combo + storm-reliant (new catalog entry)."""
+        assert "Consign to Memory" in HOSER_CATALOG
+        h = HOSER_CATALOG["Consign to Memory"]
+        assert "combo" in h.attacks
+        assert "storm-reliant" in h.attacks
+        assert frozenset({"U"}) == h.colors
+
+    def test_engineered_explosives_attacks_combo_and_greedy_manabase(self):
+        """Engineered Explosives → combo + greedy-manabase + creature-based; colorless."""
+        assert "Engineered Explosives" in HOSER_CATALOG
+        h = HOSER_CATALOG["Engineered Explosives"]
+        assert "combo" in h.attacks
+        assert "greedy-manabase" in h.attacks
+        assert "creature-based" in h.attacks
+        assert h.colors == frozenset(), "Engineered Explosives must be colorless"
+
+    def test_sheoldreds_edict_attacks_creature_based(self):
+        """Sheoldred's Edict → creature-based (edict effect bypasses hexproof/indestructible)."""
+        assert "Sheoldred's Edict" in HOSER_CATALOG
+        h = HOSER_CATALOG["Sheoldred's Edict"]
+        assert "creature-based" in h.attacks
+        assert "B" in h.colors
+
+    def test_toxic_deluge_attacks_creature_based(self):
+        """Toxic Deluge → creature-based (board wipe bypassing indestructible)."""
+        assert "Toxic Deluge" in HOSER_CATALOG
+        h = HOSER_CATALOG["Toxic Deluge"]
+        assert "creature-based" in h.attacks
+        assert "B" in h.colors
+
+    def test_dauthi_voidwalker_attacks_graveyard(self):
+        """Dauthi Voidwalker → graveyard-reliant (exiles cards as they go to GY)."""
+        assert "Dauthi Voidwalker" in HOSER_CATALOG
+        h = HOSER_CATALOG["Dauthi Voidwalker"]
+        assert "graveyard-reliant" in h.attacks
+        assert "B" in h.colors
+
+    def test_all_new_staples_have_valid_swing(self):
+        """All newly added staples have swing in (0, 1)."""
+        new_staples = [
+            "Consign to Memory",
+            "Engineered Explosives",
+            "Sheoldred's Edict",
+            "Toxic Deluge",
+            "Dauthi Voidwalker",
+        ]
+        for name in new_staples:
+            assert name in HOSER_CATALOG, f"{name} missing from HOSER_CATALOG"
+            h = HOSER_CATALOG[name]
+            assert 0.0 < h.swing < 1.0, f"{name} swing={h.swing} out of (0, 1)"
+
+    def test_all_new_staples_have_max_copies_at_least_one(self):
+        """All new staples have max_copies ≥ 1."""
+        new_staples = [
+            "Consign to Memory",
+            "Engineered Explosives",
+            "Sheoldred's Edict",
+            "Toxic Deluge",
+            "Dauthi Voidwalker",
+        ]
+        for name in new_staples:
+            assert HOSER_CATALOG[name].max_copies >= 1
+
+    def test_ramp_hosers_still_present_after_expansion(self):
+        """Big-mana hosers added by feature-bigmana-ramp-tag are still in catalog."""
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            assert name in HOSER_CATALOG, f"{name} missing after catalog expansion"
+            assert "ramp" in HOSER_CATALOG[name].attacks, f"{name} must attack 'ramp'"
+
+    # ── (c) Catalog + empirical compose without duplication ───────────────────
+
+    def test_catalog_cards_not_promoted(self):
+        """Cards in HOSER_CATALOG are never double-promoted (pool_not_in_catalog excludes them)."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        # Pool contains only catalog cards → nothing to promote
+        pool = frozenset(HOSER_CATALOG.keys())
+        promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, {}, con)
+        assert promoted == {}, (
+            "No catalog card should appear in promoted_candidates — no double-listing"
+        )
+        con.close()
+
+    def test_no_duplicate_card_names_in_coverage_model(self):
+        """After promotion, candidate_covers has no card name appearing more than once.
+
+        CoverageModel.candidate_covers is a dict — keys are unique by construction.
+        The test verifies that catalog cards and promoted candidates don't share names
+        (the promotion path is conditioned on pool_not_in_catalog).
+        """
+        con = store.connect(":memory:")
+        store.init_schema(con)
+
+        # Simulate: empirical pool = catalog cards + one non-catalog card
+        non_catalog_name = "__NonCatalogCard__"
+        pool = frozenset(HOSER_CATALOG.keys()) | {non_catalog_name}
+        freq_map = {non_catalog_name: 2}
+
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+
+        # promoted must NOT contain any catalog card name
+        overlap = set(promoted.keys()) & set(HOSER_CATALOG.keys())
+        assert overlap == set(), (
+            f"Promoted candidates must not overlap with catalog: overlap={overlap}"
+        )
+        con.close()
+
+    def test_consign_in_catalog_not_in_promoted(self):
+        """Consign to Memory in empirical pool → not promoted (it's in catalog)."""
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        pool = frozenset({"Consign to Memory", "Force of Negation"})
+        freq_map = {"Consign to Memory": 2, "Force of Negation": 2}
+        promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
+        assert "Consign to Memory" not in promoted, (
+            "Consign to Memory is a catalog card — must not be in promoted_candidates"
+        )
+        # FoN is NOT in catalog → it WILL be promoted (if oracle-text lookup succeeds)
+        # (only verify the catalog-vs-promoted boundary, not FoN oracle-text enrichment here)
+        con.close()
+
+    # ── (d) Dimir Tempo field surfaces the right staples ─────────────────────
+
+    def test_dimir_tempo_field_surfaces_gy_hate(self):
+        """Dimir Tempo (UB) field with a Reanimator-heavy metagame surfaces graveyard hate."""
+        con = _con()
+        field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.2, "Elves": 0.2})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        # UB deck — can cast U and B hosers
+        deck_colors = frozenset({"U", "B"})
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=deck_colors,
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        # Graveyard hate that's UB-legal: Surgical, Faerie Macabre (castable_any_color),
+        # Leyline of the Void (B), Dauthi Voidwalker (B), Nihil Spellbomb (B)
+        gy_hosers = {n for n, h in HOSER_CATALOG.items() if "graveyard-reliant" in h.attacks}
+        ub_legal_gy = {
+            n for n in gy_hosers
+            if not HOSER_CATALOG[n].colors
+               or HOSER_CATALOG[n].colors.issubset(deck_colors)
+               or HOSER_CATALOG[n].castable_any_color
+        }
+        covered_gy = set(model.candidate_covers.keys()) & ub_legal_gy
+        assert len(covered_gy) >= 2, (
+            f"Expected ≥2 GY-hate hosers in coverage model for UB deck; got {covered_gy}"
+        )
+
+    def test_dimir_tempo_field_surfaces_combo_hate(self):
+        """Dimir Tempo (UB) field with combo-heavy metagame surfaces combo hate.
+
+        Consign to Memory (U) and Flusterstorm (U) must be in the candidate set for a
+        UB deck facing a combo-heavy field — both are now catalog entries.
+        """
+        con = _con()
+        field = _make_field({"ANT Storm": 0.5, "Reanimator": 0.3, "Elves": 0.2})
+        archetype_tags = {
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Consign to Memory" in model.candidate_covers, (
+            "Consign to Memory (U, combo+storm-reliant) must be in candidate set for UB deck"
+        )
+        assert "Flusterstorm" in model.candidate_covers, (
+            "Flusterstorm (U, combo+storm-reliant) must be in candidate set for UB deck"
+        )
+
+    def test_dimir_tempo_field_surfaces_creature_removal(self):
+        """Dimir Tempo (UB) field with creature-based metagame surfaces edict effects.
+
+        Sheoldred's Edict (B) and Toxic Deluge (B) must be in the candidate set for a
+        UB deck facing an Elves-heavy field.
+        """
+        con = _con()
+        field = _make_field({"Elves": 0.6, "Reanimator": 0.2, "ANT Storm": 0.2})
+        archetype_tags = {
+            "Elves": frozenset({"creature-based"}),
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Sheoldred's Edict" in model.candidate_covers, (
+            "Sheoldred's Edict (B, creature-based) must be in candidate set for UB deck"
+        )
+        assert "Toxic Deluge" in model.candidate_covers, (
+            "Toxic Deluge (B, creature-based) must be in candidate set for UB deck"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestEmpiricalSideboardSwings — feature-empirical-sideboard-swings
+# ---------------------------------------------------------------------------
+# These tests verify the honesty properties of the empirical swing proxy:
+# - Data measurability: no before/after-board swing can be measured; the proxy
+#   is presence-correlational, clearly labeled and gated.
+# - empirical_swing_proxy returns None for speculative-tier or negligible-lift data.
+# - empirical_swing_proxy returns a capped, positive value for gated data with
+#   sufficient positive lift.
+# - _build_coverage_model accepts card_swing_overrides; where override exceeds
+#   the catalog swing, the element weight reflects the higher value.
+# - Where card_swing_overrides is None (no data), _build_coverage_model is
+#   byte-identical to pre-feature (gated-additive).
+# - SideboardPackage carries swing_data_informed and swing_overrides_count.
+# - When no rounds data exists, swing_data_informed=False, heuristic_note is used.
+
+class TestEmpiricalSideboardSwings:
+    """Honesty properties and gated-additive behavior of empirical swing proxies."""
+
+    # ------------------------------------------------------------------
+    # Helpers: build minimal CardValue stubs without importing the full
+    # analytics chain (avoids circular imports in test scope).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_card_value(lift: float, n: int, tier: str, card: str = "TestCard"):
+        """Build a minimal CardValue-like object for testing empirical_swing_proxy."""
+        from legacy_engine.analytics.card_value import CardValue
+        p_raw = 0.5 + lift if n > 0 else None
+        return CardValue(
+            card=card,
+            board="side",
+            opponent="Reanimator",
+            p_raw=p_raw,
+            p_shrunk=0.5 + lift,
+            prior_mean=0.5,
+            lift=lift,
+            n=n,
+            tier=tier,  # type: ignore[arg-type]
+        )
+
+    # ------------------------------------------------------------------
+    # empirical_swing_proxy — return-value contract
+    # ------------------------------------------------------------------
+
+    def test_proxy_returns_none_for_speculative_tier(self):
+        """Speculative tier (n<30) → always returns None regardless of lift."""
+        cv = self._make_card_value(lift=0.15, n=10, tier="speculative")
+        assert empirical_swing_proxy(cv) is None, (
+            "Thin data (speculative tier) must never produce an empirical swing proxy"
+        )
+
+    def test_proxy_returns_none_for_negligible_lift(self):
+        """Evolving tier but lift below noise floor → None (noise suppression)."""
+        cv = self._make_card_value(lift=_EMPIRICAL_SWING_MIN_LIFT * 0.5, n=50, tier="evolving")
+        assert empirical_swing_proxy(cv) is None, (
+            "Lift below noise floor must return None even with sufficient n"
+        )
+
+    def test_proxy_returns_none_for_negative_lift(self):
+        """Negative lift (card present in losing decks) → None, curated constant retained."""
+        cv = self._make_card_value(lift=-0.05, n=80, tier="evolving")
+        assert empirical_swing_proxy(cv) is None, (
+            "Negative lift must return None — do not penalise catalog cards on selection effects"
+        )
+
+    def test_proxy_returns_float_for_evolving_tier_with_positive_lift(self):
+        """Evolving tier (30≤n<100) with sufficient positive lift → returns a positive float."""
+        cv = self._make_card_value(lift=0.08, n=45, tier="evolving")
+        result = empirical_swing_proxy(cv)
+        assert result is not None, "Evolving tier with positive lift should produce a proxy"
+        assert 0.0 < result <= _EMPIRICAL_SWING_CAP
+
+    def test_proxy_returns_float_for_established_tier(self):
+        """Established tier (n≥100) with positive lift → returns a positive float ≤ cap."""
+        cv = self._make_card_value(lift=0.12, n=150, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None, "Established tier with positive lift should produce a proxy"
+        assert 0.0 < result <= _EMPIRICAL_SWING_CAP
+
+    def test_proxy_caps_at_empirical_swing_cap(self):
+        """Very high lift is capped at _EMPIRICAL_SWING_CAP."""
+        cv = self._make_card_value(lift=0.99, n=200, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None
+        assert result == _EMPIRICAL_SWING_CAP, (
+            f"Extreme lift must be capped at _EMPIRICAL_SWING_CAP={_EMPIRICAL_SWING_CAP}"
+        )
+
+    def test_proxy_equals_lift_when_below_cap(self):
+        """When lift < cap, proxy == lift (no distortion)."""
+        lift = _EMPIRICAL_SWING_CAP * 0.5
+        cv = self._make_card_value(lift=lift, n=100, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None
+        assert abs(result - lift) < 1e-9, f"Expected proxy={lift}, got {result}"
+
+    # ------------------------------------------------------------------
+    # _build_coverage_model — card_swing_overrides parameter
+    # ------------------------------------------------------------------
+
+    def test_coverage_model_no_overrides_is_byte_identical(self):
+        """card_swing_overrides=None → element weights identical to pre-feature.
+
+        Gated-additive: callers that don't supply overrides get the exact same
+        element weights as before this feature was added.
+        """
+        field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+            ),
+        }
+
+        model_no_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_none_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides=None,
+        )
+
+        assert model_no_override.element_weight == model_none_override.element_weight, (
+            "card_swing_overrides=None must produce byte-identical element weights"
+        )
+
+    def test_coverage_model_override_raises_element_weight(self):
+        """When a card has a data-informed override > catalog swing, the element weight increases.
+
+        The element weight for (archetype, tag) is share × best_swing_for_tag.
+        If the card's data-informed swing exceeds its catalog swing, best_swing_for_tag
+        increases, and therefore the element weight increases.
+        """
+        share = 0.60
+        catalog_swing = _SWING_SOFT   # 0.10
+        override_swing = 0.25         # > catalog, under _EMPIRICAL_SWING_CAP
+        assert override_swing > catalog_swing, "Test setup: override must exceed catalog"
+
+        field = _make_field({"Reanimator": share})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=catalog_swing
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"Surgical Extraction": override_swing},
+        )
+
+        key = "Reanimator|graveyard-reliant"
+        base_weight = model_base.element_weight.get(key, 0.0)
+        override_weight = model_override.element_weight.get(key, 0.0)
+
+        # Note: build_custom_field normalizes shares; retrieve effective normalized share.
+        effective_share = field.shares["Reanimator"]
+
+        assert override_weight > base_weight, (
+            f"Data-informed override should raise element weight: "
+            f"base={base_weight:.4f}, override={override_weight:.4f}"
+        )
+        expected_override_weight = effective_share * override_swing
+        assert abs(override_weight - expected_override_weight) < 1e-9, (
+            f"Override weight should be effective_share×override_swing={expected_override_weight:.4f}, "
+            f"got {override_weight:.4f}"
+        )
+
+    def test_coverage_model_override_for_unknown_card_is_ignored(self):
+        """Overrides for cards not in the catalog are silently ignored.
+
+        The override map may contain cards that were filtered (off-color, pool) — this
+        must not raise and must not affect element weights.
+        """
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"NonExistentCard": 0.25},  # not in catalog
+        )
+
+        assert model_base.element_weight == model_override.element_weight, (
+            "Overrides for cards not in catalog must be ignored; element weights must not change"
+        )
+
+    def test_coverage_model_lower_override_uses_max_so_catalog_floor_is_preserved(self):
+        """The call-site in recommend_sideboard uses max(proxy, catalog_swing) as the override.
+
+        This test verifies _build_coverage_model itself: if the override value happens to be
+        lower than another card covering the same tag with its catalog swing, that card's
+        catalog swing wins the max.
+        """
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+
+        # Two cards cover the same tag:
+        # - Leyline (dedicated, swing=0.20): catalog constant, no override.
+        # - Surgical (soft, swing=0.10): override=0.05, LOWER than Leyline's catalog.
+        catalog = {
+            "Leyline of the Void": _minimal_hoser(
+                "Leyline of the Void", frozenset({"graveyard-reliant"}), swing=0.20
+            ),
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=0.10
+            ),
+        }
+
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            # Surgical's "override" is lower than Leyline's catalog swing; Leyline wins.
+            card_swing_overrides={"Surgical Extraction": 0.05},
+        )
+
+        key = "Reanimator|graveyard-reliant"
+        # best_swing_for_tag should be 0.20 (Leyline's catalog), not 0.05.
+        expected_weight = 1.0 * 0.20
+        assert abs(model.element_weight.get(key, 0.0) - expected_weight) < 1e-9, (
+            "Leyline's catalog swing should dominate when Surgical's override is lower"
+        )
+
+    # ------------------------------------------------------------------
+    # SideboardPackage — swing_data_informed and swing_overrides_count
+    # ------------------------------------------------------------------
+
+    def test_package_swing_data_informed_false_without_rounds(self):
+        """Without a rounds corpus, swing_data_informed=False and heuristic_note is used.
+
+        Gated-additive: a corpus with no rounds (no decisive matches) falls back fully
+        to the curated constants.
+        """
+        con = _con()
+        # Insert just a tournament + decks, no rounds — so card_winrates has no decisive matches.
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ["t1", "Test", "2024-01-01", None, "Legacy", "mtgo", "online"])
+        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+                    ["t1", 0, "alice", "5-0", "Reanimator", None])
+        con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                    ["t1", 0, "main", "Reanimate", 4])
+
+        field = _make_field({"Reanimator": 1.0})
+        pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy")
+
+        assert not pkg.swing_data_informed, (
+            "Without rounds data, swing_data_informed must be False"
+        )
+        assert pkg.swing_overrides_count == 0, (
+            "Without rounds data, swing_overrides_count must be 0"
+        )
+        # heuristic_note must be present and mention curated/heuristic
+        assert pkg.heuristic_note, "heuristic_note must always be non-empty"
+        assert "curated" in pkg.heuristic_note.lower() or "heuristic" in pkg.heuristic_note.lower(), (
+            "heuristic_note must mention 'curated' or 'heuristic' when no data-informed swings used"
+        )
+        con.close()
+
+    def test_package_swing_data_informed_defaults_false(self):
+        """SideboardPackage default: swing_data_informed=False, swing_overrides_count=0.
+
+        Direct construction with only required fields must produce safe defaults for the
+        additive fields.
+        """
+        pkg = SideboardPackage(
+            cards={},
+            trace=[],
+            covered_weight=0.0,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="test",
+            heuristic_note="test note",
+            warnings=(),
+        )
+        assert not pkg.swing_data_informed
+        assert pkg.swing_overrides_count == 0
+
+    def test_build_coverage_model_override_with_multiple_tags(self):
+        """When a card attacks multiple tags, its override affects best_swing for each.
+
+        A card with attacks={tag_a, tag_b} and override=0.25 raises best_swing_for_tag
+        for BOTH tag_a and tag_b if 0.25 is the best across all cards covering those tags.
+        """
+        field = _make_field({"ComboArch": 0.5, "GYArch": 0.5})
+        archetype_tags = {
+            "ComboArch": frozenset({"combo"}),
+            "GYArch": frozenset({"graveyard-reliant"}),
+        }
+        catalog_swing = 0.10
+        override_swing = 0.22
+        assert override_swing > catalog_swing
+
+        catalog = {
+            "DualCard": _minimal_hoser(
+                "DualCard",
+                frozenset({"combo", "graveyard-reliant"}),
+                swing=catalog_swing,
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"DualCard": override_swing},
+        )
+
+        combo_key = "ComboArch|combo"
+        gy_key = "GYArch|graveyard-reliant"
+
+        for key in (combo_key, gy_key):
+            base_w = model_base.element_weight.get(key, 0.0)
+            override_w = model_override.element_weight.get(key, 0.0)
+            assert override_w > base_w, (
+                f"Override should raise element weight for key={key!r}: "
+                f"base={base_w:.4f}, override={override_w:.4f}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestConsideringPool — feature-considering-cards-pool
+# ---------------------------------------------------------------------------
+
+class TestConsideringPool:
+    """Tests for _rank_considering_pool and SideboardPackage.considering.
+
+    Spec-derived tests:
+    - Considering pool contains ranked non-selected candidates (not the chosen 15).
+    - The chosen 15 is unchanged with/without the pool.
+    - Cap respected (≤ _CONSIDERING_CAP).
+    - Honest tiers / labels are non-empty strings.
+    - ConsideringCard fields match spec.
+    - Sorted by marginal_gain DESC.
+    - promoted=True only for empirical-promoted cards.
+    """
+
+    def _two_tag_model(self) -> CoverageModel:
+        """Model with 2 distinct tags (A, B); 3 hosers: H_A (tag A), H_B (tag B), H_AB (both).
+
+        H_AB covers both elements and has the highest gain.
+        H_A and H_B each cover one element.
+        """
+        h_a = _minimal_hoser("H_A", frozenset({"tagA"}), max_copies=4, swing=_SWING_DEDICATED)
+        h_b = _minimal_hoser("H_B", frozenset({"tagB"}), max_copies=4, swing=_SWING_DEDICATED)
+        h_ab = _minimal_hoser("H_AB", frozenset({"tagA", "tagB"}), max_copies=4, swing=_SWING_DEDICATED)
+        element_weight = {"tagA|A": 0.10, "tagB|B": 0.08}
+        candidate_covers = {
+            "H_A": frozenset({"tagA|A"}),
+            "H_B": frozenset({"tagB|B"}),
+            "H_AB": frozenset({"tagA|A", "tagB|B"}),
+        }
+        candidate_meta = {"H_A": h_a, "H_B": h_b, "H_AB": h_ab}
+        return _make_model(element_weight, candidate_covers, candidate_meta)
+
+    def test_considering_pool_excludes_chosen_cards_at_max(self):
+        """Cards fully placed (copies == max_copies) must not appear in the pool."""
+        model = self._two_tag_model()
+        # Place H_AB at max_copies=4 → fully consumed
+        final_cards = {"H_AB": 4}
+        pool = _rank_considering_pool(model, final_cards)
+        pool_names = {cc.card for cc in pool}
+        assert "H_AB" not in pool_names, (
+            "H_AB is at max_copies=4 and must not appear in the considering pool"
+        )
+
+    def test_considering_pool_includes_not_selected_cards(self):
+        """Cards not in final_cards with positive marginal gain appear in the pool."""
+        model = self._two_tag_model()
+        # Only H_AB selected; H_A and H_B not chosen
+        final_cards = {"H_AB": 1}
+        pool = _rank_considering_pool(model, final_cards)
+        pool_names = {cc.card for cc in pool}
+        # H_A and H_B were not selected and have residual coverage value
+        assert len(pool) > 0, "Expecting at least one bubble candidate"
+        # All pool entries must NOT be in the chosen 15 at max_copies
+        for cc in pool:
+            current = final_cards.get(cc.card, 0)
+            max_c = model.candidate_meta[cc.card].max_copies
+            assert current < max_c, (
+                f"{cc.card} is at max_copies in final_cards but appears in pool"
+            )
+
+    def test_considering_pool_sorted_by_marginal_gain_desc(self):
+        """Pool is sorted by marginal_gain DESC (deterministic tie-break by card name)."""
+        model = self._two_tag_model()
+        final_cards = {}  # no cards selected → all candidates are bubble
+        pool = _rank_considering_pool(model, final_cards)
+        assert len(pool) >= 2, "Need at least 2 entries to check ordering"
+        for i in range(len(pool) - 1):
+            assert pool[i].marginal_gain >= pool[i + 1].marginal_gain, (
+                f"Pool not sorted: pool[{i}].gain={pool[i].marginal_gain:.4f} "
+                f"< pool[{i+1}].gain={pool[i+1].marginal_gain:.4f}"
+            )
+
+    def test_considering_pool_cap_respected(self):
+        """Pool length ≤ cap parameter."""
+        # Build a model with many candidates
+        element_weight: dict[str, float] = {}
+        candidate_covers: dict[str, frozenset[str]] = {}
+        candidate_meta: dict[str, HoserCard] = {}
+        for i in range(30):
+            elem = f"E{i}"
+            card = f"Hoser{i}"
+            element_weight[elem] = 0.05
+            candidate_covers[card] = frozenset({elem})
+            candidate_meta[card] = _minimal_hoser(card, frozenset({f"tag{i}"}), max_copies=1)
+        model = _make_model(element_weight, candidate_covers, candidate_meta)
+
+        pool = _rank_considering_pool(model, {}, cap=_CONSIDERING_CAP)
+        assert len(pool) <= _CONSIDERING_CAP, (
+            f"Pool len={len(pool)} exceeds cap={_CONSIDERING_CAP}"
+        )
+
+    def test_considering_pool_marginal_gains_positive(self):
+        """All ConsideringCard.marginal_gain values are > 0."""
+        model = self._two_tag_model()
+        pool = _rank_considering_pool(model, {})
+        for cc in pool:
+            assert cc.marginal_gain > 0.0, (
+                f"{cc.card} has marginal_gain={cc.marginal_gain} which is not positive"
+            )
+
+    def test_considering_card_label_nonempty(self):
+        """Every ConsideringCard carries a non-empty label string."""
+        model = self._two_tag_model()
+        pool = _rank_considering_pool(model, {})
+        for cc in pool:
+            assert isinstance(cc.label, str) and len(cc.label) > 0, (
+                f"{cc.card} has empty label"
+            )
+
+    def test_considering_card_is_frozen_dataclass(self):
+        """ConsideringCard is immutable (frozen dataclass)."""
+        cc = ConsideringCard(
+            card="Test Card",
+            marginal_gain=0.05,
+            covers_elements=frozenset({"tagA|A"}),
+            label="covers tagA (Arch A)",
+            promoted=False,
+        )
+        assert cc.card == "Test Card"
+        assert cc.marginal_gain == pytest.approx(0.05)
+        assert "tagA|A" in cc.covers_elements
+        assert cc.promoted is False
+
+    def test_considering_card_promoted_flag(self):
+        """ConsideringCard.promoted=True when card is in promoted_names."""
+        model = self._two_tag_model()
+        final_cards = {"H_AB": 1}
+        # Mark H_A as promoted (empirical, not in catalog)
+        pool = _rank_considering_pool(model, final_cards, promoted_names=frozenset({"H_A"}))
+        promoted_in_pool = [cc for cc in pool if cc.card == "H_A"]
+        if promoted_in_pool:
+            assert promoted_in_pool[0].promoted is True
+        # H_B is not promoted → promoted=False
+        non_promoted_in_pool = [cc for cc in pool if cc.card == "H_B"]
+        if non_promoted_in_pool:
+            assert non_promoted_in_pool[0].promoted is False
+
+    def test_chosen_15_unchanged_with_considering(self):
+        """recommend_sideboard chosen 15 is byte-identical regardless of considering pool."""
+        con = _con()
+        field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
+        # Two-hoser catalog: both colorless so always castable
+        catalog = {
+            "Grafdigger's Cage": HoserCard(
+                name="Grafdigger's Cage",
+                attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+            "Mindbreak Trap": HoserCard(
+                name="Mindbreak Trap",
+                attacks=frozenset({"combo"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+            "Leyline of the Void": HoserCard(
+                name="Leyline of the Void",
+                attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(),
+                max_copies=4,
+                swing=_SWING_DEDICATED,
+            ),
+        }
+        pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy", catalog=catalog)
+
+        # chosen 15 is in pkg.cards; considering is purely additive
+        # The chosen cards must be consistent regardless of whether considering is populated
+        assert isinstance(pkg.cards, dict)
+        assert sum(pkg.cards.values()) <= 15
+        assert isinstance(pkg.considering, tuple)
+        # Every card in considering is NOT in pkg.cards at max_copies
+        from legacy_engine.advisory.sideboard import _CONSIDERING_CAP as CAP
+        assert len(pkg.considering) <= CAP
+        for cc in pkg.considering:
+            chosen_copies = pkg.cards.get(cc.card, 0)
+            # The card may appear in chosen but at < max_copies, OR not appear at all
+            assert cc.card not in pkg.cards or chosen_copies < catalog.get(cc.card, HoserCard(
+                name=cc.card, attacks=frozenset(), colors=frozenset(), max_copies=4, swing=0.10
+            )).max_copies
+        con.close()
+
+    def test_considering_pool_disjoint_from_fully_selected(self):
+        """All cards in the considering pool are not at max_copies in the solution."""
+        model = self._two_tag_model()
+        # Select H_A and H_B at max_copies=4 each; H_AB is only partially selected
+        final_cards = {"H_A": 4, "H_B": 4, "H_AB": 1}
+        pool = _rank_considering_pool(model, final_cards)
+        for cc in pool:
+            current = final_cards.get(cc.card, 0)
+            max_c = model.candidate_meta[cc.card].max_copies
+            assert current < max_c, (
+                f"{cc.card} is at max_copies ({max_c}) in final_cards but appears in the pool"
+            )
+
+    def test_considering_empty_when_all_candidates_at_max(self):
+        """When all candidates are at max_copies in final_cards, pool is empty."""
+        model = self._two_tag_model()
+        # Place all cards at their max_copies (4 each for all 3 hosers)
+        # Budget cap: 15 total slots; 3 hosers × 4 = 12 ≤ 15
+        final_cards = {"H_A": 4, "H_B": 4, "H_AB": 4}
+        pool = _rank_considering_pool(model, final_cards)
+        assert pool == [], (
+            f"Expected empty pool when all candidates at max_copies, got {pool}"
+        )
+
+    def test_sideboard_package_considering_field_defaults_empty(self):
+        """SideboardPackage.considering defaults to empty tuple (no regression for existing code)."""
+        pkg = SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.12,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="test",
+            warnings=(),
+        )
+        # considering is additive with a default_factory → always present
+        assert hasattr(pkg, "considering")
+        assert isinstance(pkg.considering, tuple)

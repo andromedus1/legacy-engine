@@ -16,6 +16,7 @@ from legacy_engine.advisory.positioning import (
 from legacy_engine.advisory.sideboard import (
     HOSER_CATALOG,
     HoserCard,
+    ConsideringCard,
     PickTrace,
     SideboardPackage,
     recommend_sideboard,
@@ -51,6 +52,7 @@ __all__ = [
     # sideboard
     "HOSER_CATALOG",
     "HoserCard",
+    "ConsideringCard",
     "PickTrace",
     "SideboardPackage",
     "recommend_sideboard",
