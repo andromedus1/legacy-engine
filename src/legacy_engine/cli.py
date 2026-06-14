@@ -2015,6 +2015,9 @@ def advise_positioning(
                 lo, hi = ranking.s_ci[d]
                 cov = ranking.data_coverage[d]
                 low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
+                # Label S as full-field when the deck would be restricted in the single-deck
+                # view — keeps the ranking path consistent with advise positioning output.
+                s_label = "S*" if d in ranking.coverage_caveated else "S"
                 # Suppress P(best) when coverage ≈ 0 — the value is imputation noise that
                 # otherwise reads as a spuriously confident ranking signal.
                 if cov < _PBEST_SUPPRESS_COVERAGE:
@@ -2022,7 +2025,7 @@ def advise_positioning(
                 else:
                     pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
                 click.echo(
-                    f"  {d:<35}  S={ranking.s_mean[d]:.3f}  "
+                    f"  {d:<35}  {s_label}={ranking.s_mean[d]:.3f}  "
                     f"CI=[{lo:.3f},{hi:.3f}]  {pbest_str}  "
                     f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
                 )

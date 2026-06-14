@@ -244,10 +244,15 @@ def _primer_summary(
         s_q = ranking.s_quantile.get(archetype, 0.0)
         cov = ranking.data_coverage.get(archetype, 0.0)
         low_cov = archetype in ranking.low_coverage
+        # coverage_caveated: deck is below the 0.85 restrict threshold — S here is
+        # the shared full-field estimate (not the restricted sub-field S that
+        # positioning_score would show).  Label it honestly.
+        is_caveated = archetype in getattr(ranking, "coverage_caveated", set())
+        s_label = "S (full-field, low coverage)" if is_caveated else "S"
         cov_note = " [low data coverage — S estimate less reliable]" if low_cov else ""
         lines.append(
             f"Positioning: ranked #{rank_pos} of {len(ranking.decks)} candidates "
-            f"(S={s_val:.3f}, q{ranking.quantile_level:.2f}={s_q:.3f}; "
+            f"({s_label}={s_val:.3f}, q{ranking.quantile_level:.2f}={s_q:.3f}; "
             f"data_coverage={cov:.2f}{cov_note})."
         )
     elif subj is not None and subj.data_coverage == 0.0:

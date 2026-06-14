@@ -75,6 +75,7 @@ def sample_ranking():
         quantile_level=0.05,
         data_coverage={"Control": 0.9, "Combo": 0.8, "Aggro": 0.15},
         low_coverage={"Aggro"},
+        coverage_caveated={"Aggro"},
         pairwise={
             ("Control", "Combo"): 0.72,
             ("Control", "Aggro"): 0.80,
@@ -246,6 +247,7 @@ class TestSpecPositioning:
             quantile_level=0.05,
             data_coverage={apos_subject: 0.85, "Control": 0.90, "Combo": 0.80},
             low_coverage=set(),
+            coverage_caveated=set(),
             pairwise={
                 (apos_subject, "Control"): 0.60,
                 (apos_subject, "Combo"): 0.55,
