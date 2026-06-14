@@ -1691,6 +1691,22 @@ def advise_positioning(
     help="Solver to use: ilp (exact, primary) or greedy (fallback).",
 )
 @click.option(
+    "--collection",
+    "collection_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a plain-text collection file (<qty> <card name> lines). "
+         "Enables owned/acquire annotations on each recommendation. "
+         "When omitted, output is byte-identical to pre-collection behavior.",
+)
+@click.option(
+    "--owned-only",
+    is_flag=True,
+    default=False,
+    help="Only show cards the user already owns (requires --collection). "
+         "Suppresses the acquire-list, prints count of suppressed cards.",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -1704,6 +1720,8 @@ def advise_sideboard(
     field_file: str | None,
     reserved: int,
     solver: str,
+    collection_file: str | None,
+    owned_only: bool,
     db: str | None,
     since: str | None,
     until: str | None,
@@ -1723,6 +1741,16 @@ def advise_sideboard(
     deck_text = Path(deck).read_text()
     mainboard, _sideboard_cards = _parse_decklist(deck_text)
     field_text = Path(field_file).read_text() if field_file else None
+
+    # Load collection view (gated: None when --collection not provided).
+    cv = None
+    if collection_file:
+        from legacy_engine.advisory.collection import CollectionView
+        cv = CollectionView.from_text(Path(collection_file).read_text())
+        click.echo(f"// collection: {cv}")
+
+    if owned_only and cv is None:
+        raise click.ClickException("--owned-only requires --collection")
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -1754,6 +1782,7 @@ def advise_sideboard(
             since=plan_since,
             until=plan_until,
             adaptive=use_adaptive,
+            collection=cv,
         )
 
         # Echo adaptive audit line when adaptive mode resolved actual windows.
@@ -1773,11 +1802,33 @@ def advise_sideboard(
         click.echo(f"\n=== Sideboard Recommendation (solver={pkg.solver_used}, field_source={pkg.field_source}) ===")
         click.echo(f"  Budget: {pkg.budget}  |  Reserved: {pkg.reserved}")
         click.echo(f"  Covered weight: {pkg.covered_weight:.4f}")
-        if pkg.cards:
-            for card, copies in sorted(pkg.cards.items(), key=lambda kv: kv[1], reverse=True):
-                click.echo(f"  {copies}x {card}")
+
+        # Render cards (with owned annotations when collection is wired).
+        display_cards = pkg.cards
+        suppressed_count = 0
+        if owned_only and cv is not None:
+            from legacy_engine.advisory.acquire import split_recommendation
+            play_owned, acquire = split_recommendation(pkg.cards, cv)
+            display_cards = play_owned
+            suppressed_count = len(acquire)
+
+        if display_cards:
+            for card, copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                if pkg.collection_aware and pkg.owned:
+                    ann = pkg.owned.get(card)
+                    if ann is not None:
+                        status = "owned" if ann.owned else f"acquire {ann.to_acquire}"
+                        click.echo(f"  {copies}x {card}  [{status}]")
+                    else:
+                        click.echo(f"  {copies}x {card}")
+                else:
+                    click.echo(f"  {copies}x {card}")
         else:
             click.echo("  (no recommendations — no castable hosers for this deck's colors)")
+
+        if owned_only and suppressed_count > 0:
+            click.echo(f"  [--owned-only: {suppressed_count} acquire-card(s) suppressed]")
+
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")
@@ -2426,6 +2477,194 @@ def identify_track(
         click.echo(f"{row.regime_label:<25}  {arch_label:<35}  {row.deck_count:>5}")
 
 
+@advise.command("acquire")
+@click.option(
+    "--collection",
+    "collection_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text collection file (<qty> <card name> lines). Required.",
+)
+@click.option(
+    "--archetype",
+    default=None,
+    help="Target archetype for consensus-based candidate universe.",
+)
+@click.option(
+    "--deck",
+    "deck_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a plain-text decklist to use as the target board (alternative to --archetype).",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines).",
+)
+@click.option(
+    "--budget",
+    type=float,
+    default=None,
+    help="Optional USD budget cap; takes buys in impact-per-dollar order until spent.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_window_opts
+@_verbose
+def advise_acquire(
+    collection_file: str,
+    archetype: str | None,
+    deck_file: str | None,
+    field_file: str | None,
+    budget: float | None,
+    db: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Generate a ranked, priced buy list for a target field/board.
+
+    Outputs a buy list ranked by impact (field_relevance × archetype_relevance),
+    flags redundant/over-quantity owns and overpriced printings, and shows how each
+    buy slots into the board.
+
+    Example:
+      legacy-engine advise acquire --collection binder.txt --archetype "Dimir Tempo"
+      legacy-engine advise acquire --collection binder.txt --deck mylist.txt --budget 50
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.acquire import acquire_plan
+    from legacy_engine.advisory.collection import CollectionView
+    from legacy_engine.advisory.report import _load_field, _parse_decklist
+    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.ingestion import store
+
+    if archetype is None and deck_file is None:
+        raise click.ClickException("One of --archetype or --deck is required.")
+
+    cv = CollectionView.from_text(Path(collection_file).read_text())
+    click.echo(f"// collection: {cv}")
+
+    deck: dict[str, int] | None = None
+    if deck_file:
+        deck_text = Path(deck_file).read_text()
+        main, side = _parse_decklist(deck_text)
+        deck = {**main, **side}
+
+    field_text = Path(field_file).read_text() if field_file else None
+
+    # Resolve price source (soft dep — absent → unpriced ranking).
+    price_fn = None
+    con = store.connect(db) if db else store.connect()
+    try:
+        # Try to build a price_fn from the loaded card_prices table.
+        try:
+            from legacy_engine.ingestion.prices import price_quote as _pq
+            def price_fn(name: str):  # type: ignore[misc]
+                try:
+                    return _pq(con, name)
+                except Exception:
+                    return None
+        except Exception:
+            pass
+
+        win = resolve_advisory_window(
+            con, regime=regime, since=since, until=until, all_time=all_time,
+        )
+        _echo_window(win)
+
+        field = _load_field(con, field_text=field_text)
+
+        plan = acquire_plan(
+            con,
+            field,
+            archetype=archetype,
+            deck=deck,
+            collection=cv,
+            price_fn=price_fn,
+            since=win.since,
+            until=win.until,
+        )
+
+        click.echo(
+            f"\n=== Acquisition Plan (field_source={plan.field_source}, "
+            f"impact_basis={plan.impact_basis}) ==="
+        )
+
+        if not plan.buy_list:
+            click.echo("  (nothing to acquire — you already own everything recommended!)")
+        else:
+            header = f"  {'copies':>6}  {'card':<40}  {'impact':>7}  {'price':>7}  slots-into"
+            click.echo(header)
+            click.echo("  " + "-" * (len(header) - 2))
+            for item in plan.buy_list:
+                price_str = f"${item.price:.2f}" if item.price is not None else "n/a"
+                click.echo(
+                    f"  {item.acquire_copies:>6}x  {item.card:<40}  "
+                    f"{item.impact:>7.4f}  {price_str:>7}  {item.slots_into}"
+                )
+                if item.replaces:
+                    click.echo(f"            replaces: {item.replaces}")
+
+        if plan.total_cost is not None:
+            click.echo(f"\n  Total estimated cost: ${plan.total_cost:.2f}")
+        elif plan.buy_list:
+            click.echo("\n  Total cost: unavailable (no price source or some cards unpriced)")
+
+        # Budget filter.
+        if budget is not None and plan.buy_list:
+            priced_buys = [b for b in plan.buy_list if b.price is not None and b.price > 0]
+            if priced_buys:
+                # Sort by impact-per-dollar for budget fill.
+                by_eff = sorted(
+                    priced_buys,
+                    key=lambda b: -(b.impact / b.price if b.price else 0),
+                )
+                remaining = budget
+                chosen = []
+                for item in by_eff:
+                    cost = item.price * item.acquire_copies  # type: ignore[operator]
+                    if cost <= remaining:
+                        chosen.append(item)
+                        remaining -= cost
+                click.echo(
+                    f"\n  [--budget ${budget:.2f}] {len(chosen)} buys fit "
+                    f"(${budget - remaining:.2f} spent, ${remaining:.2f} left):"
+                )
+                for item in chosen:
+                    click.echo(f"    {item.acquire_copies}x {item.card}  ${item.price:.2f}")
+            else:
+                click.echo(f"\n  [--budget] no priced buys to filter")
+
+        # Flags section.
+        if plan.flags:
+            click.echo("\n  === Collection Flags ===")
+            for flag in plan.flags:
+                click.echo(f"  [{flag.kind}] {flag.card}: {flag.detail}")
+
+        # Warnings.
+        for w in plan.warnings:
+            click.echo(f"  [warn] {w}")
+
+        click.echo(f"\n  {plan.heuristic_note}")
+        from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
+        click.echo(f"  [disclaimer] {_VALUE_DISCLAIMER}")
+
+    finally:
+        con.close()
+
+
 # ── generate: deck generation ──
 @main.group()
 def generate() -> None:
@@ -2764,6 +3003,22 @@ def generate_consensus(
     help="Max exploratory discovery suggestions to show (--discover only).",
 )
 @click.option(
+    "--collection",
+    "collection_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a plain-text collection file (<qty> <card name> lines). "
+         "Enables owned/acquire annotations on each recommendation. "
+         "When omitted, output is byte-identical to pre-collection behavior.",
+)
+@click.option(
+    "--owned-only",
+    is_flag=True,
+    default=False,
+    help="Only show cards the user already owns (requires --collection). "
+         "Suppresses the acquire-list, prints count of suppressed cards.",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -2786,6 +3041,8 @@ def generate_tune(
     export_fmt: str | None,
     discover: bool,
     discover_cap: int,
+    collection_file: str | None,
+    owned_only: bool,
     db: str | None,
     verbose: bool,
 ) -> None:
@@ -2813,6 +3070,16 @@ def generate_tune(
     deck_text = Path(deck).read_text()
     maindeck, starting_side = _parse_decklist(deck_text)
     field_text = Path(field_file).read_text() if field_file else None
+
+    # Load collection view (gated: None when --collection not provided).
+    cv = None
+    if collection_file:
+        from legacy_engine.advisory.collection import CollectionView
+        cv = CollectionView.from_text(Path(collection_file).read_text())
+        click.echo(f"// collection: {cv}")
+
+    if owned_only and cv is None:
+        raise click.ClickException("--owned-only requires --collection")
 
     con = store.connect(db) if db else store.connect()
     discovery = None
@@ -2895,6 +3162,7 @@ def generate_tune(
             card_winrates=shared_rates,
             players=player_set_tune,
             alias_map=alias_map_tune if player_set_tune is not None else None,
+            collection=cv,
         )
 
         if discover:
@@ -2966,6 +3234,24 @@ def generate_tune(
         click.echo("Sideboard")
         for name, count in sorted(tuned.sideboard.items(), key=lambda kv: (-kv[1], kv[0])):
             click.echo(f"{count} {name}")
+
+    # ── Collection-aware annotation (only when --collection supplied) ─────────
+    if tuned.collection_aware and tuned.owned:
+        from legacy_engine.advisory.acquire import split_recommendation
+        all_cards = {**tuned.maindeck, **tuned.sideboard}
+        if owned_only and cv is not None:
+            play_owned, acquire = split_recommendation(all_cards, cv)
+            click.echo(f"\n// [owned-only] Showing {len(play_owned)} owned cards; "
+                       f"{len(acquire)} acquire-card(s) suppressed")
+        else:
+            to_acquire = {c: ann for c, ann in tuned.owned.items() if not ann.owned}
+            already_own = {c: ann for c, ann in tuned.owned.items() if ann.owned}
+            if to_acquire:
+                click.echo(f"\n// [collection] Acquire ({len(to_acquire)} cards):")
+                for card, ann in sorted(to_acquire.items(), key=lambda kv: -kv[1].to_acquire):
+                    click.echo(f"//   need {ann.to_acquire}x {card} (own {ann.owned_copies})")
+            if already_own:
+                click.echo(f"// [collection] Already owned: {len(already_own)} cards")
 
     # ── Footer ────────────────────────────────────────────────────────────────
     main_total = sum(tuned.maindeck.values())
