@@ -219,13 +219,23 @@ def build_custom_field(
     shares: dict[str, float],
     *,
     known_archetypes: frozenset[str] | None = None,
+    counts: dict[str, int] | None = None,
 ) -> FieldDistribution:
     """Build a user-supplied custom field (the 'best call for MY room' headline).
 
     Normalizes via ``_normalize_shares`` (warn on sum!=1).  If ``known_archetypes`` is
     given, archetypes absent from it are flagged in ``no_data`` + warned (kept in the
-    field for downstream wide-uncertainty imputation).  ``counts=None`` (share-only) →
-    positioning uses point shares; emits a warning to that effect.
+    field for downstream wide-uncertainty imputation).
+
+    ``counts`` (optional): per-archetype backing sample counts that feed the Dirichlet
+    posterior in positioning.  When provided, positioning models field-share uncertainty
+    instead of using fixed point shares.  When ``None`` (share-only, the default),
+    positioning uses fixed point shares and a warning is emitted to that effect.
+
+    ``counts`` must cover exactly the same keys as ``shares`` after normalization;
+    every count must be a positive integer.  A ``ValueError`` is raised if the counts
+    are malformed or mismatched.
+
     ``field_source='custom'``.
     """
     normalized, warnings = _normalize_shares(shares)
@@ -243,15 +253,42 @@ def build_custom_field(
     else:
         no_data = frozenset()
 
-    warnings.append(
-        "custom field is share-only (counts=None); positioning will use point shares "
-        "(no field-share uncertainty)"
-    )
+    resolved_counts: dict[str, int] | None
+    if counts is not None:
+        # Validate counts: must be a dict of positive integers keyed to the same archetypes.
+        missing_keys = set(normalized) - set(counts)
+        extra_keys = set(counts) - set(normalized)
+        if missing_keys:
+            raise ValueError(
+                "build_custom_field: counts missing keys present in shares: "
+                + ", ".join(sorted(missing_keys))
+            )
+        if extra_keys:
+            raise ValueError(
+                "build_custom_field: counts has extra keys not in shares: "
+                + ", ".join(sorted(extra_keys))
+            )
+        for archetype, count in counts.items():
+            if not isinstance(count, int) or count < 1:
+                raise ValueError(
+                    f"build_custom_field: count for {archetype!r} must be a positive integer, "
+                    f"got {count!r}"
+                )
+        resolved_counts = counts
+        warnings.append(
+            "custom field carries counts; positioning will use Dirichlet-backed field-share uncertainty"
+        )
+    else:
+        resolved_counts = None
+        warnings.append(
+            "custom field is share-only (counts=None); positioning will use point shares "
+            "(no field-share uncertainty)"
+        )
 
     return FieldDistribution(
         shares=normalized,
         field_source="custom",
-        counts=None,
+        counts=resolved_counts,
         no_data=no_data,
         warnings=tuple(warnings),
     )
