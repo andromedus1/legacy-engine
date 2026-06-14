@@ -1,7 +1,7 @@
 ---
 id: feature-archetype-empirical-recommendations
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: [feature-oracle-text-interaction-tags]
