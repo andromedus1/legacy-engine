@@ -1,7 +1,7 @@
 ---
 id: feature-analytics-reporting-completeness
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: null
 depends_on: []
