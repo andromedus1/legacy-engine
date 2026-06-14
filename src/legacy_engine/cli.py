@@ -13,6 +13,8 @@ from typing import NoReturn
 
 import click
 
+log = logging.getLogger(__name__)
+
 
 def _setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
