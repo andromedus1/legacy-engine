@@ -11,6 +11,7 @@ import json
 import logging
 import time
 import unicodedata
+import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,6 +39,30 @@ BULK_DATA_URL = f"{SCRYFALL_API_BASE}/bulk-data"
 COLLECTION_URL = f"{SCRYFALL_API_BASE}/cards/collection"
 ORACLE_CARDS_PATH = SCRYFALL_DIR / "oracle_cards.json"
 METADATA_PATH = SCRYFALL_DIR / "metadata.json"
+
+
+_SCRYFALL_ALLOWED_HOSTS = frozenset({"scryfall.com", "api.scryfall.com", "c2.scryfall.com"})
+_SCRYFALL_ALLOWED_SUFFIXES = (".scryfall.com", ".scryfall.io")
+
+
+def _validate_scryfall_uri(uri: str) -> None:
+    """Raise ``ValueError`` if *uri* does not point at a Scryfall-owned host.
+
+    Scryfall's bulk ``download_uri`` values point at their CDN
+    (*.scryfall.com / *.scryfall.io).  Validating the host before following
+    redirects closes an SSRF-on-redirect vector where a tampered or replayed
+    metadata response could redirect us to an internal address.
+    """
+    parsed = urllib.parse.urlparse(uri)
+    host = parsed.hostname or ""
+    if host in _SCRYFALL_ALLOWED_HOSTS:
+        return
+    if any(host.endswith(suffix) for suffix in _SCRYFALL_ALLOWED_SUFFIXES):
+        return
+    raise ValueError(
+        f"Scryfall download_uri host {host!r} is not in the allowlist "
+        f"({_SCRYFALL_ALLOWED_HOSTS | set(_SCRYFALL_ALLOWED_SUFFIXES)})"
+    )
 
 
 def normalize_name(name: str) -> str:
@@ -79,6 +104,7 @@ class ScryfallClient:
                 return ORACLE_CARDS_PATH
 
         meta = self._fetch_bulk_metadata()
+        _validate_scryfall_uri(meta["download_uri"])
         logger.info("Downloading Scryfall %s bulk from %s", SCRYFALL_BULK_TYPE, meta["download_uri"])
         resp = self.client.get(meta["download_uri"], follow_redirects=True)
         resp.raise_for_status()
@@ -163,6 +189,7 @@ class ScryfallClient:
                 return SCRYFALL_PRICES_PATH
 
         meta = self._fetch_prices_metadata()
+        _validate_scryfall_uri(meta["download_uri"])
         logger.info(
             "Downloading Scryfall %s bulk from %s",
             SCRYFALL_PRICES_BULK_TYPE,
