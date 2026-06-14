@@ -1,7 +1,7 @@
 ---
 id: fix-cruft-dead-code-sweep
 kind: story
-stage: implementing
+stage: review
 tags: [cleanup]
 parent: null
 depends_on: []
@@ -26,4 +26,22 @@ Medium:
 Low: stale comments in primer.py:412 ("always shown"), primer.py:350-366 (unused params),
 card_distribution.py:226 (docstring overstates predicate), sideboard.py:1330-1341 (unreachable invariant
 warning). Fix or remove.
+
+## Resolution
+
+All items resolved. Changes:
+- `advisory/acquire.py`: deleted dead per-printing `for...pass` loop (was ~331-354), phantom `owned_prices`
+  comment (was ~356-358), and unused `_GRAVEYARD_TAG/_COMBO_TAG/_MANABASE_TAG` constants (~63-65).
+- `interaction_facts.py`: collapsed the `_classify_affects` if/else that added `"symmetric"` in both
+  branches into a single unconditional `scopes_found.add("symmetric")`. The `_RE_STATIC_RESTRICTION`
+  check was genuinely unused (both branches produced identical output). Behavior preserved.
+- `ingestion/releases.py`: deleted unused `_SCRYFALL_SETS_PATH` constant; `fetch_sets` hardcodes
+  the `/sets` path inline.
+- `advisory/primer.py`: fixed stale "always shown" comment (now "shown when not degraded"); dropped
+  unused `sideboard` and `note` params from `_prose_no_swap_needed` and its call site.
+- `generation/card_distribution.py`: corrected docstring that overstated `is_outlier` predicate with
+  a redundant `(name in dists)` clause already guaranteed by earlier code.
+- `advisory/sideboard.py`: downgraded the unreachable swap-loop invariant `log.warning` (which fired
+  only on an impossible mismatch by construction) to a plain comment.
+Full suite: 1869 passed.
 

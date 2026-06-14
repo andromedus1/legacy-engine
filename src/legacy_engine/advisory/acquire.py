@@ -58,13 +58,6 @@ _HEURISTIC_NOTE = (
     "field_relevance falls back to field-adoption when win-rate signal is absent."
 )
 
-# Vulnerability tags considered when computing tag-level over-cover.
-# A card covers a tag if its name appears in the HOSER_CATALOG under that tag.
-_GRAVEYARD_TAG = "graveyard-reliant"
-_COMBO_TAG = "combo"
-_MANABASE_TAG = "greedy-manabase"
-
-
 # ---------------------------------------------------------------------------
 # Output records
 # ---------------------------------------------------------------------------
@@ -323,39 +316,6 @@ def _rank_acquisitions(
                     kind="over-quantity",
                     detail=over_qty_reason,
                 ))
-
-            # ── Overpriced-printing flag ────────────────────────────────────
-            # Fire when: owned printing price >= overprice_factor × cheapest price
-            # AND a cheaper printing exists.
-            # We compare the cheapest owned printing price to the absolute cheapest.
-            if price_fn is not None and price is not None and price > 0.0:
-                owned_printings = owned.printings(card)
-                # If we have per-printing data, find the owned printing's approx price.
-                # For now: compare price (cheapest legal) against any owned printing
-                # whose printing_str might imply a different price.  Since we may not
-                # have per-printing prices for owned cards in the text-import path, we
-                # use a simple heuristic: if the user owns it and price is cheap, no flag.
-                # The flag is triggered by the ADVISOR inspecting the price spread.
-                # We look for whether there are multiple printings with divergent prices.
-                # In the test scenario: owned=$33 SL Dismember, cheapest=$2 NPH.
-                # We surface this as: "cheapest printing is $X cheaper than your copy."
-                # Implementation: if owned_printings has a price field (from a richer
-                # import path), use it; otherwise use the price_fn result as-is.
-                # For the text-import path: we can't determine the owned printing price,
-                # so the overpriced flag is not triggered (no false positives).
-                if owned_printings:
-                    for op in owned_printings:
-                        # OwnedPrinting has no price field — flag requires explicit price data.
-                        # The flag fires when: caller supplies per-printing price data
-                        # OR when a dedicated price_fn provides a "user_price" for the owned copy.
-                        # Design: since OwnedPrinting doesn't carry price, we skip per-printing
-                        # overpriced check here (it would require a second price_fn variant).
-                        # The flag is instead triggered when the orchestrator detects the spread.
-                        pass
-
-    # ── Overpriced check from explicit per-printing data injected by orchestrator ──
-    # The pure core also accepts a separate `owned_prices` dict injected by acquire_plan.
-    # (This is handled in the orchestrator wrapper below — pure core only does impact ranking.)
 
     # ── Sort buy list: impact DESC, price ASC, card ASC ────────────────────
     def _sort_key(item: BuyItem) -> tuple:

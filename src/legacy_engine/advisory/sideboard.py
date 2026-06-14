@@ -1586,15 +1586,9 @@ def _plan_matchups(
         # If deck_maindeck does not sum to 60 (the caller owns that contract), planning is skipped.
         out_total = sum(side_out.values())
         in_total = sum(side_in.values())
-        # Invariant: each swap removes one and adds one, so these are equal by
-        # construction. Guard defensively (not `assert`, which strips under -O):
-        # post_board below is rebuilt independently from side_out/side_in, so it
-        # stays correct regardless; a mismatch would signal a swap-loop bug.
-        if out_total != in_total:
-            log.warning(
-                "_plan_matchups: side_out copies (%d) != side_in copies (%d) for %s — "
-                "swap-loop invariant violated", out_total, in_total, opp,
-            )
+        # Invariant: each swap removes one and adds one, so out_total == in_total by
+        # construction. post_board is rebuilt independently from side_out/side_in,
+        # so it stays correct regardless of this check.
 
         # Build post_board
         post_board = dict(deck_maindeck)
