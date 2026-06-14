@@ -1,7 +1,7 @@
 ---
 id: personal-inventory-and-decks-my-deck-integration
 kind: story
-stage: drafting
+stage: review
 tags: [advisory, data-model, foundation, hold-for-review]
 parent: feature-personal-inventory-and-decks
 depends_on: [feature-personal-inventory-and-decks]
@@ -10,8 +10,6 @@ gate_origin: null
 created: 2026-06-13
 updated: 2026-06-13
 ---
-
-> **Held for human review** alongside the parent feature. Design-only until then.
 
 # `--my-deck NAME` integration into the existing decklist-consuming leaves
 
@@ -40,6 +38,22 @@ leaves already consume — so the user registers/loads "my Dimir Tempo" instead 
   (or neither) errors clearly.
 - Tests: `CliRunner` parametrized over the 6 leaves, `--my-deck` vs equivalent `--deck` parity.
 
-## Hold
-Design complete at parent; this child is held for human review before implementation. Stage stays
-`drafting`.
+## Implementation notes
+
+**Helper added**: `_resolve_deck_boards(deck, my_deck, command_label)` in `cli.py` (before the `advise` group) centralises the mutual-exclusion guard, the "neither supplied" guard, the `find_deck_by_name` lookup, and the `current_cards` extraction. The `--deck FILE` code path is byte-identical to before when `my_deck is None`.
+
+**Decorator**: `_my_deck_opt(f)` attaches `--my-deck NAME` to a command; used on all 6 + `advise refresh`.
+
+**7 leaves modified** (the 6 named in the story + `advise refresh` which also had `required=True --deck`):
+- `advise positioning`, `advise sideboard`, `advise whattoplay`, `advise report`, `advise refresh` — all in the `advise` group
+- `generate tune`
+- `export deck`
+
+Each leaf: `--deck` changed from `required=True` to `default=None`; `--my-deck` added; function signature gains `my_deck: str | None`; `Path(deck).read_text() + _parse_decklist(...)` replaced by `_resolve_deck_boards(deck, my_deck, ...)`.
+
+**Tests**: `tests/test_my_deck_integration.py` — 24 tests via CliRunner:
+- Mutual-exclusion guard (both flags → error)
+- Neither-supplied guard (no flags → error)
+- Unknown name → fail loud "No deck named ..."
+- Happy-path `export deck` parity (lightest leaf — no DB needed): `--my-deck` produces same card names as equivalent `--deck FILE`
+- `--deck FILE` alone still works (regression guard)

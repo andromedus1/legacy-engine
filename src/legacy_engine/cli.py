@@ -1819,6 +1819,67 @@ def _print_speculation(forecast: "SpeculativeForecast") -> None:
     click.echo("")
 
 
+# ---------------------------------------------------------------------------
+# Deck-source resolution helper
+# ---------------------------------------------------------------------------
+
+def _my_deck_opt(f):
+    """Attach --my-deck NAME to a command (complement to --deck FILE)."""
+    return click.option(
+        "--my-deck",
+        "my_deck",
+        default=None,
+        help="Name of a saved UserDeck (alternative to --deck FILE).",
+    )(f)
+
+
+def _resolve_deck_boards(
+    deck: str | None,
+    my_deck: str | None,
+    command_label: str = "this command",
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Resolve ``--deck FILE`` or ``--my-deck NAME`` into ``(mainboard, sideboard)``.
+
+    Mutual exclusion:
+    - Both supplied → ClickException
+    - Neither supplied → ClickException
+    - ``--deck FILE`` only → read and parse the file (byte-identical to old path)
+    - ``--my-deck NAME`` only → look up UserDeck, extract current_cards
+
+    The function is gated-additive: when ``my_deck`` is None the file path is
+    exercised identically to before this feature shipped.
+    """
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _parse_decklist
+
+    if deck is not None and my_deck is not None:
+        raise click.ClickException(
+            "--deck and --my-deck are mutually exclusive: supply one, not both."
+        )
+    if deck is None and my_deck is None:
+        raise click.ClickException(
+            f"{command_label} requires either --deck FILE or --my-deck NAME."
+        )
+
+    if my_deck is not None:
+        from legacy_engine.collection.decks import current_cards
+        from legacy_engine.collection.persist import find_deck_by_name
+
+        found = find_deck_by_name(my_deck)
+        if found is None:
+            raise click.ClickException(
+                f"No deck named {my_deck!r} found in your collection. "
+                "Use `deck list` to see saved decks."
+            )
+        main, side = current_cards(found)
+        return main, side
+
+    # --deck FILE path: byte-identical to the pre-feature baseline.
+    deck_text = Path(deck).read_text()  # type: ignore[arg-type]
+    return _parse_decklist(deck_text)
+
+
 # ── advise: meta attack / advisory ──
 @main.group()
 def advise() -> None:
@@ -1829,9 +1890,10 @@ def advise() -> None:
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file.",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -1873,7 +1935,8 @@ def advise() -> None:
 @_window_opts
 @_verbose
 def advise_positioning(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     field_file: str | None,
     candidates_file: str | None,
@@ -1895,12 +1958,11 @@ def advise_positioning(
         positioning_score,
         rank_decks,
     )
-    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.advisory.report import _classify_deck, _load_field
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
 
-    deck_text = Path(deck).read_text()
-    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise positioning")
     field_text = Path(field_file).read_text() if field_file else None
 
     con = store.connect(db) if db else store.connect()
@@ -1974,9 +2036,10 @@ def advise_positioning(
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file.",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -2028,7 +2091,8 @@ def advise_positioning(
 @_window_opts
 @_verbose
 def advise_sideboard(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     field_file: str | None,
     reserved: int,
@@ -2046,13 +2110,12 @@ def advise_sideboard(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.advisory.report import _classify_deck, _load_field
     from legacy_engine.advisory.sideboard import recommend_sideboard
     from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.ingestion import store
 
-    deck_text = Path(deck).read_text()
-    mainboard, _sideboard_cards = _parse_decklist(deck_text)
+    mainboard, _sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise sideboard")
     field_text = Path(field_file).read_text() if field_file else None
 
     # Load collection view (gated: None when --collection not provided).
@@ -2172,9 +2235,10 @@ def advise_sideboard(
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file.",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -2197,7 +2261,8 @@ def advise_sideboard(
 @_window_opts
 @_verbose
 def advise_whattoplay(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     field_file: str | None,
     db: str | None,
@@ -2212,13 +2277,12 @@ def advise_whattoplay(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist, _render_whattoplay
+    from legacy_engine.advisory.report import _classify_deck, _load_field, _render_whattoplay
     from legacy_engine.advisory.whattoplay import proactivity_score, vulnerability_tags_for_deck
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
     from legacy_engine.ingestion import store
 
-    deck_text = Path(deck).read_text()
-    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise whattoplay")
     field_text = Path(field_file).read_text() if field_file else None
 
     con = store.connect(db) if db else store.connect()
@@ -2286,9 +2350,10 @@ def advise_whattoplay(
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file.",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -2329,7 +2394,8 @@ def advise_whattoplay(
 @_window_opts
 @_verbose
 def advise_report(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     field_file: str | None,
     venues: str | None,
@@ -2348,7 +2414,6 @@ def advise_report(
 
     from legacy_engine.advisory.report import (
         _load_field,
-        _parse_decklist,
         build_field_read_report,
         render_field_read,
         render_cross_venue_positioning,
@@ -2364,8 +2429,7 @@ def advise_report(
             "single custom field."
         )
 
-    deck_text = Path(deck).read_text()
-    mainboard, sideboard_cards = _parse_decklist(deck_text)
+    mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise report")
     field_text = Path(field_file).read_text() if field_file else None
 
     con = store.connect(db) if db else store.connect()
@@ -2437,9 +2501,10 @@ def advise_report(
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file (consensus shell or user list).",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -2473,7 +2538,8 @@ def advise_report(
 @_window_opts
 @_verbose
 def advise_refresh(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     venues: str | None,
     lock_threshold: float,
@@ -2503,16 +2569,14 @@ def advise_refresh(
       legacy-engine advise refresh --deck shell.txt --venues online,paper
     """
     _setup_logging(verbose)
-    from pathlib import Path
 
     from legacy_engine.advisory.refresh import RefreshResult, run_refresh, render_refresh_result
-    from legacy_engine.advisory.report import _classify_deck, _parse_decklist
+    from legacy_engine.advisory.report import _classify_deck
     from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.venue import resolve_venues
     from legacy_engine.ingestion import store
 
-    deck_text = Path(deck).read_text()
-    maindeck, sideboard_in = _parse_decklist(deck_text)
+    maindeck, sideboard_in = _resolve_deck_boards(deck, my_deck, "advise refresh")
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -3222,9 +3286,10 @@ def generate_consensus(
 @click.option(
     "--deck",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file (consensus shell or user list).",
 )
+@_my_deck_opt
 @click.option(
     "--archetype",
     default=None,
@@ -3339,7 +3404,8 @@ def generate_consensus(
 )
 @_verbose
 def generate_tune(
-    deck: str,
+    deck: str | None,
+    my_deck: str | None,
     archetype: str | None,
     field_file: str | None,
     since: str | None,
@@ -3375,13 +3441,12 @@ def generate_tune(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.report import _classify_deck, _load_field, _parse_decklist
+    from legacy_engine.advisory.report import _classify_deck, _load_field
     from legacy_engine.analytics.players.identity import load_alias_map
     from legacy_engine.generation.tuning import tune_deck
     from legacy_engine.ingestion import store
 
-    deck_text = Path(deck).read_text()
-    maindeck, starting_side = _parse_decklist(deck_text)
+    maindeck, starting_side = _resolve_deck_boards(deck, my_deck, "generate tune")
     field_text = Path(field_file).read_text() if field_file else None
 
     # Load collection view (gated: None when --collection not provided).
@@ -4294,8 +4359,14 @@ def export() -> None:
     "--deck",
     "deck_file",
     type=click.Path(exists=True, dir_okay=False),
-    required=True,
+    default=None,
     help="Path to a plain-text decklist file.",
+)
+@click.option(
+    "--my-deck",
+    "my_deck",
+    default=None,
+    help="Name of a saved UserDeck (alternative to --deck FILE).",
 )
 @click.option(
     "--format",
@@ -4313,7 +4384,8 @@ def export() -> None:
 )
 @_verbose
 def export_deck(
-    deck_file: str,
+    deck_file: str | None,
+    my_deck: str | None,
     fmt: str,
     out: str | None,
     verbose: bool,
@@ -4328,12 +4400,10 @@ def export_deck(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.report import _parse_decklist
     from legacy_engine.generation.export import format_decklist
 
-    deck_text = Path(deck_file).read_text()
     try:
-        maindeck, sideboard = _parse_decklist(deck_text)
+        maindeck, sideboard = _resolve_deck_boards(deck_file, my_deck, "export deck")
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
