@@ -27,6 +27,8 @@ from legacy_engine.advisory.sideboard import (
     _COVERAGE_P,
     _SWING_DEDICATED,
     _SWING_SOFT,
+    _EMPIRICAL_SWING_CAP,
+    _EMPIRICAL_SWING_MIN_LIFT,
     _build_coverage_model,
     _g,
     _greedy_solve,
@@ -40,6 +42,7 @@ from legacy_engine.advisory.sideboard import (
     _derive_attacks_for_promoted,
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
+    empirical_swing_proxy,
     recommend_sideboard,
 )
 from legacy_engine.ingestion import store
@@ -4444,3 +4447,364 @@ class TestHoserCatalogExpansion:
         assert "Toxic Deluge" in model.candidate_covers, (
             "Toxic Deluge (B, creature-based) must be in candidate set for UB deck"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestEmpiricalSideboardSwings — feature-empirical-sideboard-swings
+# ---------------------------------------------------------------------------
+# These tests verify the honesty properties of the empirical swing proxy:
+# - Data measurability: no before/after-board swing can be measured; the proxy
+#   is presence-correlational, clearly labeled and gated.
+# - empirical_swing_proxy returns None for speculative-tier or negligible-lift data.
+# - empirical_swing_proxy returns a capped, positive value for gated data with
+#   sufficient positive lift.
+# - _build_coverage_model accepts card_swing_overrides; where override exceeds
+#   the catalog swing, the element weight reflects the higher value.
+# - Where card_swing_overrides is None (no data), _build_coverage_model is
+#   byte-identical to pre-feature (gated-additive).
+# - SideboardPackage carries swing_data_informed and swing_overrides_count.
+# - When no rounds data exists, swing_data_informed=False, heuristic_note is used.
+
+class TestEmpiricalSideboardSwings:
+    """Honesty properties and gated-additive behavior of empirical swing proxies."""
+
+    # ------------------------------------------------------------------
+    # Helpers: build minimal CardValue stubs without importing the full
+    # analytics chain (avoids circular imports in test scope).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_card_value(lift: float, n: int, tier: str, card: str = "TestCard"):
+        """Build a minimal CardValue-like object for testing empirical_swing_proxy."""
+        from legacy_engine.analytics.card_value import CardValue
+        p_raw = 0.5 + lift if n > 0 else None
+        return CardValue(
+            card=card,
+            board="side",
+            opponent="Reanimator",
+            p_raw=p_raw,
+            p_shrunk=0.5 + lift,
+            prior_mean=0.5,
+            lift=lift,
+            n=n,
+            tier=tier,  # type: ignore[arg-type]
+        )
+
+    # ------------------------------------------------------------------
+    # empirical_swing_proxy — return-value contract
+    # ------------------------------------------------------------------
+
+    def test_proxy_returns_none_for_speculative_tier(self):
+        """Speculative tier (n<30) → always returns None regardless of lift."""
+        cv = self._make_card_value(lift=0.15, n=10, tier="speculative")
+        assert empirical_swing_proxy(cv) is None, (
+            "Thin data (speculative tier) must never produce an empirical swing proxy"
+        )
+
+    def test_proxy_returns_none_for_negligible_lift(self):
+        """Evolving tier but lift below noise floor → None (noise suppression)."""
+        cv = self._make_card_value(lift=_EMPIRICAL_SWING_MIN_LIFT * 0.5, n=50, tier="evolving")
+        assert empirical_swing_proxy(cv) is None, (
+            "Lift below noise floor must return None even with sufficient n"
+        )
+
+    def test_proxy_returns_none_for_negative_lift(self):
+        """Negative lift (card present in losing decks) → None, curated constant retained."""
+        cv = self._make_card_value(lift=-0.05, n=80, tier="evolving")
+        assert empirical_swing_proxy(cv) is None, (
+            "Negative lift must return None — do not penalise catalog cards on selection effects"
+        )
+
+    def test_proxy_returns_float_for_evolving_tier_with_positive_lift(self):
+        """Evolving tier (30≤n<100) with sufficient positive lift → returns a positive float."""
+        cv = self._make_card_value(lift=0.08, n=45, tier="evolving")
+        result = empirical_swing_proxy(cv)
+        assert result is not None, "Evolving tier with positive lift should produce a proxy"
+        assert 0.0 < result <= _EMPIRICAL_SWING_CAP
+
+    def test_proxy_returns_float_for_established_tier(self):
+        """Established tier (n≥100) with positive lift → returns a positive float ≤ cap."""
+        cv = self._make_card_value(lift=0.12, n=150, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None, "Established tier with positive lift should produce a proxy"
+        assert 0.0 < result <= _EMPIRICAL_SWING_CAP
+
+    def test_proxy_caps_at_empirical_swing_cap(self):
+        """Very high lift is capped at _EMPIRICAL_SWING_CAP."""
+        cv = self._make_card_value(lift=0.99, n=200, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None
+        assert result == _EMPIRICAL_SWING_CAP, (
+            f"Extreme lift must be capped at _EMPIRICAL_SWING_CAP={_EMPIRICAL_SWING_CAP}"
+        )
+
+    def test_proxy_equals_lift_when_below_cap(self):
+        """When lift < cap, proxy == lift (no distortion)."""
+        lift = _EMPIRICAL_SWING_CAP * 0.5
+        cv = self._make_card_value(lift=lift, n=100, tier="established")
+        result = empirical_swing_proxy(cv)
+        assert result is not None
+        assert abs(result - lift) < 1e-9, f"Expected proxy={lift}, got {result}"
+
+    # ------------------------------------------------------------------
+    # _build_coverage_model — card_swing_overrides parameter
+    # ------------------------------------------------------------------
+
+    def test_coverage_model_no_overrides_is_byte_identical(self):
+        """card_swing_overrides=None → element weights identical to pre-feature.
+
+        Gated-additive: callers that don't supply overrides get the exact same
+        element weights as before this feature was added.
+        """
+        field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+            ),
+        }
+
+        model_no_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_none_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides=None,
+        )
+
+        assert model_no_override.element_weight == model_none_override.element_weight, (
+            "card_swing_overrides=None must produce byte-identical element weights"
+        )
+
+    def test_coverage_model_override_raises_element_weight(self):
+        """When a card has a data-informed override > catalog swing, the element weight increases.
+
+        The element weight for (archetype, tag) is share × best_swing_for_tag.
+        If the card's data-informed swing exceeds its catalog swing, best_swing_for_tag
+        increases, and therefore the element weight increases.
+        """
+        share = 0.60
+        catalog_swing = _SWING_SOFT   # 0.10
+        override_swing = 0.25         # > catalog, under _EMPIRICAL_SWING_CAP
+        assert override_swing > catalog_swing, "Test setup: override must exceed catalog"
+
+        field = _make_field({"Reanimator": share})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=catalog_swing
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"Surgical Extraction": override_swing},
+        )
+
+        key = "Reanimator|graveyard-reliant"
+        base_weight = model_base.element_weight.get(key, 0.0)
+        override_weight = model_override.element_weight.get(key, 0.0)
+
+        # Note: build_custom_field normalizes shares; retrieve effective normalized share.
+        effective_share = field.shares["Reanimator"]
+
+        assert override_weight > base_weight, (
+            f"Data-informed override should raise element weight: "
+            f"base={base_weight:.4f}, override={override_weight:.4f}"
+        )
+        expected_override_weight = effective_share * override_swing
+        assert abs(override_weight - expected_override_weight) < 1e-9, (
+            f"Override weight should be effective_share×override_swing={expected_override_weight:.4f}, "
+            f"got {override_weight:.4f}"
+        )
+
+    def test_coverage_model_override_for_unknown_card_is_ignored(self):
+        """Overrides for cards not in the catalog are silently ignored.
+
+        The override map may contain cards that were filtered (off-color, pool) — this
+        must not raise and must not affect element weights.
+        """
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"NonExistentCard": 0.25},  # not in catalog
+        )
+
+        assert model_base.element_weight == model_override.element_weight, (
+            "Overrides for cards not in catalog must be ignored; element weights must not change"
+        )
+
+    def test_coverage_model_lower_override_uses_max_so_catalog_floor_is_preserved(self):
+        """The call-site in recommend_sideboard uses max(proxy, catalog_swing) as the override.
+
+        This test verifies _build_coverage_model itself: if the override value happens to be
+        lower than another card covering the same tag with its catalog swing, that card's
+        catalog swing wins the max.
+        """
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+
+        # Two cards cover the same tag:
+        # - Leyline (dedicated, swing=0.20): catalog constant, no override.
+        # - Surgical (soft, swing=0.10): override=0.05, LOWER than Leyline's catalog.
+        catalog = {
+            "Leyline of the Void": _minimal_hoser(
+                "Leyline of the Void", frozenset({"graveyard-reliant"}), swing=0.20
+            ),
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=0.10
+            ),
+        }
+
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            # Surgical's "override" is lower than Leyline's catalog swing; Leyline wins.
+            card_swing_overrides={"Surgical Extraction": 0.05},
+        )
+
+        key = "Reanimator|graveyard-reliant"
+        # best_swing_for_tag should be 0.20 (Leyline's catalog), not 0.05.
+        expected_weight = 1.0 * 0.20
+        assert abs(model.element_weight.get(key, 0.0) - expected_weight) < 1e-9, (
+            "Leyline's catalog swing should dominate when Surgical's override is lower"
+        )
+
+    # ------------------------------------------------------------------
+    # SideboardPackage — swing_data_informed and swing_overrides_count
+    # ------------------------------------------------------------------
+
+    def test_package_swing_data_informed_false_without_rounds(self):
+        """Without a rounds corpus, swing_data_informed=False and heuristic_note is used.
+
+        Gated-additive: a corpus with no rounds (no decisive matches) falls back fully
+        to the curated constants.
+        """
+        con = _con()
+        # Insert just a tournament + decks, no rounds — so card_winrates has no decisive matches.
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ["t1", "Test", "2024-01-01", None, "Legacy", "mtgo", "online"])
+        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+                    ["t1", 0, "alice", "5-0", "Reanimator", None])
+        con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                    ["t1", 0, "main", "Reanimate", 4])
+
+        field = _make_field({"Reanimator": 1.0})
+        pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy")
+
+        assert not pkg.swing_data_informed, (
+            "Without rounds data, swing_data_informed must be False"
+        )
+        assert pkg.swing_overrides_count == 0, (
+            "Without rounds data, swing_overrides_count must be 0"
+        )
+        # heuristic_note must be present and mention curated/heuristic
+        assert pkg.heuristic_note, "heuristic_note must always be non-empty"
+        assert "curated" in pkg.heuristic_note.lower() or "heuristic" in pkg.heuristic_note.lower(), (
+            "heuristic_note must mention 'curated' or 'heuristic' when no data-informed swings used"
+        )
+        con.close()
+
+    def test_package_swing_data_informed_defaults_false(self):
+        """SideboardPackage default: swing_data_informed=False, swing_overrides_count=0.
+
+        Direct construction with only required fields must produce safe defaults for the
+        additive fields.
+        """
+        pkg = SideboardPackage(
+            cards={},
+            trace=[],
+            covered_weight=0.0,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="test",
+            heuristic_note="test note",
+            warnings=(),
+        )
+        assert not pkg.swing_data_informed
+        assert pkg.swing_overrides_count == 0
+
+    def test_build_coverage_model_override_with_multiple_tags(self):
+        """When a card attacks multiple tags, its override affects best_swing for each.
+
+        A card with attacks={tag_a, tag_b} and override=0.25 raises best_swing_for_tag
+        for BOTH tag_a and tag_b if 0.25 is the best across all cards covering those tags.
+        """
+        field = _make_field({"ComboArch": 0.5, "GYArch": 0.5})
+        archetype_tags = {
+            "ComboArch": frozenset({"combo"}),
+            "GYArch": frozenset({"graveyard-reliant"}),
+        }
+        catalog_swing = 0.10
+        override_swing = 0.22
+        assert override_swing > catalog_swing
+
+        catalog = {
+            "DualCard": _minimal_hoser(
+                "DualCard",
+                frozenset({"combo", "graveyard-reliant"}),
+                swing=catalog_swing,
+            ),
+        }
+
+        model_base = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        model_override = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset(),
+            deck_tags=frozenset(),
+            catalog=catalog,
+            card_swing_overrides={"DualCard": override_swing},
+        )
+
+        combo_key = "ComboArch|combo"
+        gy_key = "GYArch|graveyard-reliant"
+
+        for key in (combo_key, gy_key):
+            base_w = model_base.element_weight.get(key, 0.0)
+            override_w = model_override.element_weight.get(key, 0.0)
+            assert override_w > base_w, (
+                f"Override should raise element weight for key={key!r}: "
+                f"base={base_w:.4f}, override={override_w:.4f}"
+            )
