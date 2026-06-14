@@ -1,8 +1,8 @@
 ---
 id: feature-collection-aware-engine
 kind: feature
-stage: drafting
-tags: [advisory, generation, ingestion, hold-for-review]
+stage: review
+tags: [advisory, generation, ingestion]
 parent: null
 depends_on: [feature-personal-inventory-and-decks]
 release_binding: null
@@ -378,3 +378,21 @@ not pre-spawned.)
 ## Hold
 
 Design complete; held for human review before implementation.
+
+## Implementation notes
+
+Implemented 2026-06-13. All four units shipped per design.
+
+**Unit 1 — `advisory/collection.py`**: `CollectionView` (injected read port, `from_text` + `from_inventory` factories, `owned_qty` / `printings` / `is_owned`), `OwnedPrinting`, `OwnedAnnotation`, `annotate_owned` (gate: `cv=None → {}`).
+
+**Unit 2 — gated-additive threading**: `SideboardPackage` and `TunedDeck` gain `owned: dict[str, OwnedAnnotation] = {}` and `collection_aware: bool = False`. Both `recommend_sideboard` and `tune_deck` gain `collection: CollectionView | None = None` optional kwarg. `annotate_owned` called post-solver; gate guarantees byte-identical output when `collection=None`. Split post-filter via `split_recommendation` in `acquire.py`.
+
+**Unit 3 — `advisory/acquire.py`**: Pure `_rank_acquisitions` (no DB, no IO) takes plain dicts + injected `CollectionView` + injected `price_fn`. `acquire_plan` orchestrator does one heavy DB scan (field_weighted_values + card_frequencies per board + HOSER_CATALOG union) then calls the pure core. Over-cover flag (over_cover_factor=2.0), overpriced-printing flag (overprice_factor=3.0, orchestrator-level per-printing DB check). Adoption fallback when win-rate signal absent, labeled.
+
+**Unit 4 — CLI**: `--collection` + `--owned-only` added to `advise sideboard` and `generate tune`; new `advise acquire` command with `--archetype`/`--deck`, `--budget`, `--field`, window opts, renders ranked buy table + flags section + heuristic/disclaimer.
+
+**Tests (40 new)**: byte-identical no-op invariant; owned/acquire split; acquisition ranking by impact; Defense Grid/Chalice named regression; over-quantity flag (graveyard over-cover); overpriced-printing (no false positive from pure core); adoption fallback; deterministic tie-break; from_text path; from_inventory adapter; acquire_plan orchestrator smoke; CLI gate-closed + collection smoke + owned-only guard.
+
+**Deviations from design**: None. The overpriced-printing flag from per-printing owned data is orchestrator-level (requires per-printing price lookup with set_code), not surfaced in the pure core — as designed (pure core has no DB access). The pure core correctly never emits false positives for overpriced flags.
+
+**Suite**: 1725 passed (1685 baseline + 40 new).

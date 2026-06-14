@@ -1439,6 +1439,12 @@ class SideboardPackage:
     # --- Additive fields (regime-windowing-consistency) ---
     plan_window_label: str = ""                              # "" = not set; "adaptive (per-opponent ban-aware)" in adaptive mode
     plan_windows: dict[str, tuple[str | None, str | None]] = dc_field(default_factory=dict)  # per-opponent audit
+    # --- Additive fields (feature-collection-aware-engine) ---
+    # owned: annotation for each recommended card (empty dict → not collection-aware).
+    # collection_aware: True iff a CollectionView was supplied.
+    # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
+    owned: "dict[str, object]" = dc_field(default_factory=dict)
+    collection_aware: bool = False
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -1480,6 +1486,9 @@ def recommend_sideboard(
     # When False (or archetype is None), falls back to the single uniform window path
     # (byte-identical to pre-feature for existing callers).
     adaptive: bool = True,
+    # New optional kwarg (feature-collection-aware-engine).
+    # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
+    collection: "Optional[object]" = None,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -1735,6 +1744,8 @@ def recommend_sideboard(
             plan_window=plan_window,
             plan_window_label=plan_window_label,
             plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
+            owned={},
+            collection_aware=collection is not None,
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -1792,6 +1803,11 @@ def recommend_sideboard(
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
             warnings.append(f"per-matchup plan failed: {exc}")
 
+    # --- Collection-aware annotation (gated-additive, feature-collection-aware-engine) ---
+    # annotate_owned returns {} when collection is None → gate closed → byte-identical.
+    from legacy_engine.advisory.collection import annotate_owned
+    owned_annotations = annotate_owned(final_cards, collection)  # type: ignore[arg-type]
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -1807,4 +1823,6 @@ def recommend_sideboard(
         plan_window=plan_window,
         plan_window_label=plan_window_label,
         plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
+        owned=owned_annotations,
+        collection_aware=collection is not None,
     )
