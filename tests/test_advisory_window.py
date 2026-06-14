@@ -128,14 +128,15 @@ class TestWindowCLI:
         assert "window: 2026-01-01" in result.output
         assert "THIN" not in result.output          # no rounds-degrade for meta
 
-    def test_meta_skips_wrw_under_window(self, db_path):
-        # Meta doesn't degrade (thin_floor=0), so the window stands → wrw is skipped.
+    def test_meta_wrw_under_window_now_computes(self, db_path):
+        # wrw is now windowed (finding: wrw-windowed) — no longer skipped under a window.
         result = CliRunner().invoke(
             main, ["report", "meta", "--db", db_path, "--definition", "wrw",
                    "--provenance", "online", "--since", "2026-01-01", "--until", "2026-03-01"]
         )
         assert result.exit_code == 0, result.output
-        assert "skipping wrw under a window" in result.output
+        # The old "skipping wrw under a window" message must no longer appear.
+        assert "skipping wrw under a window" not in result.output
 
 
 class TestMetashareDocRot:
@@ -145,9 +146,11 @@ class TestMetashareDocRot:
         src = inspect.getsource(metashare.compute_metashare)
         assert "match_results is not windowed" not in src
 
-    def test_windowed_wrw_still_raises(self, make_rounds_corpus):
+    def test_windowed_wrw_now_computes(self, make_rounds_corpus):
+        """wrw under a window is now supported (finding: wrw-windowed); must not raise."""
         from legacy_engine.analytics.metashare import compute_metashare
         con, _ = make_rounds_corpus(n_repeats=1)
-        with pytest.raises(NotImplementedError):
-            compute_metashare(con, definition="wrw", since="2026-01-01")
+        # Must succeed and return a valid MetaShareReport.
+        report = compute_metashare(con, definition="wrw", since="2026-01-01")
+        assert report.definition == "wrw"
         con.close()
