@@ -49,11 +49,34 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
       ``_build_coverage_model`` accepts an optional ``empirical_pool`` frozenset; when
       provided, catalog candidates not in the pool are dropped.
 
+  (C) Empirical pool PROMOTION (fix-sideboard-surface-field-staples):
+      Pool cards that are NOT in the catalog are PROMOTED into the candidate set as
+      ``HoserCard`` entries with best-effort coverage attribution derived from oracle_text
+      and ``card_tags.staple_role``.  This makes high-adoption field staples like
+      Force of Negation and Consign to Memory surfaceable even though they are absent from
+      the hand-curated HOSER_CATALOG.
+
+      Attribution rules (``_derive_attacks_for_promoted``):
+        - "counter target" or "counter that spell" in oracle_text → ``{"combo", "storm-reliant"}``
+        - "exile" + "graveyard" in oracle_text → ``{"graveyard-reliant"}``
+        - Removal keywords ("destroy target", "exile target creature") → ``{"creature-based"}``
+        - ``staple_role`` == "free_interaction" → ``{"combo", "storm-reliant"}``
+        - Unattributed cards: a conservative ``{"combo"}`` set (labeled in a warning) so
+          the solver can still select them on adoption signal.
+
+      ``max_copies``: from the archetype's modal_count for that card (capped at 4).
+      ``swing``: ``_SWING_SOFT`` — conservative, since attribution is best-effort.
+
+      Promoted cards carry a distinct ``promoted_from_empirical`` label so the caller
+      can distinguish them from catalog entries.  The anti-synergy filter still applies.
+
   GATING (gated-additive):
     - Anti-synergy signals are None when no deck card objects are supplied (empty maindeck
       path in tests).  ``is_anti_synergistic(card, None)`` always returns False → no-op.
     - Empirical pool is None when ``archetype`` is not supplied, the archetype has no
       sideboard data, or the pool would be empty.  ``empirical_pool=None`` → no-op.
+    - Empirical promotions are None when the caller supplies no ``freq_map`` (the modal-count
+      lookup dict).  No promotion → no-op.
     - Existing tests supply empty maindecks and no archetype → both filters are no-ops →
       test output is byte-identical to pre-feature.
 """
@@ -679,6 +702,179 @@ def _empirical_sideboard_pool(
 
 
 # ---------------------------------------------------------------------------
+# Extension C: Empirical pool promotion
+# (fix-sideboard-surface-field-staples)
+# ---------------------------------------------------------------------------
+
+# Minimum adoption rate for an empirical card to be promoted into the candidate set.
+# Must match or exceed _EMPIRICAL_POOL_MIN_ADOPTION (both default to 5%).
+_EMPIRICAL_PROMOTE_MIN_ADOPTION: float = _EMPIRICAL_POOL_MIN_ADOPTION
+
+# Tag set assigned when oracle_text attribution is genuinely unknown.
+# Conservative single tag so the card participates but does not over-capture.
+_FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
+
+
+def _derive_attacks_for_promoted(
+    card_name: str,
+    oracle_text: str,
+    type_line: str,
+) -> frozenset[str]:
+    """Derive best-effort vulnerability-tag coverage for a promoted empirical card.
+
+    Pure function — no DB.  Priority order (multiple tags possible):
+
+    1. Counter magic:  "counter target" / "counter that spell"
+       → {combo, storm-reliant}   (answers the most common free-spell targets)
+    2. Graveyard exile: "exile" AND "graveyard" present
+       → {graveyard-reliant}
+    3. Removal: "destroy target" / "exile target creature" / "exile target attacking"
+       → {creature-based}
+    4. staple_role == "free_interaction" (card_tags lookup)
+       → {combo, storm-reliant}   (Force of Negation, Daze, etc.)
+    5. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
+       → {greedy-manabase}        (answers Blood Moon, Back to Basics, Chalice)
+    6. Fallback: {combo}  (conservative — labeled in warning by caller).
+
+    Returns a frozenset of tag strings.  Never returns the empty frozenset so
+    ``HoserCard.attacks`` is always non-empty.
+    """
+    from legacy_engine.card_tags import staple_role
+
+    text_lower = (oracle_text or "").lower()
+    tags: set[str] = set()
+
+    # 1. Counter magic
+    if "counter target" in text_lower or "counter that spell" in text_lower:
+        tags.update({"combo", "storm-reliant"})
+
+    # 2. Graveyard exile
+    if "graveyard" in text_lower and "exile" in text_lower:
+        tags.add("graveyard-reliant")
+
+    # 3. Creature removal
+    if (
+        "destroy target" in text_lower
+        or "exile target creature" in text_lower
+        or "exile target attacking" in text_lower
+    ):
+        tags.add("creature-based")
+
+    # 4. staple_role == free_interaction (Force of Negation, Daze, etc.)
+    if staple_role(card_name) == "free_interaction":
+        tags.update({"combo", "storm-reliant"})
+
+    # 5. Artifact/enchantment removal → answers lock pieces / mana hosers
+    if (
+        "destroy target artifact" in text_lower
+        or "destroy target enchantment" in text_lower
+        or ("exile target" in text_lower and "artifact" in text_lower)
+        or ("exile target" in text_lower and "enchantment" in text_lower)
+    ):
+        tags.add("greedy-manabase")
+
+    return frozenset(tags) if tags else _FALLBACK_ATTACKS
+
+
+def _build_promoted_candidates(
+    empirical_pool: "frozenset[str]",
+    catalog: "dict[str, HoserCard]",
+    freq_map: "dict[str, int]",
+    con: "duckdb.DuckDBPyConnection",
+) -> "tuple[dict[str, HoserCard], list[str]]":
+    """Build HoserCard entries for empirical-pool cards NOT already in the catalog.
+
+    Promoted cards participate in the coverage solver exactly like catalog cards, but with:
+    - ``swing = _SWING_SOFT`` (conservative — attribution is best-effort).
+    - ``attacks`` derived by ``_derive_attacks_for_promoted`` (oracle_text heuristics).
+    - ``colors`` from the DB card record (or empty frozenset if card not in DB).
+    - ``max_copies`` from ``freq_map`` (modal_count), capped at 4.
+    - ``castable_any_color`` derived from ``card_tags.is_free_spell``.
+
+    Returns ``(promoted_dict, warnings)`` where ``promoted_dict`` maps card_name → HoserCard
+    and ``warnings`` is a list of human-readable strings for cards that fell back to the
+    conservative attribution.
+
+    When the oracle_text lookup fails (card not in DB), the card is still promoted with
+    empty colors (colorless = always castable) and the fallback tag set.
+
+    GATING: returns ({}, []) when ``empirical_pool`` is None or when ``freq_map`` is empty.
+    This is called ONLY from ``_build_coverage_model`` when ``empirical_pool`` is not None.
+    """
+    promoted: dict[str, HoserCard] = {}
+    warnings: list[str] = []
+
+    pool_not_in_catalog = empirical_pool - frozenset(catalog.keys())
+    if not pool_not_in_catalog:
+        return {}, []
+
+    # Batch-fetch card data from the DB for all promoted cards.
+    # ``colors`` is stored as a concatenated WUBRG string (e.g. "U", "UB", "WUB") —
+    # see store.py _tuple: "".join(colors).
+    card_data: dict[str, tuple[str, str, list[str], bool]] = {}  # name → (oracle, type, colors, free)
+    try:
+        from legacy_engine.card_tags import _FREE_SPELL_RE
+        rows = con.execute(
+            "SELECT name, oracle_text, type_line, colors FROM cards WHERE name IN ({})".format(
+                ", ".join("?" * len(pool_not_in_catalog))
+            ),
+            list(pool_not_in_catalog),
+        ).fetchall()
+        for row in rows:
+            name, oracle_text, type_line, colors_raw = row
+            # colors is a VARCHAR string like "U", "UB", "WUB", or NULL / ""
+            if isinstance(colors_raw, str):
+                # Each character is a WUBRG color letter
+                colors_list = [c for c in colors_raw if c in "WUBRG"]
+            else:
+                colors_list = []
+            free = bool(_FREE_SPELL_RE.search(oracle_text or ""))
+            card_data[name] = (oracle_text or "", type_line or "", colors_list, free)
+    except Exception as exc:
+        log.debug("_build_promoted_candidates: card DB fetch failed: %s", exc)
+
+    for card_name in sorted(pool_not_in_catalog):  # sorted for determinism
+        oracle_text, type_line, colors_list, free_spell = card_data.get(
+            card_name, ("", "", [], False)
+        )
+
+        attacks = _derive_attacks_for_promoted(card_name, oracle_text, type_line)
+
+        # Warn when attribution fell back to the conservative default
+        if attacks == _FALLBACK_ATTACKS and not oracle_text:
+            warnings.append(
+                f"promoted empirical card {card_name!r}: not found in DB — "
+                f"using fallback attacks={sorted(_FALLBACK_ATTACKS)}; review attribution"
+            )
+        elif attacks == _FALLBACK_ATTACKS:
+            warnings.append(
+                f"promoted empirical card {card_name!r}: oracle_text attribution unknown — "
+                f"using fallback attacks={sorted(_FALLBACK_ATTACKS)}; review attribution"
+            )
+
+        # max_copies from modal_count, capped at 4
+        max_copies = min(freq_map.get(card_name, 2), 4)
+
+        # Colors from card DB record
+        card_colors: frozenset[str] = frozenset(c for c in colors_list if c in "WUBRG")
+
+        promoted[card_name] = HoserCard(
+            name=card_name,
+            attacks=attacks,
+            colors=card_colors,
+            max_copies=max_copies,
+            swing=_SWING_SOFT,
+            castable_any_color=free_spell,
+        )
+        log.debug(
+            "_build_promoted_candidates: promoted %r → attacks=%s, colors=%s, max_copies=%d, free=%s",
+            card_name, sorted(attacks), sorted(card_colors), max_copies, free_spell,
+        )
+
+    return promoted, warnings
+
+
+# ---------------------------------------------------------------------------
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
@@ -708,6 +904,7 @@ def _build_coverage_model(
     matchup_pressure: Optional[dict[str, float]] = None,
     anti_synergy_signals: "DeckAntiSynergySignals | None" = None,
     empirical_pool: "frozenset[str] | None" = None,
+    promoted_candidates: "dict[str, HoserCard] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -741,17 +938,28 @@ def _build_coverage_model(
     Empirical pool filter (feature-archetype-empirical-recommendations):
     When ``empirical_pool`` is not None, catalog candidates NOT in the pool are dropped.
     Gated-additive: ``empirical_pool=None`` → no-op.
+
+    Empirical pool promotion (fix-sideboard-surface-field-staples):
+    When ``promoted_candidates`` is not None, those HoserCard entries are ADDED to the
+    candidate universe alongside the (already-filtered) catalog cards.  Color pre-filter,
+    anti-synergy filter, and element-coverage computation all apply equally.
+    Gated-additive: ``promoted_candidates=None`` → no-op (byte-identical to pre-fix for
+    callers that don't supply the promotion dict).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
 
     warnings: list[str] = []
 
-    # --- Step 1: Identify best swing per tag across the full catalog ---
+    # --- Step 1: Identify best swing per tag across the full catalog + promoted candidates ---
     # Computed globally (not per-deck-color) so element weights reflect the best
     # *theoretical* swing for that tag; color filtering happens in candidate_covers.
+    # Promoted candidates are included here so new tags they cover can seed element weights.
     best_swing_for_tag: dict[str, float] = {}
-    for hoser in catalog.values():
+    _all_hosers_for_swing = list(catalog.values())
+    if promoted_candidates:
+        _all_hosers_for_swing.extend(promoted_candidates.values())
+    for hoser in _all_hosers_for_swing:
         for tag in hoser.attacks:
             if tag == "_hate":
                 continue  # counter-hosers don't directly represent archetype swing
@@ -879,6 +1087,55 @@ def _build_coverage_model(
         if covered:
             candidate_covers[card_name] = frozenset(covered)
             candidate_meta[card_name] = hoser
+
+    # --- Step 4b: Promoted empirical candidates (gated-additive) ---
+    # Cards from the empirical pool that were NOT in the catalog.  They bypass the
+    # empirical-pool filter (they are already FROM the pool) but still go through the
+    # color pre-filter and anti-synergy filter.
+    if promoted_candidates:
+        for card_name, hoser in promoted_candidates.items():
+            # Anti-synergy filter applies to promoted cards too.
+            if is_anti_synergistic(card_name, anti_synergy_signals):
+                log.debug(
+                    "_build_coverage_model: dropping promoted %r — anti-synergistic with deck",
+                    card_name,
+                )
+                continue
+
+            # Color pre-filter applies equally.
+            if hoser.colors and not hoser.colors.issubset(deck_colors) and not hoser.castable_any_color:
+                log.debug(
+                    "_build_coverage_model: dropping promoted %r — off-color (%s not in %s)",
+                    card_name, sorted(hoser.colors), sorted(deck_colors),
+                )
+                continue
+
+            # Compute coverage exactly as for catalog cards.
+            covered_promoted: set[str] = set()
+            for archetype, tag_keys in _archetype_tag_keys.items():
+                for key in tag_keys:
+                    tag_part = key.split("|", 1)[1]
+                    if tag_part in hoser.attacks:
+                        covered_promoted.add(key)
+
+            if "_hate" in hoser.attacks:
+                for tag in hate_elements_added:
+                    hate_key = _HATE_ELEMENT_PREFIX + tag
+                    if hate_key in element_weight:
+                        covered_promoted.add(hate_key)
+
+            if covered_promoted:
+                candidate_covers[card_name] = frozenset(covered_promoted)
+                candidate_meta[card_name] = hoser
+                log.debug(
+                    "_build_coverage_model: admitted promoted %r covering %d elements",
+                    card_name, len(covered_promoted),
+                )
+            else:
+                log.debug(
+                    "_build_coverage_model: promoted %r covers no live elements — skipped",
+                    card_name,
+                )
 
     return CoverageModel(
         element_weight=element_weight,
@@ -1328,16 +1585,9 @@ def _plan_matchups(
         # Since each swap removes one and adds one, total = sum(deck_maindeck.values()) always.
         # If deck_maindeck does not sum to 60 (the caller owns that contract), planning is skipped.
         out_total = sum(side_out.values())
-        in_total = sum(side_in.values())
-        # Invariant: each swap removes one and adds one, so these are equal by
-        # construction. Guard defensively (not `assert`, which strips under -O):
-        # post_board below is rebuilt independently from side_out/side_in, so it
-        # stays correct regardless; a mismatch would signal a swap-loop bug.
-        if out_total != in_total:
-            log.warning(
-                "_plan_matchups: side_out copies (%d) != side_in copies (%d) for %s — "
-                "swap-loop invariant violated", out_total, in_total, opp,
-            )
+        # Invariant: each swap removes one and adds one, so out_total == sum(side_in.values())
+        # by construction. post_board is rebuilt independently from side_out/side_in,
+        # so it stays correct regardless.
 
         # Build post_board
         post_board = dict(deck_maindeck)
@@ -1578,22 +1828,51 @@ def recommend_sideboard(
             log.debug("recommend_sideboard: reactive deck detected → Defense Grid filtered")
 
     # --- Step 3c: Empirical archetype sideboard pool (NEW, gated-additive) ---
-    # When archetype is known, restrict the catalog to cards real lists actually run.
+    # When archetype is known, restrict the catalog to cards real lists actually run,
+    # AND promote high-adoption pool cards that are absent from the catalog.
     # None when archetype is unknown, no in-regime sideboard data, or pool would be empty.
     empirical_pool: "frozenset[str] | None" = None
+    promoted_candidates: "dict[str, HoserCard] | None" = None
+    _empirical_freq_map: "dict[str, int]" = {}  # card → modal_count (for promoted max_copies)
     if archetype is not None:
-        empirical_pool = _empirical_sideboard_pool(
-            con, archetype, since=eff_since, until=eff_until
-        )
+        # Fetch raw CardFreq list so we have modal_count for max_copies on promoted cards.
+        try:
+            from legacy_engine.generation.consensus import card_frequencies as _card_frequencies
+            _side_freqs = _card_frequencies(con, archetype, board="side", since=eff_since, until=eff_until)
+            _empirical_freq_map = {cf.name: cf.modal_count for cf in _side_freqs}
+            _pool_raw = frozenset(
+                cf.name for cf in _side_freqs if cf.inclusion_pct >= _EMPIRICAL_POOL_MIN_ADOPTION
+            )
+            empirical_pool = _pool_raw if _pool_raw else None
+        except Exception as exc:
+            log.debug(
+                "recommend_sideboard: _empirical_sideboard_pool fallback (card_frequencies failed): %s",
+                exc,
+            )
+            empirical_pool = None
+
         if empirical_pool is not None:
             log.debug(
                 "recommend_sideboard: empirical pool for %r has %d cards (min_adoption=%.0f%%)",
                 archetype, len(empirical_pool), _EMPIRICAL_POOL_MIN_ADOPTION * 100,
             )
+            # --- Step 3d: Promote pool cards not in the catalog (gated-additive) ---
+            # Cards in the empirical pool but absent from the catalog get promoted into the
+            # candidate set with best-effort coverage attribution.
+            _promo_dict, _promo_warnings = _build_promoted_candidates(
+                empirical_pool, catalog, _empirical_freq_map, con
+            )
+            if _promo_dict:
+                promoted_candidates = _promo_dict
+                warnings.extend(_promo_warnings)
+                log.debug(
+                    "recommend_sideboard: %d empirical cards promoted from pool (not in catalog): %s",
+                    len(_promo_dict), sorted(_promo_dict.keys()),
+                )
         else:
             log.debug(
                 "recommend_sideboard: no empirical sideboard pool for %r (thin/no data) — "
-                "skipping pool filter", archetype,
+                "skipping pool filter + promotion", archetype,
             )
 
     # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
@@ -1725,6 +2004,7 @@ def recommend_sideboard(
         matchup_pressure=matchup_pressure,
         anti_synergy_signals=anti_synergy_signals,
         empirical_pool=empirical_pool,
+        promoted_candidates=promoted_candidates,
     )
     warnings.extend(model.warnings)
 

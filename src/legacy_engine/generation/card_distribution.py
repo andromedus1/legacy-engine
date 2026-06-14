@@ -223,7 +223,7 @@ def diff_deck_vs_field(
     For every card in EITHER the user's list or the field dists:
       - field_dist/modal/decks_total from dists[name] (or skip if user-only -> not_in_field).
       - user_share = field_dist.get(user_count, 0.0).
-      - is_outlier = (name in dists) AND user_share < outlier_floor AND user_count != field_modal.
+      - is_outlier = user_share < outlier_floor AND user_count != field_modal (user-only cards are already excluded above).
     A card the user runs that the field never runs in this archetype goes to not_in_field
     (never an 'outlier' — there's no distribution to be off of).
     Deterministic ordering for stable output (sort by name within each group).

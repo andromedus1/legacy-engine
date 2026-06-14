@@ -25,7 +25,15 @@ jobs:
           cache: 'pip'
 
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" ruff
+
+      - name: Lint (ruff)
+        # Non-blocking for now: 8 pre-existing findings in src/ (F401/F841 across
+        # positioning.py, subgroup.py, consensus.py, interaction_facts.py, viz/) plus
+        # ~22 in cli.py (lazy-import pattern for type-annotation strings). Wired here
+        # so new regressions are visible in the log; make blocking once pre-existing
+        # debt is cleaned up in a dedicated PR.
+        run: ruff check src/ || true
 
       - name: Test (pytest)
         run: python -m pytest -q

@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-06-02T04:04:09Z'
+generated_at: '2026-06-14T13:45:44Z'
 generated_from: frontmatter
 total_docs: 20
 by_kind:
@@ -10,19 +10,19 @@ recent:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   kind: planning
-  updated: '2026-06-01'
-- path: docs/SPEC.md
-  title: 'Spec: legacy-engine'
-  kind: planning
-  updated: '2026-06-01'
-- path: docs/VISION.md
-  title: 'Vision: legacy-engine'
-  kind: planning
-  updated: '2026-05-31'
+  updated: '2026-06-13'
 - path: docs/PRINCIPLES.md
   title: 'Principles: legacy-engine'
   kind: planning
-  updated: '2026-05-29'
+  updated: '2026-06-13'
+- path: docs/SPEC.md
+  title: 'Spec: legacy-engine'
+  kind: planning
+  updated: '2026-06-13'
+- path: docs/VISION.md
+  title: 'Vision: legacy-engine'
+  kind: planning
+  updated: '2026-06-13'
 - path: docs/briefs/ingestion-archetype-contracts/campaign.md
   title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
   kind: research
