@@ -52,6 +52,26 @@ def _window_opts(f):
     return f
 
 
+def _provenance_opt(f):
+    """Attach ``--provenance online|paper`` to an advise leaf.
+
+    Filters the expected field (and matchup matrix) to online-only or paper-only events.
+    Absent (default) → current global behavior, byte-identical.
+    When ``--field`` is also supplied, provenance still filters the matchup matrix but the
+    custom field is used as-is (a hand-rolled field has no provenance axis).
+    """
+    return click.option(
+        "--provenance",
+        type=click.Choice(["online", "paper"], case_sensitive=False),
+        default=None,
+        help=(
+            "Filter the expected field and matchup matrix to online or paper events only. "
+            "Absent → combined global field (current default). "
+            "When --field is also given, provenance filters only the matchup matrix."
+        ),
+    )(f)
+
+
 def _echo_window(res: "WindowResolution") -> None:
     """Echo the resolved window (+ degrade banner) for auditability."""
     from legacy_engine.advisory.window import WindowResolution  # noqa: F401
@@ -2156,6 +2176,7 @@ def advise() -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_positioning(
@@ -2167,6 +2188,7 @@ def advise_positioning(
     reserved: int,
     seed: int | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2189,17 +2211,23 @@ def advise_positioning(
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise positioning")
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
         matrix = inputs.matrix
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        # When --field is supplied, the custom field is used as-is; provenance only filtered
+        # the matchup matrix above. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2315,6 +2343,7 @@ def advise_positioning(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_sideboard(
@@ -2327,6 +2356,7 @@ def advise_sideboard(
     collection_file: str | None,
     owned_only: bool,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2355,12 +2385,15 @@ def advise_sideboard(
     if owned_only and cv is None:
         raise click.ClickException("--owned-only requires --collection")
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         # Resolve window. Sideboard plans default to adaptive (per-opponent ban-aware);
         # uniform/full modes disable adaptive and use the resolved since/until instead.
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
@@ -2369,7 +2402,10 @@ def advise_sideboard(
         plan_since = win.since
         plan_until = win.until
 
-        field = _load_field(con, field_text=field_text)
+        # When --field is supplied, the custom field is used as-is; provenance only affects
+        # the window's thinness check above. When --field is absent, provenance narrows the field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2485,6 +2521,7 @@ def advise_sideboard(
     help="Path to the DuckDB database file (defaults to project default).",
 )
 @click.option("--seed", type=int, default=None, help="RNG seed for deterministic positioning S.")
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_whattoplay(
@@ -2494,6 +2531,7 @@ def advise_whattoplay(
     field_file: str | None,
     db: str | None,
     seed: int | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2512,16 +2550,20 @@ def advise_whattoplay(
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise whattoplay")
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2618,6 +2660,7 @@ def advise_whattoplay(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_report(
@@ -2629,6 +2672,7 @@ def advise_report(
     reserved: int,
     seed: int | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2656,16 +2700,27 @@ def advise_report(
             "single custom field."
         )
 
+    # --provenance and --venues are mutually exclusive: venues already provides per-venue splits.
+    if provenance is not None and venues is not None:
+        raise click.ClickException(
+            "--provenance and --venues are mutually exclusive: --venues provides per-venue "
+            "splits already. Use --provenance for a single-provenance global field, or "
+            "--venues for side-by-side venue comparison."
+        )
+
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise report")
     field_text = Path(field_file).read_text() if field_file else None
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
 
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
 
@@ -2711,7 +2766,10 @@ def advise_report(
             return
 
         # ── legacy single-field mode (--venues unset; byte-identical baseline) ──
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        # When --field is supplied, the custom field is used as-is; provenance only filtered
+        # the matchup matrix. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
         report = build_field_read_report(
             con,
             mainboard,
@@ -2765,6 +2823,7 @@ def advise_report(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_refresh(
@@ -2775,6 +2834,7 @@ def advise_refresh(
     lock_threshold: float,
     max_swaps: int,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2806,7 +2866,18 @@ def advise_refresh(
     from legacy_engine.analytics.venue import resolve_venues
     from legacy_engine.ingestion import store
 
+    # --provenance and --venues are mutually exclusive: venues already embeds provenance.
+    if provenance is not None and venues is not None:
+        raise click.ClickException(
+            "--provenance and --venues are mutually exclusive for advise refresh: "
+            "use --venues to select specific venues (which carry their own provenance), "
+            "or --provenance to restrict to a single provenance venue."
+        )
+
     maindeck, sideboard_in = _resolve_deck_boards(deck, my_deck, "advise refresh")
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -2814,7 +2885,7 @@ def advise_refresh(
 
         # Resolve window (default: adaptive — ban-regime-correct per-opponent).
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
@@ -2825,8 +2896,15 @@ def advise_refresh(
             resolved_archetype = result.archetype
             click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
 
-        # Resolve venues.
-        venue_keys = [k.strip() for k in venues.split(",")] if venues else None
+        # Resolve venues. When --provenance is given (without --venues), restrict to that
+        # single provenance venue. When --venues is given, use those keys directly.
+        # Default (both None): use the standard online + paper set.
+        if provenance is not None:
+            venue_keys = [provenance]
+        elif venues is not None:
+            venue_keys = [k.strip() for k in venues.split(",")]
+        else:
+            venue_keys = None
         venue_list = resolve_venues(con, venue_keys)
 
         # Determine the window to pass (None = adaptive within tune_deck/recommend_sideboard).
@@ -3123,6 +3201,7 @@ def identify_track(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_acquire(
@@ -3132,6 +3211,7 @@ def advise_acquire(
     field_file: str | None,
     budget: float | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -3171,6 +3251,9 @@ def advise_acquire(
 
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     # Resolve price source (soft dep — absent → unpriced ranking).
     price_fn = None
     con = store.connect(db) if db else store.connect()
@@ -3187,11 +3270,14 @@ def advise_acquire(
             pass
 
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
-        field = _load_field(con, field_text=field_text)
+        # When --field is supplied, the custom field is used as-is; provenance only affects
+        # the window thinness check. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance)
 
         plan = acquire_plan(
             con,
