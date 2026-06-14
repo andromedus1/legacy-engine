@@ -339,6 +339,89 @@ _HEURISTIC_NOTE = (
     "the per-tag swing magnitude is an estimate.  Treat card ordering as indicative, not precise."
 )
 
+# Note on measurability (feature-empirical-sideboard-swings):
+# ─────────────────────────────────────────────────────────────
+# What is NOT measurable from this corpus:
+#   A true "before/after-board" win-rate swing cannot be derived.  The ``rounds``
+#   table stores only match-level aggregate scores ("2-1", "2-0") — individual
+#   game-within-match outcomes are not recorded, so game 1 (pre-board) cannot be
+#   separated from games 2–3 (post-board).
+#
+# What IS available (presence-correlational proxy):
+#   ``card_value_matchup`` from ``analytics.card_value`` provides a per-card×matchup
+#   lift estimate: how much better decks running card X in board ``"side"`` tend to win
+#   vs archetype Y, relative to the card's overall corpus average.  This is a
+#   PRESENCE-CORRELATIONAL signal (registered 75 for decks that appeared in resolved
+#   matches) — confounded by deck quality and player selection.  It is NOT causal.
+#
+#   Where this signal gates at ≥ evolving tier (n ≥ 30), it is used to replace the
+#   catalog's curated swing for that card in the ``best_swing_for_tag`` computation.
+#   This is labeled ``"data-informed"`` (not "empirical") throughout.  Where the data
+#   is thin (speculative tier, n < 30), the curated constant + caveat is retained.
+
+# Maximum swing value the empirical proxy is allowed to produce.
+# The curated _SWING_DEDICATED cap of 0.20 reflects expert estimates; the proxy
+# can exceed it on strong presence-correlational signal, but is capped to prevent
+# extreme selection effects from dominating the element weights.
+_EMPIRICAL_SWING_CAP: float = 0.35
+
+# Minimum lift magnitude to treat the proxy as a non-trivial signal.
+# Lifts smaller than this (in absolute value) are treated as noise and the catalog
+# constant is retained.
+_EMPIRICAL_SWING_MIN_LIFT: float = 0.02
+
+_DATA_INFORMED_NOTE = (
+    "Swing magnitudes (_SWING_DEDICATED=0.20, _SWING_SOFT=0.10) are curated heuristic constants.  "
+    "Where per-card corpus data cleared the ≥evolving tier (n≥30 decisive matches) for sideboard "
+    "cards vs specific matchups, a PRESENCE-CORRELATIONAL swing proxy replaced the catalog value "
+    "in the element-weight computation for those cards.  This proxy reflects how decks registering "
+    "card X in their sideboard fared vs archetype Y — confounded by deck-quality selection, NOT a "
+    "causal before/after-board measurement (individual game outcomes are not in the corpus).  Cards "
+    "with thin data (n<30) retain the curated constant + caveat.  Treat card ordering as indicative."
+)
+
+
+def empirical_swing_proxy(cv: object) -> "float | None":
+    """Convert a ``CardValue`` for a sideboard card to a presence-correlational swing proxy.
+
+    Accepts any object with ``.tier`` (str) and ``.lift`` (float) attributes, matching the
+    ``CardValue`` dataclass from ``analytics.card_value``.  Using ``object`` in the signature
+    avoids a circular import (sideboard.py ← advisory ← analytics) while remaining duck-typed.
+
+    Returns a float in ``(_EMPIRICAL_SWING_MIN_LIFT, _EMPIRICAL_SWING_CAP]`` when
+    the card value gates at ``"evolving"`` or ``"established"`` tier AND the lift is
+    above the noise floor ``_EMPIRICAL_SWING_MIN_LIFT``.  Returns ``None`` otherwise.
+
+    HONESTY CONSTRAINTS:
+    - Only positive lifts produce a proxy (negative lift = the card is present in
+      losing decks; using it as a SWING proxy would be misleading — we keep the
+      curated constant instead so the card is not penalised by selection effects).
+    - Lifts below ``_EMPIRICAL_SWING_MIN_LIFT`` are treated as noise (return None).
+    - The proxy is capped at ``_EMPIRICAL_SWING_CAP`` (0.35) to prevent extreme
+      selection-effect outliers from dominating element weights.
+    - Callers MUST label the proxy as "data-informed (presence-correlational)" and
+      MUST NOT present it as a causal win-rate delta.
+
+    Parameters
+    ----------
+    cv : CardValue (duck-typed as object)
+        A ``card_value_matchup`` result for a sideboard card (``board="side"``) vs a
+        specific opponent archetype.
+
+    Returns
+    -------
+    float | None
+        The proxy swing value, or None when the data is thin or the lift is negligible.
+    """
+    tier = getattr(cv, "tier", None)
+    lift = getattr(cv, "lift", 0.0)
+
+    if tier not in ("evolving", "established"):
+        return None
+    if lift < _EMPIRICAL_SWING_MIN_LIFT:
+        return None
+    return min(lift, _EMPIRICAL_SWING_CAP)
+
 
 # ---------------------------------------------------------------------------
 # Unit 1: HoserCard + HOSER_CATALOG
@@ -885,6 +968,7 @@ def _build_coverage_model(
     anti_synergy_signals: "DeckAntiSynergySignals | None" = None,
     empirical_pool: "frozenset[str] | None" = None,
     promoted_candidates: "dict[str, HoserCard] | None" = None,
+    card_swing_overrides: "dict[str, float] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -925,6 +1009,14 @@ def _build_coverage_model(
     anti-synergy filter, and element-coverage computation all apply equally.
     Gated-additive: ``promoted_candidates=None`` → no-op (byte-identical to pre-fix for
     callers that don't supply the promotion dict).
+
+    Data-informed swing overrides (feature-empirical-sideboard-swings):
+    When ``card_swing_overrides`` is not None, it maps card name → data-informed swing proxy
+    derived from ``empirical_swing_proxy`` (presence-correlational per-card×matchup lift).
+    For each card with an override, its override value is used instead of its catalog swing
+    when computing ``best_swing_for_tag``.  Where data is thin (not in overrides), the
+    catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
+    → no-op (byte-identical to pre-feature for callers without card-value data).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -935,6 +1027,9 @@ def _build_coverage_model(
     # Computed globally (not per-deck-color) so element weights reflect the best
     # *theoretical* swing for that tag; color filtering happens in candidate_covers.
     # Promoted candidates are included here so new tags they cover can seed element weights.
+    # Data-informed swing overrides (feature-empirical-sideboard-swings): when provided,
+    # a card's override swing (presence-correlational proxy, gate-cleared) replaces its
+    # catalog swing in this computation.  Thin-data cards retain the catalog constant.
     best_swing_for_tag: dict[str, float] = {}
     _all_hosers_for_swing = list(catalog.values())
     if promoted_candidates:
@@ -943,7 +1038,13 @@ def _build_coverage_model(
         for tag in hoser.attacks:
             if tag == "_hate":
                 continue  # counter-hosers don't directly represent archetype swing
-            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), hoser.swing)
+            # Use the data-informed override when available; otherwise use catalog swing.
+            effective_swing = (
+                card_swing_overrides[hoser.name]
+                if card_swing_overrides and hoser.name in card_swing_overrides
+                else hoser.swing
+            )
+            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), effective_swing)
 
     # --- Step 2: Build (archetype, tag) element weights ---
     # Each element is keyed as "<archetype>|<tag>" so a soft hoser covering only
@@ -1675,6 +1776,15 @@ class SideboardPackage:
     # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
     owned: "dict[str, object]" = dc_field(default_factory=dict)
     collection_aware: bool = False
+    # --- Additive fields (feature-empirical-sideboard-swings) ---
+    # swing_data_informed: True when ≥1 catalog card had its swing replaced by a
+    #   presence-correlational proxy derived from gate-clearing per-card×matchup data.
+    #   False → all swings are curated constants (heuristic_note applies fully).
+    # swing_overrides_count: number of cards whose swing was data-informed.
+    # Gate: no card-value data or all data thin → swing_data_informed=False →
+    #   heuristic_note is the full note; byte-identical element weights to pre-feature.
+    swing_data_informed: bool = False
+    swing_overrides_count: int = 0
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -1974,6 +2084,78 @@ def recommend_sideboard(
             matchup_pressure = pressure
         # else: keep matchup_pressure as None → byte-identical model
 
+    # --- Step 3e: Data-informed swing overrides (feature-empirical-sideboard-swings) ---
+    # Where per-card×matchup data for SIDEBOARD catalog cards gates at ≥evolving tier,
+    # replace the curated catalog swing with a presence-correlational proxy.
+    #
+    # HONESTY: this is NOT a before/after-board measurement — game-level data is not in
+    # the corpus (rounds table stores only match-level aggregate scores).  This proxy
+    # reflects how decks registering card X in the board fared vs archetype Y.  Thin
+    # cells (n<30) retain the curated constant.
+    #
+    # GATING: only runs when card_winrates is available (rounds corpus) and any_gate_cleared
+    # (at least one maindeck cell gated, confirming the corpus is non-trivial).  When no
+    # data → card_swing_overrides=None → _build_coverage_model is byte-identical.
+    card_swing_overrides: "dict[str, float] | None" = None
+    _swing_data_informed = False
+    _swing_overrides_count = 0
+
+    if card_winrates is not None and any_gate_cleared and _top_opponents:
+        from legacy_engine.analytics.card_value import card_values_vs
+        # Query sideboard card values for each catalog card vs each top opponent.
+        # We use the uniform window (card_winrates) rather than adaptive windows here
+        # because: (a) adaptive windows are per-opponent and catalog-card swings are
+        # global (not per-opponent); (b) using the pooled corpus maximises n for thin
+        # sideboard cells, which is more honest (fewer speculative → evolving upgrades).
+        catalog_card_names = list(catalog.keys())
+        _override_map: dict[str, list[float]] = {}  # card → list of gate-clearing proxies
+
+        for opp in _top_opponents:
+            opp_share = field.shares.get(opp, 0.0)
+            if opp_share < 0.01:
+                continue  # skip negligible-share opponents to avoid noise
+            try:
+                side_values = card_values_vs(
+                    card_winrates, catalog_card_names, "side", opp, gate=_VALUE_GATE
+                )
+            except Exception as exc:
+                log.debug(
+                    "recommend_sideboard: card_values_vs (side) failed for %r: %s", opp, exc
+                )
+                continue
+
+            for card_name, cv in side_values.items():
+                proxy = empirical_swing_proxy(cv)
+                if proxy is not None:
+                    _override_map.setdefault(card_name, []).append(proxy)
+
+        if _override_map:
+            # For each card, take the max proxy across matchups (strongest data-informed signal).
+            # Bounded by catalog swing range constraints and _EMPIRICAL_SWING_CAP (already
+            # applied in empirical_swing_proxy).
+            overrides: dict[str, float] = {}
+            for card_name, proxies in _override_map.items():
+                best_proxy = max(proxies)
+                cat_swing = catalog[card_name].swing if card_name in catalog else _SWING_SOFT
+                # Only use the proxy if it differs from the catalog swing by more than noise.
+                # We never suppress a card that the catalog rates highly — use max(proxy, catalog).
+                # This is intentionally conservative: the proxy can raise the effective swing
+                # but catalog expertise is preserved as a floor.
+                effective = max(best_proxy, cat_swing)
+                if abs(effective - cat_swing) > _EMPIRICAL_SWING_MIN_LIFT:
+                    overrides[card_name] = effective
+
+            if overrides:
+                card_swing_overrides = overrides
+                _swing_data_informed = True
+                _swing_overrides_count = len(overrides)
+                log.debug(
+                    "recommend_sideboard: data-informed swing overrides for %d catalog cards "
+                    "(presence-correlational proxy, NOT before/after-board): %s",
+                    _swing_overrides_count,
+                    {k: f"{v:.3f}" for k, v in sorted(overrides.items())},
+                )
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -1985,6 +2167,7 @@ def recommend_sideboard(
         anti_synergy_signals=anti_synergy_signals,
         empirical_pool=empirical_pool,
         promoted_candidates=promoted_candidates,
+        card_swing_overrides=card_swing_overrides,
     )
     warnings.extend(model.warnings)
 
@@ -1998,7 +2181,7 @@ def recommend_sideboard(
             reserved=reserved,
             solver_used="none",
             field_source=field.field_source,
-            heuristic_note=_HEURISTIC_NOTE,
+            heuristic_note=_DATA_INFORMED_NOTE if _swing_data_informed else _HEURISTIC_NOTE,
             warnings=tuple(warnings),
             value_informed=any_gate_cleared,
             plan_window=plan_window,
@@ -2006,6 +2189,8 @@ def recommend_sideboard(
             plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
             owned={},
             collection_aware=collection is not None,
+            swing_data_informed=_swing_data_informed,
+            swing_overrides_count=_swing_overrides_count,
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -2076,7 +2261,7 @@ def recommend_sideboard(
         reserved=reserved,
         solver_used=solver_used,
         field_source=field.field_source,
-        heuristic_note=_HEURISTIC_NOTE,
+        heuristic_note=_DATA_INFORMED_NOTE if _swing_data_informed else _HEURISTIC_NOTE,
         warnings=tuple(warnings),
         matchup_plans=matchup_plans,
         value_informed=any_gate_cleared,
@@ -2085,4 +2270,6 @@ def recommend_sideboard(
         plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
         owned=owned_annotations,
         collection_aware=collection is not None,
+        swing_data_informed=_swing_data_informed,
+        swing_overrides_count=_swing_overrides_count,
     )
