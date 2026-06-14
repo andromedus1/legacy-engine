@@ -582,6 +582,12 @@ class TunedDeck:
     # Empty string means the uniform current-regime window was used (e.g. caller passed
     # an explicit --since/--until, so adaptive per-opponent pooling was disabled).
     plan_window_label: str = ""
+    # --- Additive fields (feature-collection-aware-engine) ---
+    # owned: annotation for each recommended card (empty dict → not collection-aware).
+    # collection_aware: True iff a CollectionView was supplied.
+    # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
+    owned: "dict[str, object]" = dc_field(default_factory=dict)
+    collection_aware: bool = False
 
 
 def tune_deck(
@@ -598,6 +604,9 @@ def tune_deck(
     card_winrates=None,
     players: set[str] | None = None,
     alias_map: dict[str, str] | None = None,
+    # New optional kwarg (feature-collection-aware-engine).
+    # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
+    collection: "Optional[object]" = None,
 ) -> TunedDeck:
     """Optimise a maindeck against the field using greedy per-card-value tuning.
 
@@ -762,6 +771,7 @@ def tune_deck(
             con, field, maindeck, solver="greedy",
             archetype=archetype, since=sb_since, until=sb_until,
             card_winrates=card_winrates,
+            collection=collection,
         )
         recommended_sb = dict(sb_pkg.cards)
 
@@ -774,6 +784,11 @@ def tune_deck(
             legality_errors = validate_deck(maindeck, recommended_sb, snapshot)
 
         cov_after = coverage_value(model, maindeck) if model else cov_before
+
+        # Collection-aware annotation for the combined deck (gated-additive).
+        from legacy_engine.advisory.collection import annotate_owned
+        combined_cards = {**dict(maindeck), **recommended_sb}
+        tune_owned = annotate_owned(combined_cards, collection)  # type: ignore[arg-type]
 
         return TunedDeck(
             archetype=archetype,
@@ -791,6 +806,8 @@ def tune_deck(
             reason=reason,
             legality_errors=legality_errors,
             plan_window_label=sb_pkg.plan_window_label,
+            owned=tune_owned,
+            collection_aware=collection is not None,
         )
 
     # ── Greedy swap loop (per-card-value objective) ───────────────────────────
@@ -833,6 +850,7 @@ def tune_deck(
         con, field, final_main, solver="greedy",
         archetype=archetype, since=sb_since, until=sb_until,
         card_winrates=card_winrates,
+        collection=collection,
     )
     recommended_sb = dict(sb_pkg.cards)
 
@@ -858,6 +876,11 @@ def tune_deck(
         v_after = v_before  # no swaps applied
         reason += " [REVERTED: final legality failed; returned consensus main]"
 
+    # Collection-aware annotation for the combined deck (gated-additive).
+    from legacy_engine.advisory.collection import annotate_owned
+    combined_cards = {**final_main, **recommended_sb}
+    tune_owned = annotate_owned(combined_cards, collection)  # type: ignore[arg-type]
+
     return TunedDeck(
         archetype=archetype,
         maindeck=final_main,
@@ -874,4 +897,6 @@ def tune_deck(
         reason=reason,
         legality_errors=legality_errors,
         plan_window_label=sb_pkg.plan_window_label,
+        owned=tune_owned,
+        collection_aware=collection is not None,
     )
