@@ -1,7 +1,7 @@
 ---
 id: fix-infra-ijson-and-ci-lint
 kind: story
-stage: review
+stage: done
 tags: [infra]
 parent: null
 depends_on: []
