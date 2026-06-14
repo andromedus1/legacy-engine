@@ -1,7 +1,7 @@
 ---
 id: epic-advisory-output-honesty
 kind: epic
-stage: implementing
+stage: done
 tags: [advisory, analytics, correctness]
 parent: null
 depends_on: []

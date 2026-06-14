@@ -30,6 +30,7 @@ def _ranking(s_mean, s_quantile, data_coverage, low_coverage) -> DeckRanking:
         quantile_level=0.25,
         data_coverage=data_coverage,
         low_coverage=set(low_coverage),
+        coverage_caveated=set(low_coverage),  # mirror low_coverage for test purposes
         pairwise={},
         field_source="global",
     )

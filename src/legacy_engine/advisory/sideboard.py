@@ -83,8 +83,10 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 from typing import Optional
 
 import duckdb
@@ -337,6 +339,89 @@ _HEURISTIC_NOTE = (
     "the per-tag swing magnitude is an estimate.  Treat card ordering as indicative, not precise."
 )
 
+# Note on measurability (feature-empirical-sideboard-swings):
+# ─────────────────────────────────────────────────────────────
+# What is NOT measurable from this corpus:
+#   A true "before/after-board" win-rate swing cannot be derived.  The ``rounds``
+#   table stores only match-level aggregate scores ("2-1", "2-0") — individual
+#   game-within-match outcomes are not recorded, so game 1 (pre-board) cannot be
+#   separated from games 2–3 (post-board).
+#
+# What IS available (presence-correlational proxy):
+#   ``card_value_matchup`` from ``analytics.card_value`` provides a per-card×matchup
+#   lift estimate: how much better decks running card X in board ``"side"`` tend to win
+#   vs archetype Y, relative to the card's overall corpus average.  This is a
+#   PRESENCE-CORRELATIONAL signal (registered 75 for decks that appeared in resolved
+#   matches) — confounded by deck quality and player selection.  It is NOT causal.
+#
+#   Where this signal gates at ≥ evolving tier (n ≥ 30), it is used to replace the
+#   catalog's curated swing for that card in the ``best_swing_for_tag`` computation.
+#   This is labeled ``"data-informed"`` (not "empirical") throughout.  Where the data
+#   is thin (speculative tier, n < 30), the curated constant + caveat is retained.
+
+# Maximum swing value the empirical proxy is allowed to produce.
+# The curated _SWING_DEDICATED cap of 0.20 reflects expert estimates; the proxy
+# can exceed it on strong presence-correlational signal, but is capped to prevent
+# extreme selection effects from dominating the element weights.
+_EMPIRICAL_SWING_CAP: float = 0.35
+
+# Minimum lift magnitude to treat the proxy as a non-trivial signal.
+# Lifts smaller than this (in absolute value) are treated as noise and the catalog
+# constant is retained.
+_EMPIRICAL_SWING_MIN_LIFT: float = 0.02
+
+_DATA_INFORMED_NOTE = (
+    "Swing magnitudes (_SWING_DEDICATED=0.20, _SWING_SOFT=0.10) are curated heuristic constants.  "
+    "Where per-card corpus data cleared the ≥evolving tier (n≥30 decisive matches) for sideboard "
+    "cards vs specific matchups, a PRESENCE-CORRELATIONAL swing proxy replaced the catalog value "
+    "in the element-weight computation for those cards.  This proxy reflects how decks registering "
+    "card X in their sideboard fared vs archetype Y — confounded by deck-quality selection, NOT a "
+    "causal before/after-board measurement (individual game outcomes are not in the corpus).  Cards "
+    "with thin data (n<30) retain the curated constant + caveat.  Treat card ordering as indicative."
+)
+
+
+def empirical_swing_proxy(cv: object) -> "float | None":
+    """Convert a ``CardValue`` for a sideboard card to a presence-correlational swing proxy.
+
+    Accepts any object with ``.tier`` (str) and ``.lift`` (float) attributes, matching the
+    ``CardValue`` dataclass from ``analytics.card_value``.  Using ``object`` in the signature
+    avoids a circular import (sideboard.py ← advisory ← analytics) while remaining duck-typed.
+
+    Returns a float in ``(_EMPIRICAL_SWING_MIN_LIFT, _EMPIRICAL_SWING_CAP]`` when
+    the card value gates at ``"evolving"`` or ``"established"`` tier AND the lift is
+    above the noise floor ``_EMPIRICAL_SWING_MIN_LIFT``.  Returns ``None`` otherwise.
+
+    HONESTY CONSTRAINTS:
+    - Only positive lifts produce a proxy (negative lift = the card is present in
+      losing decks; using it as a SWING proxy would be misleading — we keep the
+      curated constant instead so the card is not penalised by selection effects).
+    - Lifts below ``_EMPIRICAL_SWING_MIN_LIFT`` are treated as noise (return None).
+    - The proxy is capped at ``_EMPIRICAL_SWING_CAP`` (0.35) to prevent extreme
+      selection-effect outliers from dominating element weights.
+    - Callers MUST label the proxy as "data-informed (presence-correlational)" and
+      MUST NOT present it as a causal win-rate delta.
+
+    Parameters
+    ----------
+    cv : CardValue (duck-typed as object)
+        A ``card_value_matchup`` result for a sideboard card (``board="side"``) vs a
+        specific opponent archetype.
+
+    Returns
+    -------
+    float | None
+        The proxy swing value, or None when the data is thin or the lift is negligible.
+    """
+    tier = getattr(cv, "tier", None)
+    lift = getattr(cv, "lift", 0.0)
+
+    if tier not in ("evolving", "established"):
+        return None
+    if lift < _EMPIRICAL_SWING_MIN_LIFT:
+        return None
+    return min(lift, _EMPIRICAL_SWING_CAP)
+
 
 # ---------------------------------------------------------------------------
 # Unit 1: HoserCard + HOSER_CATALOG
@@ -366,183 +451,139 @@ class HoserCard:
     castable_any_color: bool = False
 
 
-# Seeded from docs/briefs/legacy-metagame.md §6 "Hosers by target"
-# Colors use single WUBRG chars; empty = colorless.
-# swing: _SWING_DEDICATED (0.20) for dedicated hate, _SWING_SOFT (0.10) for soft/partial answers.
-HOSER_CATALOG: dict[str, HoserCard] = {
-    # --- Graveyard hate → graveyard-reliant ---
-    "Surgical Extraction": HoserCard(
-        name="Surgical Extraction",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-        # Phyrexian mana: castable for 2 life in any deck regardless of color identity.
-        castable_any_color=True,
-    ),
-    "Faerie Macabre": HoserCard(
-        name="Faerie Macabre",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-        # Free discard activation: usable at zero mana cost in any deck.
-        castable_any_color=True,
-    ),
-    "Leyline of the Void": HoserCard(
-        name="Leyline of the Void",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Endurance": HoserCard(
-        name="Endurance",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Containment Priest": HoserCard(
-        name="Containment Priest",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"W"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Grafdigger's Cage": HoserCard(
-        name="Grafdigger's Cage",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Nihil Spellbomb": HoserCard(
-        name="Nihil Spellbomb",
-        attacks=frozenset({"graveyard-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Combo hate → combo + storm-reliant ---
-    "Force of Will": HoserCard(
-        name="Force of Will",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Flusterstorm": HoserCard(
-        name="Flusterstorm",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Mindbreak Trap": HoserCard(
-        name="Mindbreak Trap",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"U"}),
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-    ),
-    "Thoughtseize": HoserCard(
-        name="Thoughtseize",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Duress": HoserCard(
-        name="Duress",
-        attacks=frozenset({"combo", "storm-reliant"}),
-        colors=frozenset({"B"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Counter-hosers → _hate pseudo-elements ---
-    # These defend the deck against opposing hate rather than attacking archetypes.
-    "Veil of Summer": HoserCard(
-        name="Veil of Summer",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Defense Grid": HoserCard(
-        name="Defense Grid",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Carpet of Flowers": HoserCard(
-        name="Carpet of Flowers",
-        attacks=frozenset({"_hate"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Greedy-manabase hate → greedy-manabase ---
-    "Blood Moon": HoserCard(
-        name="Blood Moon",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"R"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Back to Basics": HoserCard(
-        name="Back to Basics",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Wasteland": HoserCard(
-        name="Wasteland",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset(),          # colorless land
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    # --- Artifact/enchantment removal → greedy-manabase (answers Blood Moon/Back to Basics/Chalice) ---
-    "Force of Vigor": HoserCard(
-        name="Force of Vigor",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"G"}),
-        max_copies=4,
-        swing=_SWING_DEDICATED,
-    ),
-    "Krosan Grip": HoserCard(
-        name="Krosan Grip",
-        attacks=frozenset({"greedy-manabase"}),
-        colors=frozenset({"G"}),
-        max_copies=3,
-        swing=_SWING_SOFT,
-    ),
-    # --- Additional useful hosers ---
-    "Pyroblast": HoserCard(
-        name="Pyroblast",
-        attacks=frozenset({"combo", "low-interaction"}),
-        colors=frozenset({"R"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Hydroblast": HoserCard(
-        name="Hydroblast",
-        attacks=frozenset({"greedy-manabase", "low-interaction"}),
-        colors=frozenset({"U"}),
-        max_copies=4,
-        swing=_SWING_SOFT,
-    ),
-    "Chalice of the Void": HoserCard(
-        name="Chalice of the Void",
-        attacks=frozenset({"combo", "storm-reliant", "low-curve"}),
-        colors=frozenset(),          # colorless artifact
-        max_copies=2,
-        swing=_SWING_DEDICATED,
-    ),
+# ---------------------------------------------------------------------------
+# Hoser catalog loader — reads from the editable JSON data file.
+# Mirrors the variants-registry load pattern (config.HOSERS_REGISTRY_PATH).
+# ---------------------------------------------------------------------------
+
+# Swing-alias map: JSON authors write "dedicated" / "soft" instead of raw floats
+# so the data file is self-documenting and immune to constant renames in code.
+_SWING_ALIAS: dict[str, float] = {
+    "dedicated": _SWING_DEDICATED,
+    "soft": _SWING_SOFT,
 }
+
+_VALID_COLORS = frozenset("WUBRG")
+
+
+def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
+    """Load and validate a hoser catalog from a JSON data file.
+
+    Format: ``{"version": "<date>", "hosers": [ { ... }, ... ]}``.
+
+    Each hoser entry must have:
+      ``name``          (str)
+      ``attacks``       (list of tag strings; non-empty)
+      ``colors``        (list of WUBRG single-char strings; empty = colorless)
+      ``max_copies``    (int ≥ 1)
+      ``swing``         (float in (0,1) OR the aliases "dedicated" / "soft")
+
+    Optional:
+      ``castable_any_color`` (bool, default False)
+      ``_comment``           (str, ignored)
+
+    Raises ``ValueError`` on schema violations (bad swing alias, empty attacks,
+    invalid colors, max_copies < 1) or ``FileNotFoundError`` when the path is absent.
+    Duplicate names raise ``ValueError`` so catalog integrity is enforced at load time.
+
+    This is a module-level loader called once at import; the result is cached as
+    ``HOSER_CATALOG``.  Callers that need a different catalog can call
+    ``load_hoser_catalog`` directly.
+    """
+    path = Path(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+
+    hosers_raw = raw.get("hosers")
+    if not isinstance(hosers_raw, list):
+        raise ValueError(f"load_hoser_catalog: 'hosers' must be a list in {path}")
+
+    catalog: dict[str, HoserCard] = {}
+    for idx, entry in enumerate(hosers_raw):
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"load_hoser_catalog: entry[{idx}] missing or empty 'name'")
+
+        if name in catalog:
+            raise ValueError(
+                f"load_hoser_catalog: duplicate hoser name {name!r} at entry[{idx}] in {path}"
+            )
+
+        attacks_raw = entry.get("attacks")
+        if not isinstance(attacks_raw, list) or not attacks_raw:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'attacks' must be a non-empty list"
+            )
+        attacks = frozenset(str(t) for t in attacks_raw)
+
+        colors_raw = entry.get("colors")
+        if not isinstance(colors_raw, list):
+            raise ValueError(f"load_hoser_catalog: {name!r} 'colors' must be a list")
+        colors: frozenset[str] = frozenset(
+            c for c in (str(x) for x in colors_raw) if c in _VALID_COLORS
+        )
+        # Warn on unrecognized color chars (silently drop; not a hard error).
+        unknown = [x for x in colors_raw if str(x) not in _VALID_COLORS]
+        if unknown:
+            log.warning(
+                "load_hoser_catalog: %r has unrecognized color chars %s (dropped)", name, unknown
+            )
+
+        max_copies = entry.get("max_copies")
+        if not isinstance(max_copies, int) or max_copies < 1:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'max_copies' must be an int ≥ 1"
+            )
+
+        swing_raw = entry.get("swing")
+        if isinstance(swing_raw, str):
+            if swing_raw not in _SWING_ALIAS:
+                raise ValueError(
+                    f"load_hoser_catalog: {name!r} swing alias {swing_raw!r} unknown; "
+                    f"use 'dedicated', 'soft', or a float"
+                )
+            swing = _SWING_ALIAS[swing_raw]
+        elif isinstance(swing_raw, (int, float)):
+            swing = float(swing_raw)
+        else:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'swing' must be a float or alias string"
+            )
+        if not (0.0 < swing < 1.0):
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} swing={swing} out of (0, 1)"
+            )
+
+        castable_any_color = bool(entry.get("castable_any_color", False))
+
+        catalog[name] = HoserCard(
+            name=name,
+            attacks=attacks,
+            colors=colors,
+            max_copies=max_copies,
+            swing=swing,
+            castable_any_color=castable_any_color,
+        )
+
+    return catalog
+
+
+# Load the catalog from the shipped data file at module import time.
+# The path is resolved from config so tests can override HOSERS_REGISTRY_PATH.
+# Inline the default path here (same pattern as variants: no runtime import of config
+# in the hot path — the path is a constant once the module loads).
+def _load_default_hoser_catalog() -> "dict[str, HoserCard]":
+    """Load HOSER_CATALOG from the shipped data file; fall back to empty dict on error."""
+    try:
+        from legacy_engine.config import HOSERS_REGISTRY_PATH
+        return load_hoser_catalog(HOSERS_REGISTRY_PATH)
+    except Exception as exc:
+        log.error(
+            "HOSER_CATALOG: failed to load from data file — returning empty catalog: %s", exc
+        )
+        return {}
+
+
+HOSER_CATALOG: dict[str, HoserCard] = _load_default_hoser_catalog()
 
 
 # ---------------------------------------------------------------------------
@@ -927,6 +968,7 @@ def _build_coverage_model(
     anti_synergy_signals: "DeckAntiSynergySignals | None" = None,
     empirical_pool: "frozenset[str] | None" = None,
     promoted_candidates: "dict[str, HoserCard] | None" = None,
+    card_swing_overrides: "dict[str, float] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -967,6 +1009,14 @@ def _build_coverage_model(
     anti-synergy filter, and element-coverage computation all apply equally.
     Gated-additive: ``promoted_candidates=None`` → no-op (byte-identical to pre-fix for
     callers that don't supply the promotion dict).
+
+    Data-informed swing overrides (feature-empirical-sideboard-swings):
+    When ``card_swing_overrides`` is not None, it maps card name → data-informed swing proxy
+    derived from ``empirical_swing_proxy`` (presence-correlational per-card×matchup lift).
+    For each card with an override, its override value is used instead of its catalog swing
+    when computing ``best_swing_for_tag``.  Where data is thin (not in overrides), the
+    catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
+    → no-op (byte-identical to pre-feature for callers without card-value data).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -977,6 +1027,9 @@ def _build_coverage_model(
     # Computed globally (not per-deck-color) so element weights reflect the best
     # *theoretical* swing for that tag; color filtering happens in candidate_covers.
     # Promoted candidates are included here so new tags they cover can seed element weights.
+    # Data-informed swing overrides (feature-empirical-sideboard-swings): when provided,
+    # a card's override swing (presence-correlational proxy, gate-cleared) replaces its
+    # catalog swing in this computation.  Thin-data cards retain the catalog constant.
     best_swing_for_tag: dict[str, float] = {}
     _all_hosers_for_swing = list(catalog.values())
     if promoted_candidates:
@@ -985,7 +1038,13 @@ def _build_coverage_model(
         for tag in hoser.attacks:
             if tag == "_hate":
                 continue  # counter-hosers don't directly represent archetype swing
-            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), hoser.swing)
+            # Use the data-informed override when available; otherwise use catalog swing.
+            effective_swing = (
+                card_swing_overrides[hoser.name]
+                if card_swing_overrides and hoser.name in card_swing_overrides
+                else hoser.swing
+            )
+            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), effective_swing)
 
     # --- Step 2: Build (archetype, tag) element weights ---
     # Each element is keyed as "<archetype>|<tag>" so a soft hoser covering only
@@ -1670,6 +1729,177 @@ def _plan_matchups(
 
 
 # ---------------------------------------------------------------------------
+# Unit 5: ConsideringCard + _rank_considering_pool
+# ---------------------------------------------------------------------------
+
+# Maximum number of candidates to surface in the considering pool.
+# Chosen 15 + considering up to 15 = ~30 total context (as specified).
+_CONSIDERING_CAP = 15
+
+
+@dataclass(frozen=True)
+class ConsideringCard:
+    """One entry in the "considering" (bubble) pool emitted by ``recommend_sideboard``.
+
+    These are ranked candidates that the solver evaluated but did NOT select —
+    the next-best cards by marginal coverage value that were just outside the
+    chosen 15.  They represent flex options and meta-call alternatives.
+
+    ``card``:           card name.
+    ``marginal_gain``:  coverage-model marginal gain given the final solution's
+                        coverage state (what the engine would earn by adding this
+                        card next — the residual opportunity cost).
+    ``covers_elements``: frozenset of element IDs (archetype|tag or _hate:tag) this
+                        card covers that are not yet fully saturated by the solution.
+    ``label``:          human-readable "why on bubble" string (coverage contribution
+                        and value tier; e.g. "covers graveyard-reliant (Dredge 18%)").
+    ``promoted``:       True when the card was promoted from the empirical pool (not
+                        in the hand-curated catalog) — indicates best-effort attribution.
+    """
+
+    card: str
+    marginal_gain: float
+    covers_elements: frozenset[str]
+    label: str
+    promoted: bool
+
+
+def _rank_considering_pool(
+    model: CoverageModel,
+    final_cards: dict[str, int],
+    *,
+    cap: int = _CONSIDERING_CAP,
+    promoted_names: "frozenset[str] | None" = None,
+) -> "list[ConsideringCard]":
+    """Rank candidates NOT in the final 15 by residual marginal coverage gain.
+
+    Computes the coverage state from ``final_cards``, then for every candidate
+    not yet at max_copies evaluates its marginal gain given that state.
+    Returns the top-``cap`` candidates sorted by marginal_gain DESC, card_name ASC
+    (deterministic tie-break).
+
+    Pure function — no DB, no IO.  Satisfies the objective-search-split pattern
+    (the heavy DB work is already done in recommend_sideboard; this is the pure loop).
+
+    Parameters
+    ----------
+    model
+        The CoverageModel used to solve for ``final_cards``.
+    final_cards
+        The chosen sideboard (card → copies).
+    cap
+        Maximum number of candidates to return (default ``_CONSIDERING_CAP`` = 15).
+    promoted_names
+        Set of card names that were promoted from the empirical pool (not in catalog).
+        Used to set ``ConsideringCard.promoted``.
+
+    Returns
+    -------
+    list[ConsideringCard]
+        Ranked list of bubble candidates (may be shorter than ``cap`` if fewer
+        candidates exist).
+    """
+    if promoted_names is None:
+        promoted_names = frozenset()
+
+    # Build coverage counts from final solution (element → copies covered).
+    cov_counts: dict[str, int] = {}
+    for card_name, copies in final_cards.items():
+        for e in model.candidate_covers.get(card_name, frozenset()):
+            cov_counts[e] = cov_counts.get(e, 0) + copies
+
+    candidates: list[ConsideringCard] = []
+
+    for card_name, element_ids in model.candidate_covers.items():
+        current_copies = final_cards.get(card_name, 0)
+        max_copies = model.candidate_meta[card_name].max_copies
+
+        # Skip if already at max_copies (fully placed in the solution).
+        if current_copies >= max_copies:
+            continue
+
+        # Compute residual marginal gain (as if we added one more copy).
+        gain = 0.0
+        residual_elements: set[str] = set()
+        for e in element_ids:
+            w = model.element_weight.get(e, 0.0)
+            if w > 0.0:
+                cov_e = cov_counts.get(e, 0)
+                mg = _marginal_g(cov_e + 1)
+                gain += w * mg
+                if mg > 0.0:
+                    residual_elements.add(e)
+
+        if gain <= 0.0:
+            continue  # no residual coverage value → skip
+
+        # Build human-readable label for what this card covers.
+        label = _considering_label(card_name, element_ids, model, cov_counts)
+
+        candidates.append(ConsideringCard(
+            card=card_name,
+            marginal_gain=gain,
+            covers_elements=frozenset(residual_elements),
+            label=label,
+            promoted=card_name in promoted_names,
+        ))
+
+    # Sort: marginal gain DESC, card name ASC (deterministic tie-break).
+    candidates.sort(key=lambda c: (-c.marginal_gain, c.card))
+    return candidates[:cap]
+
+
+def _considering_label(
+    card_name: str,
+    element_ids: "frozenset[str]",
+    model: CoverageModel,
+    cov_counts: "dict[str, int]",
+) -> str:
+    """Build a concise label explaining why a card is on the considering bubble.
+
+    Extracts the top 1–2 highest-weight uncovered (or under-covered) elements
+    this card addresses and formats them as: "covers <tag> (<archetype> N%),
+    <tag2>".
+
+    Pure function — no DB.
+    """
+    # Collect (element_key, residual_weight) pairs for this card.
+    element_gains: list[tuple[str, float]] = []
+    for e in element_ids:
+        w = model.element_weight.get(e, 0.0)
+        if w <= 0.0:
+            continue
+        cov_e = cov_counts.get(e, 0)
+        mg = _marginal_g(cov_e + 1)
+        residual_w = w * mg
+        if residual_w > 0.0:
+            element_gains.append((e, residual_w))
+
+    if not element_gains:
+        return f"{card_name}: no uncovered elements (low residual)"
+
+    # Sort by residual weight DESC to surface the most important coverage.
+    element_gains.sort(key=lambda x: -x[1])
+
+    parts: list[str] = []
+    for e, _ in element_gains[:2]:
+        if "|" in e:
+            # Archetype|tag element — format as "tag (Archetype N%)"
+            arch, tag = e.split("|", 1)
+            w = model.element_weight.get(e, 0.0)
+            # Extract archetype share from element weight / best_swing (not directly
+            # available; approximate share from weight so label is indicative).
+            parts.append(f"{tag} ({arch})")
+        elif e.startswith("_hate:"):
+            tag = e[len("_hate:"):]
+            parts.append(f"anti-hate:{tag}")
+        else:
+            parts.append(e)
+
+    return "covers " + ", ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -1717,6 +1947,21 @@ class SideboardPackage:
     # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
     owned: "dict[str, object]" = dc_field(default_factory=dict)
     collection_aware: bool = False
+    # --- Additive fields (feature-empirical-sideboard-swings) ---
+    # swing_data_informed: True when ≥1 catalog card had its swing replaced by a
+    #   presence-correlational proxy derived from gate-clearing per-card×matchup data.
+    #   False → all swings are curated constants (heuristic_note applies fully).
+    # swing_overrides_count: number of cards whose swing was data-informed.
+    # Gate: no card-value data or all data thin → swing_data_informed=False →
+    #   heuristic_note is the full note; byte-identical element weights to pre-feature.
+    swing_data_informed: bool = False
+    swing_overrides_count: int = 0
+    # --- Additive fields (feature-considering-cards-pool) ---
+    # considering: ranked bubble candidates NOT selected in the final 15, sorted by
+    #   residual marginal coverage gain.  Always populated (up to _CONSIDERING_CAP ≈ 15).
+    #   Empty tuple when there are no remaining candidates (degenerate / budget-filled model).
+    #   Gated-additive: existing callers that don't use this field see no change in cards/trace.
+    considering: "tuple[ConsideringCard, ...]" = dc_field(default_factory=tuple)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -2016,6 +2261,78 @@ def recommend_sideboard(
             matchup_pressure = pressure
         # else: keep matchup_pressure as None → byte-identical model
 
+    # --- Step 3e: Data-informed swing overrides (feature-empirical-sideboard-swings) ---
+    # Where per-card×matchup data for SIDEBOARD catalog cards gates at ≥evolving tier,
+    # replace the curated catalog swing with a presence-correlational proxy.
+    #
+    # HONESTY: this is NOT a before/after-board measurement — game-level data is not in
+    # the corpus (rounds table stores only match-level aggregate scores).  This proxy
+    # reflects how decks registering card X in the board fared vs archetype Y.  Thin
+    # cells (n<30) retain the curated constant.
+    #
+    # GATING: only runs when card_winrates is available (rounds corpus) and any_gate_cleared
+    # (at least one maindeck cell gated, confirming the corpus is non-trivial).  When no
+    # data → card_swing_overrides=None → _build_coverage_model is byte-identical.
+    card_swing_overrides: "dict[str, float] | None" = None
+    _swing_data_informed = False
+    _swing_overrides_count = 0
+
+    if card_winrates is not None and any_gate_cleared and _top_opponents:
+        from legacy_engine.analytics.card_value import card_values_vs
+        # Query sideboard card values for each catalog card vs each top opponent.
+        # We use the uniform window (card_winrates) rather than adaptive windows here
+        # because: (a) adaptive windows are per-opponent and catalog-card swings are
+        # global (not per-opponent); (b) using the pooled corpus maximises n for thin
+        # sideboard cells, which is more honest (fewer speculative → evolving upgrades).
+        catalog_card_names = list(catalog.keys())
+        _override_map: dict[str, list[float]] = {}  # card → list of gate-clearing proxies
+
+        for opp in _top_opponents:
+            opp_share = field.shares.get(opp, 0.0)
+            if opp_share < 0.01:
+                continue  # skip negligible-share opponents to avoid noise
+            try:
+                side_values = card_values_vs(
+                    card_winrates, catalog_card_names, "side", opp, gate=_VALUE_GATE
+                )
+            except Exception as exc:
+                log.debug(
+                    "recommend_sideboard: card_values_vs (side) failed for %r: %s", opp, exc
+                )
+                continue
+
+            for card_name, cv in side_values.items():
+                proxy = empirical_swing_proxy(cv)
+                if proxy is not None:
+                    _override_map.setdefault(card_name, []).append(proxy)
+
+        if _override_map:
+            # For each card, take the max proxy across matchups (strongest data-informed signal).
+            # Bounded by catalog swing range constraints and _EMPIRICAL_SWING_CAP (already
+            # applied in empirical_swing_proxy).
+            overrides: dict[str, float] = {}
+            for card_name, proxies in _override_map.items():
+                best_proxy = max(proxies)
+                cat_swing = catalog[card_name].swing if card_name in catalog else _SWING_SOFT
+                # Only use the proxy if it differs from the catalog swing by more than noise.
+                # We never suppress a card that the catalog rates highly — use max(proxy, catalog).
+                # This is intentionally conservative: the proxy can raise the effective swing
+                # but catalog expertise is preserved as a floor.
+                effective = max(best_proxy, cat_swing)
+                if abs(effective - cat_swing) > _EMPIRICAL_SWING_MIN_LIFT:
+                    overrides[card_name] = effective
+
+            if overrides:
+                card_swing_overrides = overrides
+                _swing_data_informed = True
+                _swing_overrides_count = len(overrides)
+                log.debug(
+                    "recommend_sideboard: data-informed swing overrides for %d catalog cards "
+                    "(presence-correlational proxy, NOT before/after-board): %s",
+                    _swing_overrides_count,
+                    {k: f"{v:.3f}" for k, v in sorted(overrides.items())},
+                )
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -2027,6 +2344,7 @@ def recommend_sideboard(
         anti_synergy_signals=anti_synergy_signals,
         empirical_pool=empirical_pool,
         promoted_candidates=promoted_candidates,
+        card_swing_overrides=card_swing_overrides,
     )
     warnings.extend(model.warnings)
 
@@ -2040,7 +2358,7 @@ def recommend_sideboard(
             reserved=reserved,
             solver_used="none",
             field_source=field.field_source,
-            heuristic_note=_HEURISTIC_NOTE,
+            heuristic_note=_DATA_INFORMED_NOTE if _swing_data_informed else _HEURISTIC_NOTE,
             warnings=tuple(warnings),
             value_informed=any_gate_cleared,
             plan_window=plan_window,
@@ -2048,6 +2366,8 @@ def recommend_sideboard(
             plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
             owned={},
             collection_aware=collection is not None,
+            swing_data_informed=_swing_data_informed,
+            swing_overrides_count=_swing_overrides_count,
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -2105,6 +2425,16 @@ def recommend_sideboard(
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
             warnings.append(f"per-matchup plan failed: {exc}")
 
+    # --- Step 6c: Considering pool (feature-considering-cards-pool, always-on additive) ---
+    # Rank all model candidates not fully selected in final_cards by their residual
+    # marginal gain given the final coverage state.  This is the "what would we pick
+    # next" computation — the bubble of flex / meta-call alternatives the solver weighed.
+    # Gated-additive: final_cards / model / trace are byte-identical to pre-feature.
+    _promoted_names = frozenset(promoted_candidates.keys()) if promoted_candidates else frozenset()
+    considering_pool = _rank_considering_pool(
+        model, final_cards, promoted_names=_promoted_names
+    )
+
     # --- Collection-aware annotation (gated-additive, feature-collection-aware-engine) ---
     # annotate_owned returns {} when collection is None → gate closed → byte-identical.
     from legacy_engine.advisory.collection import annotate_owned
@@ -2118,7 +2448,7 @@ def recommend_sideboard(
         reserved=reserved,
         solver_used=solver_used,
         field_source=field.field_source,
-        heuristic_note=_HEURISTIC_NOTE,
+        heuristic_note=_DATA_INFORMED_NOTE if _swing_data_informed else _HEURISTIC_NOTE,
         warnings=tuple(warnings),
         matchup_plans=matchup_plans,
         value_informed=any_gate_cleared,
@@ -2127,4 +2457,7 @@ def recommend_sideboard(
         plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
         owned=owned_annotations,
         collection_aware=collection is not None,
+        swing_data_informed=_swing_data_informed,
+        swing_overrides_count=_swing_overrides_count,
+        considering=tuple(considering_pool),
     )

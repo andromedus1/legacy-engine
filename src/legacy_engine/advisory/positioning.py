@@ -474,10 +474,27 @@ def positioning_score(
     # ── Warnings ─────────────────────────────────────────────────────────────
     warnings_list: list[str] = list(field.warnings)
 
-    imputed_set = frozenset(no_data_list)
-
-    # Also flag field archetypes listed in field.no_data (custom field)
-    all_imputed = imputed_set | (field.no_data & frozenset(field_archetypes))
+    # ── imputed — archetypes that were actually imputed in the SCORING field ──
+    # When restricted=True, S was scored on the covered sub-field; excluded opponents
+    # were dropped entirely (not imputed).  Listing them in `imputed` is misleading
+    # ("imputed N no-data opponent(s)" fires for opponents we never scored against).
+    # Fix: restrict the imputed set to scoring-field archetypes only.
+    # When s_computable=False, no MC ran at all — nothing was imputed.
+    if not s_computable:
+        # Zero-coverage: S not computed; nothing was imputed
+        all_imputed: frozenset[str] = frozenset()
+    elif restricted:
+        # Scoring field is the covered sub-field; re-derive no_data only within it.
+        scoring_field_archetypes = list(scoring_field.shares)
+        _, s_n, s_is_mirror, s_no_data_list = _row_winrate_inputs(
+            matrix, deck_archetype, scoring_field_archetypes
+        )
+        s_imputed_set = frozenset(s_no_data_list)
+        all_imputed = s_imputed_set | (scoring_field.no_data & frozenset(scoring_field_archetypes))
+    else:
+        imputed_set = frozenset(no_data_list)
+        # Also flag field archetypes listed in field.no_data (custom field)
+        all_imputed = imputed_set | (field.no_data & frozenset(field_archetypes))
 
     if all_imputed:
         warnings_list.append(
@@ -543,7 +560,12 @@ class DeckRanking:
         Secondary field: P(S_D = max) across shared-field draws.  Kept for
         diagnostics and display — no longer the sort key.
     s_mean
-        Posterior mean S per deck.
+        Posterior mean S per deck.  Always the FULL-FIELD shared-MC value —
+        ``rank_decks`` uses one shared sampled field for all candidates so
+        P(best) is honest; per-deck restriction to different sub-fields is
+        not possible here.  Consumers should display "S (full-field)" for
+        decks in ``coverage_caveated`` rather than presenting this as if it
+        were the same restricted-sub-field S that ``positioning_score`` shows.
     s_ci
         (2.5th, 97.5th) credible interval per deck.
     s_quantile
@@ -557,6 +579,13 @@ class DeckRanking:
     low_coverage
         Set of deck archetypes whose ``data_coverage < min_coverage``.  These
         are flagged, not silently dropped — they remain in ``decks``.
+    coverage_caveated
+        Set of deck archetypes whose ``data_coverage < _COVERAGE_RESTRICT_THRESHOLD``
+        (0.85) — the same threshold at which ``positioning_score`` auto-restricts
+        the single-deck view to the covered sub-field.  Because ``rank_decks``
+        cannot per-deck-restrict (shared-field MC constraint), their ``s_mean``
+        is a full-field estimate dominated by imputation; consumers must label
+        it as such.  Always populated regardless of ``min_coverage``.
     pairwise
         P(S_a > S_b) for every ordered pair (a, b).
     field_source
@@ -571,6 +600,7 @@ class DeckRanking:
     quantile_level: float
     data_coverage: dict[str, float]
     low_coverage: set[str]
+    coverage_caveated: set[str]
     pairwise: dict[tuple[str, str], float]
     field_source: str
 
@@ -629,6 +659,7 @@ def rank_decks(
             quantile_level=effective_q,
             data_coverage={},
             low_coverage=set(),
+            coverage_caveated=set(),
             pairwise={},
             field_source=field.field_source,
         )
@@ -708,6 +739,23 @@ def rank_decks(
             ", ".join(sorted(low_coverage)),
         )
 
+    # ── coverage_caveated — decks that would be restricted in positioning_score ──
+    # Populated at the same 0.85 threshold positioning_score uses for auto-restrict
+    # so the ranking path is consistent with the single-deck path.  S values for
+    # these decks are full-field (shared-MC constraint) and dominated by imputation;
+    # consumers must label them as such rather than presenting them as equivalent to
+    # the restricted-sub-field S positioning_score returns.
+    coverage_caveated: set[str] = {
+        deck for deck, cov in coverage_dict.items() if cov < _COVERAGE_RESTRICT_THRESHOLD
+    }
+    if coverage_caveated:
+        log.debug(
+            "rank_decks: %d deck(s) in coverage_caveated (data_coverage < %.2f): %s",
+            len(coverage_caveated),
+            _COVERAGE_RESTRICT_THRESHOLD,
+            ", ".join(sorted(coverage_caveated)),
+        )
+
     # ── pairwise P(S_a ≥ S_b) with half-credit on exact ties ────────────
     # Use (strict win) + 0.5 * (tie) so P(a>b) + P(b>a) = 1.0 even for
     # identical candidates (pure ties give each side 0.5).
@@ -733,6 +781,7 @@ def rank_decks(
         quantile_level=effective_q,
         data_coverage=coverage_dict,
         low_coverage=low_coverage,
+        coverage_caveated=coverage_caveated,
         pairwise=pairwise,
         field_source=field.field_source,
     )

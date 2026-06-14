@@ -52,6 +52,26 @@ def _window_opts(f):
     return f
 
 
+def _provenance_opt(f):
+    """Attach ``--provenance online|paper`` to an advise leaf.
+
+    Filters the expected field (and matchup matrix) to online-only or paper-only events.
+    Absent (default) → current global behavior, byte-identical.
+    When ``--field`` is also supplied, provenance still filters the matchup matrix but the
+    custom field is used as-is (a hand-rolled field has no provenance axis).
+    """
+    return click.option(
+        "--provenance",
+        type=click.Choice(["online", "paper"], case_sensitive=False),
+        default=None,
+        help=(
+            "Filter the expected field and matchup matrix to online or paper events only. "
+            "Absent → combined global field (current default). "
+            "When --field is also given, provenance filters only the matchup matrix."
+        ),
+    )(f)
+
+
 def _echo_window(res: "WindowResolution") -> None:
     """Echo the resolved window (+ degrade banner) for auditability."""
     from legacy_engine.advisory.window import WindowResolution  # noqa: F401
@@ -544,12 +564,8 @@ def report_meta(
                 thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
-            windowed = win.since is not None or win.until is not None
 
             for defn in definitions:
-                if windowed and defn == "wrw":
-                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
-                    continue
                 if by_variant and defn == "wrw":
                     click.echo("// --by-variant is not supported for wrw (win-rate weights are archetype-level)")
                     continue
@@ -596,11 +612,7 @@ def report_meta(
                 provenance=basis, thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
-            windowed = win.since is not None or win.until is not None
             for defn in definitions_leg:
-                if windowed and defn == "wrw":
-                    click.echo("// skipping wrw under a window (win-rate weights are full-corpus only)")
-                    continue
                 # wrw does not support group_by_variant (weights are archetype-level).
                 effective_by_variant = by_variant and defn != "wrw"
                 if by_variant and defn == "wrw":
@@ -725,6 +737,18 @@ def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
     help="Minimum share of matches for an archetype to appear as a row/column.",
 )
 @click.option(
+    "--a",
+    "archetype_a",
+    default=None,
+    help="Head-to-head mode: archetype A (use with --b).",
+)
+@click.option(
+    "--b",
+    "archetype_b",
+    default=None,
+    help="Head-to-head mode: archetype B (use with --a).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -735,6 +759,8 @@ def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
 def report_matchups(
     provenance: str,
     min_row_share: float,
+    archetype_a: str | None,
+    archetype_b: str | None,
     db: str | None,
     since: str | None,
     until: str | None,
@@ -742,11 +768,21 @@ def report_matchups(
     all_time: bool,
     verbose: bool,
 ) -> None:
-    """Archetype matchup matrix with confidence intervals."""
+    """Archetype matchup matrix with confidence intervals.
+
+    Head-to-head mode: pass --a <archetype> and --b <archetype> to look up a single pair
+    directly instead of printing the full matrix.
+    """
     _setup_logging(verbose)
     from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
-    from legacy_engine.analytics.matchup import MatchupMatrix
+    from legacy_engine.analytics.matchup import lookup_head_to_head
     from legacy_engine.ingestion import store
+
+    # Validate head-to-head flag pair
+    if (archetype_a is None) != (archetype_b is None):
+        raise click.ClickException("--a and --b must be used together (both or neither).")
+
+    head_to_head = archetype_a is not None and archetype_b is not None
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -766,7 +802,12 @@ def report_matchups(
             for line in inputs.audit:
                 click.echo(line)
             matrix = inputs.matrix
-            _print_matchup_matrix(matrix)
+
+            if head_to_head:
+                cell = lookup_head_to_head(matrix, archetype_a, archetype_b)
+                _print_head_to_head(matrix, archetype_a, archetype_b, cell)
+            else:
+                _print_matchup_matrix(matrix)
     finally:
         con.close()
 
@@ -818,6 +859,154 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
         click.echo(_UNCLASSIFIED_FOOTNOTE)
 
 
+def _print_head_to_head(
+    matrix: "MatchupMatrix",
+    archetype_a: str,
+    archetype_b: str,
+    cell: "MatchupCell | None",
+) -> None:
+    """Render a single head-to-head matchup cell."""
+    from legacy_engine.analytics.matchup import MatchupMatrix, DISPLAY_GATE_N  # noqa: F401
+    from legacy_engine.models import MatchupCell  # noqa: F401
+
+    basis_label = matrix.provenance if matrix.provenance else "all"
+    click.echo(f"\n=== Head-to-Head [{basis_label}]: {archetype_a!r} vs {archetype_b!r} ===")
+    click.echo(f"Caveat: {matrix.caveat}")
+
+    if cell is None:
+        if archetype_a not in matrix.archetypes or archetype_b not in matrix.archetypes:
+            missing = [
+                a for a in (archetype_a, archetype_b) if a not in matrix.archetypes
+            ]
+            click.echo(
+                f"  (archetype(s) not in matrix — below row-inclusion threshold or no data: "
+                f"{', '.join(missing)})"
+            )
+        else:
+            click.echo("  (pair not found in matrix)")
+        return
+
+    click.echo(f"  {archetype_a!r} win-rate vs {archetype_b!r}:")
+    click.echo(f"    n              = {cell.n}")
+    click.echo(f"    wins           = {cell.wins}")
+    click.echo(f"    tier           = {cell.tier}")
+
+    if not cell.display:
+        click.echo(
+            f"    NOTE: n={cell.n} < {DISPLAY_GATE_N} (speculative) — "
+            "rate present-and-honest but unreliable; treat as indicative only"
+        )
+    if cell.p_raw is not None:
+        click.echo(f"    p_raw          = {cell.p_raw:.3f} ({cell.p_raw:.1%})")
+    if cell.p_shrunk is not None:
+        click.echo(f"    p_shrunk       = {cell.p_shrunk:.3f} ({cell.p_shrunk:.1%})")
+    if cell.ci_low is not None and cell.ci_high is not None:
+        click.echo(f"    95% CI         = [{cell.ci_low:.3f}, {cell.ci_high:.3f}]")
+
+    # Also show the reverse direction
+    rev = matrix.cells.get((archetype_b, archetype_a))
+    if rev is not None and rev.p_shrunk is not None:
+        click.echo(
+            f"  {archetype_b!r} win-rate vs {archetype_a!r}: "
+            f"{rev.p_shrunk:.1%} (n={rev.n})"
+        )
+
+
+@report.command("affectedness")
+@click.option(
+    "--archetype",
+    required=True,
+    help="Archetype to explain (e.g. 'Dimir Reanimator').",
+)
+@click.option(
+    "--provenance",
+    type=click.Choice(["online", "paper"], case_sensitive=False),
+    default=None,
+    help="Filter to online or paper events (default: all).",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=0.25,
+    show_default=True,
+    help="Inclusion rate threshold above which a ban is considered materially affecting (0..1).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def report_affectedness(
+    archetype: str,
+    provenance: str | None,
+    threshold: float,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Explain which bans drove an archetype's valid_since (ban-affectedness derivation).
+
+    Shows, for each ban event, how many of the archetype's pre-ban decks ran any
+    banned card — the inclusion rate that determined whether the ban materially
+    affected the archetype's matchup history.
+
+    Example: legacy report affectedness --archetype "Dimir Reanimator"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.affectedness import explain_valid_since
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        explanations = explain_valid_since(
+            con, archetype, provenance=provenance, affect_threshold=threshold
+        )
+        _print_affectedness_explain(archetype, explanations, threshold=threshold)
+    finally:
+        con.close()
+
+
+def _print_affectedness_explain(
+    archetype: str,
+    explanations: "list[AffectednessExplanation]",
+    *,
+    threshold: float,
+) -> None:
+    """Render the affectedness derivation as a labeled per-ban-event table."""
+    from legacy_engine.analytics.affectedness import AffectednessExplanation  # noqa: F401
+
+    click.echo(f"\n=== Affectedness Derivation: {archetype!r} (threshold={threshold:.0%}) ===")
+
+    if not explanations:
+        click.echo("  (no ban events in BAN_EVENTS — nothing to explain)")
+        return
+
+    # Determine valid_since: latest ban_date where affected=True
+    affected_dates = [e.ban_date for e in explanations if e.affected]
+    valid_since = max(affected_dates) if affected_dates else None
+    click.echo(f"  Derived valid_since: {valid_since or 'None (full history — no affecting ban)'}")
+    click.echo("")
+    click.echo(
+        f"  {'Ban date':<12}  {'Pre-ban decks':>13}  {'Run banned':>10}  "
+        f"{'Rate':>6}  {'Affected?':<10}  Cards banned"
+    )
+    click.echo("  " + "-" * 90)
+
+    for e in explanations:
+        affected_str = "YES ***" if e.affected else "no"
+        rate_str = f"{e.inclusion_rate:.1%}"
+        cards_str = ", ".join(e.banned_cards)
+        window_str = f"{e.prev_ban_date or 'open'} → {e.ban_date}"
+        click.echo(
+            f"  {e.ban_date:<12}  {e.pre_ban_decks:>13}  {e.running_decks:>10}  "
+            f"{rate_str:>6}  {affected_str:<10}  {cards_str}"
+        )
+        if e.pre_ban_decks == 0:
+            click.echo(f"    (no pre-ban deck data for window {window_str})")
+
+
 @report.command("trends")
 @click.option(
     "--definition",
@@ -846,17 +1035,26 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@click.option(
+    "--movers",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Append a biggest-movers digest comparing the two most recent regimes (top N by |delta|). "
+         "0 = off.",
+)
 @_verbose
 def report_trends(
     definition: str,
     provenance: str,
     min_share: float,
     db: str | None,
+    movers: int,
     verbose: bool,
 ) -> None:
     """Meta-share evolution across ban-list regimes (version-stamped)."""
     _setup_logging(verbose)
-    from legacy_engine.analytics.trends import compute_trends
+    from legacy_engine.analytics.trends import biggest_movers, compute_trends
     from legacy_engine.ingestion import store
 
     con = store.connect(db) if db else store.connect()
@@ -876,6 +1074,9 @@ def report_trends(
                 min_share=min_share,
             )
             _print_trend_series(series)
+            if movers > 0:
+                top = biggest_movers(series, n=movers)
+                _print_biggest_movers(top)
     finally:
         con.close()
 
@@ -937,6 +1138,29 @@ def _print_trend_series(series: "TrendSeries") -> None:
                 thin_marker = "*" if regime.thin else " "
                 row_parts.append(f"{cell.share:>6.1%}{thin_marker}".rjust(col_w))
         click.echo("  ".join(row_parts))
+
+
+def _print_biggest_movers(movers: "list[BiggestMover]") -> None:
+    """Render a biggest-movers digest as a compact labeled table."""
+    from legacy_engine.analytics.trends import BiggestMover  # noqa: F401
+
+    if not movers:
+        click.echo("\n  (biggest-movers: fewer than 2 regimes — nothing to compare)")
+        return
+
+    # Derive the regime labels from the first entry (all share the same pair).
+    prev_label = movers[0].prev_regime
+    curr_label = movers[0].curr_regime
+    click.echo(f"\n── Biggest Movers: {prev_label!r} → {curr_label!r} ──")
+    click.echo(f"  {'Archetype':<30}  {'Prev':>7}  {'Curr':>7}  {'Delta':>7}")
+    click.echo("  " + "-" * 58)
+
+    for m in movers:
+        prev_str = f"{m.prev_share:.1%}" if m.prev_share is not None else "new"
+        curr_str = f"{m.curr_share:.1%}" if m.curr_share is not None else "gone"
+        sign = "+" if m.delta > 0 else ""
+        delta_str = f"{sign}{m.delta:.1%}"
+        click.echo(f"  {m.archetype:<30}  {prev_str:>7}  {curr_str:>7}  {delta_str:>7}")
 
 
 @report.command("tiers")
@@ -1952,6 +2176,7 @@ def advise() -> None:
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_positioning(
@@ -1963,6 +2188,7 @@ def advise_positioning(
     reserved: int,
     seed: int | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -1985,17 +2211,23 @@ def advise_positioning(
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise positioning")
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
         matrix = inputs.matrix
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        # When --field is supplied, the custom field is used as-is; provenance only filtered
+        # the matchup matrix above. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2015,6 +2247,9 @@ def advise_positioning(
                 lo, hi = ranking.s_ci[d]
                 cov = ranking.data_coverage[d]
                 low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
+                # Label S as full-field when the deck would be restricted in the single-deck
+                # view — keeps the ranking path consistent with advise positioning output.
+                s_label = "S*" if d in ranking.coverage_caveated else "S"
                 # Suppress P(best) when coverage ≈ 0 — the value is imputation noise that
                 # otherwise reads as a spuriously confident ranking signal.
                 if cov < _PBEST_SUPPRESS_COVERAGE:
@@ -2022,7 +2257,7 @@ def advise_positioning(
                 else:
                     pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
                 click.echo(
-                    f"  {d:<35}  S={ranking.s_mean[d]:.3f}  "
+                    f"  {d:<35}  {s_label}={ranking.s_mean[d]:.3f}  "
                     f"CI=[{lo:.3f},{hi:.3f}]  {pbest_str}  "
                     f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
                 )
@@ -2108,6 +2343,7 @@ def advise_positioning(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_sideboard(
@@ -2120,6 +2356,7 @@ def advise_sideboard(
     collection_file: str | None,
     owned_only: bool,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2148,12 +2385,15 @@ def advise_sideboard(
     if owned_only and cv is None:
         raise click.ClickException("--owned-only requires --collection")
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         # Resolve window. Sideboard plans default to adaptive (per-opponent ban-aware);
         # uniform/full modes disable adaptive and use the resolved since/until instead.
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
@@ -2162,7 +2402,10 @@ def advise_sideboard(
         plan_since = win.since
         plan_until = win.until
 
-        field = _load_field(con, field_text=field_text)
+        # When --field is supplied, the custom field is used as-is; provenance only affects
+        # the window's thinness check above. When --field is absent, provenance narrows the field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2228,6 +2471,17 @@ def advise_sideboard(
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")
+
+        # --- Considering pool (flex / meta-call alternatives on the bubble) ---
+        if pkg.considering:
+            click.echo("\nConsidering (flex / meta-call alternatives):")
+            for cc in pkg.considering:
+                promo_tag = "  [empirical]" if cc.promoted else ""
+                click.echo(
+                    f"  {cc.card}  [gain={cc.marginal_gain:.4f}]{promo_tag}"
+                    f"  — {cc.label}"
+                )
+
         # --- Per-matchup OUT/IN plans (only when value_informed) ---
         if pkg.value_informed and pkg.matchup_plans:
             click.echo("\n  Per-matchup plans (presence-correlational — see disclaimer):")
@@ -2278,6 +2532,7 @@ def advise_sideboard(
     help="Path to the DuckDB database file (defaults to project default).",
 )
 @click.option("--seed", type=int, default=None, help="RNG seed for deterministic positioning S.")
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_whattoplay(
@@ -2287,6 +2542,7 @@ def advise_whattoplay(
     field_file: str | None,
     db: str | None,
     seed: int | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2305,16 +2561,20 @@ def advise_whattoplay(
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise whattoplay")
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2366,6 +2626,124 @@ def advise_whattoplay(
         con.close()
 
 
+@advise.command("field")
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines). "
+         "Absent → global corpus field (optionally filtered by --provenance/window opts).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_provenance_opt
+@_window_opts
+@_verbose
+def advise_field(
+    field_file: str | None,
+    db: str | None,
+    provenance: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Field composition + vulnerability/hate-equity profile — no deck required.
+
+    Prints the expected field (archetype shares) and the field's vulnerability
+    profile (which vulnerability tags the field carries and what share each tag
+    attacks), without requiring a player deck.  Useful for quickly understanding
+    the field composition and its structural weaknesses before building a deck.
+
+    Sources (in priority order):
+      1. ``--field <file>``  — user-supplied archetype shares
+      2. ``--provenance online|paper`` — corpus filtered to that venue
+      3. No flags — full global corpus field
+
+    Window opts (``--since``/``--until``/``--regime``/``--all-time``) narrow the
+    global field time window.  When ``--field`` is supplied the window is ignored
+    for the field itself (custom fields have no time axis) but still filters any
+    downstream matchup data.
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.advisory.whattoplay import field_vulnerability_tags, hate_equity
+    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.ingestion import store
+
+    field_text = Path(field_file).read_text() if field_file else None
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con, provenance=provenance)
+        win = resolve_advisory_window(
+            con,
+            regime=regime,
+            since=since,
+            until=until,
+            all_time=all_time,
+            provenance=provenance,
+            thin_floor=0,
+            adaptive_default=False,
+        )
+        _echo_window(win)
+
+        # When --field is supplied, the custom field is used as-is; provenance/window
+        # filter only applies to the global field builder.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(
+            con,
+            field_text=field_text,
+            provenance=field_provenance,
+            since=win.since,
+            until=win.until,
+        )
+
+        # Warn on field warnings (thin-data banners, normalization, etc.)
+        for w in field.warnings:
+            click.echo(f"// field warning: {w}")
+
+        # Compute per-archetype vulnerability tags + hate-equity coverage
+        archetype_tags = field_vulnerability_tags(con, field)
+        field_vuln_profile = hate_equity(field, archetype_tags)
+
+        # Render field composition
+        click.echo(f"\n=== Field Read (field_source={field.field_source}) ===")
+        click.echo(f"Field composition ({len(field.shares)} archetypes):")
+        for archetype, share in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True):
+            tags = archetype_tags.get(archetype, frozenset())
+            tag_str = f"  [{', '.join(sorted(tags))}]" if tags else ""
+            click.echo(f"  {archetype:<30}  {share:>6.1%}{tag_str}")
+
+        # Render field vulnerability profile (hate-equity)
+        if field_vuln_profile:
+            click.echo("\nField vulnerability profile (hate-equity):")
+            click.echo(
+                "  (share of the field that carries each vulnerability tag — "
+                "what a hate card targeting that tag would attack)"
+            )
+            for tag, eq in sorted(
+                field_vuln_profile.items(), key=lambda kv: kv[1], reverse=True
+            ):
+                click.echo(f"  {tag:<28}  field share attacked: {eq:>6.1%}")
+        else:
+            click.echo("\nField vulnerability profile: (no tagged archetypes found)")
+
+    finally:
+        con.close()
+
+
 @advise.command("report")
 @click.option(
     "--deck",
@@ -2411,6 +2789,7 @@ def advise_whattoplay(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_report(
@@ -2422,6 +2801,7 @@ def advise_report(
     reserved: int,
     seed: int | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2449,16 +2829,27 @@ def advise_report(
             "single custom field."
         )
 
+    # --provenance and --venues are mutually exclusive: venues already provides per-venue splits.
+    if provenance is not None and venues is not None:
+        raise click.ClickException(
+            "--provenance and --venues are mutually exclusive: --venues provides per-venue "
+            "splits already. Use --provenance for a single-provenance global field, or "
+            "--venues for side-by-side venue comparison."
+        )
+
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise report")
     field_text = Path(field_file).read_text() if field_file else None
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
 
     con = store.connect(db) if db else store.connect()
     try:
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
-        inputs = build_advisory_inputs(con, win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
         for line in inputs.audit:
             click.echo(line)
 
@@ -2504,7 +2895,10 @@ def advise_report(
             return
 
         # ── legacy single-field mode (--venues unset; byte-identical baseline) ──
-        field = _load_field(con, field_text=field_text, since=inputs.field_since, until=inputs.field_until)
+        # When --field is supplied, the custom field is used as-is; provenance only filtered
+        # the matchup matrix. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
         report = build_field_read_report(
             con,
             mainboard,
@@ -2558,6 +2952,7 @@ def advise_report(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_refresh(
@@ -2568,6 +2963,7 @@ def advise_refresh(
     lock_threshold: float,
     max_swaps: int,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2599,7 +2995,18 @@ def advise_refresh(
     from legacy_engine.analytics.venue import resolve_venues
     from legacy_engine.ingestion import store
 
+    # --provenance and --venues are mutually exclusive: venues already embeds provenance.
+    if provenance is not None and venues is not None:
+        raise click.ClickException(
+            "--provenance and --venues are mutually exclusive for advise refresh: "
+            "use --venues to select specific venues (which carry their own provenance), "
+            "or --provenance to restrict to a single provenance venue."
+        )
+
     maindeck, sideboard_in = _resolve_deck_boards(deck, my_deck, "advise refresh")
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
 
     con = store.connect(db) if db else store.connect()
     try:
@@ -2607,7 +3014,7 @@ def advise_refresh(
 
         # Resolve window (default: adaptive — ban-regime-correct per-opponent).
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
@@ -2618,8 +3025,15 @@ def advise_refresh(
             resolved_archetype = result.archetype
             click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
 
-        # Resolve venues.
-        venue_keys = [k.strip() for k in venues.split(",")] if venues else None
+        # Resolve venues. When --provenance is given (without --venues), restrict to that
+        # single provenance venue. When --venues is given, use those keys directly.
+        # Default (both None): use the standard online + paper set.
+        if provenance is not None:
+            venue_keys = [provenance]
+        elif venues is not None:
+            venue_keys = [k.strip() for k in venues.split(",")]
+        else:
+            venue_keys = None
         venue_list = resolve_venues(con, venue_keys)
 
         # Determine the window to pass (None = adaptive within tune_deck/recommend_sideboard).
@@ -2916,6 +3330,7 @@ def identify_track(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@_provenance_opt
 @_window_opts
 @_verbose
 def advise_acquire(
@@ -2925,6 +3340,7 @@ def advise_acquire(
     field_file: str | None,
     budget: float | None,
     db: str | None,
+    provenance: str | None,
     since: str | None,
     until: str | None,
     regime: str | None,
@@ -2964,6 +3380,9 @@ def advise_acquire(
 
     field_text = Path(field_file).read_text() if field_file else None
 
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
     # Resolve price source (soft dep — absent → unpriced ranking).
     price_fn = None
     con = store.connect(db) if db else store.connect()
@@ -2980,11 +3399,14 @@ def advise_acquire(
             pass
 
         win = resolve_advisory_window(
-            con, regime=regime, since=since, until=until, all_time=all_time,
+            con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance,
         )
         _echo_window(win)
 
-        field = _load_field(con, field_text=field_text)
+        # When --field is supplied, the custom field is used as-is; provenance only affects
+        # the window thinness check. When --field is absent, provenance narrows the global field.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance)
 
         plan = acquire_plan(
             con,
