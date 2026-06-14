@@ -123,6 +123,8 @@ def partition_flex(
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     since: str | None = None,
     until: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Partition a maindeck into (locked, flex) slices.
 
@@ -146,6 +148,8 @@ def partition_flex(
     since / until
         Date window for consensus frequencies; ``None`` defaults to the latest
         ban-regime window.
+    players / alias_map
+        Optional player filter (gated-additive; ``None`` → unchanged behaviour).
 
     Returns
     -------
@@ -158,7 +162,10 @@ def partition_flex(
     if since is None and until is None:
         since, until = _latest_regime_window()
 
-    freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+    freqs = card_frequencies(
+        con, archetype, board="main", since=since, until=until,
+        players=players, alias_map=alias_map,
+    )
     inclusion: dict[str, float] = {cf.name: cf.inclusion_pct for cf in freqs}
 
     locked: dict[str, int] = {}
@@ -180,6 +187,8 @@ def candidate_pool(
     *,
     since: str | None = None,
     until: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> list[str]:
     """Return observed archetype maindeck card names (the swap-in candidate pool).
 
@@ -190,12 +199,17 @@ def candidate_pool(
 
     Returns a list of card names, ordered by inclusion_pct DESC, modal_count DESC.
 
+    ``players`` / ``alias_map`` — optional player filter (gated-additive; ``None`` unchanged).
+
     AC: result = all card names from card_frequencies for this archetype (main board).
     """
     if since is None and until is None:
         since, until = _latest_regime_window()
 
-    freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+    freqs = card_frequencies(
+        con, archetype, board="main", since=since, until=until,
+        players=players, alias_map=alias_map,
+    )
     return [cf.name for cf in freqs]
 
 
@@ -564,6 +578,17 @@ class TunedDeck:
     reason: str = ""                         # explanation of objective/fallback
     legality_errors: list[str] = dc_field(default_factory=list)  # ALWAYS [] on return
 
+    # Window label from the sideboard recommender (e.g. "adaptive (per-opponent ban-aware)").
+    # Empty string means the uniform current-regime window was used (e.g. caller passed
+    # an explicit --since/--until, so adaptive per-opponent pooling was disabled).
+    plan_window_label: str = ""
+    # --- Additive fields (feature-collection-aware-engine) ---
+    # owned: annotation for each recommended card (empty dict → not collection-aware).
+    # collection_aware: True iff a CollectionView was supplied.
+    # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
+    owned: "dict[str, object]" = dc_field(default_factory=dict)
+    collection_aware: bool = False
+
 
 def tune_deck(
     con: duckdb.DuckDBPyConnection,
@@ -577,6 +602,11 @@ def tune_deck(
     lock_threshold: float = _DEFAULT_LOCK_THRESHOLD,
     max_swaps: int = _DEFAULT_MAX_SWAPS,
     card_winrates=None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
+    # New optional kwarg (feature-collection-aware-engine).
+    # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
+    collection: "Optional[object]" = None,
 ) -> TunedDeck:
     """Optimise a maindeck against the field using greedy per-card-value tuning.
 
@@ -633,6 +663,14 @@ def tune_deck(
     - positioning_s carried as archetype context; unchanged by card swaps (labeled).
     """
     # ── Resolve window + field ────────────────────────────────────────────────
+    # Track whether the caller supplied an explicit window.  When they did NOT,
+    # we pass since=None/until=None to recommend_sideboard so its adaptive
+    # per-opponent ban-aware path activates (the default).  When they DID pass
+    # an explicit window, we forward it so recommend_sideboard uses the same
+    # uniform window (adaptive is suppressed by _caller_explicit_window logic
+    # inside recommend_sideboard when since/until are non-None).
+    _caller_explicit_window = (since is not None) or (until is not None)
+
     if since is None and until is None:
         eff_since, eff_until = _latest_regime_window()
     else:
@@ -669,8 +707,12 @@ def tune_deck(
         con, archetype, maindeck,
         lock_threshold=lock_threshold,
         since=eff_since, until=eff_until,
+        players=players, alias_map=alias_map,
     )
-    pool = candidate_pool(con, archetype, since=eff_since, until=eff_until)
+    pool = candidate_pool(
+        con, archetype, since=eff_since, until=eff_until,
+        players=players, alias_map=alias_map,
+    )
     snapshot = current_banlist()
 
     # ── Per-card win-rate aggregate: compute ONCE, thread everywhere ─────────
@@ -708,7 +750,9 @@ def tune_deck(
             "no-signal-skip: no gate-clearing per-card matchup data found for "
             f"archetype {archetype!r} vs the current field in window "
             f"[{eff_since}, {eff_until}]. "
-            "Maindeck kept as-is (consensus); sideboard recommender still applied."
+            "Maindeck kept as-is (consensus); sideboard recommender still applied. "
+            f"[window audit: consensus/card-freq list window [{eff_since}..{eff_until}] (uniform); "
+            "matchup math uses adaptive per-opponent ban-aware windows — intentional divergence]"
         )
         log.info("tune_deck: %s", reason)
 
@@ -717,10 +761,17 @@ def tune_deck(
         v_before = sum(copies * fwv.get(card, 0.0) for card, copies in maindeck.items())
 
         # Still run the sideboard recommender for the 15.
+        # When the caller gave no explicit window, pass since=None/until=None so that
+        # recommend_sideboard's adaptive per-opponent ban-aware path can activate.
+        # When the caller gave an explicit window, forward it unchanged (adaptive stays
+        # off because recommend_sideboard sees non-None since/until as an explicit request).
+        sb_since = None if not _caller_explicit_window else eff_since
+        sb_until = None if not _caller_explicit_window else eff_until
         sb_pkg = recommend_sideboard(
             con, field, maindeck, solver="greedy",
-            archetype=archetype, since=eff_since, until=eff_until,
+            archetype=archetype, since=sb_since, until=sb_until,
             card_winrates=card_winrates,
+            collection=collection,
         )
         recommended_sb = dict(sb_pkg.cards)
 
@@ -733,6 +784,11 @@ def tune_deck(
             legality_errors = validate_deck(maindeck, recommended_sb, snapshot)
 
         cov_after = coverage_value(model, maindeck) if model else cov_before
+
+        # Collection-aware annotation for the combined deck (gated-additive).
+        from legacy_engine.advisory.collection import annotate_owned
+        combined_cards = {**dict(maindeck), **recommended_sb}
+        tune_owned = annotate_owned(combined_cards, collection)  # type: ignore[arg-type]
 
         return TunedDeck(
             archetype=archetype,
@@ -749,6 +805,9 @@ def tune_deck(
             fell_back=True,
             reason=reason,
             legality_errors=legality_errors,
+            plan_window_label=sb_pkg.plan_window_label,
+            owned=tune_owned,
+            collection_aware=collection is not None,
         )
 
     # ── Greedy swap loop (per-card-value objective) ───────────────────────────
@@ -775,12 +834,23 @@ def tune_deck(
         if len(swaps) < max_swaps
         else f"per-card-value greedy: max_swaps={max_swaps} reached"
     )
+    # Fix A: note the intentional window divergence so it is never silent.
+    reason += (
+        f" [window audit: consensus/card-freq list uses current-regime window "
+        f"[{eff_since}..{eff_until}] (uniform); matchup math uses adaptive per-opponent "
+        "ban-aware windows — intentional divergence, not a bug]"
+    )
 
     # ── Re-run sideboard recommender for the tuned maindeck ──────────────────
+    # Same adaptive/uniform logic as the no-signal path above: when the caller
+    # gave no explicit window, pass None so adaptive per-opponent windows activate.
+    sb_since = None if not _caller_explicit_window else eff_since
+    sb_until = None if not _caller_explicit_window else eff_until
     sb_pkg = recommend_sideboard(
         con, field, final_main, solver="greedy",
-        archetype=archetype, since=eff_since, until=eff_until,
+        archetype=archetype, since=sb_since, until=sb_until,
         card_winrates=card_winrates,
+        collection=collection,
     )
     recommended_sb = dict(sb_pkg.cards)
 
@@ -806,6 +876,11 @@ def tune_deck(
         v_after = v_before  # no swaps applied
         reason += " [REVERTED: final legality failed; returned consensus main]"
 
+    # Collection-aware annotation for the combined deck (gated-additive).
+    from legacy_engine.advisory.collection import annotate_owned
+    combined_cards = {**final_main, **recommended_sb}
+    tune_owned = annotate_owned(combined_cards, collection)  # type: ignore[arg-type]
+
     return TunedDeck(
         archetype=archetype,
         maindeck=final_main,
@@ -821,4 +896,7 @@ def tune_deck(
         fell_back=False,
         reason=reason,
         legality_errors=legality_errors,
+        plan_window_label=sb_pkg.plan_window_label,
+        owned=tune_owned,
+        collection_aware=collection is not None,
     )

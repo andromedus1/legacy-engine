@@ -1417,3 +1417,125 @@ class TestPeerReviewFindingsUnit2:
         with pytest.raises(ValueError, match="weights sum to"):
             blend_shares({"online": report_a, "paper": report_b}, {"online": -0.5, "paper": -0.5})
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# corpus_freshness — epic-advisory-output-honesty-transparency
+# ---------------------------------------------------------------------------
+
+
+class TestCorpusFreshness:
+    def test_empty_corpus_returns_none(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        store.init_schema(con)
+        assert corpus_freshness(con) == (None, 0)
+
+    def test_returns_max_date_and_deck_count(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        _load_online_challenge(con)
+        max_date, deck_count = corpus_freshness(con)
+        assert max_date == "2026-05-24"   # date-portion of the online challenge
+        assert deck_count >= 2            # alice + bob (at least)
+
+    def test_provenance_filter(self):
+        from legacy_engine.analytics.metashare import corpus_freshness
+        con = _con()
+        _load_online_challenge(con)
+        # paper basis has no events → empty
+        assert corpus_freshness(con, provenance="paper") == (None, 0)
+        # online basis has the challenge
+        max_date, n = corpus_freshness(con, provenance="online")
+        assert max_date == "2026-05-24" and n >= 2
+
+
+# ---------------------------------------------------------------------------
+# Variant consumer tests — gated-additive contract + --by-variant splitting
+# ---------------------------------------------------------------------------
+
+def _con_with_variants():
+    """In-memory DB with 4 decks: 2 'Dimir Tempo / Bauble', 1 'Dimir Tempo / non-Bauble', 1 'Izzet Tempo'."""
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    raw = {
+        "Tournament": {
+            "Name": "Variant Test",
+            "Date": "2026-05-25",
+            "Uri": "https://test.com/variant",
+            "Formats": "Legacy",
+        },
+        "Decks": [
+            {"Player": "p1", "Result": "1st", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+            {"Player": "p2", "Result": "2nd", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+            {"Player": "p3", "Result": "3rd", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+            {"Player": "p4", "Result": "4th", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+        ],
+        "Rounds": [],
+        "Standings": [],
+    }
+    store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+    # Pin archetypes + variants directly.
+    con.execute("UPDATE decks SET archetype = 'Dimir Tempo', variant = 'Bauble' WHERE player IN ('p1', 'p2')")
+    con.execute("UPDATE decks SET archetype = 'Dimir Tempo', variant = 'non-Bauble' WHERE player = 'p3'")
+    con.execute("UPDATE decks SET archetype = 'Izzet Tempo', variant = NULL WHERE player = 'p4'")
+    return con
+
+
+class TestByVariantMetashare:
+    """group_by_variant=True splits Dimir Tempo into two variant rows."""
+
+    def test_unmodified_path_unchanged(self):
+        """Existing callers (no group_by_variant) see byte-identical results."""
+        con = _con_with_variants()
+        report = compute_metashare(con, definition="raw", min_share=0.0, group_other=False)
+        keys = {e.archetype for e in report.entries}
+        assert "Dimir Tempo" in keys
+        assert "Izzet Tempo" in keys
+        # No variant-split rows
+        assert "Dimir Tempo / Bauble" not in keys
+        con.close()
+
+    def test_by_variant_splits_into_sub_rows(self):
+        """group_by_variant=True emits 'Dimir Tempo / Bauble' and 'Dimir Tempo / non-Bauble'."""
+        con = _con_with_variants()
+        report = compute_metashare(
+            con, definition="raw", min_share=0.0, group_other=False, group_by_variant=True,
+        )
+        keys = {e.archetype for e in report.entries}
+        assert "Dimir Tempo / Bauble" in keys
+        assert "Dimir Tempo / non-Bauble" in keys
+        assert "Izzet Tempo" in keys  # no variant → bare parent key
+        assert "Dimir Tempo" not in keys  # should not appear as a naked row
+        con.close()
+
+    def test_by_variant_shares_sum_to_1(self):
+        con = _con_with_variants()
+        report = compute_metashare(
+            con, definition="raw", min_share=0.0, group_other=False, group_by_variant=True,
+        )
+        total_share = sum(e.share for e in report.entries)
+        assert abs(total_share - 1.0) < 1e-9
+        con.close()
+
+    def test_by_variant_bauble_share_is_half_of_dimir_tempo(self):
+        """2 of 3 Dimir Tempo decks are Bauble → share = 2/4 = 50%."""
+        con = _con_with_variants()
+        report = compute_metashare(
+            con, definition="raw", min_share=0.0, group_other=False, group_by_variant=True,
+        )
+        by_key = {e.archetype: e for e in report.entries}
+        assert by_key["Dimir Tempo / Bauble"].share == pytest.approx(2 / 4)
+        assert by_key["Dimir Tempo / non-Bauble"].share == pytest.approx(1 / 4)
+        con.close()
+
+    def test_no_variant_decks_keep_bare_key(self):
+        """Decks with variant=NULL appear under bare archetype key."""
+        con = _con_with_variants()
+        report = compute_metashare(
+            con, definition="raw", min_share=0.0, group_other=False, group_by_variant=True,
+        )
+        by_key = {e.archetype: e for e in report.entries}
+        assert "Izzet Tempo" in by_key
+        assert by_key["Izzet Tempo"].share == pytest.approx(1 / 4)
+        con.close()

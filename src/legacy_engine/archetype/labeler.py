@@ -4,6 +4,10 @@ End-to-end: read each deck's cards from the store, resolve names to Cards (for c
 compute deck colors, classify against the loaded ruleset, and persist the label into
 ``decks.archetype`` (the column ingestion left NULL). Conflict/Unknown labels are written raw.
 
+When an optional ``VariantRegistry`` is provided, also resolves a sub-archetype variant tag
+into ``decks.variant`` (new nullable column).  No registry → variant stays NULL → byte-identical
+behaviour to the pre-variant codebase (gated-additive contract).
+
 ``resolve_card`` is injected (name -> Card | None) so this is testable without the Scryfall bulk; the
 CLI passes ``ScryfallClient.get_card``.
 """
@@ -17,10 +21,23 @@ from legacy_engine.archetype.rules import RuleSet
 from legacy_engine.colors import compute_deck_colors
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
+from legacy_engine.models.variant import VariantRegistry
 
 
-def label_decks(con, ruleset: RuleSet, resolve_card: Callable[[str], Card | None]) -> int:
-    """Classify every deck in the store and write its archetype. Returns the count labeled."""
+def label_decks(
+    con,
+    ruleset: RuleSet,
+    resolve_card: Callable[[str], Card | None],
+    registry: VariantRegistry | None = None,
+) -> int:
+    """Classify every deck in the store and write its archetype (and optional variant).
+
+    Returns the count of decks labeled.
+
+    When ``registry`` is provided, resolves a variant tag for each deck and writes it to
+    ``decks.variant``.  When ``registry`` is ``None`` the variant column is left untouched
+    (stays NULL) — byte-identical to the pre-variant behaviour.
+    """
     store.init_schema(con)
     deck_keys = con.execute("SELECT tournament_id, deck_idx FROM decks").fetchall()
 
@@ -43,9 +60,16 @@ def label_decks(con, ruleset: RuleSet, resolve_card: Callable[[str], Card | None
 
         colors = compute_deck_colors(cards)
         result = classify(mainboard, sideboard, ruleset, colors)
+
+        if registry is not None:
+            from legacy_engine.archetype.variants import resolve_variant
+            variant = resolve_variant(result.base_archetype, mainboard, sideboard, registry)
+        else:
+            variant = None
+
         con.execute(
-            "UPDATE decks SET archetype = ? WHERE tournament_id = ? AND deck_idx = ?",
-            [result.archetype, tid, idx],
+            "UPDATE decks SET archetype = ?, variant = ? WHERE tournament_id = ? AND deck_idx = ?",
+            [result.archetype, variant, tid, idx],
         )
         labeled += 1
 

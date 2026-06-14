@@ -23,8 +23,8 @@ def test_top_level_help_lists_groups(runner):
 @pytest.mark.parametrize(
     "group,subcommands",
     [
-        ("seed", ("cards", "cache", "rules", "banlist")),
-        ("report", ("meta", "matchups", "tiers")),
+        ("seed", ("cards", "cache", "rules", "banlist", "prices")),
+        ("report", ("meta", "matchups", "tiers", "prices")),
         ("advise", ("positioning", "sideboard", "whattoplay", "report")),
         ("generate", ("consensus", "tune")),
         ("export", ("deck",)),
@@ -47,20 +47,6 @@ def test_export_deck_requires_deck(runner):
     """export deck exits non-zero when --deck is missing."""
     result = runner.invoke(main, ["export", "deck"])
     assert result.exit_code != 0
-
-
-@pytest.mark.parametrize(
-    "args,label",
-    [
-        # seed cards/cache/rules/banlist, label, report matchups, report meta, and report tiers are implemented.
-        # advise positioning/sideboard/whattoplay/report are also implemented (no longer stubs).
-        (["refresh"], "refresh"),
-    ],
-)
-def test_leaf_stubs_not_implemented(runner, args, label):
-    result = runner.invoke(main, args)
-    assert result.exit_code != 0
-    assert f"not implemented: {label}" in result.output
 
 
 def test_advise_subcommands_require_deck(runner):
@@ -495,3 +481,232 @@ class TestFieldConsistency:
         assert out.count("unclassified — not positionable") == 1
         # numeric cells unaffected
         assert "(n=100)" in out
+
+
+# ---------------------------------------------------------------------------
+# Output transparency — epic-advisory-output-honesty-transparency
+# ---------------------------------------------------------------------------
+
+
+class TestTransparency:
+    """data-freshness header + staleness guard, consensus thin-sample flag, tune swap rationale."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        db_path = tmp_path / "test.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    # --- pure staleness helper (regression for the unparseable-date crash) ---
+    def test_staleness_age_none_on_empty(self):
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days(None, date(2026, 6, 6)) is None
+
+    def test_staleness_age_none_on_unparseable_date(self):
+        # Synthetic corpora carry out-of-range dates like '2026-01-50' — must NOT crash.
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days("2026-01-50", date(2026, 6, 6)) is None
+
+    def test_staleness_age_computes_days(self):
+        from datetime import date
+        from legacy_engine.cli import _staleness_age_days
+        assert _staleness_age_days("2026-05-30", date(2026, 6, 6)) == 7
+        assert _staleness_age_days("2026-01-01", date(2026, 6, 6)) > 30
+
+    # --- data-freshness header on reports ---
+    def test_report_meta_prints_data_as_of_header(self, runner, db_with_corpus):
+        result = runner.invoke(main, ["report", "meta", "--db", db_with_corpus, "--provenance", "online"])
+        assert result.exit_code == 0, result.output
+        assert "// data as of 2026-01-05" in result.output  # max synthetic date (n_repeats=5)
+        assert "decks)" in result.output
+
+    # --- consensus thin-sample flag ---
+    def test_consensus_thin_sample_flagged(self, runner, db_with_corpus):
+        result = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control", "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "[speculative]" in result.output
+        assert "thin sample" in result.output
+
+    # --- tune swap rationale ---
+    def test_tune_renders_delta_and_swap_log(self, runner, db_with_corpus, tmp_path):
+        # Derive a LEGAL 60-card deck from the consensus output (its maindeck is exactly 60),
+        # then tune it — so the command actually exits 0 and the new render lines are asserted.
+        cons = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control", "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert cons.exit_code == 0, cons.output
+        maindeck_lines = []
+        for ln in cons.output.splitlines():
+            if ln.strip() == "Sideboard":
+                break
+            if ln and ln[0].isdigit():  # "N CardName" — skip // headers/blank lines
+                maindeck_lines.append(ln)
+        assert maindeck_lines, cons.output
+        deck = tmp_path / "control.txt"
+        deck.write_text("\n".join(maindeck_lines) + "\n")
+
+        result = runner.invoke(
+            main,
+            ["generate", "tune", "--deck", str(deck), "--archetype", "Control", "--db", db_with_corpus],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Δvalue =" in result.output
+        # Thin corpus → no signal → no swaps; the no-swap log line must render cleanly.
+        assert "// Swap log:" in result.output
+        # The presence-correlational scale note appears only when swaps were made.
+        if "1. CUT" in result.output:
+            assert "presence-correlational" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestWindowEchoRegimeConsistency — feature-regime-windowing-consistency
+# ---------------------------------------------------------------------------
+
+
+class TestWindowEchoRegimeConsistency:
+    """CLI window-echo assertions for feature-regime-windowing-consistency.
+
+    Verifies that each surface echoes its window and that the divergence between
+    consensus (uniform current-regime) and tune/sideboard (adaptive) is stated.
+    """
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """Write a small rounds corpus to a file-backed DuckDB for CLI invocations."""
+        db_path = tmp_path / "test_window.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_generate_consensus_echoes_window_and_sample_n(self, runner, db_with_corpus):
+        """generate consensus must echo window + sample_n in its header."""
+        result = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control",
+             "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert result.exit_code == 0, result.output
+        # Fix A: consensus echoes its current-regime window + sample_n
+        assert "window:" in result.output
+        assert "sample_n=" in result.output
+
+    def test_generate_consensus_echoes_uniform_label(self, runner, db_with_corpus):
+        """generate consensus must label its window as uniform / current-regime."""
+        result = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control",
+             "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert result.exit_code == 0, result.output
+        # The window echo must mention 'uniform' or 'current-regime' or 'deck composition'
+        output_lower = result.output.lower()
+        assert (
+            "uniform" in output_lower
+            or "current-regime" in output_lower
+            or "deck composition" in output_lower
+        ), f"Expected current-regime window label; output:\n{result.output}"
+
+    def test_generate_tune_echoes_window_divergence(self, runner, db_with_corpus, tmp_path):
+        """generate tune must state the window divergence between list and matchup math."""
+        # Build a minimal legal-ish deck file first.
+        cons = runner.invoke(
+            main,
+            ["generate", "consensus", "--archetype", "Control",
+             "--db", db_with_corpus, "--since", "2026-01-01"],
+        )
+        assert cons.exit_code == 0, cons.output
+        maindeck_lines = []
+        for ln in cons.output.splitlines():
+            if ln.strip() == "Sideboard":
+                break
+            if ln and ln[0].isdigit():
+                maindeck_lines.append(ln)
+        assert maindeck_lines, cons.output
+        deck = tmp_path / "control_for_tune.txt"
+        deck.write_text("\n".join(maindeck_lines) + "\n")
+
+        result = runner.invoke(
+            main,
+            ["generate", "tune", "--deck", str(deck), "--archetype", "Control",
+             "--db", db_with_corpus],
+        )
+        assert result.exit_code == 0, result.output
+        # Fix A: tune echoes the window divergence note
+        output_lower = result.output.lower()
+        assert (
+            "two windows" in output_lower
+            or "divergence" in output_lower
+            or "current-regime" in output_lower
+            or "adaptive" in output_lower
+        ), f"Expected window divergence note in tune output; output:\n{result.output}"
+
+    def test_advise_sideboard_default_echoes_adaptive_window(self, runner, db_with_corpus, tmp_path):
+        """advise sideboard (default = adaptive mode) must echo // window: adaptive."""
+        # Write a minimal deck file.
+        deck = tmp_path / "sb_deck.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        # Default mode is adaptive → should echo adaptive window line
+        assert "// window:" in result.output
+        output_lower = result.output.lower()
+        assert "adaptive" in output_lower, (
+            f"Expected adaptive window echo in advise sideboard output; got:\n{result.output}"
+        )
+
+    def test_advise_sideboard_all_time_echoes_full_corpus(self, runner, db_with_corpus, tmp_path):
+        """advise sideboard --all-time must echo // window: full-corpus."""
+        deck = tmp_path / "sb_deck2.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--all-time", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window:" in result.output
+        assert "full-corpus" in result.output
+
+    def test_advise_sideboard_regime_current_echoes_window(self, runner, db_with_corpus, tmp_path):
+        """advise sideboard --regime current echoes a window line (regime label or banner)."""
+        deck = tmp_path / "sb_deck3.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--regime", "current", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window:" in result.output
