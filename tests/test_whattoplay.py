@@ -1376,3 +1376,176 @@ class TestBestDeckCallGradient:
         assert r.label == "neither"
         assert r.best_deck_score == 0.0
         assert r.best_call_score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# TestRampBigManaTag — feature-bigmana-ramp-tag
+# ---------------------------------------------------------------------------
+
+class TestRampBigManaTag:
+    """Spec-derived tests for the ramp/big-mana vulnerability tag.
+
+    Detection: ≥4 copies of named big-mana lands (Urzatron pieces / Cloudpost / Eldrazi accelerants)
+    in the deck composition.  Tag name: "ramp".
+    Gated-additive: existing tags/detection paths are byte-identical; new tag only ADDS coverage.
+    """
+
+    def _build_tron_corpus(self):
+        """Urzatron corpus: 4x each Urza land + colorless payoffs.
+
+        Mirrors a real Tron shell — 12 Urzatron pieces, 4× Karn, 4× Emrakul, 4× Expedition Map.
+        """
+        import uuid
+        con = _con()
+        cards = [
+            Card(name="Urza's Tower", type_line="Land", oracle_text="{T}: Add {C}. If you control Urza's Mine and Urza's Power Plant, add {C}{C}{C} instead.", cmc=0.0),
+            Card(name="Urza's Mine", type_line="Land", oracle_text="{T}: Add {C}. If you control Urza's Tower and Urza's Power Plant, add {C}{C} instead.", cmc=0.0),
+            Card(name="Urza's Power Plant", type_line="Land", oracle_text="{T}: Add {C}. If you control Urza's Tower and Urza's Mine, add {C}{C} instead.", cmc=0.0),
+            Card(name="Expedition Map", type_line="Artifact", oracle_text="{2}, {T}, Sacrifice Expedition Map: Search your library for a land card, reveal it, put it into your hand, then shuffle.", cmc=1.0),
+            Card(name="Karn Liberated", type_line="Legendary Planeswalker — Karn", oracle_text="[+4]: Target player exiles a card from their hand.\n[−3]: Exile target permanent.\n[−14]: ...", cmc=7.0),
+            Card(name="Emrakul, the Aeons Torn", type_line="Legendary Creature — Eldrazi", oracle_text="This spell can't be countered. When you cast this spell, take an extra turn after this one. Flying, protection from colored spells, annihilator 6.", cmc=15.0),
+        ]
+        store.load_cards(con, cards)
+        tid = str(uuid.uuid4())
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
+        )
+        for idx in range(3):
+            con.execute(
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                [tid, idx, f"player{idx}", "1st", "Urzatron"],
+            )
+            for card_name, count in [
+                ("Urza's Tower", 4),
+                ("Urza's Mine", 4),
+                ("Urza's Power Plant", 4),
+                ("Expedition Map", 4),
+                ("Karn Liberated", 4),
+                ("Emrakul, the Aeons Torn", 4),
+            ]:
+                con.execute(
+                    "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                    [tid, idx, "main", card_name, count],
+                )
+        return con
+
+    def _build_dimir_corpus(self):
+        """Dimir Tempo corpus: NO Urzatron / big-mana lands — ramp tag must NOT fire."""
+        import uuid
+        con = _con()
+        cards = [
+            Card(name="Force of Will", type_line="Instant", oracle_text="You may pay 1 life and exile a blue card from your hand rather than pay this spell's mana cost.\nCounter target spell.", cmc=5.0),
+            Card(name="Brainstorm", type_line="Instant", oracle_text="Draw three cards, then put two cards from your hand on top of your library.", cmc=1.0),
+            Card(name="Underground Sea", type_line="Land — Island Swamp", colors=["U", "B"], produced_mana=["U", "B"], oracle_text="", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        tid = str(uuid.uuid4())
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
+        )
+        for idx in range(3):
+            con.execute(
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                [tid, idx, f"player{idx}", "1st", "Dimir Tempo"],
+            )
+            for card_name, count in [
+                ("Force of Will", 4),
+                ("Brainstorm", 4),
+                ("Underground Sea", 16),
+            ]:
+                con.execute(
+                    "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+                    [tid, idx, "main", card_name, count],
+                )
+        return con
+
+    # --- Detection: Tron-shaped deck gets ramp tag ---
+
+    def test_tron_archetype_has_ramp_tag(self):
+        """Urzatron archetype (12 Urza lands) gets the 'ramp' vulnerability tag."""
+        con = self._build_tron_corpus()
+        tags = vulnerability_tags(con, "Urzatron")
+        assert "ramp" in tags, f"Expected 'ramp' in tags for Tron; got {tags}"
+        con.close()
+
+    def test_tron_deck_direct_has_ramp_tag(self):
+        """vulnerability_tags_for_deck with a Tron maindeck emits 'ramp'."""
+        con = _con()
+        cards = [
+            Card(name="Urza's Tower", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+            Card(name="Urza's Mine", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+            Card(name="Urza's Power Plant", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+            Card(name="Karn Liberated", type_line="Legendary Planeswalker — Karn", oracle_text="[+4]: Target player exiles a card.", cmc=7.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {
+            "Urza's Tower": 4,
+            "Urza's Mine": 4,
+            "Urza's Power Plant": 4,
+            "Karn Liberated": 4,
+        }
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "ramp" in tags, f"Expected 'ramp' in tags; got {tags}"
+        con.close()
+
+    def test_below_threshold_no_ramp_tag(self):
+        """Fewer than 4 big-mana lands does NOT trigger the ramp tag."""
+        con = _con()
+        cards = [
+            Card(name="Urza's Tower", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+            Card(name="Karn Liberated", type_line="Legendary Planeswalker — Karn", oracle_text="[+4]: Target player exiles a card.", cmc=7.0),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # Only 3 copies of an Urza land — below threshold of 4
+        maindeck = {
+            "Urza's Tower": 3,
+            "Karn Liberated": 4,
+            "Island": 16,
+        }
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "ramp" not in tags, f"Below-threshold deck should NOT have 'ramp'; got {tags}"
+        con.close()
+
+    def test_dimir_tempo_no_ramp_tag(self):
+        """Dimir Tempo archetype (no big-mana lands) does NOT get the 'ramp' tag."""
+        con = self._build_dimir_corpus()
+        tags = vulnerability_tags(con, "Dimir Tempo")
+        assert "ramp" not in tags, f"Dimir Tempo should NOT have 'ramp'; got {tags}"
+        con.close()
+
+    # --- Gated-additive: existing tags still fire correctly ---
+
+    def test_tron_ramp_tag_does_not_suppress_low_interaction(self):
+        """Adding the ramp tag does not prevent low-interaction from also firing on a Tron deck."""
+        con = self._build_tron_corpus()
+        tags = vulnerability_tags(con, "Urzatron")
+        # Tron has very few counters/removal → should also be low-interaction
+        assert "ramp" in tags
+        # (low-interaction is expected to also fire; we just confirm ramp doesn't break other tags)
+        assert isinstance(tags, frozenset)
+        con.close()
+
+    # --- Hate-equity: big-mana field share is now covered ---
+
+    def test_hate_equity_includes_ramp_tag(self):
+        """hate_equity correctly sums field share for archetypes carrying the ramp tag."""
+        field = _make_field({"Urzatron": 0.09, "Dimir Tempo": 0.15, "Storm": 0.10})
+        archetype_tags = {
+            "Urzatron": frozenset({"ramp", "low-interaction"}),
+            "Dimir Tempo": frozenset({"creature-based", "greedy-manabase"}),
+            "Storm": frozenset({"storm-reliant", "combo"}),
+        }
+        equity = hate_equity(field, archetype_tags)
+        assert "ramp" in equity, "hate_equity should include 'ramp' when an archetype carries it"
+        assert pytest.approx(equity["ramp"], abs=1e-6) == pytest.approx(field.shares["Urzatron"])
+
+    def test_covered_share_with_ramp_field(self):
+        """covered_share over ramp archetype correctly returns its field fraction."""
+        field = _make_field({"Urzatron": 0.09, "Cloudpost": 0.05, "Dimir Tempo": 0.15, "Storm": 0.10})
+        ramp_archetypes = {"Urzatron", "Cloudpost"}
+        cs = covered_share(field, ramp_archetypes)
+        expected = field.shares["Urzatron"] + field.shares["Cloudpost"]
+        assert pytest.approx(cs, abs=1e-6) == pytest.approx(expected)

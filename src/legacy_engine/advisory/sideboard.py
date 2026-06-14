@@ -542,6 +542,43 @@ HOSER_CATALOG: dict[str, HoserCard] = {
         max_copies=2,
         swing=_SWING_DEDICATED,
     ),
+    # --- Big-mana / ramp hate → ramp ---
+    # Harbinger of the Seas: "Lands opponents control that aren't Islands don't untap during their
+    # untap step" — locks Urzatron and Cloudpost out of their mana entirely.
+    "Harbinger of the Seas": HoserCard(
+        name="Harbinger of the Seas",
+        attacks=frozenset({"ramp"}),
+        colors=frozenset({"U"}),
+        max_copies=4,
+        swing=_SWING_DEDICATED,
+    ),
+    # Damping Sphere: nonbasic, non-island lands produce only {C}; each spell costs {1} more per
+    # spell cast this turn — hoses both Tron/Cloudpost mana production AND storm chains.
+    "Damping Sphere": HoserCard(
+        name="Damping Sphere",
+        attacks=frozenset({"ramp", "storm-reliant"}),
+        colors=frozenset(),          # colorless artifact
+        max_copies=4,
+        swing=_SWING_DEDICATED,
+    ),
+    # Pithing Needle: names Eye of Ugin / Eldrazi Temple activated abilities; staxes planeswalkers
+    # and utility lands across the board.  Soft swing — flexible answer, not dedicated to ramp alone.
+    "Pithing Needle": HoserCard(
+        name="Pithing Needle",
+        attacks=frozenset({"ramp"}),
+        colors=frozenset(),          # colorless artifact
+        max_copies=2,
+        swing=_SWING_SOFT,
+    ),
+    # Null Rod: shuts down mana artifacts (Mox Diamond, Chrome Mox, Grim Monolith, etc.) common in
+    # Eldrazi and Cloudpost shells; also hits greedy-manabase fast-mana artifacts.
+    "Null Rod": HoserCard(
+        name="Null Rod",
+        attacks=frozenset({"ramp", "greedy-manabase"}),
+        colors=frozenset({"G"}),
+        max_copies=4,
+        swing=_SWING_SOFT,
+    ),
 }
 
 
