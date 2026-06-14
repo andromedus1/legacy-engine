@@ -198,14 +198,11 @@ class ScryfallClient:
         # Stream into a temp file first, then rename atomically so a partial download
         # never leaves a corrupt mirror.
         tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
-        card_count = 0
         with self.client.stream("GET", meta["download_uri"], follow_redirects=True) as resp:
             resp.raise_for_status()
             with tmp_path.open("wb") as fh:
                 for chunk in resp.iter_bytes(chunk_size=64 * 1024):
                     fh.write(chunk)
-                    # Rough card count: count opening-brace sequences as a progress proxy.
-                    card_count += chunk.count(b'{"id"')
 
         tmp_path.rename(SCRYFALL_PRICES_PATH)
         SCRYFALL_PRICES_META_PATH.write_text(
