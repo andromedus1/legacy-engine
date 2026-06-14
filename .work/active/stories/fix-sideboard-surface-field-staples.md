@@ -1,7 +1,7 @@
 ---
 id: fix-sideboard-surface-field-staples
 kind: story
-stage: review
+stage: done
 tags: [advisory, quality]
 parent: null
 depends_on: []
