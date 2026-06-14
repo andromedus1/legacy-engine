@@ -1,7 +1,7 @@
 ---
 id: feature-personal-inventory-and-decks
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, data-model, advisory, foundation]
 parent: null
 depends_on: []
@@ -398,3 +398,6 @@ to avoid collision with DuckDB reserved word.
 
 ## Review findings (bounce 1)
 BLOCKING: `cli.py` `collection show --free-only` is broken by operator chaining: `if free_only and free_cnt > 0 == 0:` parses as `free_only and (free_cnt>0) and (0==0)` so it `continue`s on every card that HAS free copies → `--free-only` shows nothing. FIX the predicate (should skip cards with free_cnt==0 under --free-only) and add a spec-derived regression test (own N, allocate 0 → --free-only shows N). Round-trip + model + ARCHITECTURE roll-forward all verified good.
+
+### Resolution
+Fixed 2026-06-13. Removed the broken `free_cnt > 0 == 0` predicate (dead line that was always True due to Python chaining and skipped every card with free copies). The correct `free_cnt == 0` guard on the next line was already sufficient. Added `TestCollectionShow::test_free_only_shows_unallocated_cards` in `tests/test_collection_cli.py`: owns 4 Brainstorm (0 allocated → appears under --free-only) + 2 Force of Will (2 allocated → does NOT appear). Uses isolated tmp_path fixture; never touches real DB.
