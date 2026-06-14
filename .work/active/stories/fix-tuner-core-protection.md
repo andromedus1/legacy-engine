@@ -1,7 +1,7 @@
 ---
 id: fix-tuner-core-protection
 kind: story
-stage: review
+stage: done
 tags: [generation, quality]
 parent: null
 depends_on: []
