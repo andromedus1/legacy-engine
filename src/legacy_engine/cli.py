@@ -522,8 +522,17 @@ def report_meta(
                 definitions = [definition]
 
             # Resolve a single window (venues mode uses one shared window).
+            # When no explicit window flag is given, default to the current ban regime
+            # rather than full corpus — venue comparison is inherently about the live
+            # meta, and full-corpus data bleeds in obsolete regime shares (e.g. Tron
+            # at 1% from eras before the ban list changed).  A plain (non-venues)
+            # ``report meta`` keeps its existing full-corpus default (gated-additive:
+            # the else-branch below is byte-identical to the pre-patch code).
+            effective_regime = regime
+            if venues is not None and regime is None and since is None and until is None and not all_time:
+                effective_regime = "current"
             win = resolve_advisory_window(
-                con, regime=regime, since=since, until=until, all_time=all_time,
+                con, regime=effective_regime, since=since, until=until, all_time=all_time,
                 thin_floor=0, adaptive_default=False,
             )
             _echo_window(win)
