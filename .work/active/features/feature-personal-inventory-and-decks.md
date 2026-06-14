@@ -1,7 +1,7 @@
 ---
 id: feature-personal-inventory-and-decks
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, data-model, advisory, foundation]
 parent: null
 depends_on: []
