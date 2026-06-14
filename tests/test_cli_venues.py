@@ -213,6 +213,42 @@ class TestReportMetaVenues:
         # Should still show the meta share report header (legacy mode)
         assert "Meta Share" in result.output
 
+    def test_venues_default_window_is_current_regime_not_full_corpus(self, runner, venue_db):
+        """report meta --venues with NO window flag defaults to current regime, not full corpus.
+
+        The window echo should NOT say 'full-corpus'; it should reference the current
+        ban-regime window (since=<date> .. —), so the user sees the data is scoped
+        to the live meta.  A plain report meta (no --venues) still defaults to
+        full-corpus — gated-additive: that path is untouched.
+        """
+        result = runner.invoke(
+            main,
+            ["report", "meta", "--db", venue_db, "--venues", "online,paper",
+             "--definition", "raw"],
+        )
+        assert result.exit_code == 0, result.output
+        # Must NOT say full-corpus — the default is now current regime
+        assert "full-corpus" not in result.output
+        # Must echo a window line with a date (current regime since 2026-05-18)
+        assert "// window:" in result.output
+        assert "regime: current" in result.output
+        # Data from 2026-06-05/06 is inside the current regime (opens 2026-05-18),
+        # so venue tables must still render — not "no data"
+        assert "Online (MTGO)" in result.output
+        assert "Paper" in result.output
+
+    def test_non_venues_default_remains_full_corpus(self, runner, venue_db):
+        """report meta (no --venues) keeps its existing full-corpus default.
+
+        Gated-additive: the non-venues path is byte-identical to the pre-patch code.
+        """
+        result = runner.invoke(
+            main,
+            ["report", "meta", "--db", venue_db, "--definition", "raw"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window: full-corpus" in result.output
+
     def test_venues_wrw_skipped_under_window(self, runner, venue_db):
         """wrw is skipped under a time window — same guard as baseline behavior."""
         result = runner.invoke(

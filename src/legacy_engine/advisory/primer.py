@@ -233,7 +233,7 @@ def _build_blurb(
     else:
         # Data present, gate cleared, but no swap identified (e.g. no dead flex cards found)
         data_quality = tier
-        prose = _prose_no_swap_needed(opponent, tier, n_basis, sideboard, note)
+        prose = _prose_no_swap_needed(opponent, tier, n_basis)
 
     return MatchupBlurb(
         opponent=opponent,
@@ -351,8 +351,6 @@ def _prose_no_swap_needed(
     opponent: str,
     tier: str,
     n_basis: int,
-    sideboard: dict[str, int],
-    note: str,
 ) -> str:
     """Prose when data cleared the gate but no beneficial swap was identified."""
     tier_desc = "sufficient data (evolving)" if tier == "evolving" else "solid data (established)"
@@ -409,7 +407,7 @@ def _render_primer(
             lines.append(f"  {blurb.opponent}  {quality_badge}")
             # Prose (wrap for readability — one long paragraph per matchup)
             lines.append(f"  {blurb.prose}")
-            # Explicit swap summary (always shown)
+            # Explicit swap summary (shown when not degraded)
             if not blurb.degraded:
                 lines.append(f"  {blurb.side_out_str}")
                 lines.append(f"  {blurb.side_in_str}")
