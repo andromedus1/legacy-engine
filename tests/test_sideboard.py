@@ -198,6 +198,51 @@ class TestHoserCatalog:
     def test_defense_grid_is_colorless(self):
         assert HOSER_CATALOG["Defense Grid"].colors == frozenset()
 
+    # --- Big-mana / ramp catalog entries (feature-bigmana-ramp-tag) ---
+
+    def test_harbinger_of_the_seas_attacks_ramp(self):
+        """Harbinger of the Seas → ramp (dedicated: locks out Tron/Cloudpost mana)."""
+        assert "Harbinger of the Seas" in HOSER_CATALOG
+        h = HOSER_CATALOG["Harbinger of the Seas"]
+        assert "ramp" in h.attacks
+        assert h.swing == _SWING_DEDICATED
+
+    def test_damping_sphere_attacks_ramp_and_storm(self):
+        """Damping Sphere → ramp + storm-reliant (hoses both Tron mana and storm chains)."""
+        assert "Damping Sphere" in HOSER_CATALOG
+        h = HOSER_CATALOG["Damping Sphere"]
+        assert "ramp" in h.attacks
+        assert "storm-reliant" in h.attacks
+
+    def test_damping_sphere_is_colorless(self):
+        """Damping Sphere is an artifact — colorless (castable by any deck)."""
+        assert HOSER_CATALOG["Damping Sphere"].colors == frozenset()
+
+    def test_pithing_needle_attacks_ramp(self):
+        """Pithing Needle → ramp (names Eye of Ugin / Eldrazi Temple activated abilities)."""
+        assert "Pithing Needle" in HOSER_CATALOG
+        h = HOSER_CATALOG["Pithing Needle"]
+        assert "ramp" in h.attacks
+
+    def test_pithing_needle_is_colorless(self):
+        assert HOSER_CATALOG["Pithing Needle"].colors == frozenset()
+
+    def test_null_rod_attacks_ramp(self):
+        """Null Rod → ramp (shuts down mana artifacts in Eldrazi/Post shells)."""
+        assert "Null Rod" in HOSER_CATALOG
+        h = HOSER_CATALOG["Null Rod"]
+        assert "ramp" in h.attacks
+
+    def test_ramp_hosers_have_valid_swing(self):
+        """All new big-mana hosers have swing in the valid (0,1) range."""
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            h = HOSER_CATALOG[name]
+            assert 0.0 < h.swing < 1.0, f"{name} swing={h.swing} out of (0,1)"
+
+    def test_ramp_hosers_have_max_copies_at_least_one(self):
+        for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
+            assert HOSER_CATALOG[name].max_copies >= 1
+
 
 # ---------------------------------------------------------------------------
 # TestCoverageModel — weights, color pre-filter, anti-hate pseudo-elements
