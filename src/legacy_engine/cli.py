@@ -2615,6 +2615,124 @@ def advise_whattoplay(
         con.close()
 
 
+@advise.command("field")
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a custom field file (<share> <archetype> lines). "
+         "Absent → global corpus field (optionally filtered by --provenance/window opts).",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_provenance_opt
+@_window_opts
+@_verbose
+def advise_field(
+    field_file: str | None,
+    db: str | None,
+    provenance: str | None,
+    since: str | None,
+    until: str | None,
+    regime: str | None,
+    all_time: bool,
+    verbose: bool,
+) -> None:
+    """Field composition + vulnerability/hate-equity profile — no deck required.
+
+    Prints the expected field (archetype shares) and the field's vulnerability
+    profile (which vulnerability tags the field carries and what share each tag
+    attacks), without requiring a player deck.  Useful for quickly understanding
+    the field composition and its structural weaknesses before building a deck.
+
+    Sources (in priority order):
+      1. ``--field <file>``  — user-supplied archetype shares
+      2. ``--provenance online|paper`` — corpus filtered to that venue
+      3. No flags — full global corpus field
+
+    Window opts (``--since``/``--until``/``--regime``/``--all-time``) narrow the
+    global field time window.  When ``--field`` is supplied the window is ignored
+    for the field itself (custom fields have no time axis) but still filters any
+    downstream matchup data.
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.advisory.whattoplay import field_vulnerability_tags, hate_equity
+    from legacy_engine.advisory.window import resolve_advisory_window
+    from legacy_engine.ingestion import store
+
+    field_text = Path(field_file).read_text() if field_file else None
+
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con, provenance=provenance)
+        win = resolve_advisory_window(
+            con,
+            regime=regime,
+            since=since,
+            until=until,
+            all_time=all_time,
+            provenance=provenance,
+            thin_floor=0,
+            adaptive_default=False,
+        )
+        _echo_window(win)
+
+        # When --field is supplied, the custom field is used as-is; provenance/window
+        # filter only applies to the global field builder.
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(
+            con,
+            field_text=field_text,
+            provenance=field_provenance,
+            since=win.since,
+            until=win.until,
+        )
+
+        # Warn on field warnings (thin-data banners, normalization, etc.)
+        for w in field.warnings:
+            click.echo(f"// field warning: {w}")
+
+        # Compute per-archetype vulnerability tags + hate-equity coverage
+        archetype_tags = field_vulnerability_tags(con, field)
+        field_vuln_profile = hate_equity(field, archetype_tags)
+
+        # Render field composition
+        click.echo(f"\n=== Field Read (field_source={field.field_source}) ===")
+        click.echo(f"Field composition ({len(field.shares)} archetypes):")
+        for archetype, share in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True):
+            tags = archetype_tags.get(archetype, frozenset())
+            tag_str = f"  [{', '.join(sorted(tags))}]" if tags else ""
+            click.echo(f"  {archetype:<30}  {share:>6.1%}{tag_str}")
+
+        # Render field vulnerability profile (hate-equity)
+        if field_vuln_profile:
+            click.echo("\nField vulnerability profile (hate-equity):")
+            click.echo(
+                "  (share of the field that carries each vulnerability tag — "
+                "what a hate card targeting that tag would attack)"
+            )
+            for tag, eq in sorted(
+                field_vuln_profile.items(), key=lambda kv: kv[1], reverse=True
+            ):
+                click.echo(f"  {tag:<28}  field share attacked: {eq:>6.1%}")
+        else:
+            click.echo("\nField vulnerability profile: (no tagged archetypes found)")
+
+    finally:
+        con.close()
+
+
 @advise.command("report")
 @click.option(
     "--deck",
