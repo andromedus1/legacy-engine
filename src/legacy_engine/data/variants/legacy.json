@@ -1,0 +1,34 @@
+{
+  "version": "2026-06-13",
+  "variants": [
+    {
+      "parent": "Dimir Tempo",
+      "name": "Bauble",
+      "conditions": [
+        {"Type": "InMainboard", "Cards": ["Mishra's Bauble"]}
+      ]
+    },
+    {
+      "parent": "Dimir Tempo",
+      "name": "non-Bauble",
+      "conditions": [
+        {"Type": "DoesNotContain", "Cards": ["Mishra's Bauble"]}
+      ]
+    },
+    {
+      "parent": "Smallpox",
+      "name": "Loam",
+      "conditions": [
+        {"Type": "OneOrMoreInMainOrSideboard", "Cards": ["Life from the Loam"]}
+      ]
+    },
+    {
+      "parent": "Smallpox",
+      "name": "non-Loam",
+      "conditions": [
+        {"Type": "DoesNotContain", "Cards": ["Life from the Loam"]}
+      ]
+    }
+  ],
+  "defaults": {}
+}

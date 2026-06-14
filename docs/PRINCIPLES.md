@@ -17,8 +17,9 @@ decisions:
   - "Never an unlabeled meta-% — always state the definition (raw/top-cut/winrate-weighted) and the online/paper/blend basis; they diverge materially."
   - "Confidence-gate every derived stat — sample size + CI on matchup cells; low-n flagged, not silently shown."
   - "Advisory is first-class — 'how to attack the field' is a headline product surface, not a footnote to descriptive stats."
+  - "Ban-regime-aware windowing is the default, and the window is always stated — adaptive for matrix-backed surfaces, uniform for explicit --regime/--since windows, full for deck-based descriptive surfaces; a thin window may never silently claim depth it doesn't have."
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-13
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -78,3 +79,14 @@ Mirror edh-engine's architecture, conventions, and code wherever the domain over
 deck-as-data, mana solver, mulligan, confidence metadata, CLI shape). Diverge only where Legacy demands
 it — the archetype parser, the advisory pillar, 1v1/sideboard semantics, straight London (no free mull) —
 and say why in the doc.
+
+### 10. Ban-regime-aware windowing, always labeled
+Every analytical surface defaults to ban-regime-aware windowing so tuning reflects the **current**
+meta, not a stale pre-ban field. Three modes — **adaptive** (per-cell/per-opponent ban-aware, the
+default for matrix-backed surfaces: matchups, positioning, gaps, sideboard plans), **uniform**
+(an explicit `--regime`/`--since` window, degraded to full corpus + banner when thin), and **full**
+(`--all-time`, or deck-based descriptive surfaces whose thinness shows via confidence tiers). A
+surface MUST echo its resolved window and thinness; a thin window may never silently claim depth it
+doesn't have. Where two surfaces legitimately use different windows (a current-regime consensus list
+read alongside an adaptive matchup matrix), the divergence is stated, never silent. New surfaces are
+audited against this checklist before they ship.

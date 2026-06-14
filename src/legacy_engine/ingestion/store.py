@@ -11,13 +11,40 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
+
+if TYPE_CHECKING:
+    from legacy_engine.ingestion.prices import PrintingPrice
 
 from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.models.card import Card
 from legacy_engine.models.tournament import TournamentResult
+
+# ── card_prices DDL ────────────────────────────────────────────────────────────────────────────────
+# Separate from the ``cards`` table: prices live at printing cardinality (set + collector number),
+# refresh on a daily cadence, and are an optional/gated signal.  The ``cards`` table is the
+# oracle dimension (one row per playable name); folding per-printing prices into it would break
+# its primary key.
+CARD_PRICES_DDL = """
+CREATE TABLE IF NOT EXISTS card_prices (
+    scryfall_id      VARCHAR PRIMARY KEY,
+    name             VARCHAR NOT NULL,
+    set_code         VARCHAR,
+    set_name         VARCHAR,
+    collector_number VARCHAR,
+    usd              DOUBLE,
+    usd_foil         DOUBLE,
+    usd_etched       DOUBLE,
+    eur              DOUBLE,
+    promo            BOOLEAN,
+    is_paper         BOOLEAN,
+    price_date       VARCHAR
+)
+"""
 
 CARDS_DDL = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -44,6 +71,7 @@ TOURNAMENT_DDL = [
     )""",
     """CREATE TABLE IF NOT EXISTS decks (
         tournament_id VARCHAR, deck_idx INTEGER, player VARCHAR, result VARCHAR, archetype VARCHAR,
+        variant VARCHAR,
         PRIMARY KEY (tournament_id, deck_idx)
     )""",
     """CREATE TABLE IF NOT EXISTS deck_cards (
@@ -57,6 +85,15 @@ TOURNAMENT_DDL = [
         wins INTEGER, losses INTEGER, draws INTEGER
     )""",
 ]
+
+# Derived identity table — populated by analytics.players.identity.materialize_player_aliases.
+# Declared here so init_schema always creates the empty table in a fresh DB.
+PLAYER_ALIASES_DDL = """\
+CREATE TABLE IF NOT EXISTS player_aliases (
+    handle_norm VARCHAR PRIMARY KEY,
+    player_id   VARCHAR NOT NULL
+)\
+"""
 
 
 def connect(path: Path | str = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
@@ -79,6 +116,11 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("ALTER TABLE cards ADD COLUMN IF NOT EXISTS toughness VARCHAR")
     for ddl in TOURNAMENT_DDL:
         con.execute(ddl)
+    # Migration: add variant column (sub-archetype tag, NULL until labeler resolves it).
+    # Idempotent — ADD COLUMN IF NOT EXISTS is a no-op on tables that already carry it.
+    con.execute("ALTER TABLE decks ADD COLUMN IF NOT EXISTS variant VARCHAR")
+    # Derived identity table — data populated by materialize_player_aliases; empty until then.
+    con.execute(PLAYER_ALIASES_DDL)
 
 
 # Multi-face layout classes — determine how a face name inherits attributes.
@@ -204,10 +246,139 @@ def load_card(con: duckdb.DuckDBPyConnection, name: str) -> Card | None:
     return Card.model_validate(row)
 
 
+def existing_card_names(con: duckdb.DuckDBPyConnection) -> set[str]:
+    """Return the set of card names currently in the cards table.
+
+    Returns an empty set when the table does not yet exist (fresh DB), so callers
+    can call this before init_schema without raising.
+    """
+    try:
+        rows = con.execute("SELECT name FROM cards").fetchall()
+    except Exception:
+        return set()
+    return {row[0] for row in rows}
+
+
+@dataclass(frozen=True)
+class IngestDiff:
+    """Result of a diff-producing ingest run.
+
+    ``new_names``: card names present in the incoming bulk but absent from the table
+    before this load. The authoritative "new cards" signal — robust to how Scryfall's
+    bulk changed (new set, Secret Lair drop, oracle erratum adding a face alias).
+
+    ``total_after``: total number of full-name card rows in the table after the load.
+
+    ``scryfall_updated_at``: the bulk file's ``updated_at`` provenance string (from
+    metadata.json), or None if unavailable. Round-tripped for auditability.
+    """
+
+    new_names: tuple[str, ...]
+    total_after: int
+    scryfall_updated_at: str | None
+
+
+def load_cards_diff(
+    con: duckdb.DuckDBPyConnection,
+    cards: Iterable[Card],
+    *,
+    scryfall_updated_at: str | None = None,
+) -> IngestDiff:
+    """INSERT OR REPLACE all cards (idempotent, identical to load_cards) and capture the diff.
+
+    Captures the set of card names present before the load, calls load_cards, then
+    computes the set difference to yield newly-ingested names. Non-destructive: the
+    cards table is NOT dropped — this is the incremental, diff-aware path. The full
+    rebuild path (drop + reload) remains ``rebuild`` + ``load_cards``.
+
+    Args:
+        con: DuckDB connection (cards table created if absent).
+        cards: Iterable of Card objects to ingest (the full current bulk).
+        scryfall_updated_at: Provenance string from the Scryfall bulk metadata.json;
+            persisted in the returned IngestDiff for auditability.
+
+    Returns:
+        IngestDiff with new_names (sorted tuple), total_after, and scryfall_updated_at.
+    """
+    cards_list = list(cards)
+    before = existing_card_names(con)
+    load_cards(con, cards_list)
+    # Count only full-name rows (not face aliases — aliases use INSERT OR IGNORE and
+    # don't represent new playable names in the game sense).
+    total_after = con.execute("SELECT count(*) FROM cards").fetchone()[0]
+    after_names = existing_card_names(con)
+    new = tuple(sorted(after_names - before))
+    return IngestDiff(
+        new_names=new,
+        total_after=total_after,
+        scryfall_updated_at=scryfall_updated_at,
+    )
+
+
 def rebuild(con: duckdb.DuckDBPyConnection) -> None:
     """Drop and recreate the cards table (raw JSON remains the source of truth)."""
     con.execute("DROP TABLE IF EXISTS cards")
     init_schema(con)
+
+
+# ── card_prices table helpers ──────────────────────────────────────────────────────────────────────
+
+
+def init_prices_schema(con: duckdb.DuckDBPyConnection) -> None:
+    """Create the card_prices table if absent (idempotent).
+
+    Intentionally separate from ``init_schema`` so the cards/oracle path stays byte-identical
+    when prices have never been seeded (gated-additive-augmentation: the no-price corpus behaves
+    exactly as today).
+    """
+    con.execute(CARD_PRICES_DDL)
+
+
+def load_prices(con: duckdb.DuckDBPyConnection, printings: "Iterable[PrintingPrice]") -> int:
+    """Insert/replace per-printing price rows into card_prices. Idempotent on scryfall_id.
+
+    Args:
+        con: DuckDB connection (card_prices table must exist — call init_prices_schema first).
+        printings: Iterable of ``PrintingPrice`` dataclass instances.
+
+    Returns:
+        Number of rows loaded (not counting idempotent skips).
+    """
+    rows = [
+        (
+            pp.scryfall_id,
+            pp.name,
+            pp.set_code,
+            pp.set_name,
+            pp.collector_number,
+            pp.usd,
+            pp.usd_foil,
+            pp.usd_etched,
+            pp.eur,
+            pp.promo,
+            pp.is_paper,
+            pp.price_date,
+        )
+        for pp in printings
+    ]
+    if not rows:
+        return 0
+    con.executemany(
+        """
+        INSERT OR REPLACE INTO card_prices
+        (scryfall_id, name, set_code, set_name, collector_number,
+         usd, usd_foil, usd_etched, eur, promo, is_paper, price_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    return len(rows)
+
+
+def rebuild_prices(con: duckdb.DuckDBPyConnection) -> None:
+    """Drop and recreate card_prices (the raw default_cards.json mirror is the source of truth)."""
+    con.execute("DROP TABLE IF EXISTS card_prices")
+    init_prices_schema(con)
 
 
 def tournament_id(tr: TournamentResult) -> str:
@@ -242,13 +413,14 @@ def load_tournament(con: duckdb.DuckDBPyConnection, tr: TournamentResult) -> str
     deck_rows = []
     card_rows = []
     for idx, deck in enumerate(tr.decks):
-        deck_rows.append((tid, idx, deck.player, deck.result, None))  # archetype NULL until labeled
+        # archetype + variant both NULL until the labeler runs.
+        deck_rows.append((tid, idx, deck.player, deck.result, None, None))
         for cc in deck.mainboard:
             card_rows.append((tid, idx, "main", cc.name, cc.count))
         for cc in deck.sideboard:
             card_rows.append((tid, idx, "side", cc.name, cc.count))
     if deck_rows:
-        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?)", deck_rows)
+        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
     if card_rows:
         con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
 

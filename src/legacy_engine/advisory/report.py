@@ -19,6 +19,7 @@ from legacy_engine.archetype.matcher import ArchetypeResult, classify
 from legacy_engine.archetype.rules import load_ruleset
 from legacy_engine.colors import compute_deck_colors
 from legacy_engine.config import RULES_DIR
+from legacy_engine.models.decklist import parse_decklist as _parse_decklist_impl
 
 log = logging.getLogger(__name__)
 
@@ -27,57 +28,26 @@ log = logging.getLogger(__name__)
 # Unit 1 — Deck/field input plumbing
 # ---------------------------------------------------------------------------
 
+# _COUNT_RE kept for any other callers in this file.
 _COUNT_RE = re.compile(r"^(\d+)[xX]?\s+(.+)$")
 
 
 def _parse_decklist(text: str) -> tuple[dict[str, int], dict[str, int]]:
     """Parse a plain-text decklist into (mainboard, sideboard).
 
+    Thin wrapper around ``models.decklist.parse_decklist`` (the canonical
+    implementation, promoted there so ``collection/`` can import it without a
+    sideways ``collection → advisory`` dependency).  Error messages previously
+    said ``_parse_decklist:``; the promoted function says ``parse_decklist:``
+    — callers catching ``ValueError`` should match on the exception type, not
+    the prefix string.
+
     Lines ``<count> <name>`` or ``<count>x <name>``; a line equal to
     ``Sideboard`` (case-insensitive) or a blank line after main cards starts
     the sideboard.  Ignores ``#``-prefixed comments and leading blank lines.
     Raises ``ValueError`` on a malformed line or an empty maindeck.
     """
-    mainboard: dict[str, int] = {}
-    sideboard: dict[str, int] = {}
-    in_side = False
-    seen_main_card = False
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-
-        # Skip comments
-        if line.startswith("#"):
-            continue
-
-        # Blank line: after we've seen at least one main card, switch to side
-        if not line:
-            if seen_main_card:
-                in_side = True
-            continue
-
-        # "Sideboard" header (case-insensitive)
-        if line.lower() == "sideboard":
-            in_side = True
-            continue
-
-        m = _COUNT_RE.match(line)
-        if m is None:
-            raise ValueError(f"_parse_decklist: malformed line {line!r}")
-
-        count = int(m.group(1))
-        name = m.group(2).strip()
-
-        if in_side:
-            sideboard[name] = sideboard.get(name, 0) + count
-        else:
-            mainboard[name] = mainboard.get(name, 0) + count
-            seen_main_card = True
-
-    if not mainboard:
-        raise ValueError("_parse_decklist: empty maindeck")
-
-    return mainboard, sideboard
+    return _parse_decklist_impl(text)
 
 
 def _classify_deck(
@@ -487,8 +457,95 @@ def _render_sideboard_plans(sb) -> list[str]:
     return lines
 
 
-def _render_sideboard(report: FieldReadReport) -> str:
-    """Render the sideboard section."""
+def _interaction_annotation(card_name: str, con: duckdb.DuckDBPyConnection) -> str | None:
+    """Return a short oracle-grounded interaction annotation for a hate card, or None.
+
+    Gated-additive: only fires for graveyard-touching cards from the HOSER_CATALOG.
+    When interaction facts are absent or the card doesn't touch graveyards the function
+    returns None — callers render identically to the pre-feature baseline.
+
+    This is the Unit 2 + 3 wiring: oracle_text grounds the advisory rationale so the
+    primer can say "one-sided graveyard hate, synergy-safe" rather than producing
+    a wrong self-harm claim from memory.
+
+    ``con`` is the DuckDB connection used to look up real oracle_text from the cards
+    table — no hardcoded text cache, no memory-based reasoning.
+    """
+    try:
+        from legacy_engine.interaction_facts import interaction_facts, verify_graveyard_claim
+        from legacy_engine.advisory.sideboard import HOSER_CATALOG
+        from legacy_engine.models.card import Card
+
+        hoser = HOSER_CATALOG.get(card_name)
+        if hoser is None or "graveyard-reliant" not in hoser.attacks:
+            return None
+
+        # Look up the real oracle_text from the DB — no hardcoded cache.
+        # If the card isn't in the DB, degrade gracefully (return None, never crash).
+        row = con.execute(
+            "SELECT oracle_text, type_line FROM cards WHERE name = ?",
+            [card_name],
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+
+        oracle_text, type_line = row[0], row[1] or ""
+        card = Card(name=card_name, type_line=type_line, oracle_text=oracle_text)
+        facts = interaction_facts(card)
+
+        if not facts.touches_graveyard:
+            return None
+
+        # Build annotation
+        parts: list[str] = []
+        scope_desc = {
+            "opponent-only": "one-sided (opponent's yard only)",
+            "targeted": "targeted (aim at opponent)",
+            "symmetric": "symmetric" + ("" if not facts.graveyard_count_reduction else " exile"),
+            "self-only": "self-only (your own engine)",
+            "none": None,
+        }.get(facts.affects)
+        if scope_desc:
+            parts.append(scope_desc)
+
+        if facts.self_graveyard_safe:
+            parts.append("synergy-safe")
+        else:
+            parts.append("hurts own yard too")
+
+        if facts.permanence in ("static", "activated"):
+            parts.append(facts.permanence)
+
+        annotation = ", ".join(p for p in parts if p)
+
+        # Unit 3 guard: run verify_graveyard_claim to check for incorrect self-harm claims.
+        # If the card is safe but was being claimed to harm own yard, annotate accordingly.
+        check = verify_graveyard_claim(card, claims_self_harm=False)
+        if check.ok and facts.self_graveyard_safe:
+            # Confirmed safe — annotation stands
+            pass
+        elif not check.ok:
+            # Guard found something unexpected; append evidence note
+            annotation += " [review oracle_text]"
+
+        if facts.confidence.level == "speculative":
+            annotation += " [scope uncertain]"
+
+        return f"[{annotation}]" if annotation else None
+
+    except Exception:
+        # Gated: any failure → return None, render identically to baseline
+        return None
+
+
+def _render_sideboard(report: FieldReadReport, con: duckdb.DuckDBPyConnection | None = None) -> str:
+    """Render the sideboard section.
+
+    ``con`` is optional — when provided, oracle_text for graveyard hosers is looked
+    up from the DB and an interaction annotation is appended.  When absent (e.g. unit
+    tests that don't exercise the annotation path), the annotation is silently skipped,
+    preserving byte-identical baseline output.
+    """
     sb = report.sideboard
     lines: list[str] = [
         f"Recommended sideboard (solver={sb.solver_used}, budget={sb.budget}, "
@@ -498,7 +555,9 @@ def _render_sideboard(report: FieldReadReport) -> str:
     ]
     if sb.cards:
         for card, copies in sorted(sb.cards.items(), key=lambda kv: kv[1], reverse=True):
-            lines.append(f"  {copies}x {card}")
+            annotation = _interaction_annotation(card, con) if con is not None else None
+            suffix = f"  {annotation}" if annotation else ""
+            lines.append(f"  {copies}x {card}{suffix}")
     else:
         lines.append("  (no sideboard recommendations — no castable hosers found)")
     lines.append(f"  Note: {sb.heuristic_note}")
@@ -510,11 +569,80 @@ def _render_sideboard(report: FieldReadReport) -> str:
     return "\n".join(lines)
 
 
-def render_field_read(report: FieldReadReport) -> str:
+def render_cross_venue_positioning(reports: dict[str, "FieldReadReport"]) -> str:
+    """Render a compact cross-venue positioning delta footer.
+
+    Shows the deck's positioning S and best-deck-call per venue side by side —
+    the decision-relevant divergence ("your deck is well-positioned online but
+    poorly in paper").  ``reports`` maps ``venue.key`` to a ``FieldReadReport``
+    (already built per venue by the CLI orchestrator; this function is a pure
+    text renderer, no recompute).
+
+    Only emits rows for venues where positioning was computed (not None).
+    """
+    if not reports:
+        return ""
+
+    lines: list[str] = ["── Cross-venue positioning delta ──"]
+
+    # Header row
+    venue_keys = list(reports.keys())
+    col_w = 14
+    header = f"  {'Metric':<28}" + "".join(f"  {k:<{col_w}}" for k in venue_keys)
+    lines.append(header)
+    lines.append("  " + "-" * (28 + (col_w + 2) * len(venue_keys)))
+
+    # Positioning S row
+    s_parts = [f"  {'Positioning S':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        pos = r.positioning
+        if pos is None:
+            s_parts.append(f"  {'N/A':<{col_w}}")
+        elif not pos.s_computable:
+            s_parts.append(f"  {'no data':<{col_w}}")
+        else:
+            scope_note = "*" if pos.restricted else ""
+            s_parts.append(f"  {pos.s_mean:.3f}{scope_note:<{col_w - 5}}")
+    lines.append("".join(s_parts))
+
+    # Coverage row
+    cov_parts = [f"  {'Coverage':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        pos = r.positioning
+        if pos is None:
+            cov_parts.append(f"  {'N/A':<{col_w}}")
+        else:
+            cov_parts.append(f"  {pos.data_coverage:.0%}{'':>{col_w - 4}}")
+    lines.append("".join(cov_parts))
+
+    # Best-deck-call row
+    bdc_parts = [f"  {'Best-deck-call':<28}"]
+    for k in venue_keys:
+        r = reports[k]
+        bdc = r.best_deck_call
+        if bdc is None:
+            bdc_parts.append(f"  {'N/A':<{col_w}}")
+        else:
+            label = bdc.label[:col_w]
+            bdc_parts.append(f"  {label:<{col_w}}")
+    lines.append("".join(bdc_parts))
+
+    lines.append("  (* = restricted to covered sub-field)")
+
+    return "\n".join(lines)
+
+
+def render_field_read(report: FieldReadReport, con: duckdb.DuckDBPyConnection | None = None) -> str:
     """Render the full Field Read & Deck Recommendation as labeled text.
 
     Sections: header → field composition → vulnerability profile →
     positioning → whattoplay → sideboard → audit trail.
+
+    ``con`` is optional — when supplied, oracle_text-grounded interaction annotations
+    are appended to graveyard hosers in the sideboard section.  When absent the output
+    is byte-identical to the pre-feature baseline (gated-additive).
     """
     sections: list[str] = []
 
@@ -540,7 +668,7 @@ def render_field_read(report: FieldReadReport) -> str:
     sections.append(_render_whattoplay(report))
 
     # Sideboard
-    sections.append(_render_sideboard(report))
+    sections.append(_render_sideboard(report, con=con))
 
     # Audit trail
     audit_lines = "\n".join(f"  {line}" for line in report.audit)

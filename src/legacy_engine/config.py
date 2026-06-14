@@ -17,11 +17,34 @@ RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData rules
 BANLIST_DIR = DATA_DIR / "banlist"    # dated WotC B&R snapshots
 DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
 
+# Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
+PACKAGE_DATA_DIR = Path(__file__).parent / "data"
+VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
+VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
+PLAYERS_DIR = PACKAGE_DATA_DIR / "players"
+ALIASES_PATH = PLAYERS_DIR / "aliases.json"             # shipped player-alias map (curated SSOT)
+
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"
 SCRYFALL_BULK_TYPE = "oracle_cards"
 SCRYFALL_API_DELAY = 0.1  # seconds between REST requests (bulk has no limit)
 USER_AGENT = "LegacyEngine/0.1.0"
+SCRYFALL_SETS_URL = f"{SCRYFALL_API_BASE}/sets"   # GET /sets — the release calendar
+
+# Release-scan windows: how far to look ahead (upcoming) and behind (recently-released).
+# Advisory only — the diff is the authoritative "what's new" signal.
+RELEASE_HORIZON_DAYS = 30   # days forward for "upcoming" sets
+RELEASE_LOOKBACK_DAYS = 14  # days back for "recently released" sets
+
+# Per-printing price bulk (default_cards: one object per printing, English/printed-language).
+# Separate from the oracle bulk (oracle_cards) which carries one object per Oracle ID — that
+# single-row design is the root cause of usd:null for reserved-list cards (Underground Sea
+# resolves to a Vintage Masters printing with only MTGO tix, not a paper price).
+SCRYFALL_PRICES_BULK_TYPE = "default_cards"
+SCRYFALL_PRICES_PATH = SCRYFALL_DIR / "default_cards.json"
+SCRYFALL_PRICES_META_PATH = SCRYFALL_DIR / "prices_metadata.json"
+PRICE_STALE_DAYS = 30  # days before a PriceQuote is flagged stale (advisory, not hard error)
+PRICE_OVERRIDE_PATH = DATA_DIR / "prices" / "overrides.json"  # optional curated fallback; absent by default
 
 # ── Vendored / mirrored external sources ──
 FBETTEGA_CACHE_REPO = "https://github.com/fbettega/MTG_decklistcache"
@@ -36,6 +59,12 @@ RULES_PINNED_SHA = ""
 # exact commit and raises if the post-checkout HEAD doesn't match, preventing
 # silent drift when the upstream repo advances.
 MTGOFORMATDATA_SHA = "e056bc7d63c0138091986ce1696c705bc7dee296"
+
+# ── Collection (user's personal inventory + decks) ──
+COLLECTION_DIR = DATA_DIR / "collection"
+INVENTORY_PATH = COLLECTION_DIR / "inventory.json"
+DECKS_DIR = COLLECTION_DIR / "decks"
+LOCAL_OWNER = "local"  # single-user default; future multi-user: pass a real user id
 
 # ── Visualization ──
 VIZ_DIR = DATA_DIR / "viz"                 # default output dir; mkdir at write time, never on import

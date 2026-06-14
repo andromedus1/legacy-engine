@@ -783,7 +783,7 @@ class TestComputeMatchResults:
         # string that normalizes to the same key ("alice"), simulating the
         # real-world scenario where two distinct decks share a normalized name.
         con.execute(
-            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver')",
+            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver', NULL)",
             [tid],
         )
         # Label alice and bob so the pairing is not trivially unmatched
@@ -817,7 +817,7 @@ class TestComputeMatchResults:
         tid = store.load_tournament(con, parse_cache_item(_DUP_NAMES, "MTGO"))
         # Make bob's name non-unique (two decks normalize to "bob")
         con.execute(
-            "INSERT INTO decks VALUES (?, 99, 'BOB', '3rd', 'Combo')",
+            "INSERT INTO decks VALUES (?, 99, 'BOB', '3rd', 'Combo', NULL)",
             [tid],
         )
         con.execute(
@@ -912,7 +912,7 @@ class TestComputeMatchResults:
         # Load a dup-names tournament to exercise ambiguous_player_names
         tid_dup = store.load_tournament(con, parse_cache_item(_DUP_NAMES, "MTGO"))
         con.execute(
-            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver')",
+            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver', NULL)",
             [tid_dup],
         )
         con.execute(

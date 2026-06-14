@@ -8,7 +8,7 @@ depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-06
-updated: 2026-06-06
+updated: 2026-06-13
 ---
 
 # Local-Meta Support
@@ -53,3 +53,11 @@ This epic makes preparing for a *specific local meta* a first-class, supported w
 - **engine-geo-dimension** [ingestion, analytics]: tournaments carry no geographic/location field, so
   the engine can't natively answer its headline local-meta use case. Add a geo/location dimension to
   ingestion + schema and expose region filtering across reports/advise.
+
+  **Forward seam from `feature-three-venue-meta-frame`:** that feature ships the `Venue` abstraction
+  (`analytics/venue.py`) and the side-by-side comparison surface (`report meta --venues`,
+  `advise report --venues`) for the only venue axis available today (online vs paper provenance). When
+  this geo dimension lands, add `local:<region>` Venue members (and, with a new event-tier/event-size
+  dimension, a `regional` member) to `resolve_venues`; the comparison/divergence/CLI layers consume
+  `list[Venue]` and need no change. This is a forward note, NOT a build dependency —
+  `feature-three-venue-meta-frame` is independently shippable on existing data.

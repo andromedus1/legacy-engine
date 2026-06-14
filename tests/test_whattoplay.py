@@ -731,7 +731,7 @@ class TestVulnerabilityTags:
         )
         for idx in range(3):
             con.execute(
-                "INSERT INTO decks VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
                 [tid, idx, f"player{idx}", "1st", "Reanimator"],
             )
             for card_name, count in [("Reanimate", 4), ("Animate Dead", 2), ("Entomb", 4), ("Griselbrand", 4), ("Swamp", 10)]:
@@ -769,7 +769,7 @@ class TestVulnerabilityTags:
         )
         for idx in range(3):
             con.execute(
-                "INSERT INTO decks VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
                 [tid, idx, f"player{idx}", "1st", "Death and Taxes"],
             )
             for card_name, count in [
@@ -811,7 +811,7 @@ class TestVulnerabilityTags:
         )
         for idx in range(3):
             con.execute(
-                "INSERT INTO decks VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
                 [tid, idx, f"player{idx}", "1st", "ANT Storm"],
             )
             for card_name, count in [
@@ -908,7 +908,7 @@ class TestVulnerabilityTags:
             [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
         )
         # One deck with 4×FoW, 4×Counterspell, 4×Brainstorm, 1×Tendrils (stray), 12×Island
-        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?)", [tid, 0, "p0", "1st", "Izzet Control"])
+        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, 0, "p0", "1st", "Izzet Control"])
         for name, count in [
             ("Force of Will", 4),
             ("Counterspell", 4),
@@ -1034,7 +1034,7 @@ class TestHateEquity:
             "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
             [tid, "T", "2026-01-01", None, "Legacy", "test", "test"],
         )
-        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?)", [tid, 0, "p0", "1st", "Reanimator"])
+        con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, 0, "p0", "1st", "Reanimator"])
         con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, 0, "main", "Reanimate", 4])
         con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, 0, "main", "Swamp", 10])
 

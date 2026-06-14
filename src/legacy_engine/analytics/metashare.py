@@ -58,6 +58,28 @@ WHERE d.archetype IS NOT NULL
 GROUP BY d.archetype
 """
 
+_TOPCUT_BY_VARIANT_SQL = _TOPCUT_DUP_CTES + """
+SELECT
+  CASE WHEN d.variant IS NOT NULL
+       THEN d.archetype || ' / ' || d.variant
+       ELSE d.archetype
+  END AS archetype,
+  count(*) AS n
+FROM decks d
+JOIN tournaments t ON t.id = d.tournament_id
+JOIN standings s ON s.tournament_id = d.tournament_id
+               AND lower(trim(s.player)) = lower(trim(d.player))
+LEFT JOIN dup du ON du.tournament_id = d.tournament_id AND du.norm = lower(trim(d.player))
+LEFT JOIN dup_s dus ON dus.tournament_id = d.tournament_id AND dus.norm = lower(trim(d.player))
+WHERE d.archetype IS NOT NULL
+  AND du.norm IS NULL AND dus.norm IS NULL   -- exclude names ambiguous in decks OR standings
+  AND s.rank <= ?
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
+GROUP BY d.archetype, d.variant
+"""
+
 # Same join structure but counts NULL-archetype decks for finding #3.
 _TOPCUT_UNLABELED_SQL = _TOPCUT_DUP_CTES + """
 SELECT count(*) AS n
@@ -83,6 +105,7 @@ def _topcut_counts(
     cut_size: int,
     since: str | None = None,
     until: str | None = None,
+    group_by_variant: bool = False,
 ) -> dict[str, int]:
     """Per-archetype count of decks finishing within the event's top cut (standings.rank <= cut_size).
 
@@ -90,9 +113,13 @@ def _topcut_counts(
     definition (b)'s numerator AND denominator — top-cut is undefined for them.
     Decks whose normalized player name is non-unique within the tournament are
     excluded to avoid ambiguous deck-standings attribution (finding #1 top-cut half).
+
+    When ``group_by_variant`` is True, the key becomes ``"{archetype} / {variant}"`` for
+    decks with a non-NULL variant.
     """
+    sql = _TOPCUT_BY_VARIANT_SQL if group_by_variant else _TOPCUT_SQL
     rows = con.execute(
-        _TOPCUT_SQL, [cut_size, provenance, provenance, since, since, until, until]
+        sql, [cut_size, provenance, provenance, since, since, until, until]
     ).fetchall()
     return {archetype: n for archetype, n in rows}
 
@@ -131,6 +158,22 @@ WHERE d.archetype IS NOT NULL
 GROUP BY d.archetype
 """
 
+_RAW_BY_VARIANT_SQL = """
+SELECT
+  CASE WHEN d.variant IS NOT NULL
+       THEN d.archetype || ' / ' || d.variant
+       ELSE d.archetype
+  END AS archetype,
+  count(*) AS n
+FROM decks d
+JOIN tournaments t ON t.id = d.tournament_id
+WHERE d.archetype IS NOT NULL
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date < ?)
+GROUP BY d.archetype, d.variant
+"""
+
 _UNLABELED_SQL = """
 SELECT count(*) AS n
 FROM decks d
@@ -148,10 +191,17 @@ def _raw_counts(
     provenance: str | None,
     since: str | None = None,
     until: str | None = None,
+    group_by_variant: bool = False,
 ) -> dict[str, int]:
-    """Per-archetype deck count over labeled decks (archetype IS NOT NULL)."""
+    """Per-archetype deck count over labeled decks (archetype IS NOT NULL).
+
+    When ``group_by_variant`` is True, the key becomes ``"{archetype} / {variant}"`` for
+    decks with a non-NULL variant; decks without a variant keep the bare archetype key.
+    Default (False) → unchanged, byte-identical to the pre-variant path.
+    """
+    sql = _RAW_BY_VARIANT_SQL if group_by_variant else _RAW_SQL
     rows = con.execute(
-        _RAW_SQL, [provenance, provenance, since, since, until, until]
+        sql, [provenance, provenance, since, since, until, until]
     ).fetchall()
     return {archetype: n for archetype, n in rows}
 
@@ -259,6 +309,30 @@ class MetaShareReport:
     excluded_no_match_data: list[str] = field(default_factory=list)
     # finding #5: wrw archetypes that have a deck count but zero match data — surfaced
     # as coverage metadata rather than only a debug log.  Empty for raw/topcut.
+
+
+def corpus_freshness(
+    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None
+) -> tuple[str | None, int]:
+    """Return ``(max_event_date, deck_count)`` for data-currency headers.
+
+    ``max_event_date`` is the newest ``tournaments.date`` as an ISO ``YYYY-MM-DD`` string
+    (date-portion only — real-corpus values mix plain dates with full timestamps), or ``None``
+    on an empty corpus.  ``deck_count`` is the number of decks in scope.  Deterministic: a pure
+    function of the corpus, with no wall-clock — the staleness *comparison* is the caller's job.
+    """
+    row = con.execute(
+        """
+        SELECT max(t.date), count(d.deck_idx)
+        FROM tournaments t
+        LEFT JOIN decks d ON d.tournament_id = t.id
+        WHERE (? IS NULL OR t.provenance = ?)
+        """,
+        [provenance, provenance],
+    ).fetchone()
+    if not row or row[0] is None:
+        return None, 0
+    return row[0][:10], int(row[1] or 0)
 
 
 # Labels that must never be folded into the "Other" fringe bucket
@@ -378,6 +452,7 @@ def compute_metashare(
     group_other: bool = True,
     since: str | None = None,
     until: str | None = None,
+    group_by_variant: bool = False,
 ) -> MetaShareReport:
     """Compute meta-share for one definition and provenance basis.
 
@@ -385,6 +460,9 @@ def compute_metashare(
     ``provenance`` filters to ``"online"``/``"paper"``; ``None`` = all.
     ``since``/``until`` are ISO ``YYYY-MM-DD`` strings for a half-open ``[since, until)``
     date window against ``tournaments.date``; ``None`` = no bound.
+    ``group_by_variant`` when True splits each archetype by variant tag, rendering rows as
+    ``"{archetype} / {variant}"``; decks with no variant keep the bare archetype key.
+    Default (False) → unchanged, byte-identical to the pre-variant path.
 
     ``definition="wrw"`` with a date window raises ``NotImplementedError`` — windowed
     win-rate-weighted share is incoherent here because this path weights by the full-corpus
@@ -402,7 +480,10 @@ def compute_metashare(
     unlabeled = _unlabeled_count(con, provenance=provenance, since=since, until=until)
 
     if definition == "raw":
-        counts = _raw_counts(con, provenance=provenance, since=since, until=until)
+        counts = _raw_counts(
+            con, provenance=provenance, since=since, until=until,
+            group_by_variant=group_by_variant,
+        )
         total = sum(counts.values())
         n_by_arch = dict(counts)
         return _assemble(
@@ -417,7 +498,10 @@ def compute_metashare(
         )
 
     elif definition == "topcut":
-        counts = _topcut_counts(con, provenance=provenance, cut_size=cut_size, since=since, until=until)
+        counts = _topcut_counts(
+            con, provenance=provenance, cut_size=cut_size, since=since, until=until,
+            group_by_variant=group_by_variant,
+        )
         total = sum(counts.values())
         n_by_arch = dict(counts)
         # finding #3: compute actual unlabeled count over the same dup-excluded standings join
