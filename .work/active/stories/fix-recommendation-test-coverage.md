@@ -1,7 +1,7 @@
 ---
 id: fix-recommendation-test-coverage
 kind: story
-stage: drafting
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -22,3 +22,7 @@ updated: 2026-06-13
 - `generate doctor` no-archetype classify branch + Δ-rendering; `report subgroup`/`report variants` CLI
   smoke; interaction-fact evidence content (scope substring), not just non-emptiness.
 
+
+
+## Resolution
+Covered the two highest-value gaps in tests/test_recommendation_coverage.py (overpriced-flag FIRING path via acquire_plan — confirmed it fires, not a bug; + interaction-fact evidence scope content). Remaining lower-value gaps filed as idea-recommendation-coverage-rest. Suite 1888.
