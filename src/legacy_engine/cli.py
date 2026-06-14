@@ -378,6 +378,9 @@ def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: b
         finally:
             con.close()
 
+        # ── Persist the diff for report new-cards / speculate --new ──────────
+        store.persist_ingest_diff(diff)
+
     # ── Step 5: report the diff ──────────────────────────────────────────────
     date_str = (updated_at or "unknown")[:10]
     click.echo(f"// Bulk as of {date_str}  |  total cards: {diff.total_after:,}")
@@ -1635,45 +1638,40 @@ def report_prices(name: str, db: str | None, verbose: bool) -> None:
 def report_new_cards(limit: int, db: str | None, verbose: bool) -> None:
     """Show cards added in the most recent diff-ingest run.
 
-    Reads from the DuckDB cards table (all names) and the Scryfall bulk metadata
-    to report provenance. For the "what's new to test this week" surface.
+    Reads the persisted ingest diff written by `refresh cards` to list the
+    actual new card names. For the "what's new to test this week" surface.
 
     Run `legacy refresh cards` first to populate the diff.
 
     Example: legacy report new-cards --limit 20
     """
     _setup_logging(verbose)
-    import json
 
     from legacy_engine.ingestion import store
-    from legacy_engine.ingestion.scryfall import METADATA_PATH
 
-    # Read provenance from the metadata file.
-    updated_at = None
-    if METADATA_PATH.exists():
-        try:
-            updated_at = json.loads(METADATA_PATH.read_text()).get("updated_at")
-        except Exception:
-            pass
+    diff = store.load_ingest_diff()
+    if diff is None:
+        click.echo(
+            "// No diff recorded yet — run `legacy refresh cards` first.\n"
+            "// The diff will be persisted automatically on the next refresh."
+        )
+        return
 
-    con = store.connect(db) if db else store.connect()
-    try:
-        total = con.execute("SELECT count(*) FROM cards").fetchone()[0]
-    except Exception:
-        total = 0
-    finally:
-        con.close()
-
-    date_str = (updated_at or "unknown")[:10]
-    click.echo(f"\n=== New Cards (bulk as of {date_str}, total in DB: {total:,}) ===")
+    date_str = (diff.scryfall_updated_at or "unknown")[:10]
+    n_new = len(diff.new_names)
     click.echo(
-        "// Run `legacy refresh cards` to ingest the latest bulk and capture a diff.\n"
-        "// The diff is stored in the IngestDiff returned by load_cards_diff;\n"
-        "// to persist the diff between runs, call `refresh cards` and inspect its output."
+        f"\n=== New Cards (bulk as of {date_str}, total in DB: {diff.total_after:,}) ==="
     )
-    click.echo(
-        "\nTip: run `legacy refresh cards` and inspect the '+ CardName' lines for the latest diff."
-    )
+
+    if n_new == 0:
+        click.echo("// No new cards in the last diff (card universe was already current).")
+        return
+
+    click.echo(f"{n_new} new card(s) from the last `refresh cards` run:")
+    for name in diff.new_names[:limit]:
+        click.echo(f"  + {name}")
+    if n_new > limit:
+        click.echo(f"  … ({n_new - limit} more; use --limit to show more)")
 
 
 @report.command("speculate")
@@ -1763,10 +1761,18 @@ def report_speculate(
 
     # Determine the list of cards to forecast.
     if all_new:
-        # --new mode: look for the last diff from the metadata or prompt the user.
-        click.echo("// --new mode: to get new cards, run `legacy refresh cards` first.")
-        click.echo("// Speculating on the 10 most recently inserted cards as a proxy.")
-        target_names = [row[0] for row in pool_rows[-10:]]
+        # --new mode: read the persisted ingest diff; fall back with a clear message.
+        diff = store.load_ingest_diff()
+        if diff is None or not diff.new_names:
+            click.echo(
+                "// --new: no persisted diff found — run `legacy refresh cards` first.\n"
+                "// Once you run refresh cards, speculate --new will operate on the actual new-cards set."
+            )
+            return
+        click.echo(
+            f"// --new: using {len(diff.new_names)} card(s) from the last `refresh cards` diff."
+        )
+        target_names = list(diff.new_names)
     else:
         target_names = [card_name]  # type: ignore[list-item]
 
