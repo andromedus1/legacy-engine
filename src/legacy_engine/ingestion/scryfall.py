@@ -11,15 +11,23 @@ import json
 import logging
 import time
 import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from legacy_engine.ingestion.prices import PrintingPrice
 
 from legacy_engine.config import (
     SCRYFALL_API_BASE,
     SCRYFALL_API_DELAY,
     SCRYFALL_BULK_TYPE,
     SCRYFALL_DIR,
+    SCRYFALL_PRICES_BULK_TYPE,
+    SCRYFALL_PRICES_META_PATH,
+    SCRYFALL_PRICES_PATH,
     USER_AGENT,
 )
 from legacy_engine.models.card import Card
@@ -132,6 +140,128 @@ class ScryfallClient:
         """Resolve a card name to a typed Card, or None if unknown."""
         raw = self.load_card_index().get(normalize_name(name))
         return Card.from_scryfall(raw) if raw is not None else None
+
+    # ── prices bulk (default_cards: one object per printing) ──
+    def download_prices_bulk(self, force: bool = False) -> Path:
+        """Download the default_cards bulk file into data/scryfall/default_cards.json.
+
+        Skips the download when the locally mirrored file is already at the same
+        ``updated_at`` as the remote bulk (same skip-if-current mechanism as
+        ``download_bulk_data`` for oracle_cards).
+
+        NOTE: default_cards is ~547 MB.  This is a deliberate one-time fetch; re-running
+        is a no-op until Scryfall publishes a new bulk.  The table is rebuildable from the
+        mirrored file, so deleting the DuckDB loses no data.
+        """
+        SCRYFALL_DIR.mkdir(parents=True, exist_ok=True)
+
+        if not force and SCRYFALL_PRICES_PATH.exists() and SCRYFALL_PRICES_META_PATH.exists():
+            cached = json.loads(SCRYFALL_PRICES_META_PATH.read_text())
+            remote = self._fetch_prices_metadata()
+            if cached.get("updated_at") == remote.get("updated_at"):
+                logger.info("Scryfall prices bulk is up to date, skipping download")
+                return SCRYFALL_PRICES_PATH
+
+        meta = self._fetch_prices_metadata()
+        logger.info(
+            "Downloading Scryfall %s bulk from %s",
+            SCRYFALL_PRICES_BULK_TYPE,
+            meta["download_uri"],
+        )
+        # Stream into a temp file first, then rename atomically so a partial download
+        # never leaves a corrupt mirror.
+        tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
+        card_count = 0
+        with self.client.stream("GET", meta["download_uri"], follow_redirects=True) as resp:
+            resp.raise_for_status()
+            with tmp_path.open("wb") as fh:
+                for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                    fh.write(chunk)
+                    # Rough card count: count opening-brace sequences as a progress proxy.
+                    card_count += chunk.count(b'{"id"')
+
+        tmp_path.rename(SCRYFALL_PRICES_PATH)
+        SCRYFALL_PRICES_META_PATH.write_text(
+            json.dumps(
+                {
+                    "updated_at": meta.get("updated_at"),
+                    "bulk_type": SCRYFALL_PRICES_BULK_TYPE,
+                },
+                indent=2,
+            )
+        )
+        logger.info("Downloaded prices bulk (updated_at=%s)", meta.get("updated_at"))
+        return SCRYFALL_PRICES_PATH
+
+    def _fetch_prices_metadata(self) -> dict:
+        resp = self.client.get(BULK_DATA_URL)
+        resp.raise_for_status()
+        for item in resp.json().get("data", []):
+            if item.get("type") == SCRYFALL_PRICES_BULK_TYPE:
+                return item
+        raise RuntimeError(f"Scryfall bulk type not found: {SCRYFALL_PRICES_BULK_TYPE}")
+
+    def iter_price_rows(self, path: Path | None = None) -> "Iterator[PrintingPrice]":
+        """Stream the mirrored default_cards.json and yield one ``PrintingPrice`` per printing.
+
+        Filters to paper-legal, gameplay-layout printings only (excludes MTGO-only cards,
+        tokens, art-series, etc.).  All price fields are kept as-is from Scryfall (None where
+        Scryfall has no price).
+
+        The iterator holds only the current card object in memory at a time — suitable for
+        the ~547 MB default_cards bulk.
+
+        Args:
+            path: Override the mirrored file path (for tests).
+        """
+        from legacy_engine.ingestion.prices import _raw_to_printing_price  # prices.py imports nothing from scryfall
+
+        import json as _json
+
+        src = path or SCRYFALL_PRICES_PATH
+        if not src.exists():
+            raise FileNotFoundError(
+                f"Prices bulk not found at {src}. Run `legacy seed prices` first."
+            )
+
+        # Inject price_date from the metadata file so each PrintingPrice row carries staleness info.
+        price_date = self.prices_updated_at()
+
+        # Stream-parse with ijson when available; fall back to a full json.load for
+        # environments/tests where ijson is not installed.
+        try:
+            import ijson  # type: ignore[import]
+            use_ijson = True
+        except ImportError:
+            use_ijson = False
+
+        def _with_date(raw: dict) -> dict:
+            if price_date is not None:
+                raw = dict(raw)  # don't mutate the original
+                raw["_price_date"] = price_date
+            return raw
+
+        if use_ijson:
+            with src.open("rb") as fh:
+                for raw in ijson.items(fh, "item"):
+                    pp = _raw_to_printing_price(_with_date(raw))
+                    if pp is not None:
+                        yield pp
+        else:
+            data = _json.loads(src.read_text())
+            for raw in data:
+                pp = _raw_to_printing_price(_with_date(raw))
+                if pp is not None:
+                    yield pp
+
+    def prices_updated_at(self) -> str | None:
+        """Return the ``updated_at`` timestamp from the prices metadata file, or None."""
+        if not SCRYFALL_PRICES_META_PATH.exists():
+            return None
+        try:
+            return json.loads(SCRYFALL_PRICES_META_PATH.read_text()).get("updated_at")
+        except Exception:
+            return None
 
     def _batch_lookup(self, card_names: list[str]) -> dict[str, dict]:
         """Batch-resolve names via POST /cards/collection (75 per request)."""
