@@ -1585,10 +1585,9 @@ def _plan_matchups(
         # Since each swap removes one and adds one, total = sum(deck_maindeck.values()) always.
         # If deck_maindeck does not sum to 60 (the caller owns that contract), planning is skipped.
         out_total = sum(side_out.values())
-        in_total = sum(side_in.values())
-        # Invariant: each swap removes one and adds one, so out_total == in_total by
-        # construction. post_board is rebuilt independently from side_out/side_in,
-        # so it stays correct regardless of this check.
+        # Invariant: each swap removes one and adds one, so out_total == sum(side_in.values())
+        # by construction. post_board is rebuilt independently from side_out/side_in,
+        # so it stays correct regardless.
 
         # Build post_board
         post_board = dict(deck_maindeck)
