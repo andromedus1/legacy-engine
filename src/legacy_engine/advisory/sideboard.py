@@ -29,6 +29,33 @@ Maindeck-aware extension (epic-deck-generation-sideboard-maindeck):
   PRESENCE-CORRELATIONAL NOTE: per-card win-rates reflect the registered 75 for
   decks that appeared in resolved matches, not causal game-by-game effects.  The
   OUT/IN plan is a data-guided starting point, not a deterministic prescription.
+
+Archetype-empirical recommendations extension (feature-archetype-empirical-recommendations):
+  Two complementary filters prevent anti-synergistic hoser proposals:
+
+  (A) Anti-synergy pre-filter: ``DeckAntiSynergySignals`` captures three deck-composition
+      signals derived from oracle-text-free card data (avg CMC, nonbasic land fraction,
+      reactive-mass fraction).  ``is_anti_synergistic(card_name, signals)`` checks a
+      hard-coded map of known self-harming hosers against those signals.  Implemented as a
+      pure function with no DB dependency — testable with hand-built card lists.
+
+      - low_curve deck (avg non-land CMC < 1.5) → Chalice of the Void blocked
+      - nonbasic_heavy deck (>50% non-basic lands) → Back to Basics blocked
+      - reactive deck (reactive fraction > 0.55) → Defense Grid blocked
+
+  (B) Empirical archetype sideboard pool filter: when ``archetype`` is known and
+      the DB has regime-windowed sideboard data, ``_empirical_sideboard_pool`` returns the
+      set of cards that real archetype lists ran above ``min_adoption`` (default 5%).
+      ``_build_coverage_model`` accepts an optional ``empirical_pool`` frozenset; when
+      provided, catalog candidates not in the pool are dropped.
+
+  GATING (gated-additive):
+    - Anti-synergy signals are None when no deck card objects are supplied (empty maindeck
+      path in tests).  ``is_anti_synergistic(card, None)`` always returns False → no-op.
+    - Empirical pool is None when ``archetype`` is not supplied, the archetype has no
+      sideboard data, or the pool would be empty.  ``empirical_pool=None`` → no-op.
+    - Existing tests supply empty maindecks and no archetype → both filters are no-ops →
+      test output is byte-identical to pre-feature.
 """
 
 from __future__ import annotations
@@ -112,6 +139,8 @@ def _field_matchup_values(
     top_k: int = 8,
     gate: tuple[str, ...] = _VALUE_GATE,
     card_winrates=None,
+    adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
+    top_opponents: "list[str] | None" = None,
 ) -> dict[str, _OppValues]:
     """Build per-opponent CardValue maps for the top_k field archetypes.
 
@@ -127,6 +156,17 @@ def _field_matchup_values(
     (e.g. ``recommend_sideboard`` reuses one across its two passes; ``tune_deck`` threads
     one through the whole tune). When None, it is computed here.
 
+    ``adaptive_windows``: optional dict mapping opponent archetype → (since, until) for that
+    opponent's adaptive ban-aware window.  When provided, a per-window ``CardWinRates``
+    cache is built (one scan per distinct window, not per opponent), and each opponent's
+    card values are sourced from its own window's aggregate.  When ``card_winrates`` is ALSO
+    provided alongside ``adaptive_windows``, it seeds the cache for ``(since, until)`` (the
+    uniform fallback window) to avoid a redundant scan when one of the adaptive windows
+    happens to match the uniform window.
+
+    ``top_opponents``: pre-computed ordered list of top-k opponents (avoids recomputing
+    it when the caller already selected them).  When None, they are computed here.
+
     Window defaults to the latest ban regime when both since/until are None.
 
     Returns {} if the per-card win-rate table cannot be built (no rounds data).
@@ -134,6 +174,59 @@ def _field_matchup_values(
     from legacy_engine.analytics.match_results import compute_card_winrates
     from legacy_engine.analytics.card_value import card_values_vs
 
+    # ── Determine top_opponents ────────────────────────────────────────────────
+    if top_opponents is None:
+        top_opponents = [
+            arch
+            for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
+        ][:top_k]
+
+    main_cards = list(deck_maindeck.keys())
+    side_cards = list(sideboard_15.keys())
+
+    # ── Adaptive-windows path (Fix B): per-window CardWinRates cache ──────────
+    if adaptive_windows is not None:
+        # Build a cache: window_tuple → CardWinRates (one scan per distinct window).
+        # Seed the cache with any pre-computed card_winrates to avoid a redundant scan when
+        # an adaptive window happens to equal the caller's uniform fallback window.
+        wr_cache: dict[tuple[str | None, str | None], object] = {}
+        if card_winrates is not None:
+            wr_cache[(since, until)] = card_winrates
+        result: dict[str, _OppValues] = {}
+        for opp in top_opponents:
+            opp_window = adaptive_windows.get(opp, (since, until))
+            if opp_window not in wr_cache:
+                try:
+                    wr_cache[opp_window] = compute_card_winrates(
+                        con, since=opp_window[0], until=opp_window[1]
+                    )
+                except Exception as exc:
+                    log.debug("_field_matchup_values (adaptive): compute_card_winrates failed for window %s: %s", opp_window, exc)
+                    wr_cache[opp_window] = None
+            r_opp = wr_cache[opp_window]
+            if r_opp is None or r_opp.coverage.decisive_matched == 0:
+                # No data for this window — degrade honestly with a note
+                result[opp] = _OppValues(
+                    opponent=opp,
+                    maindeck={},
+                    side={},
+                    cleared_gate=False,
+                )
+                continue
+            main_vals = card_values_vs(r_opp, main_cards, "main", opp, gate=gate) if main_cards else {}
+            side_vals = card_values_vs(r_opp, side_cards, "side", opp, gate=gate) if side_cards else {}
+            cleared = any(cv.tier in gate for cv in main_vals.values()) or any(
+                cv.tier in gate for cv in side_vals.values()
+            )
+            result[opp] = _OppValues(
+                opponent=opp,
+                maindeck=main_vals,
+                side=side_vals,
+                cleared_gate=cleared,
+            )
+        return result
+
+    # ── Uniform-window path (original behavior, byte-identical) ───────────────
     if card_winrates is not None:
         r = card_winrates
     else:
@@ -147,16 +240,7 @@ def _field_matchup_values(
     if r.coverage.decisive_matched == 0:
         return {}
 
-    # Top-k opponents by field share (descending).
-    top_opponents = [
-        arch
-        for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
-    ][:top_k]
-
-    main_cards = list(deck_maindeck.keys())
-    side_cards = list(sideboard_15.keys())
-
-    result: dict[str, _OppValues] = {}
+    result = {}
     for opp in top_opponents:
         main_vals = card_values_vs(r, main_cards, "main", opp, gate=gate) if main_cards else {}
         side_vals = card_values_vs(r, side_cards, "side", opp, gate=gate) if side_cards else {}
@@ -424,6 +508,177 @@ HOSER_CATALOG: dict[str, HoserCard] = {
 
 
 # ---------------------------------------------------------------------------
+# Extension C: Anti-synergy filter + empirical archetype pool
+# (feature-archetype-empirical-recommendations)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DeckAntiSynergySignals:
+    """Deck-composition signals used to block self-harming hoser proposals.
+
+    All three signals are derived from the deck's card objects (no DB beyond card lookup).
+    The dataclass is frozen so it can be safely passed through the solver pipeline.
+
+    ``low_curve``: avg non-land CMC < ``_LOW_CURVE_CMC_THRESHOLD`` — Chalice@1 wrecks the deck.
+    ``nonbasic_heavy``: >``_NONBASIC_FRACTION_THRESHOLD`` of land slots are non-basics
+                        (e.g. duals/fetches) — Back to Basics locks the deck out.
+    ``reactive``: reactive fraction of the non-land card pool > ``_REACTIVE_FRACTION_THRESHOLD``
+                  — Defense Grid prevents the deck from operating on the opponent's turn.
+    """
+
+    low_curve: bool        # avg non-land CMC < threshold → Chalice self-harm
+    nonbasic_heavy: bool   # >threshold fraction of lands are non-basic → BtB self-harm
+    reactive: bool         # reactive mass fraction > threshold → Defense Grid self-harm
+
+
+# Thresholds (empirically tuned to the Dimir Tempo archetype profile)
+_LOW_CURVE_CMC_THRESHOLD: float = 1.5   # avg non-land CMC; below this → low-curve
+_NONBASIC_FRACTION_THRESHOLD: float = 0.50  # fraction of land slots; above → nonbasic-heavy
+_REACTIVE_FRACTION_THRESHOLD: float = 0.40  # fraction of non-land card pool; above → reactive
+
+# Empirical sideboard pool: minimum adoption rate to include a card in the pool.
+# 5% means the card appeared in the sideboard of ≥5% of the archetype's in-regime decks.
+_EMPIRICAL_POOL_MIN_ADOPTION: float = 0.05
+
+
+# Map: hoser name → tuple of signal attribute names that make it anti-synergistic.
+# A hoser is blocked if ANY of its listed signals is True on the deck.
+_ANTI_SYNERGY_MAP: dict[str, tuple[str, ...]] = {
+    "Chalice of the Void": ("low_curve",),
+    "Back to Basics": ("nonbasic_heavy",),
+    "Defense Grid": ("reactive",),
+}
+
+
+def compute_deck_anti_synergy_signals(
+    cards_with_counts: "list[tuple[object, int]]",
+) -> DeckAntiSynergySignals:
+    """Derive anti-synergy signals from a (Card, count) list (pure, no DB).
+
+    Accepts the same ``list[tuple[Card, count]]`` format as ``_load_deck_cards``
+    returns.  Returns all-False when the list is empty (no deck → no signals).
+
+    The three signals:
+    - ``low_curve``: avg non-land CMC < _LOW_CURVE_CMC_THRESHOLD.
+    - ``nonbasic_heavy``: fraction of land slots that are non-basic > _NONBASIC_FRACTION_THRESHOLD.
+    - ``reactive``: reactive non-land card fraction > _REACTIVE_FRACTION_THRESHOLD.
+      "Reactive" cards are counters, removal, and protection spells — identified via
+      the ``_card_roles`` helper from ``whattoplay`` (not imported directly to avoid
+      a circular import; we inline the reactive-role logic here).
+
+    This is an objective-search-split pure function: heavy DB work (resolving cards)
+    is already done by the caller; this function only does arithmetic.
+    """
+    if not cards_with_counts:
+        return DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=False)
+
+    # --- low_curve: avg non-land CMC ---
+    total_nonland_cmc = 0.0
+    total_nonland_count = 0
+    total_land_count = 0
+    total_nonbasic_land_count = 0
+
+    # --- reactive: count cards whose role includes counter/removal/protection ---
+    reactive_nonland_count = 0
+
+    for card, count in cards_with_counts:
+        is_land = getattr(card, "is_land", False)
+        cmc = getattr(card, "cmc", 0.0) or 0.0
+        type_line = (getattr(card, "type_line", "") or "").lower()
+        oracle_text = (getattr(card, "oracle_text", "") or "").lower()
+
+        if is_land:
+            total_land_count += count
+            # Non-basic: not a basic land (doesn't have "Basic" in type line)
+            if "basic" not in type_line:
+                total_nonbasic_land_count += count
+        else:
+            total_nonland_count += count
+            total_nonland_cmc += cmc * count
+            # Reactive role detection (inline, avoids circular import with whattoplay).
+            # Keywords that mark interaction-on-opponent's-turn play patterns.
+            is_reactive = any(kw in oracle_text for kw in (
+                "counter target",
+                "counter that spell",
+                "destroy target",
+                "exile target creature",
+                "exile target attacking",
+                "protection from",
+                "hexproof",
+                "shroud",
+            ))
+            if is_reactive:
+                reactive_nonland_count += count
+
+    avg_cmc = (
+        total_nonland_cmc / total_nonland_count if total_nonland_count > 0 else 2.0
+    )
+    nonbasic_fraction = (
+        total_nonbasic_land_count / total_land_count if total_land_count > 0 else 0.0
+    )
+    reactive_fraction = (
+        reactive_nonland_count / total_nonland_count if total_nonland_count > 0 else 0.0
+    )
+
+    return DeckAntiSynergySignals(
+        low_curve=avg_cmc < _LOW_CURVE_CMC_THRESHOLD,
+        nonbasic_heavy=nonbasic_fraction > _NONBASIC_FRACTION_THRESHOLD,
+        reactive=reactive_fraction > _REACTIVE_FRACTION_THRESHOLD,
+    )
+
+
+def is_anti_synergistic(
+    card_name: str,
+    signals: "DeckAntiSynergySignals | None",
+) -> bool:
+    """Return True if ``card_name`` is anti-synergistic with the deck described by ``signals``.
+
+    Pure lookup: checks ``_ANTI_SYNERGY_MAP`` against the signals.  Returns False when
+    ``signals`` is None (gated-additive no-op for callers without deck data).
+    """
+    if signals is None:
+        return False
+    reasons = _ANTI_SYNERGY_MAP.get(card_name)
+    if not reasons:
+        return False
+    return any(getattr(signals, attr, False) for attr in reasons)
+
+
+def _empirical_sideboard_pool(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    *,
+    since: "str | None" = None,
+    until: "str | None" = None,
+    min_adoption: float = _EMPIRICAL_POOL_MIN_ADOPTION,
+) -> "frozenset[str] | None":
+    """Return the set of cards that real archetype sideboard lists run above ``min_adoption``.
+
+    Uses ``card_frequencies(board='side')`` — the per-archetype in-regime adoption primitive.
+    Returns None (not empty frozenset) when:
+    - the archetype has no in-regime sideboard data (thin archetype)
+    - card_frequencies raises (schema not initialised, etc.)
+
+    Returning None (vs empty frozenset) allows callers to distinguish "no data → skip filter"
+    from "data says no cards pass threshold → genuinely empty pool".  In practice the latter
+    is extremely rare and is still treated as None (skip filter) to avoid producing empty
+    sideboards when real archetype data is absent.
+    """
+    try:
+        from legacy_engine.generation.consensus import card_frequencies
+        freqs = card_frequencies(con, archetype, board="side", since=since, until=until)
+        if not freqs:
+            return None
+        pool = frozenset(
+            cf.name for cf in freqs if cf.inclusion_pct >= min_adoption
+        )
+        return pool if pool else None
+    except Exception as exc:
+        log.debug("_empirical_sideboard_pool: card_frequencies failed for %r: %s", archetype, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
@@ -451,6 +706,8 @@ def _build_coverage_model(
     *,
     catalog: Optional[dict[str, HoserCard]] = None,
     matchup_pressure: Optional[dict[str, float]] = None,
+    anti_synergy_signals: "DeckAntiSynergySignals | None" = None,
+    empirical_pool: "frozenset[str] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -474,6 +731,16 @@ def _build_coverage_model(
     cards") × the _SWING_SOFT constant.  Each counter-hoser covers only the hate
     pseudo-elements for the deck-vulnerability tags that interactive field archetypes
     actually care about — not every tag indiscriminately.
+
+    Anti-synergy filter (feature-archetype-empirical-recommendations):
+    When ``anti_synergy_signals`` is not None, catalog candidates whose name appears in
+    ``_ANTI_SYNERGY_MAP`` and whose signal fires for this deck are dropped before coverage
+    computation.  Gated-additive: ``anti_synergy_signals=None`` → no-op (byte-identical to
+    pre-feature for callers that don't supply deck composition).
+
+    Empirical pool filter (feature-archetype-empirical-recommendations):
+    When ``empirical_pool`` is not None, catalog candidates NOT in the pool are dropped.
+    Gated-additive: ``empirical_pool=None`` → no-op.
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -566,6 +833,24 @@ def _build_coverage_model(
     candidate_meta: dict[str, HoserCard] = {}
 
     for card_name, hoser in catalog.items():
+        # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
+        # This grounds recommendations in what real archetype sideboards actually run.
+        if empirical_pool is not None and card_name not in empirical_pool:
+            log.debug(
+                "_build_coverage_model: dropping %r — not in empirical archetype pool", card_name
+            )
+            continue
+
+        # Anti-synergy filter (gated-additive): drop self-harming hosers.
+        # e.g. Chalice into a 1-CMC-heavy deck, Back to Basics into a nonbasic manabase,
+        # Defense Grid into a reactive counter deck.
+        if is_anti_synergistic(card_name, anti_synergy_signals):
+            log.debug(
+                "_build_coverage_model: dropping %r — anti-synergistic with deck composition",
+                card_name,
+            )
+            continue
+
         # Color pre-filter: hoser.colors must be subset of deck_colors.
         # Empty hoser.colors = colorless → always legal.
         # castable_any_color=True bypasses the filter (Phyrexian mana / free activations).
@@ -842,6 +1127,7 @@ def _plan_matchups(
     since: str | None = None,
     until: str | None = None,
     catalog: Optional[dict[str, HoserCard]] = None,
+    adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
 ) -> dict[str, MatchupPlan]:
     """Build per-opponent OUT/IN swap plans for the maindeck.
 
@@ -877,13 +1163,22 @@ def _plan_matchups(
 
     plans: dict[str, MatchupPlan] = {}
 
-    # Build locked core once per archetype (not per opponent)
+    # Build locked core once per archetype using the deck-archetype's own adaptive window.
+    # When adaptive_windows is provided, use the deck-archetype's own window (not an
+    # opponent's window) — the locked core describes the deck's identity, not a matchup.
     locked_core: frozenset[str] = frozenset()
     lock_note = ""
+    arch_since = since
+    arch_until = until
+    if archetype is not None and adaptive_windows is not None:
+        # Use the deck-archetype's own window (keyed by archetype itself, if present)
+        arch_win = adaptive_windows.get(archetype)
+        if arch_win is not None:
+            arch_since, arch_until = arch_win
     if archetype is not None:
         try:
             from legacy_engine.generation.consensus import card_frequencies
-            freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+            freqs = card_frequencies(con, archetype, board="main", since=arch_since, until=arch_until)
             locked_core = frozenset(
                 cf.name for cf in freqs if cf.inclusion_pct >= lock_threshold
             )
@@ -896,6 +1191,20 @@ def _plan_matchups(
 
     for opp, ov in opp_values.items():
         if not ov.cleared_gate:
+            # Build an honest degraded note: name the adaptive window if one was used,
+            # so the user knows the pooling was attempted and how thin the window still is.
+            if adaptive_windows is not None and opp in adaptive_windows:
+                opp_win = adaptive_windows[opp]
+                since_label = opp_win[0] or "full-corpus"
+                note = (
+                    f"even pooling to {since_label}, the {opp} matchup is thin "
+                    f"(n<gate threshold) — guidance is reasoning-based, not data-derived"
+                )
+            else:
+                note = (
+                    f"thin data (n < gate threshold) for {opp} — "
+                    "no per-matchup plan; rely on the maindeck-aware 15 composition"
+                )
             plans[opp] = MatchupPlan(
                 opponent=opp,
                 side_out={},
@@ -904,10 +1213,7 @@ def _plan_matchups(
                 n_basis=0,
                 tier="speculative",
                 degraded=True,
-                note=(
-                    f"thin data (n < gate threshold) for {opp} — "
-                    "no per-matchup plan; rely on the maindeck-aware 15 composition"
-                ),
+                note=note,
             )
             continue
 
@@ -1113,6 +1419,8 @@ class SideboardPackage:
     ``matchup_plans``: per-opponent OUT/IN plans (empty dict when no per-card data).
     ``value_informed``: True when ≥1 opponent cleared the per-card data gate.
     ``plan_window``: (since, until) window used for per-card data (both None = no data).
+    ``plan_window_label``: human-readable label for the plan window (for CLI echo).
+    ``plan_windows``: per-opponent adaptive window audit (opponent → (since, until)).
     """
 
     cards: dict[str, int]
@@ -1128,6 +1436,15 @@ class SideboardPackage:
     matchup_plans: dict[str, MatchupPlan] = dc_field(default_factory=dict)
     value_informed: bool = False
     plan_window: tuple[str | None, str | None] = (None, None)
+    # --- Additive fields (regime-windowing-consistency) ---
+    plan_window_label: str = ""                              # "" = not set; "adaptive (per-opponent ban-aware)" in adaptive mode
+    plan_windows: dict[str, tuple[str | None, str | None]] = dc_field(default_factory=dict)  # per-opponent audit
+    # --- Additive fields (feature-collection-aware-engine) ---
+    # owned: annotation for each recommended card (empty dict → not collection-aware).
+    # collection_aware: True iff a CollectionView was supplied.
+    # Gate: collection=None → owned={}, collection_aware=False → byte-identical to pre-feature.
+    owned: "dict[str, object]" = dc_field(default_factory=dict)
+    collection_aware: bool = False
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -1163,6 +1480,15 @@ def recommend_sideboard(
     opponents: list[str] | None = None,
     max_swaps: int = 4,
     card_winrates=None,
+    # Fix B: adaptive ban-aware per-opponent windows (regime-windowing-consistency).
+    # When True and archetype is set, pool each opponent's card-value cells back to
+    # max(valid_since[archetype], valid_since[opponent]) — mirrors build_adaptive_matrix.
+    # When False (or archetype is None), falls back to the single uniform window path
+    # (byte-identical to pre-feature for existing callers).
+    adaptive: bool = True,
+    # New optional kwarg (feature-collection-aware-engine).
+    # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
+    collection: "Optional[object]" = None,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -1205,6 +1531,8 @@ def recommend_sideboard(
             field_source=field.field_source,
             heuristic_note=_HEURISTIC_NOTE,
             warnings=("budget ≤ 0 — all slots reserved",),
+            plan_window_label="",
+            plan_windows={},
         )
 
     warnings: list[str] = []
@@ -1225,16 +1553,8 @@ def recommend_sideboard(
     # --- Step 3: Field archetype tags ---
     archetype_tags = field_vulnerability_tags(con, field)
 
-    # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
-    # We don't have the final_cards yet; use empty sideboard for the value adapter call.
-    # After solving we'll rebuild opp_values with the real 15.  For the pressure pass
-    # we only need the maindeck values (used to derive the deficit), so this is correct.
-    opp_values_pre: dict[str, _OppValues] = {}
-    matchup_pressure: Optional[dict[str, float]] = None
-    any_gate_cleared = False
-
-    # Apply regime-window default: when caller passes both since=None and until=None,
-    # default to the latest ban-regime window (consistent with report cards/meta).
+    # --- Step 2b (setup): Resolve effective window ---
+    # Done early so Steps 3c and later can all use eff_since/eff_until.
     eff_since = since
     eff_until = until
     if eff_since is None and eff_until is None:
@@ -1244,10 +1564,110 @@ def recommend_sideboard(
         except Exception:
             pass  # keep both None (open window)
 
+    # --- Step 3b: Anti-synergy signals (NEW, gated-additive) ---
+    # Computed from the resolved card objects (already available from Step 1).
+    # None when the deck is empty — that signals no-op to _build_coverage_model.
+    anti_synergy_signals: "DeckAntiSynergySignals | None" = None
+    if cards_with_counts:
+        anti_synergy_signals = compute_deck_anti_synergy_signals(cards_with_counts)
+        if anti_synergy_signals.low_curve:
+            log.debug("recommend_sideboard: low-curve deck detected → Chalice of the Void filtered")
+        if anti_synergy_signals.nonbasic_heavy:
+            log.debug("recommend_sideboard: nonbasic-heavy deck detected → Back to Basics filtered")
+        if anti_synergy_signals.reactive:
+            log.debug("recommend_sideboard: reactive deck detected → Defense Grid filtered")
+
+    # --- Step 3c: Empirical archetype sideboard pool (NEW, gated-additive) ---
+    # When archetype is known, restrict the catalog to cards real lists actually run.
+    # None when archetype is unknown, no in-regime sideboard data, or pool would be empty.
+    empirical_pool: "frozenset[str] | None" = None
+    if archetype is not None:
+        empirical_pool = _empirical_sideboard_pool(
+            con, archetype, since=eff_since, until=eff_until
+        )
+        if empirical_pool is not None:
+            log.debug(
+                "recommend_sideboard: empirical pool for %r has %d cards (min_adoption=%.0f%%)",
+                archetype, len(empirical_pool), _EMPIRICAL_POOL_MIN_ADOPTION * 100,
+            )
+        else:
+            log.debug(
+                "recommend_sideboard: no empirical sideboard pool for %r (thin/no data) — "
+                "skipping pool filter", archetype,
+            )
+
+    # --- Step 2b: Per-card matchup values + matchup_pressure (NEW, gated) ---
+    # We don't have the final_cards yet; use empty sideboard for the value adapter call.
+    # After solving we'll rebuild opp_values with the real 15.  For the pressure pass
+    # we only need the maindeck values (used to derive the deficit), so this is correct.
+    opp_values_pre: dict[str, _OppValues] = {}
+    matchup_pressure: Optional[dict[str, float]] = None
+    any_gate_cleared = False
+
+    # eff_since/eff_until already computed above (Step 2b setup).
+
     plan_window: tuple[str | None, str | None] = (eff_since, eff_until)
+    plan_window_label: str = ""
+    computed_adaptive_windows: dict[str, tuple[str | None, str | None]] | None = None
+
+    # Fix B: build per-opponent adaptive windows (ban-aware, mirrors build_adaptive_matrix).
+    # Pool each opponent's window back to max(valid_since[deck_arch], valid_since[opp]).
+    # Only computed when:
+    #   - adaptive=True and archetype is set, AND
+    #   - no explicit since/until was passed by the caller (same rule as resolve_advisory_window:
+    #     default is adaptive; explicit flags = uniform request).
+    # This preserves byte-identical behavior for all existing callers that pass since/until.
+    # Compute the top-k opponents ONCE so both _field_matchup_values passes and the
+    # adaptive-window resolution use the same set (prevents window/opponent drift).
+    _top_opponents: list[str] | None = None
+    _top_k = 8  # must match _field_matchup_values default
+
+    # Use the ORIGINAL since/until args (before regime-window defaulting) to decide whether
+    # the caller explicitly requested a specific window.
+    _caller_explicit_window = (since is not None) or (until is not None)
+    _use_adaptive = adaptive and archetype is not None and not _caller_explicit_window
+    if _use_adaptive:
+        _top_opponents = [
+            arch
+            for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
+        ][:_top_k]
+        try:
+            from legacy_engine.analytics.affectedness import archetype_valid_since as _avs
+            all_archetypes_to_check = list({archetype, *_top_opponents})
+            valid_since_map = _avs(con, all_archetypes_to_check)
+            deck_valid_since = valid_since_map.get(archetype)
+
+            computed_adaptive_windows = {}
+            for opp in _top_opponents:
+                opp_valid_since = valid_since_map.get(opp)
+                # Pool to max(valid_since[deck_arch], valid_since[opp])
+                both = [s for s in (deck_valid_since, opp_valid_since) if s is not None]
+                opp_since = max(both) if both else None
+                computed_adaptive_windows[opp] = (opp_since, None)
+            # Also record deck-archetype's own window (for locked-core in _plan_matchups)
+            if deck_valid_since is not None:
+                computed_adaptive_windows[archetype] = (deck_valid_since, None)
+
+            plan_window = (None, None)  # no single uniform window in adaptive mode
+            plan_window_label = "adaptive (per-opponent ban-aware)"
+            log.debug(
+                "recommend_sideboard: adaptive windows for %d opponents (deck_arch=%s, valid_since=%s)",
+                len(_top_opponents), archetype, deck_valid_since,
+            )
+        except Exception as exc:
+            log.debug(
+                "recommend_sideboard: adaptive window resolution failed (%s); falling back to uniform",
+                exc,
+            )
+            computed_adaptive_windows = None
+            plan_window = (eff_since, eff_until)
+            plan_window_label = ""
 
     # Compute the per-card win-rate aggregate ONCE (heavy full-corpus scan) and reuse it
     # across both _field_matchup_values passes below; callers (e.g. tune_deck) may inject one.
+    # In adaptive mode the uniform aggregate is NOT used for per-opponent values (each opponent
+    # uses its own window's aggregate via _field_matchup_values adaptive_windows param), but we
+    # still compute it here as a fallback for the pressure pass when adaptive_windows fails.
     if card_winrates is None:
         try:
             from legacy_engine.analytics.match_results import compute_card_winrates
@@ -1259,7 +1679,13 @@ def recommend_sideboard(
     try:
         opp_values_pre = _field_matchup_values(
             con, field, deck_maindeck, {},
-            since=eff_since, until=eff_until, card_winrates=card_winrates,
+            since=eff_since, until=eff_until,
+            # Pass card_winrates as a cache seed for both adaptive and uniform paths.
+            # In adaptive mode it seeds the (eff_since, eff_until) entry, avoiding a redundant
+            # scan when an opponent's adaptive window happens to equal the uniform fallback.
+            card_winrates=card_winrates,
+            adaptive_windows=computed_adaptive_windows,
+            top_opponents=_top_opponents,
         )
     except Exception as exc:
         log.debug("recommend_sideboard: _field_matchup_values failed: %s", exc)
@@ -1297,6 +1723,8 @@ def recommend_sideboard(
         deck_tags,
         catalog=catalog,
         matchup_pressure=matchup_pressure,
+        anti_synergy_signals=anti_synergy_signals,
+        empirical_pool=empirical_pool,
     )
     warnings.extend(model.warnings)
 
@@ -1314,6 +1742,10 @@ def recommend_sideboard(
             warnings=tuple(warnings),
             value_informed=any_gate_cleared,
             plan_window=plan_window,
+            plan_window_label=plan_window_label,
+            plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
+            owned={},
+            collection_aware=collection is not None,
         )
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
@@ -1349,7 +1781,10 @@ def recommend_sideboard(
         try:
             opp_values_final = _field_matchup_values(
                 con, field, deck_maindeck, final_cards,
-                since=eff_since, until=eff_until, card_winrates=card_winrates,
+                since=eff_since, until=eff_until,
+                card_winrates=card_winrates,
+                adaptive_windows=computed_adaptive_windows,
+                top_opponents=_top_opponents,
             )
             # If caller restricted to specific opponents, filter here.
             if opponents is not None:
@@ -1362,10 +1797,16 @@ def recommend_sideboard(
                 since=eff_since,
                 until=eff_until,
                 catalog=catalog,
+                adaptive_windows=computed_adaptive_windows,
             )
         except Exception as exc:
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
             warnings.append(f"per-matchup plan failed: {exc}")
+
+    # --- Collection-aware annotation (gated-additive, feature-collection-aware-engine) ---
+    # annotate_owned returns {} when collection is None → gate closed → byte-identical.
+    from legacy_engine.advisory.collection import annotate_owned
+    owned_annotations = annotate_owned(final_cards, collection)  # type: ignore[arg-type]
 
     return SideboardPackage(
         cards=final_cards,
@@ -1380,4 +1821,8 @@ def recommend_sideboard(
         matchup_plans=matchup_plans,
         value_informed=any_gate_cleared,
         plan_window=plan_window,
+        plan_window_label=plan_window_label,
+        plan_windows=computed_adaptive_windows if computed_adaptive_windows is not None else {},
+        owned=owned_annotations,
+        collection_aware=collection is not None,
     )

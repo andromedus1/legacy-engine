@@ -383,7 +383,7 @@ class TestCoverageParity:
         tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
         # Inject duplicate normalized name for alice
         con.execute(
-            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver')", [tid]
+            "INSERT INTO decks VALUES (?, 99, '  Alice ', '1st', 'Delver', NULL)", [tid]
         )
         con.execute(
             "UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ? AND player = 'alice'",

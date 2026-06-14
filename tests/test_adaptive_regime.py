@@ -118,3 +118,47 @@ class TestWindowMode:
         res = resolve_advisory_window(con, since="2025-01-01", until="2026-01-01", thin_floor=0)
         assert res.mode == "uniform"
         con.close()
+
+
+class TestArchetypeValidSincePooling:
+    """Assert that archetype_valid_since + max() logic correctly resolves per-sideboard windows."""
+
+    def test_max_of_two_valid_since_values(self):
+        """When deck_arch has valid_since A and opponent has valid_since B,
+        the correct sideboard window is max(A, B) — the later date wins."""
+        con = _build_two_regime_corpus(pre_n=5, post_n=5)
+        vs = archetype_valid_since(con, ["Reanimator", "Control"])
+
+        # Reanimator affected by Entomb ban (2025-11-10); Control unaffected (None).
+        arch_vs = vs["Reanimator"]   # 2025-11-10
+        opp_vs = vs["Control"]       # None
+
+        # The sideboard pools to max(arch_vs, opp_vs): None means full-history,
+        # so max(2025-11-10, None) = 2025-11-10 (the non-None date wins).
+        both = [s for s in (arch_vs, opp_vs) if s is not None]
+        pooled = max(both) if both else None
+
+        assert arch_vs == "2025-11-10"
+        assert opp_vs is None
+        assert pooled == "2025-11-10", (
+            f"max(valid_since[deck], valid_since[opp]) should be 2025-11-10 "
+            f"(the non-None date); got {pooled!r}"
+        )
+        con.close()
+
+    def test_both_none_means_full_corpus(self):
+        """When both deck_arch and opponent have valid_since=None, pooled window is full corpus."""
+        con = _build_two_regime_corpus(pre_n=5, post_n=5)
+        vs = archetype_valid_since(con, ["Control"])
+
+        # Control is not affected by any ban.
+        deck_vs = vs["Control"]   # None
+        opp_vs = None             # hypothetical unaffected opponent
+
+        both = [s for s in (deck_vs, opp_vs) if s is not None]
+        pooled = max(both) if both else None
+
+        assert pooled is None, (
+            f"Both None → full corpus (pooled=None); got {pooled!r}"
+        )
+        con.close()

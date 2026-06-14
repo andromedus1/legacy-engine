@@ -14,6 +14,17 @@ Design (from feature spec § Architectural choice):
   5. Validate via ``ingestion.banlist.validate_deck``.
 
 The default window is the latest ban-regime (re-uses ``trends.regime_windows``).
+
+Player filter (gated-additive — feature-strong-player-signal story 3):
+  ``card_frequencies`` / ``build_consensus`` accept an optional ``players``
+  (a ``set[str]`` of canonical player_ids) and ``alias_map``.  When both are
+  ``None``, behaviour is byte-identical to the pre-filter baseline — no new SQL
+  predicate is emitted.  When ``players`` is supplied, the ``deck_pool`` CTE gains:
+    ``AND lower(trim(d.player)) IN (<resolved handle set>)``
+  The player filter is applied *on top of* the existing window; no window widening
+  ever occurs (regime-safety guarantee).  Thin strong+windowed pools degrade
+  honestly: low ``sample_n`` + speculative tier + a loud banner on the
+  ``GeneratedDeck``; the caller decides what to do with it.
 """
 
 from __future__ import annotations
@@ -28,6 +39,9 @@ from legacy_engine.generation.models import GeneratedDeck
 from legacy_engine.ingestion.banlist import current_banlist, validate_deck
 
 log = logging.getLogger(__name__)
+
+# Thin-pool floor for honest-degrade banner (same as confidence.py "evolving" gate).
+_THIN_SAMPLE_FLOOR: int = 30
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +80,36 @@ def _latest_regime_window() -> tuple[str | None, str | None]:
     return since, until
 
 
+def _resolve_player_handles(
+    players: set[str],
+    alias_map: dict[str, str] | None,
+) -> set[str]:
+    """Expand a set of player_ids into the full set of normalized handles to match.
+
+    For each player_id in ``players``, collect all handle_norm keys in ``alias_map``
+    that map to it, plus the player_id itself (which may be a normalized handle in the
+    un-curated case).  Returns the union of all resolved handles — these are what
+    ``lower(trim(d.player))`` is compared against in the SQL CTE.
+
+    When ``alias_map`` is None or empty, each player_id in ``players`` is treated as
+    its own handle (identity resolution: no aliases → direct match).
+    """
+    from legacy_engine.analytics.match_results import normalize_player
+
+    handles: set[str] = set()
+    for pid in players:
+        # The player_id itself, normalized, is always a valid match key.
+        norm_pid = normalize_player(pid)
+        if norm_pid:
+            handles.add(norm_pid)
+        # Plus any alias handles that resolve to this player_id.
+        if alias_map:
+            for handle_norm, mapped_pid in alias_map.items():
+                if mapped_pid == pid:
+                    handles.add(handle_norm)
+    return handles
+
+
 def card_frequencies(
     con: duckdb.DuckDBPyConnection,
     archetype: str,
@@ -74,6 +118,9 @@ def card_frequencies(
     since: str | None = None,
     until: str | None = None,
     provenance: str | None = None,
+    variant: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> list[CardFreq]:
     """Per-card inclusion frequency for ``archetype`` in ``board`` over a date window.
 
@@ -81,6 +128,14 @@ def card_frequencies(
 
     Window defaults to the latest ban-regime when both ``since`` and ``until`` are
     ``None`` (caller passes both as None to trigger the default).
+
+    ``variant`` optionally filters to decks with ``decks.variant = variant`` (exact match).
+    ``None`` → no variant filter (unchanged, gated-additive contract).
+
+    ``players`` optionally restricts the pool to decks registered by a specific set of
+    canonical player_ids.  ``alias_map`` (``{handle_norm: player_id}``) is used to expand
+    each player_id into its full set of normalized handles.  When ``players`` is ``None``,
+    behaviour is **byte-identical** to the pre-filter baseline — no predicate added.
 
     Returns a list of ``CardFreq``, sorted by inclusion_pct DESC then modal_count DESC.
     Empty list when the archetype has no decks in the window.
@@ -91,9 +146,36 @@ def card_frequencies(
     if since is None and until is None:
         since, until = _latest_regime_window()
 
+    # Resolve the player filter into a flat set of normalized handles.
+    # When players is None, player_handles stays None (no SQL predicate).
+    player_handles: set[str] | None = None
+    if players is not None:
+        player_handles = _resolve_player_handles(players, alias_map)
+        if not player_handles:
+            # Players set is non-None but resolved to nothing → empty result.
+            log.debug(
+                "card_frequencies: players=%r resolved to zero handles; returning []",
+                players,
+            )
+            return []
+
+    # Build the player predicate snippet + param list.
+    # Gated-additive: when player_handles is None, no predicate and no extra params.
+    if player_handles is not None:
+        # Build "lower(trim(d.player)) IN (?, ?, ...)" with one ? per handle.
+        ph_list = list(player_handles)
+        ph_placeholders = ", ".join(["?" for _ in ph_list])
+        player_clause = f" AND lower(trim(d.player)) IN ({ph_placeholders})"
+    else:
+        ph_list = []
+        player_clause = ""
+
     # Count distinct archetype decks in the window (the denominator).
+    arch_count_params = [
+        archetype, provenance, provenance, since, since, until, until, variant, variant
+    ] + ph_list
     arch_count_row = con.execute(
-        """
+        f"""
         SELECT count(DISTINCT (d.tournament_id, d.deck_idx))
         FROM decks d
         JOIN tournaments t ON t.id = d.tournament_id
@@ -101,8 +183,10 @@ def card_frequencies(
           AND (? IS NULL OR t.provenance = ?)
           AND (? IS NULL OR t.date >= ?)
           AND (? IS NULL OR t.date < ?)
+          AND (? IS NULL OR d.variant = ?)
+          {player_clause}
         """,
-        [archetype, provenance, provenance, since, since, until, until],
+        arch_count_params,
     ).fetchone()
     archetype_deck_count = int(arch_count_row[0]) if arch_count_row else 0
 
@@ -112,8 +196,11 @@ def card_frequencies(
     # Per-card: decks_running + modal_count (mode of dc.count across those decks).
     # We compute the mode as the count value with the highest frequency; ties go
     # to the higher count (ORDER BY freq DESC, dc.count DESC LIMIT 1 per card).
+    pool_params = [
+        archetype, provenance, provenance, since, since, until, until, variant, variant
+    ] + ph_list + [board]
     rows = con.execute(
-        """
+        f"""
         WITH deck_pool AS (
             SELECT d.tournament_id, d.deck_idx
             FROM decks d
@@ -122,6 +209,8 @@ def card_frequencies(
               AND (? IS NULL OR t.provenance = ?)
               AND (? IS NULL OR t.date >= ?)
               AND (? IS NULL OR t.date < ?)
+              AND (? IS NULL OR d.variant = ?)
+              {player_clause}
         ),
         card_counts AS (
             SELECT dc.name,
@@ -148,7 +237,7 @@ def card_frequencies(
         FROM modal
         ORDER BY decks_running DESC, modal_count DESC
         """,
-        [archetype, provenance, provenance, since, since, until, until, board],
+        pool_params,
     ).fetchall()
 
     result: list[CardFreq] = []
@@ -235,6 +324,9 @@ def build_consensus(
     provenance: str | None = None,
     main_size: int = 60,
     side_size: int = 15,
+    variant: str | None = None,
+    players: set[str] | None = None,
+    alias_map: dict[str, str] | None = None,
 ) -> GeneratedDeck:
     """Build a consensus baseline deck for ``archetype``.
 
@@ -246,6 +338,17 @@ def build_consensus(
     * ``sideboard`` summing to ≤ ``side_size``; may be empty for thin archetypes.
     * ``legality_errors`` from ``validate_deck``; empty = legal.
 
+    ``variant`` optionally scopes the pool to decks with ``decks.variant = variant`` (exact
+    match).  ``None`` → no variant filter (unchanged, gated-additive contract).
+
+    ``players`` optionally restricts the pool to a set of canonical player_ids (strong-player
+    filter).  ``alias_map`` resolves player_ids to their normalized handles.  When ``players``
+    is ``None``, behaviour is **byte-identical** to the pre-filter baseline.
+
+    When the player-filtered + windowed pool is thin (``sample_n`` < ``_THIN_SAMPLE_FLOOR``),
+    a loud banner is added to ``legality_errors`` (the audit trail) and the ``GeneratedDeck``
+    carries a low ``sample_n``; the window is **never** silently widened.
+
     Raises ``click.ClickException`` (via caller) for unknown archetypes — this
     function returns a ``GeneratedDeck`` with ``sample_n=0`` and a legality error.
 
@@ -254,8 +357,9 @@ def build_consensus(
     - ``sideboard`` ≤ 15.
     - No card exceeds its copy limit.
     - No card double-listed across boards.
-    - ``legality_errors == []`` for a real archetype.
+    - ``legality_errors == []`` for a real archetype (when unfiltered or pool not thin).
     - Thin archetype still returns a legal list and a low ``sample_n``.
+    - ``players=None`` → byte-identical to the unfiltered call.
     """
     # Resolve the effective window.
     if since is None and until is None:
@@ -267,10 +371,12 @@ def build_consensus(
     main_freqs = card_frequencies(
         con, archetype, board="main",
         since=effective_since, until=effective_until, provenance=provenance,
+        variant=variant, players=players, alias_map=alias_map,
     )
     side_freqs = card_frequencies(
         con, archetype, board="side",
         since=effective_since, until=effective_until, provenance=provenance,
+        variant=variant, players=players, alias_map=alias_map,
     )
 
     # Derive sample_n from main-board query (decks with at least one main card).
@@ -286,20 +392,31 @@ def build_consensus(
 
     log.debug(
         "build_consensus: archetype=%r window=[%s, %s) sample_n=%d "
-        "main_pool=%d side_pool=%d",
+        "main_pool=%d side_pool=%d players_filter=%s",
         archetype, effective_since, effective_until, sample_n,
         len(main_freqs), len(side_freqs),
+        f"{len(players)} player(s)" if players is not None else "none",
     )
 
     if sample_n == 0:
-        # Unknown archetype — return an empty deck with a legality error.
+        # Unknown archetype or player-filtered pool is empty —
+        # return an empty deck with a legality error.
+        if players is not None:
+            error_msg = (
+                f"archetype {archetype!r} has no decks in the window "
+                f"for the requested player set ({len(players)} player(s)); "
+                "window NOT widened (regime-safety guarantee) — use --all-time for an "
+                "explicit wider window, or remove the player filter"
+            )
+        else:
+            error_msg = f"archetype {archetype!r} has no decks in the window"
         return GeneratedDeck(
             archetype=archetype,
             maindeck={},
             sideboard={},
             window=(effective_since, effective_until),
             sample_n=0,
-            legality_errors=[f"archetype {archetype!r} has no decks in the window"],
+            legality_errors=[error_msg],
         )
 
     # Fill each board greedily to the target.
@@ -332,6 +449,20 @@ def build_consensus(
     # Validate against the current ban snapshot.
     snapshot = current_banlist()
     errors = validate_deck(main, side, snapshot)
+
+    # Thin-pool honest-degrade banner (gated on player filter being active).
+    # When the player-filtered pool is below the evolving floor, attach a loud banner
+    # to the legality_errors list so every caller surfaces it.  The window is NEVER
+    # widened — that invariant is the regime-safety guarantee.
+    if players is not None and sample_n < _THIN_SAMPLE_FLOOR:
+        banner = (
+            f"⚠ THIN PLAYER-FILTERED POOL: only {sample_n} deck(s) in window "
+            f"[{effective_since or 'open'}, {effective_until or 'current'}) "
+            f"for {len(players)} player(s) — modal card choices are speculative; "
+            "window NOT widened (use --all-time to explicitly widen)"
+        )
+        log.warning("build_consensus: %s", banner)
+        errors = list(errors) + [banner]
 
     return GeneratedDeck(
         archetype=archetype,

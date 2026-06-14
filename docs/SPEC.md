@@ -17,7 +17,7 @@ decisions:
   - "Reproducibility is an NFR: deterministic given inputs+seed; all external data pre-fetched and cached; legality validated against a dated BanListSnapshot."
   - "Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML via vega-embed + static PNG via vl-convert), superseding the matplotlib charts; headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus. Self-contained + offline; no server, no editing GUI."
 created: 2026-05-29
-updated: 2026-06-01
+updated: 2026-06-13
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -76,6 +76,8 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 | **DeckDefinition** | Deck-as-data for sim | *(Later)* card list + tagged roles (payoff/enabler/engine) + combo line + goldfish clock + confidence metadata. Mirrors edh-engine's YAML model. |
 | **SideboardPackage** | A recommended 15 | *(Advisory)* set of hosers with edges to the archetypes/hate-cards they attack, plus coverage score vs a field. |
 | **DeckDashboard** | A composed per-deck page | *(Viz)* a set of Vega-Lite tiles (meta-share, matchup spread, trends, positioning, consensus + primer) laid out on a 12-col grid and rendered to self-contained HTML + PNG. |
+| **Inventory** | The user's owned cards | *(Personal, new)* owned card → quantity (+ printing/condition). Local, single-user now; schema designed cloud-ready for a later hosted surface. Makes advice buildable from what you actually own. |
+| **UserDeck** | The user's own deck (a variant) | *(Personal, new)* a named, **versioned** 75 the user owns and plays — distinct from the inferred `Archetype`; cards may be allocated from `Inventory` (a deck vs the free binder). |
 
 ## Non-Functional Requirements
 
@@ -88,4 +90,4 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **Self-contained, offline viz output** — visualization output is local and needs no server: interactive HTML embeds `vega-embed` from CDN and opens directly in a browser; static PNG via `vl-convert` needs no browser/Chrome at all.
 
 ## What's explicitly out of scope (MVP)
-Goldfish simulation, deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation, full rules-correct game engine, real-time event tooling, non-Legacy formats, and any interactive deck-building / web-app GUI (read-only self-contained HTML dashboards from the `viz/` layer are in scope; an editing UI is not). See VISION non-goals. Note: deck generation modes 1+2+export are built; only the simulation-dependent modes remain deferred.
+Goldfish simulation, deck generation gap-discovery (mode 3) and goldfish-validated candidate-validation, full rules-correct game engine, real-time event tooling, non-Legacy formats, and an interactive deck-building *editor* GUI (read-only self-contained HTML dashboards from the `viz/` layer are in scope; an editing UI is not). A **hosted web-app GUI is deferred pending its own research**. The user's **personal collection + deck inventory** is now *in scope* as a local, single-user capability (schema designed cloud-ready for a later hosted surface) — it makes advice buildable from owned cards. See VISION non-goals. Note: deck generation modes 1+2+export are built; only the simulation-dependent modes remain deferred.

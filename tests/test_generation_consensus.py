@@ -493,3 +493,38 @@ class TestCrossBoardDedupeTopupRegression:
         deck = build_consensus(con, "DupBoard")
         assert sum(deck.maindeck.values()) == 60, deck.maindeck
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# Variant consumer regression — gated-additive contract for build_consensus
+# ---------------------------------------------------------------------------
+
+class TestConsensusVariantFilter:
+    """build_consensus(variant=None) is byte-identical to the pre-variant path."""
+
+    def test_variant_none_is_identical_to_default(self, con):
+        deck_default = build_consensus(con, "Delver")
+        deck_none = build_consensus(con, "Delver", variant=None)
+        assert deck_default.maindeck == deck_none.maindeck
+        assert deck_default.sideboard == deck_none.sideboard
+        assert deck_default.sample_n == deck_none.sample_n
+
+    def test_variant_filter_unknown_variant_returns_empty(self, con):
+        """Filtering to a variant that no deck has → sample_n=0."""
+        deck = build_consensus(con, "Delver", variant="NonExistentVariant")
+        assert deck.sample_n == 0
+        assert deck.legality_errors  # at least one error (no decks in window)
+
+    def test_variant_filter_scopes_pool(self, con):
+        """When decks have a variant tag, filtering to that variant scopes the pool."""
+        # Tag half the Delver decks as "Bauble" variant (decks 0–4).
+        con.execute(
+            "UPDATE decks SET variant = 'Bauble' WHERE player IN ("
+            "'player0', 'player1', 'player2', 'player3', 'player4')"
+        )
+        # Filter to Bauble variant → only 5 decks.
+        deck = build_consensus(con, "Delver", variant="Bauble")
+        assert deck.sample_n == 5  # exactly 5 tagged decks
+        # Without filter → all 10.
+        deck_all = build_consensus(con, "Delver")
+        assert deck_all.sample_n == 10
