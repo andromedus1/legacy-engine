@@ -30,6 +30,16 @@ SCRYFALL_BULK_TYPE = "oracle_cards"
 SCRYFALL_API_DELAY = 0.1  # seconds between REST requests (bulk has no limit)
 USER_AGENT = "LegacyEngine/0.1.0"
 
+# Per-printing price bulk (default_cards: one object per printing, English/printed-language).
+# Separate from the oracle bulk (oracle_cards) which carries one object per Oracle ID — that
+# single-row design is the root cause of usd:null for reserved-list cards (Underground Sea
+# resolves to a Vintage Masters printing with only MTGO tix, not a paper price).
+SCRYFALL_PRICES_BULK_TYPE = "default_cards"
+SCRYFALL_PRICES_PATH = SCRYFALL_DIR / "default_cards.json"
+SCRYFALL_PRICES_META_PATH = SCRYFALL_DIR / "prices_metadata.json"
+PRICE_STALE_DAYS = 30  # days before a PriceQuote is flagged stale (advisory, not hard error)
+PRICE_OVERRIDE_PATH = DATA_DIR / "prices" / "overrides.json"  # optional curated fallback; absent by default
+
 # ── Vendored / mirrored external sources ──
 FBETTEGA_CACHE_REPO = "https://github.com/fbettega/MTG_decklistcache"
 MTGOFORMATDATA_REPO = "https://github.com/Badaro/MTGOFormatData"

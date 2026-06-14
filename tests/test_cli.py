@@ -23,8 +23,8 @@ def test_top_level_help_lists_groups(runner):
 @pytest.mark.parametrize(
     "group,subcommands",
     [
-        ("seed", ("cards", "cache", "rules", "banlist")),
-        ("report", ("meta", "matchups", "tiers")),
+        ("seed", ("cards", "cache", "rules", "banlist", "prices")),
+        ("report", ("meta", "matchups", "tiers", "prices")),
         ("advise", ("positioning", "sideboard", "whattoplay", "report")),
         ("generate", ("consensus", "tune")),
         ("export", ("deck",)),
@@ -47,20 +47,6 @@ def test_export_deck_requires_deck(runner):
     """export deck exits non-zero when --deck is missing."""
     result = runner.invoke(main, ["export", "deck"])
     assert result.exit_code != 0
-
-
-@pytest.mark.parametrize(
-    "args,label",
-    [
-        # seed cards/cache/rules/banlist, label, report matchups, report meta, and report tiers are implemented.
-        # advise positioning/sideboard/whattoplay/report are also implemented (no longer stubs).
-        (["refresh"], "refresh"),
-    ],
-)
-def test_leaf_stubs_not_implemented(runner, args, label):
-    result = runner.invoke(main, args)
-    assert result.exit_code != 0
-    assert f"not implemented: {label}" in result.output
 
 
 def test_advise_subcommands_require_deck(runner):

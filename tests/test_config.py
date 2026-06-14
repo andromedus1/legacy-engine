@@ -14,6 +14,9 @@ def test_paths_are_absolute():
         config.RULES_DIR,
         config.BANLIST_DIR,
         config.DUCKDB_PATH,
+        config.SCRYFALL_PRICES_PATH,
+        config.SCRYFALL_PRICES_META_PATH,
+        config.PRICE_OVERRIDE_PATH,
     ):
         assert path.is_absolute()
 
@@ -37,6 +40,8 @@ def test_import_has_no_filesystem_side_effects():
 
     importlib.reload(config)
     assert config.SCRYFALL_BULK_TYPE == "oracle_cards"
+    assert config.SCRYFALL_PRICES_BULK_TYPE == "default_cards"
+    assert isinstance(config.PRICE_STALE_DAYS, int)
 
 
 def test_rules_sha_unpinned_by_default():

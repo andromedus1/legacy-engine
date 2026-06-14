@@ -12,12 +12,38 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import duckdb
+
+if TYPE_CHECKING:
+    from legacy_engine.ingestion.prices import PrintingPrice
 
 from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.models.card import Card
 from legacy_engine.models.tournament import TournamentResult
+
+# ── card_prices DDL ────────────────────────────────────────────────────────────────────────────────
+# Separate from the ``cards`` table: prices live at printing cardinality (set + collector number),
+# refresh on a daily cadence, and are an optional/gated signal.  The ``cards`` table is the
+# oracle dimension (one row per playable name); folding per-printing prices into it would break
+# its primary key.
+CARD_PRICES_DDL = """
+CREATE TABLE IF NOT EXISTS card_prices (
+    scryfall_id      VARCHAR PRIMARY KEY,
+    name             VARCHAR NOT NULL,
+    set_code         VARCHAR,
+    set_name         VARCHAR,
+    collector_number VARCHAR,
+    usd              DOUBLE,
+    usd_foil         DOUBLE,
+    usd_etched       DOUBLE,
+    eur              DOUBLE,
+    promo            BOOLEAN,
+    is_paper         BOOLEAN,
+    price_date       VARCHAR
+)
+"""
 
 CARDS_DDL = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -223,6 +249,66 @@ def rebuild(con: duckdb.DuckDBPyConnection) -> None:
     """Drop and recreate the cards table (raw JSON remains the source of truth)."""
     con.execute("DROP TABLE IF EXISTS cards")
     init_schema(con)
+
+
+# ── card_prices table helpers ──────────────────────────────────────────────────────────────────────
+
+
+def init_prices_schema(con: duckdb.DuckDBPyConnection) -> None:
+    """Create the card_prices table if absent (idempotent).
+
+    Intentionally separate from ``init_schema`` so the cards/oracle path stays byte-identical
+    when prices have never been seeded (gated-additive-augmentation: the no-price corpus behaves
+    exactly as today).
+    """
+    con.execute(CARD_PRICES_DDL)
+
+
+def load_prices(con: duckdb.DuckDBPyConnection, printings: "Iterable[PrintingPrice]") -> int:
+    """Insert/replace per-printing price rows into card_prices. Idempotent on scryfall_id.
+
+    Args:
+        con: DuckDB connection (card_prices table must exist — call init_prices_schema first).
+        printings: Iterable of ``PrintingPrice`` dataclass instances.
+
+    Returns:
+        Number of rows loaded (not counting idempotent skips).
+    """
+    rows = [
+        (
+            pp.scryfall_id,
+            pp.name,
+            pp.set_code,
+            pp.set_name,
+            pp.collector_number,
+            pp.usd,
+            pp.usd_foil,
+            pp.usd_etched,
+            pp.eur,
+            pp.promo,
+            pp.is_paper,
+            pp.price_date,
+        )
+        for pp in printings
+    ]
+    if not rows:
+        return 0
+    con.executemany(
+        """
+        INSERT OR REPLACE INTO card_prices
+        (scryfall_id, name, set_code, set_name, collector_number,
+         usd, usd_foil, usd_etched, eur, promo, is_paper, price_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    return len(rows)
+
+
+def rebuild_prices(con: duckdb.DuckDBPyConnection) -> None:
+    """Drop and recreate card_prices (the raw default_cards.json mirror is the source of truth)."""
+    con.execute("DROP TABLE IF EXISTS card_prices")
+    init_prices_schema(con)
 
 
 def tournament_id(tr: TournamentResult) -> str:
