@@ -20,8 +20,13 @@ at release-deploy time, per the rolling-foundation principle.
 3. **(Low) `report meta --venues <bad-key>` raises a raw `ValueError` traceback** from
    `analytics/venue.py:86` instead of a clean `click.ClickException` (every other cli.py input-error path
    wraps it). Wrap the `resolve_venues` ValueError at `cli.py:~316` for consistency. Valid keys work.
+   **RESOLVED (2026-06-14):** Both `report meta --venues` and `advise report --venues` now wrap
+   `resolve_venues` ValueError in a `click.ClickException`. Tests added in `TestBadVenueKeyCleanError`
+   (test_cli_venues.py).
 4. **(Trivial) `generate consensus` help** doesn't state that `--variant` and `--players` combine
    (AND-filter); add a one-line note.
+   **RESOLVED (2026-06-14):** Both `--variant` and `--players` option help strings now state they
+   combine as an AND-filter.
 
 Cross-feature seams reviewed and judged defensible-by-design (not bugs): the empirical sideboard pool is
 anchored to the current-regime uniform window while per-opponent adaptive windows pool back to

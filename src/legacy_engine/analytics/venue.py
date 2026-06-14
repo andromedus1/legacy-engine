@@ -266,11 +266,15 @@ def venue_divergence(
     # Sort desc by spread.
     rows.sort(key=lambda r: r.spread, reverse=True)
 
+    _DIVERGENCE_NOTE_TOP_N = 8
     if speculative_high_spread:
+        shown = speculative_high_spread[:_DIVERGENCE_NOTE_TOP_N]
+        extra = len(speculative_high_spread) - len(shown)
+        suffix = f" (+{extra} more)" if extra > 0 else ""
         notes.append(
             "The following high-spread rows are backed by thin sample data on the "
             "higher-share venue — treat magnitudes as provisional: "
-            + "; ".join(speculative_high_spread)
+            + "; ".join(shown) + suffix
         )
 
     return VenueDivergence(
