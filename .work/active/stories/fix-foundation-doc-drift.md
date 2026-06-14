@@ -1,7 +1,7 @@
 ---
 id: fix-foundation-doc-drift
 kind: story
-stage: review
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []

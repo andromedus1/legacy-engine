@@ -1,7 +1,7 @@
 ---
 id: document-bundle-patterns
 kind: story
-stage: review
+stage: done
 tags: [patterns]
 parent: null
 depends_on: []

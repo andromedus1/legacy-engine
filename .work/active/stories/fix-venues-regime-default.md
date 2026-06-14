@@ -1,7 +1,7 @@
 ---
 id: fix-venues-regime-default
 kind: story
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []
