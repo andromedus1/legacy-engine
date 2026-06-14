@@ -1,7 +1,7 @@
 ---
 id: feature-collection-aware-engine
 kind: feature
-stage: review
+stage: implementing
 tags: [advisory, generation, ingestion]
 parent: null
 depends_on: [feature-personal-inventory-and-decks]
@@ -396,3 +396,7 @@ Implemented 2026-06-13. All four units shipped per design.
 **Deviations from design**: None. The overpriced-printing flag from per-printing owned data is orchestrator-level (requires per-printing price lookup with set_code), not surfaced in the pure core — as designed (pure core has no DB access). The pure core correctly never emits false positives for overpriced flags.
 
 **Suite**: 1725 passed (1685 baseline + 40 new).
+
+
+## Review findings (bounce 1)
+BLOCKING: `tests/test_collection_aware_engine.py::test_advise_acquire_smoke` is non-hermetic — the `advise acquire` CLI invocation passes no `--db`, so it connects to the real data/legacy.duckdb and fails under the full suite on lock contention (this is the lone suite failure: 1840 passed, 1 failed). FIX: make the smoke test use an isolated DB (`--db` with a tmp/fixture path or :memory:), like the orchestrator tests do. Production logic + byte-identical no-op invariant verified good; only the test is at fault.

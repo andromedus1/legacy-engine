@@ -1,7 +1,7 @@
 ---
 id: feature-curated-price-source
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, generation]
 parent: null
 depends_on: []
