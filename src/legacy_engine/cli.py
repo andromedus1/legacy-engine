@@ -3582,5 +3582,464 @@ def export_deck(
         click.echo(output)
 
 
+# ── collection: personal card inventory ──
+@main.group()
+def collection() -> None:
+    """Manage your personal card inventory (binder)."""
+
+
+@collection.command("import")
+@click.option(
+    "--file",
+    "deck_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file listing owned cards.",
+)
+@click.option(
+    "--merge/--replace",
+    default=True,
+    show_default=True,
+    help="Merge with existing inventory (default) or replace it entirely.",
+)
+@_verbose
+def collection_import(deck_file: str, merge: bool, verbose: bool) -> None:
+    """Import owned cards from a plain-text decklist into the inventory.
+
+    The file uses the standard ``<count> <name>`` decklist format.  Both the
+    main and sideboard sections are treated as owned cards.
+
+    Example: legacy-engine collection import --file binder.txt
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.collection.inventory import import_inventory, merge_inventory, replace_inventory
+    from legacy_engine.collection.persist import load_inventory, save_inventory
+
+    text = Path(deck_file).read_text()
+    try:
+        incoming = import_inventory(text)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    existing = load_inventory()
+    if merge:
+        updated = merge_inventory(existing, incoming)
+        action = "Merged"
+    else:
+        updated = replace_inventory(existing, incoming)
+        action = "Replaced"
+
+    save_inventory(updated)
+    total = sum(e.count for e in updated.entries)
+    click.echo(f"{action} inventory: {len(updated.entries)} entries, {total} total cards")
+
+
+@collection.command("show")
+@click.option("--free-only", is_flag=True, default=False, help="Show only cards free in the binder (not allocated).")
+@click.option("--card", "card_name", default=None, help="Filter to a specific card name.")
+@_verbose
+def collection_show(free_only: bool, card_name: str | None, verbose: bool) -> None:
+    """Show your card inventory: owned, allocated across decks, and free.
+
+    Example: legacy-engine collection show
+    Example: legacy-engine collection show --free-only
+    Example: legacy-engine collection show --card "Brainstorm"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.allocation import free_binder
+    from legacy_engine.collection.inventory import owned_counts_map
+    from legacy_engine.collection.persist import list_user_decks, load_inventory
+    from legacy_engine.collection.decks import current_cards
+
+    inv = load_inventory()
+    if not inv.entries:
+        click.echo("(inventory is empty — use `collection import` to add cards)")
+        return
+
+    owned = owned_counts_map(inv)
+
+    # Compute allocated: sum across all current deck versions.
+    decks = list_user_decks()
+    allocated: dict[str, int] = {}
+    for deck in decks:
+        main, side = current_cards(deck)
+        for name, cnt in {**main, **side}.items():
+            allocated[name] = allocated.get(name, 0) + cnt
+
+    free = free_binder(owned, allocated)
+
+    click.echo(f"\n=== Inventory ({inv.owner}) ===")
+    click.echo(f"{'Card':<40}  {'Owned':>5}  {'Alloc':>5}  {'Free':>5}")
+    click.echo("-" * 60)
+
+    entries = sorted(owned.items(), key=lambda kv: kv[0])
+    shown = 0
+    for name, owned_cnt in entries:
+        alloc_cnt = allocated.get(name, 0)
+        free_cnt = free.get(name, 0)
+        if card_name and card_name.lower() not in name.lower():
+            continue
+        if free_only and free_cnt > 0 == 0:
+            continue
+        if free_only and free_cnt == 0:
+            continue
+        click.echo(f"{name:<40}  {owned_cnt:>5}  {alloc_cnt:>5}  {free_cnt:>5}")
+        shown += 1
+
+    if shown == 0:
+        click.echo("(no cards match the filter)")
+
+
+@collection.command("status")
+@_verbose
+def collection_status(verbose: bool) -> None:
+    """Show buildability and contention summary across all decks.
+
+    Reports cards that are over-committed (claimed by more decks than owned).
+
+    Example: legacy-engine collection status
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.allocation import buildability, contention
+    from legacy_engine.collection.decks import current_cards
+    from legacy_engine.collection.inventory import owned_counts_map
+    from legacy_engine.collection.persist import list_user_decks, load_inventory
+
+    inv = load_inventory()
+    owned = owned_counts_map(inv)
+    decks = list_user_decks()
+
+    if not decks:
+        click.echo("(no decks saved — use `deck save` to register a deck)")
+        return
+
+    click.echo(f"\n=== Collection Status ({len(decks)} deck(s)) ===")
+
+    # Per-deck buildability.
+    click.echo("\n  Buildability:")
+    per_deck_cards: dict[str, dict[str, int]] = {}
+    for deck in decks:
+        main, side = current_cards(deck)
+        combined = {**main}
+        for name, cnt in side.items():
+            combined[name] = combined.get(name, 0) + cnt
+        per_deck_cards[deck.name] = combined
+        report = buildability(main, side, owned, deck_name=deck.name)
+        status_str = "OK" if report.buildable else f"MISSING {len(report.missing)} card(s)"
+        click.echo(f"    {deck.name:<35}  {status_str}")
+        if not report.buildable:
+            for card_name, shortfall in sorted(report.missing.items()):
+                click.echo(f"      − {card_name}: need {shortfall} more")
+
+    # Contention: cards over-committed across decks.
+    conflicts = contention(per_deck_cards, owned)
+    if conflicts:
+        click.echo("\n  Contention (cards claimed by more decks than owned):")
+        for entry in conflicts:
+            click.echo(
+                f"    {entry.name}: owned={entry.owned}, claimed={entry.total_claimed}, "
+                f"shortfall={entry.shortfall}  [{', '.join(entry.decks_claiming)}]"
+            )
+    else:
+        click.echo("\n  No contention — all decks can coexist with your collection.")
+
+
+@collection.command("rebuild")
+@_verbose
+def collection_rebuild(verbose: bool) -> None:
+    """Drop and reload the collection DuckDB tables from raw JSON files.
+
+    Safe to run repeatedly — raw JSON is the source of truth.
+
+    Example: legacy-engine collection rebuild
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection import store as cstore
+    from legacy_engine.ingestion import store
+
+    con = store.connect()
+    try:
+        cstore.init_schema(con)
+        cstore.rebuild_collection(con)
+    finally:
+        con.close()
+    click.echo("Collection DuckDB tables rebuilt from data/collection/")
+
+
+# ── deck: personal deck management ──
+@main.group()
+def deck() -> None:
+    """Manage your personal decks (named, versioned 75s)."""
+
+
+@deck.command("save")
+@click.option("--name", "deck_name", required=True, help="Deck name (e.g. 'my Dimir Tempo').")
+@click.option(
+    "--deck",
+    "deck_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a plain-text decklist file.",
+)
+@click.option("--note", default="", help="Changelog note for this version.")
+@click.option("--label", default="", help="Short human label for this version (e.g. 'post-Frog-ban').")
+@click.option("--archetype-hint", default=None, help="Optional archetype label (engine archetype still inferred).")
+@click.option(
+    "--deck-id",
+    default=None,
+    help="Existing deck id to append a new version to (omit to create a new deck).",
+)
+@_verbose
+def deck_save(
+    deck_name: str,
+    deck_file: str,
+    note: str,
+    label: str,
+    archetype_hint: str | None,
+    deck_id: str | None,
+    verbose: bool,
+) -> None:
+    """Save a decklist as a named deck (or append a new version).
+
+    If ``--deck-id`` is omitted, a new deck is created.  To append a new
+    version to an existing deck, pass its id (visible via ``deck list``).
+
+    Example: legacy-engine deck save --name "my Dimir Tempo" --deck list.txt
+    Example: legacy-engine deck save --name "my Dimir Tempo" --deck list2.txt --deck-id <id>
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.collection.decks import save_deck_from_file
+    from legacy_engine.collection.persist import find_deck_by_name, save_user_deck
+
+    text = Path(deck_file).read_text()
+
+    # If no deck_id given but a deck with this name exists, auto-append a version.
+    resolved_id = deck_id
+    if resolved_id is None:
+        existing = find_deck_by_name(deck_name)
+        if existing is not None:
+            resolved_id = existing.id
+            click.echo(f"// Appending new version to existing deck '{deck_name}' (id={existing.id})")
+
+    try:
+        saved = save_deck_from_file(
+            text,
+            deck_name,
+            deck_id=resolved_id,
+            note=note,
+            label=label,
+            archetype_hint=archetype_hint,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    save_user_deck(saved)
+    ver = saved.versions[-1]
+    main_count = sum(c.count for c in ver.cards if c.board == "main")
+    side_count = sum(c.count for c in ver.cards if c.board == "side")
+    click.echo(
+        f"Saved '{saved.name}' (id={saved.id}) "
+        f"v{ver.version}: {main_count} main / {side_count} side"
+    )
+
+
+@deck.command("load")
+@click.option("--name", "deck_name", required=True, help="Deck name.")
+@click.option("--version", "version_num", type=int, default=None, help="Version number (default: current).")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
+    default="moxfield",
+    show_default=True,
+    help="Export format.",
+)
+@click.option("--out", type=click.Path(dir_okay=False), default=None, help="Write to file instead of stdout.")
+@_verbose
+def deck_load(
+    deck_name: str,
+    version_num: int | None,
+    fmt: str,
+    out: str | None,
+    verbose: bool,
+) -> None:
+    """Print a saved deck as a plain-text decklist.
+
+    Example: legacy-engine deck load --name "my Dimir Tempo"
+    Example: legacy-engine deck load --name "my Dimir Tempo" --version 1 --format dec
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.collection.decks import export_deck_text
+    from legacy_engine.collection.persist import find_deck_by_name
+
+    deck = find_deck_by_name(deck_name)
+    if deck is None:
+        raise click.ClickException(f"No deck named {deck_name!r}. Use `deck list` to see available decks.")
+
+    try:
+        text = export_deck_text(deck, version_num)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if out:
+        Path(out).write_text(text)
+        click.echo(f"Written to {out}")
+    else:
+        click.echo(text)
+
+
+@deck.command("list")
+@_verbose
+def deck_list(verbose: bool) -> None:
+    """List all saved decks with their current version and archetype hint.
+
+    Example: legacy-engine deck list
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.decks import current_version
+    from legacy_engine.collection.persist import list_user_decks
+
+    decks = list_user_decks()
+    if not decks:
+        click.echo("(no decks saved — use `deck save` to register a deck)")
+        return
+
+    click.echo(f"\n=== My Decks ({len(decks)}) ===")
+    click.echo(f"  {'Name':<35}  {'v':>3}  {'Cards':>5}  {'Archetype'}")
+    click.echo("  " + "-" * 65)
+    for d in decks:
+        ver = current_version(d)
+        ver_num = ver.version if ver else 0
+        card_count = sum(c.count for c in ver.cards) if ver else 0
+        arch = d.archetype_hint or "(none)"
+        click.echo(f"  {d.name:<35}  v{ver_num:>2}  {card_count:>5}  {arch}")
+        click.echo(f"    id={d.id}")
+
+
+@deck.command("show")
+@click.option("--name", "deck_name", required=True, help="Deck name.")
+@click.option("--version", "version_num", type=int, default=None, help="Version number (default: current).")
+@_verbose
+def deck_show(deck_name: str, version_num: int | None, verbose: bool) -> None:
+    """Show the 75 for a deck version plus its version history.
+
+    Example: legacy-engine deck show --name "my Dimir Tempo"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.decks import current_version, get_version_by_number
+    from legacy_engine.collection.persist import find_deck_by_name
+
+    deck = find_deck_by_name(deck_name)
+    if deck is None:
+        raise click.ClickException(f"No deck named {deck_name!r}.")
+
+    if version_num is not None:
+        ver = get_version_by_number(deck, version_num)
+        if ver is None:
+            raise click.ClickException(f"Version {version_num} not found in deck {deck_name!r}.")
+    else:
+        ver = current_version(deck)
+        if ver is None:
+            raise click.ClickException(f"Deck {deck_name!r} has no versions.")
+
+    click.echo(f"\n=== {deck.name} — v{ver.version} ===")
+    if ver.label:
+        click.echo(f"  Label: {ver.label}")
+    if ver.note:
+        click.echo(f"  Note: {ver.note}")
+    click.echo(f"  Created: {ver.created}")
+    click.echo(f"  id: {deck.id}")
+
+    main_cards = [(c.name, c.count) for c in ver.cards if c.board == "main"]
+    side_cards = [(c.name, c.count) for c in ver.cards if c.board == "side"]
+
+    if main_cards:
+        click.echo(f"\n  Mainboard ({sum(c for _, c in main_cards)}):")
+        for name, cnt in sorted(main_cards, key=lambda kv: (-kv[1], kv[0])):
+            click.echo(f"    {cnt:>2}  {name}")
+    if side_cards:
+        click.echo(f"\n  Sideboard ({sum(c for _, c in side_cards)}):")
+        for name, cnt in sorted(side_cards, key=lambda kv: (-kv[1], kv[0])):
+            click.echo(f"    {cnt:>2}  {name}")
+
+    click.echo(f"\n  Version history ({len(deck.versions)}):")
+    for v in deck.versions:
+        marker = " ←current" if v.id == deck.current_version_id else ""
+        click.echo(f"    v{v.version}  {v.created}  {v.label or ''}  {v.note or ''}{marker}")
+
+
+@deck.command("versions")
+@click.option("--name", "deck_name", required=True, help="Deck name.")
+@_verbose
+def deck_versions(deck_name: str, verbose: bool) -> None:
+    """Show the full version log for a deck (evolution over time).
+
+    Example: legacy-engine deck versions --name "my Dimir Tempo"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.persist import find_deck_by_name
+
+    deck = find_deck_by_name(deck_name)
+    if deck is None:
+        raise click.ClickException(f"No deck named {deck_name!r}.")
+
+    click.echo(f"\n=== Version log: {deck.name} ===")
+    click.echo(f"  id={deck.id}  owner={deck.owner}  created={deck.created}")
+    click.echo("")
+    for v in deck.versions:
+        marker = " ← current" if v.id == deck.current_version_id else ""
+        main_cnt = sum(c.count for c in v.cards if c.board == "main")
+        side_cnt = sum(c.count for c in v.cards if c.board == "side")
+        click.echo(
+            f"  v{v.version}  {v.created}  "
+            f"main={main_cnt} side={side_cnt}"
+            f"{('  ' + v.label) if v.label else ''}"
+            f"{('  — ' + v.note) if v.note else ''}"
+            f"{marker}"
+        )
+
+
+@deck.command("buildable")
+@click.option("--name", "deck_name", required=True, help="Deck name.")
+@_verbose
+def deck_buildable(deck_name: str, verbose: bool) -> None:
+    """Check whether you can build a deck from your current inventory.
+
+    Lists missing cards and the shortfall count for each.
+
+    Example: legacy-engine deck buildable --name "my Dimir Tempo"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.collection.allocation import buildability
+    from legacy_engine.collection.decks import current_cards
+    from legacy_engine.collection.inventory import owned_counts_map
+    from legacy_engine.collection.persist import find_deck_by_name, load_inventory
+
+    deck = find_deck_by_name(deck_name)
+    if deck is None:
+        raise click.ClickException(f"No deck named {deck_name!r}.")
+
+    main, side = current_cards(deck)
+    if not main:
+        raise click.ClickException(f"Deck {deck_name!r} has no cards.")
+
+    inv = load_inventory()
+    owned = owned_counts_map(inv)
+    report = buildability(main, side, owned, deck_name=deck_name)
+
+    if report.buildable:
+        click.echo(f"OK — you can build '{deck_name}' from your collection.")
+    else:
+        click.echo(f"MISSING — you cannot build '{deck_name}' without {len(report.missing)} more card(s):")
+        for card, shortfall in sorted(report.missing.items()):
+            click.echo(f"  − {card}: need {shortfall} more")
+
+
 if __name__ == "__main__":
     main()

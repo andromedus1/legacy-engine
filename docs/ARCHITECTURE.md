@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-06-01
+updated: 2026-06-13
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -27,7 +27,7 @@ decisions:
 
 # Architecture: legacy-engine
 
-*Last updated: 2026-05-31*
+*Last updated: 2026-06-13*
 
 > How the system is built. For *what* and *why*, see [VISION.md](VISION.md) and [SPEC.md](SPEC.md).
 > For decision heuristics, see [PRINCIPLES.md](PRINCIPLES.md). For what to build when, the roadmap/epics
@@ -48,9 +48,11 @@ observed → label → analytics → advisory arc.
 │  seed · refresh · label · report (meta|matchups|tiers|trends|cards|gaps)      │
 │  · advise (positioning|sideboard|whattoplay|report)                           │
 │  · generate (consensus|tune) · export (deck) · viz (deck)  [later: goldfish]  │
+│  · collection (import|show|status|rebuild) · deck (save|load|list|show|       │
+│    versions|buildable)                                                         │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────┘
     │          │           │            │               │
-┌───▼─────┐ ┌──▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
+┌───▼─────┐ ┌─▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
 │ingestion/│ │archetype/ │ │analytics/ │ │advisory/    │ │generation/    │
 │scryfall  │ │rules      │ │metashare  │ │positioning  │ │consensus      │
 │cache     │ │matcher    │ │matchup    │ │sideboard    │ │export·tuning  │
@@ -60,10 +62,16 @@ observed → label → analytics → advisory arc.
 │store     │ │           │ │           │ │             │ │               │
 └───┬─────┘ └────┬──────┘ └─────┬─────┘ └──────┬──────┘ └───────────────┘
     │            │              │              │
-┌───▼────────────▼──────────────▼──────────────▼────────────────────────────┐
+┌───▼─────────────────────────────────────────────────────────────────────────┐
+│ collection/  (user personal layer — peer of ingestion/)                       │
+│  persist · store · inventory · decks · allocation                             │
+└───┬─────────────────────────────────────────────────────────────────────────┘
+    │
+┌───▼────────────────────────────────────────────────────────────────────────┐
 │                                 models/                                     │
 │  Card · Decklist · Deck · TournamentResult · Round · Standing · Archetype · │
 │  ArchetypeRule · Condition · MatchupCell · BanListSnapshot · ConfidenceMetadata │
+│  Inventory · InventoryEntry · UserDeck · DeckVersion · DeckCardRef          │
 │  (advisory/analytics result records are dataclasses in their own modules)   │
 └──────────────────────────────────┬──────────────────────────────────────────┘
                                    │
@@ -72,7 +80,10 @@ observed → label → analytics → advisory arc.
 │   cache/    (mirrored fbettega JSON)          tournaments · decks · deck_cards │
 │   scryfall/ (oracle bulk + name index)        rounds · standings · labels     │
 │   rules/    (vendored MTGOFormatData @SHA)     cards · matchups (materialized) │
-│   banlist/  (dated B&R snapshots)                                             │
+│   banlist/  (dated B&R snapshots)             inventory_entries · user_decks  │
+│   collection/ (user-authored SSOT)            deck_versions · deck_version_   │
+│     inventory.json                              cards                          │
+│     decks/<id>.json (per deck)                                                │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,6 +106,23 @@ observed → label → analytics → advisory arc.
 | `rules_vendor.py` | Vendor MTGOFormatData rules-as-JSON via git subtree into `data/rules/`, pinned to a commit SHA in `RULES_MANIFEST.json`. `legacy refresh rules` pulls upstream, diffs `Formats/Legacy/`, surfaces new archetypes/condition-types. | github (Badaro) | mtgoformatdata-rule-schema, csharp-python-port-strategy |
 | `banlist.py` | Maintain dated `BanListSnapshot`s (banned names + banned_date + ban_reason + category predicates) from WotC B&R announcements. Blacklist validation. | (hand-curated + WotC) | legacy-foundations |
 | `store.py` | Normalize parsed raw JSON → Pydantic models → load into DuckDB (`data/legacy.duckdb`). DuckDB is a **rebuildable derived cache**; raw JSON is the source of truth. | duckdb | ingestion-ops-and-metashare |
+
+### `collection/` — the user's personal layer (local single-user; schema cloud-ready)
+
+The user's own card inventory and decks as first-class persistent entities. Raw JSON under
+`data/collection/` is the source of truth (user-authored, precious, git-/hand-editable);
+DuckDB tables are the rebuildable derived cache for allocation/buildability joins — same SSOT
+split as `ingestion/`. Every owned row carries an `owner` key (defaulted `LOCAL_OWNER="local"`)
+and every persistent entity a stable UUID, so a future hosted/multi-user surface migrates
+without a schema rewrite. CLI-first; no web UI (deferred to its own research).
+
+| File | Responsibility |
+|---|---|
+| `persist.py` | JSON SSOT read/write for `Inventory` + `UserDeck` docs under `data/collection/` |
+| `store.py` | DuckDB DDL + load/fetch/rebuild for `inventory_entries`, `user_decks`, `deck_versions`, `deck_version_cards` (owns only these 4 tables) |
+| `inventory.py` | Inventory domain ops (text/CSV import, merge/replace, owner-scoped counts) |
+| `decks.py` | UserDeck ops: save (new deck / append version), load, list, show, version log |
+| `allocation.py` | Pure derived views: buildability, free-binder, contention (objective-search-split) |
 
 ### `archetype/` — the novel subsystem (no commander key → rule-based classification)
 | File | Responsibility | Brief |
@@ -127,8 +155,12 @@ observed → label → analytics → advisory arc.
 ### `models/` — shared Pydantic types
 `Card`, `Decklist`, `Deck`, `TournamentResult`, `Round`, `Standing`, `Archetype`, `ArchetypeRule`,
 `Condition`, `Variant`, `Fallback`, `MatchupCell`, `BanListSnapshot`,
-`ConfidenceMetadata` (`established | evolving | speculative`, reused from edh-engine). The advisory
-result records `PositioningResult` / `DeckRanking` / `SideboardPackage` / `FieldDistribution` /
+`ConfidenceMetadata` (`established | evolving | speculative`, reused from edh-engine).
+`Inventory`, `InventoryEntry`, `UserDeck`, `DeckVersion`, `DeckCardRef` (the personal collection
+entities — all subclass `LegacyEngineModel`; stable UUID ids; `owner` key threaded through; append-only
+versioning).  `models/decklist.py` houses the promoted public `parse_decklist` function (the canonical
+inverse of `generation.export.format_decklist`; previously private in `advisory/report.py`).
+The advisory result records `PositioningResult` / `DeckRanking` / `SideboardPackage` / `FieldDistribution` /
 `FieldReadReport` live as dataclasses in `advisory/` (computed records carrying numpy samples / coverage
 state), alongside the analytics records (`MetaShareReport`, `MatchupMatrix`, `TrendSeries`) — not here.
 
@@ -211,9 +243,9 @@ All external data fetched once and mirrored; the engine makes **no network calls
 ---
 
 ## Conventions
-- **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ archetype/ analytics/ advisory/ generation/` (+ deferred `goldfish/`). Mirrors edh-engine layout.
+- **Code org:** `src/legacy_engine/{cli,config,confidence}.py` + `models/ ingestion/ collection/ archetype/ analytics/ advisory/ generation/` (+ deferred `goldfish/`). Mirrors edh-engine layout.
 - **Naming:** `snake_case.py`, `kebab-case` CLI commands (nested groups per `.claude/rules/patterns.md`), `PascalCase` Pydantic models.
-- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends|cards|gaps`, `advise positioning|sideboard|whattoplay|report`, `generate consensus|tune` (`tune --discover` adds exploratory adjacent-card suggestions), `export deck`); lazy imports inside commands; `_setup_logging(verbose)` first. **Regime-aware advisory**: the matrix consumers (`report matchups|gaps`, `advise positioning|whattoplay|report`) take `--since/--until/--regime/--all-time` and default to the **adaptive per-cell ban-aware matrix + current-regime field** (via `advisory/window.py::resolve_advisory_window` + `build_advisory_inputs`); `--all-time` is the full-corpus escape; thin explicit windows degrade to full-corpus with a loud banner. `report meta` is deck-based (windows but never degrades; full-corpus default).
+- **CLI:** Click nested groups (`seed cards|cache|rules|banlist`, `report meta|matchups|tiers|trends|cards|gaps`, `advise positioning|sideboard|whattoplay|report`, `generate consensus|tune` (`tune --discover` adds exploratory adjacent-card suggestions), `export deck`, `collection import|show|status|rebuild`, `deck save|load|list|show|versions|buildable`); lazy imports inside commands; `_setup_logging(verbose)` first. **Regime-aware advisory**: the matrix consumers (`report matchups|gaps`, `advise positioning|whattoplay|report`) take `--since/--until/--regime/--all-time` and default to the **adaptive per-cell ban-aware matrix + current-regime field** (via `advisory/window.py::resolve_advisory_window` + `build_advisory_inputs`); `--all-time` is the full-corpus escape; thin explicit windows degrade to full-corpus with a loud banner. `report meta` is deck-based (windows but never degrades; full-corpus default).
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.
