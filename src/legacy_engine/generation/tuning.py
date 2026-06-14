@@ -71,6 +71,28 @@ _MAIN_SIZE: int = 60
 # Confidence tiers that count as gate-clearing for per-card value
 _VALUE_GATE: tuple[str, ...] = ("evolving", "established")
 
+# Core-protection thresholds — prevent gutting high-mode flex cards on noise-level lift.
+#
+# Background: per-card field-weighted values are presence-correlational signals the
+# codebase itself disclaims as "indicative not precise."  Without a minimum-lift gate
+# the greedy loop accepts *any* positive gain (even 0.0001), making it possible to cut
+# a widely-played flex card (e.g. modal_count=3, inclusion=0.60) to 0 on epsilon lift
+# and then have the same report's outlier check flag the result as off-consensus —
+# self-contradictory output.
+#
+# Policy: a swap is only accepted when the gain exceeds BOTH:
+#   1. _MIN_SWAP_GAIN — a flat floor that screens out noise-level differences.
+#   2. cut_inclusion_pct * _INCLUSION_CUT_RESISTANCE — a scaled floor: the more
+#      widely the archetype plays the outgoing card, the larger the required gain.
+#      A card at 0.60 inclusion needs a gain of at least 0.60 * 0.08 = 0.048 (vs a
+#      speculative card at 0.00 inclusion which only needs the flat floor).
+#
+# Calibration: these are deliberately conservative to block noise-driven cuts while
+# still admitting clearly-superior swaps (a gain of ≥0.05 is a meaningful field edge
+# given that per-card lift is already field-share-weighted and tier-gated).
+_MIN_SWAP_GAIN: float = 0.02            # flat minimum gain to execute any swap
+_INCLUSION_CUT_RESISTANCE: float = 0.08  # per-unit-inclusion additional gain required
+
 
 # ---------------------------------------------------------------------------
 # Public thin wrapper: build the coverage model from the field + deck context
@@ -330,6 +352,9 @@ def _greedy_tune(
     *,
     max_swaps: int,
     legal_swap: Callable[[dict[str, int], str, str], tuple[bool, dict[str, int]]],
+    inclusion_pcts: dict[str, float] | None = None,
+    min_swap_gain: float = _MIN_SWAP_GAIN,
+    inclusion_cut_resistance: float = _INCLUSION_CUT_RESISTANCE,
 ) -> tuple[dict[str, int], list[tuple[str, str]], float, float]:
     """Pure greedy maindeck tuner driven by field-weighted per-card lift.
 
@@ -338,9 +363,20 @@ def _greedy_tune(
     Each round: among legal (flex card with copies > 0 cut, pool card added,
     add != cut, add not already in locked core in current deck):
       - pick the swap maximising fwv[add] - fwv[cut]
-      - accept iff gain > 0 (STRICT improve — no ties)
+      - accept iff gain exceeds the core-protection floor (see below)
       - apply; update flex; record
       - stop at convergence or max_swaps
+
+    Core-protection gate (fix: fix-tuner-core-protection)
+    -------------------------------------------------------
+    A swap is only accepted when gain exceeds BOTH:
+      • ``min_swap_gain`` — flat noise floor (screens epsilon-level differences).
+      • ``inclusion_pcts[cut] * inclusion_cut_resistance`` — scaled floor: a widely-
+        played flex card (high field inclusion) requires a proportionally larger gain
+        before it is cut.  Cards with no inclusion data use 0.0 for the scaled term.
+
+    This prevents cutting a high-mode flex card (e.g. 60% field inclusion) to 0 on
+    sub-threshold lift, while still allowing clearly-superior swaps (large gain > floor).
 
     Parameters
     ----------
@@ -360,6 +396,15 @@ def _greedy_tune(
         Injected callable: ``(current_main, cut, add) -> (ok, new_main)``.
         Enforces exactly-60 and copy-limit legality; pure (no DB required when
         supplied as a trivial lambda in tests).
+    inclusion_pcts
+        Optional map of card name → archetype inclusion fraction (0.0–1.0).
+        When provided, the inclusion-weighted cut-resistance floor is applied.
+        When None, only the flat ``min_swap_gain`` floor is applied.
+    min_swap_gain
+        Flat minimum gain required for any swap (default: ``_MIN_SWAP_GAIN``).
+    inclusion_cut_resistance
+        Per-unit-inclusion multiplier for the scaled cut-resistance floor
+        (default: ``_INCLUSION_CUT_RESISTANCE``).
 
     Returns
     -------
@@ -372,8 +417,9 @@ def _greedy_tune(
     - Given an fwv where a flex card scores low and a pool card scores high,
       exactly that swap is made and value_after > value_before.
     - Locked core never appears in swaps.
-    - No strictly-improving swap left at stop.
+    - No strictly-improving swap (above the core-protection floor) left at stop.
     - Deterministic tie-break by (cut_name, add_name) lex order.
+    - A high-inclusion flex card is NOT cut on sub-threshold lift (core-protection).
     """
     locked_cards: frozenset[str] = frozenset(locked.keys())
 
@@ -409,8 +455,12 @@ def _greedy_tune(
                 add_lift = fwv.get(add_card, 0.0)
                 gain = add_lift - cut_lift
 
-                # Only strictly-improving swaps (gain > 0).
-                if gain <= 0.0:
+                # Core-protection gate: the gain must exceed BOTH the flat noise floor
+                # AND the inclusion-weighted cut-resistance floor for the outgoing card.
+                # This prevents cutting widely-played flex cards on epsilon-level lift.
+                cut_inclusion = (inclusion_pcts or {}).get(cut_card, 0.0)
+                required_gain = max(min_swap_gain, cut_inclusion * inclusion_cut_resistance)
+                if gain <= required_gain:
                     continue
 
                 # Check legality (injected — pure in tests, DB-backed in prod).
@@ -715,6 +765,20 @@ def tune_deck(
     )
     snapshot = current_banlist()
 
+    # ── Inclusion percentages for core-protection cut-resistance ─────────────
+    # card_frequencies returns the same lightweight query already run by partition_flex;
+    # we build a plain dict here so _greedy_tune can apply the inclusion-weighted floor
+    # without touching the DB.  Cards not in the archetype's observed pool get 0.0.
+    try:
+        _freqs = card_frequencies(
+            con, archetype, board="main", since=eff_since, until=eff_until,
+            players=players, alias_map=alias_map,
+        )
+        _inclusion_pcts: dict[str, float] = {cf.name: cf.inclusion_pct for cf in _freqs}
+    except Exception as exc:
+        log.debug("tune_deck: card_frequencies for inclusion_pcts failed: %s", exc)
+        _inclusion_pcts = {}
+
     # ── Per-card win-rate aggregate: compute ONCE, thread everywhere ─────────
     # The heavy full-corpus scan runs a single time and is reused by both
     # field_weighted_values (the swap objective) and recommend_sideboard (the
@@ -827,6 +891,7 @@ def tune_deck(
         fwv, maindeck, locked, flex, pool,
         max_swaps=max_swaps,
         legal_swap=_legal_swap_closure,
+        inclusion_pcts=_inclusion_pcts,
     )
 
     reason = (
