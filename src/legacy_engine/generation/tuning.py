@@ -733,12 +733,14 @@ def tune_deck(
     matrix = build_matrix(con)
 
     # ── Positioning S (archetype context; unchanged by card swaps) ───────────
+    # Gate on s_computable: when coverage is zero, pos.s_mean is NaN.  Fall back
+    # to None rather than leaking NaN into the serialized TunedDeck output.
     positioning_s: float | None = None
     if archetype in matrix.archetypes:
         try:
             from legacy_engine.advisory.positioning import positioning_score
             pos = positioning_score(matrix, field, archetype, seed=42)
-            positioning_s = pos.s_mean
+            positioning_s = pos.s_mean if pos.s_computable else None
         except Exception as exc:
             log.warning("tune_deck: positioning_score failed for %r: %s", archetype, exc)
 
