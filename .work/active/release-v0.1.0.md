@@ -146,3 +146,7 @@ Deferred (unbound): goldfish-simulation, local-meta geo dimension, web interface
 - **gate-cruft** (2026-06-14) — 6 findings (1 High, 3 Medium, 2 Low). High: 9 unused imports (ruff
   F401) -> gate-cruft-unused-imports. Medium -> deck-load --format ignored, report new-cards --db
   ignored, overprice_factor dead param. 2 Low -> backlog. No new dead funcs/shims (2 prior sweeps).
+- **gate-docs** (2026-06-14) — 6 findings, all High (3 items). report new-cards mischaracterized as
+  forecaster in SPEC+README -> gate-docs-new-cards-mischaracterized; report variants mislabeled in
+  README -> gate-docs-variants-readme; stale cli.py line anchors in 3 pattern skills ->
+  gate-docs-pattern-skill-cli-anchors. ARCHITECTURE clean; module-relative refs all resolve.
