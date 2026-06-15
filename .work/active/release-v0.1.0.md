@@ -143,3 +143,6 @@ Deferred (unbound): goldfish-simulation, local-meta geo dimension, web interface
   unhonored + untested (one bad deck/event aborts the batch) -> gate-tests-ingestion-bad-deck-resilience
   (implementing). 2 Low -> backlog (thin-banner named-reason, ban-date boundary). Coverage otherwise
   strong; 2 candidate gaps confirmed false-positive. 3 prior gate-tests findings already done.
+- **gate-cruft** (2026-06-14) — 6 findings (1 High, 3 Medium, 2 Low). High: 9 unused imports (ruff
+  F401) -> gate-cruft-unused-imports. Medium -> deck-load --format ignored, report new-cards --db
+  ignored, overprice_factor dead param. 2 Low -> backlog. No new dead funcs/shims (2 prior sweeps).
