@@ -5314,3 +5314,63 @@ class TestRedundancyDecay:
         assert pkg.cards.get("Surgical Extraction", 0) >= 1, "ILP decay path must still pick the answer"
         assert pkg.cards.get("Surgical Extraction", 0) < 4, "ILP decay path must cap the stack"
         assert sum(pkg.cards.values()) <= 15
+
+
+# ---------------------------------------------------------------------------
+# TestNaturalBudgetTau — epic-sideboard-core-and-hedge-dedicated-core
+# ---------------------------------------------------------------------------
+
+class TestNaturalBudgetTau:
+    """The τ per-slot opportunity cost: the solver stops committing dedicated cards once the
+    best marginal coverage ≤ τ, so the package returns FEWER than budget at the natural-budget
+    knee. τ=0.0 is byte-identical to the forced-budget baseline."""
+
+    def _dominant_model(self) -> CoverageModel:
+        # 'Top' covers a w=1.0 element, 'Alt' a w=0.1 element; both max_copies=4.
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"}), max_copies=4),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"}), max_copies=4),
+            },
+        )
+
+    def test_greedy_tau_zero_fills_budget(self):
+        # τ=0.0 reproduces the prior fill-the-budget behavior exactly.
+        cards, _ = _greedy_solve(self._dominant_model(), budget=4, tau=0.0)
+        assert sum(cards.values()) == 4, f"τ=0 must fill the budget: {cards}"
+
+    def test_greedy_stops_at_tau(self):
+        # Top marginals are Δg: 0.5, 0.25, 0.125, ...; τ=0.15 stops after the 2nd copy
+        # (3rd copy marginal 0.125 ≤ τ), and Alt (0.05) never clears τ → fewer than budget.
+        cards, _ = _greedy_solve(self._dominant_model(), budget=4, tau=0.15)
+        assert sum(cards.values()) < 4, f"τ=0.15 must stop before the budget: {cards}"
+        assert cards.get("Top", 0) == 2, f"expected 2 dedicated Top copies at τ=0.15: {cards}"
+
+    def test_ilp_stops_at_tau(self):
+        try:
+            cards = _ilp_solve(self._dominant_model(), budget=4, tau=0.15)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert sum(cards.values()) < 4, f"τ=0.15 ILP must stop before the budget: {cards}"
+
+    def test_ilp_tau_zero_identical(self):
+        try:
+            cards = _ilp_solve(self._dominant_model(), budget=4, tau=0.0)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert sum(cards.values()) == 4, f"τ=0 ILP fills the budget: {cards}"
+
+    def test_recommend_sideboard_tau_returns_fewer(self):
+        """End-to-end: τ>0 yields a smaller package than τ=0 on a real corpus."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            full = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, tau=0.0)
+            trimmed = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, tau=0.25)
+        finally:
+            con.close()
+        assert sum(trimmed.cards.values()) <= sum(full.cards.values())
+        assert sum(full.cards.values()) == 4  # the single max-4 hoser fills with τ=0
