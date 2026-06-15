@@ -5,10 +5,10 @@ stage: done
 tags: [viz]
 parent: null
 depends_on: [epic-meta-analytics, epic-advisory, epic-deck-generation, epic-regime-aware-advisory]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-30
-updated: 2026-06-01
+updated: 2026-06-14
 ---
 
 # Deck Visualization Platform

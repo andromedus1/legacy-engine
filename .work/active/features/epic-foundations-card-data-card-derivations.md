@@ -5,10 +5,10 @@ stage: done
 tags: [ingestion]
 parent: epic-foundations-card-data
 depends_on: [epic-foundations-card-data-card-model-scryfall]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-14
 ---
 
 # Card Derivations: Deck-Color Helper & Legacy Tags

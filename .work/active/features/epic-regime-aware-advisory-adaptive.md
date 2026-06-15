@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, analytics, correctness]
 parent: epic-regime-aware-advisory
 depends_on: [epic-regime-aware-advisory-windowing-core, epic-regime-aware-advisory-cli-surface]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-14
 ---
 
 # Adaptive Per-Cell Windowing (v2)

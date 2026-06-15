@@ -5,10 +5,10 @@ stage: done
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-14
 ---
 
 # charts.py Migration — Vega-Lite builders replace matplotlib

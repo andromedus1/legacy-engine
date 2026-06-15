@@ -5,10 +5,10 @@ stage: done
 tags: [ingestion, archetype, bug]
 parent: fix-spine-peer-review-findings
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-14
 ---
 
 # Ingestion edge hardening (findings 6, 8, 9)

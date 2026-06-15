@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, quality]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: tests
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 # Sideboard recommender structurally can't surface field staples (ROOT CAUSE)

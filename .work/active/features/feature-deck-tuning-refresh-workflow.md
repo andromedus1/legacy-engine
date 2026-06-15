@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, generation, workflow]
 parent: null
 depends_on: [feature-regime-windowing-consistency, feature-three-venue-meta-frame, feature-archetype-empirical-recommendations, feature-card-count-outlier-advisor]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 Build a **deck-tuning refresh workflow**: one command/run that pulls current data and emits a

@@ -5,10 +5,10 @@ stage: done
 tags: [analytics]
 parent: epic-meta-analytics
 depends_on: [epic-meta-analytics-match-results]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-14
 ---
 
 # Matchup Matrix (Wilson + Beta-Binomial shrinkage + tiers)
