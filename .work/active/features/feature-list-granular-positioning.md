@@ -1,7 +1,7 @@
 ---
 id: feature-list-granular-positioning
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics, card-level]
 parent: null
 depends_on: []
@@ -103,3 +103,35 @@ Spike VALIDATED (core Unit 6 already merged in PR #10: composition_adjusted_winr
 4. **Land detection** — exclude basic/utility lands from the composition signal so they don't add noise (use the existing is_land / land classification).
 
 Honesty constraints (UNCHANGED): opt-in, default OFF, presence-correlational caveat always shown, never presented as causal precision.
+
+## Implementation notes
+
+**Implemented 2026-06-14.** All 4 hardening items complete; 2199 tests passing (+19 new).
+
+### 1. CLI integration (`advise positioning --list-granular`)
+Added `--list-granular` flag (default OFF) to `advise positioning` in `cli.py`. When set, calls the new `_render_list_granular` helper which outputs:
+- `// [GRANULAR_CAVEAT]` on the audit line (always, honesty contract)
+- `S_granular (list-granular, experimental): <value>`
+- `S (archetype-level, baseline): <value>`
+- `delta (S_granular − S): <±value>`
+- Deck composition note including land exclusion count
+
+Default (flag absent) path is byte-identical — confirmed by test `test_positioning_without_flag_byte_identical`.
+
+### 2. Live CardWinRates plumbing
+`_render_list_granular` calls `compute_card_winrates(con, provenance=provenance, since=field_since, until=field_until)` — the same window the positioning path uses (honors ban-regime windowing via `inputs.field_since/field_until`). Lands are filtered from `mainboard` via `filter_nonland_cards(mainboard, _is_land)` where `_is_land` calls `store.fetch_card` → `row["is_land"]`. CLI resolves live data and passes it into the pure `positioning_score_granular` (no DB coupling in the core function).
+
+### 3. Constant calibration
+`_GRANULAR_MAX_NUDGE = 0.05` and `_GRANULAR_SCALE = 0.5` retained as-is. Both constants now have extended rationale docstrings explaining the calibration target. Tests in `TestConstantCalibration`:
+- (a) Sub-dominance: `|s_granular - base_S| < _GRANULAR_MAX_NUDGE` asserted for both lists
+- (b) Grindy/lean differentiation: grindy > lean on 60% ANT field asserted explicitly
+- (c) Clamp never exceeded: extreme deck (20x Hymn) asserts nudge ≤ `_GRANULAR_MAX_NUDGE`
+Current values pass all tests; no adjustment needed.
+
+### 4. Land detection
+Added `filter_nonland_cards(deck_cards, is_land_fn)` utility to `advisory/positioning.py` (pure, testable without DB). Caller supplies the `is_land_fn` predicate. Unknown cards (not in DB) are kept (conservative default). The CLI supplies `fetch_card`-backed predicate; tests supply lambdas. Tests confirm: (a) lands excluded, (b) unknowns kept, (c) land-only deck difference → identical `s_granular`, (d) baseline `base.s_mean` unaffected.
+
+### Test counts
+- 19 new hermetic tests in `tests/test_positioning_granular_hardening.py`
+- 8 CLI tests are hermetic: use `tmp_path` file-backed DuckDB + `--db` flag (never touch `data/legacy.duckdb`)
+- Full suite: **2199 passed** (was 2180 pre-spike → 2192 post-spike → 2199 post-hardening)
