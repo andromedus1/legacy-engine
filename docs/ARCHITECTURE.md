@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-06-14
+updated: 2026-06-15
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -28,7 +28,7 @@ decisions:
   - "VISUALIZATION: viz/ is a local Vega-Lite presentation layer (interactive HTML via vega-embed + static PNG via vl-convert, strip-and-inject theming, 12-col tile/layout); headline deliverable is a reusable per-deck dashboard composing meta-share/matchups/trends/positioning/consensus. No server, no cloud (mirrors the knowledge-graph/board HTML precedent)."
   - "PRICES: ingestion/prices.py + seed prices + ingestion/releases.py serve the acquisition and new-card surface; PriceQuote.all_null is the honest-null signal (never a silent 0)."
   - "PLAYER SUBSYSTEM: analytics/players/{identity,strength,history}.py classifies player handles via alias resolution, gates strength scoring on confidence tier, and tracks per-regime archetype history — drives generate consensus --strong and identify suggest|strong|track."
-  - "HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag + named reason + suppressed magnitude. No silent zeros. Applies in window.py (thin-regime banner), primer/sideboard (degraded=True note), speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence."
+  - "HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag + named reason + suppressed magnitude. No silent zeros. Applies in window.py (thin-regime banner), primer/sideboard (degraded=True note), the sideboard recommender (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve rather than padding to a forced 15), speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence."
 ---
 
 # Architecture: legacy-engine
