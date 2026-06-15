@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge
 kind: epic
-stage: implementing
+stage: done
 tags: [advisory, sideboard]
 parent: null
 depends_on: []
@@ -126,3 +126,6 @@ chain is mostly linear because a solver rework genuinely builds on itself (value
 Surfaced during a dogfooding test-drive of `advise sideboard` for Dimir Tempo vs the Boulder
 big-mana meta (2026-06-15). The padding finding and the budget→coverage curve (15/11/8/6 →
 0.444/0.434/0.413/0.385) are the empirical motivation.
+
+## Epic complete (2026-06-15)
+All 5 child features done: concave-value → dedicated-core → output-contract → gating (v1 core wave) + hedge-allocator (fast-follow). The deferred ARCHITECTURE `sideboard.py` module row was rolled forward at code-landing time (now matches the two-stage solver). End-to-end on real Boulder data, `advise sideboard --smart` produces a 5-card dedicated core + 10 diversity insurance picks + coverage curve + uncovered-field tail — replacing the original 4/4/4 padding. Gated-additive throughout: `--smart` off (default) is byte-identical to the forced-15 model (full suite 2242 green; sideboard suite byte-identical). The padding pathology that motivated the epic is fixed.
