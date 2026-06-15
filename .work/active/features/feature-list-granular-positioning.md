@@ -1,7 +1,14 @@
 ---
-id: idea-list-granular-positioning
-created: 2026-06-06
-tags: [advisory, analytics, spike]
+id: feature-list-granular-positioning
+kind: feature
+stage: implementing
+tags: [advisory, analytics, card-level]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-06-14
+updated: 2026-06-14
 ---
 
 **Deferred from `epic-advisory-output-honesty` (2026-06-06) as a research spike** — kept out of that
@@ -85,3 +92,14 @@ lists without contaminating the baseline. The main open work is:
 (d) `fetch_card` land-detection in `composition_adjusted_winrates` (or document
     caller contract).
 Suggested epic tag: `feature-list-granular-positioning-overlay`.
+
+## Promotion (2026-06-14)
+Spike VALIDATED (core Unit 6 already merged in PR #10: composition_adjusted_winrates / positioning_score_granular / GranularPositioningResult / GRANULAR_CAVEAT, opt-in + default-off + caveated, 12 hermetic tests). Promoted to a feature to HARDEN into production. This is the first step of a broader valued direction: **analyze decks as individual cards, not just archetype labels.**
+
+### Remaining production items (the hardening work)
+1. **CLI integration** — wire an opt-in flag (e.g. `advise positioning --list-granular`) that renders `s_granular` alongside archetype S with the mandatory caveat; keep default output byte-identical.
+2. **Real CardWinRates plumbing** — feed `card_value_matchup` from the live corpus (the spike used seeded inputs); reuse the existing card_value/window machinery; honor ban-regime windowing.
+3. **Constant calibration** — the 0.5x scale and ±5pp clamp are provisional; pin them with a test that the overlay stays sub-dominant to archetype S and reproduces the grindy-vs-lean differentiation.
+4. **Land detection** — exclude basic/utility lands from the composition signal so they don't add noise (use the existing is_land / land classification).
+
+Honesty constraints (UNCHANGED): opt-in, default OFF, presence-correlational caveat always shown, never presented as causal precision.
