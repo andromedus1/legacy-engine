@@ -30,7 +30,7 @@ for how it's built.
 ## Status
 
 The **observed-data spine, meta analytics, deck generation, the advisory differentiator, and a
-local visualization layer** are built and tested (1882 passing tests). Only the goldfish-simulation
+local visualization layer** are built and tested (2199 passing tests). Only the goldfish-simulation
 pillar remains deferred:
 
 | Capability | State |
@@ -42,11 +42,15 @@ pillar remains deferred:
 | Sub-archetype variant tagging (`report meta --by-variant`, `generate consensus --variant`) | ✅ built |
 | Meta-share (3 definitions, online/paper; venue split `--venues`; sub-archetype split `report subgroup`) | ✅ built |
 | Matchup matrix (Wilson/Jeffreys CI + Beta-Binomial shrinkage + confidence tiers) | ✅ built |
-| Meta trends across ban-list regimes (version-stamped) | ✅ built |
+| Meta trends across ban-list regimes (version-stamped; `--movers N` biggest-movers digest) | ✅ built |
+| Ban-affectedness report (`report affectedness` — which bans drove an archetype's valid_since) | ✅ built |
+| Head-to-head matchup lookup (`report matchups --a/--b` — single directed cell + Wilson CI) | ✅ built |
 | Regime-aware analytics & advisory (adaptive per-cell ban windowing) | ✅ built |
-| Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck) | ✅ built |
-| Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware) | ✅ built |
-| What-to-play (proactivity, vulnerability tags, hate-equity, best-deck/best-call) | ✅ built |
+| Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
+| Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
+| What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
+| Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
+| Provenance-filtered advisory (`--provenance online|paper` on all advise leaves + report matchups/meta) | ✅ built |
 | Field Read & Deck Recommendation report (the `advise report` surface; `--venues` cross-venue) | ✅ built |
 | Deck refresh (`advise refresh` — per-venue tuned maindeck + sideboard + primer) | ✅ built |
 | Acquisition plan (`advise acquire` — ranked priced buy list) | ✅ built |
@@ -114,6 +118,9 @@ legacy-engine report meta --by-variant            # split by sub-archetype varia
 legacy-engine report matchups   # archetype matchup matrix with confidence intervals
 legacy-engine report tiers      # S/A/B tier list over meta-share
 legacy-engine report trends     # meta-share evolution across ban-list regimes
+legacy-engine report trends     --movers 5       # + biggest-movers digest between the two latest regimes
+legacy-engine report matchups   --a "Dimir Tempo" --b "Sneak & Show"  # single directed cell + CI
+legacy-engine report affectedness --archetype "Dimir Tempo"  # which bans drove valid_since
 legacy-engine report gaps       # under-explored archetypes (high positioning S, low meta-share)
 legacy-engine report subgroup --archetype "Dimir Tempo"  # sub-archetype split + matchup deltas
 legacy-engine report variants --archetype "Dimir Tempo"  # per-variant card inclusion divergence
@@ -127,14 +134,19 @@ legacy-engine report cards                       # per-card presence-correlation
 
 # Meta attack / advisory — "how to attack the field"
 legacy-engine advise positioning --deck my.txt   # expected WR vs the weighted field (P(best) ranking)
+legacy-engine advise positioning --deck my.txt --list-granular  # + list-granular S_granular overlay
+legacy-engine advise positioning --deck my.txt --provenance paper  # paper-only field + matrix
 legacy-engine advise sideboard   --deck my.txt   # recommended 15-card sideboard (ILP + greedy "why")
 legacy-engine advise whattoplay  --deck my.txt   # proactivity, vulnerability tags, best-deck/best-call
+legacy-engine advise field                        # field composition + vulnerability profile (no deck)
+legacy-engine advise field --provenance online    # online-only field read
 legacy-engine advise report      --deck my.txt   # full Field Read & Deck Recommendation + audit trail
 legacy-engine advise report      --deck my.txt --venues online,paper  # cross-venue report
 legacy-engine advise refresh     --deck my.txt   # per-venue tuned maindeck + sideboard + primer
 legacy-engine advise acquire     --collection binder.txt --archetype "Dimir Tempo"  # priced buy list
 # --my-deck NAME loads a saved UserDeck; --field FILE supplies a custom field
 # --collection FILE enables owned/acquire annotations; --budget N caps the acquire plan
+# --provenance online|paper is available on all advise leaves (and report matchups/meta)
 
 # Player identity and strength
 legacy-engine identify suggest          # candidate alias clusters (identity dedup)
@@ -166,11 +178,11 @@ legacy-engine viz deck "Dimir Tempo" --out dash.html   # per-deck attack-focused
 legacy-engine viz meta --out meta.html           # also: viz matchups | viz trends | viz tiers (.html or .png)
 ```
 
-Each leaf takes `-v/--verbose`; `report` commands take `--provenance [online|paper|all]` and a `--db`
-path. Every emitted number is labeled with its definition/basis, sample size, and confidence
-tier; advisory output carries a heuristic-vs-data-driven audit trail. Absent/thin signal is
-always labeled (never a silent zero). Commands not yet implemented fail loudly rather than
-returning empty results.
+Each leaf takes `-v/--verbose`; all `advise` leaves and `report matchups|meta` take
+`--provenance [online|paper|all]` and a `--db` path. Every emitted number is labeled with its
+definition/basis, sample size, and confidence tier; advisory output carries a heuristic-vs-data-driven
+audit trail. Absent/thin signal is always labeled (never a silent zero). Commands not yet implemented
+fail loudly rather than returning empty results.
 
 ## Development
 
@@ -206,7 +218,7 @@ src/legacy_engine/
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (1882 tests)
+tests/         # pytest suite (2199 tests)
 ```
 
 ## License
