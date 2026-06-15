@@ -5,10 +5,10 @@ stage: done
 tags: [advisory]
 parent: epic-advisory-output-honesty
 depends_on: [epic-advisory-output-honesty-positioning-coverage]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-06
-updated: 2026-06-06
+updated: 2026-06-14
 ---
 
 # Honest "What to Play" Output

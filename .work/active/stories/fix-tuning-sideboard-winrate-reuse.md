@@ -5,10 +5,10 @@ stage: done
 tags: [generation, advisory, perf, cleanup]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-31
-updated: 2026-05-31
+updated: 2026-06-14
 ---
 
 

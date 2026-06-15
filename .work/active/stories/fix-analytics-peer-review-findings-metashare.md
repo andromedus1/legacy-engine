@@ -5,10 +5,10 @@ stage: done
 tags: [analytics, bug]
 parent: fix-analytics-peer-review-findings
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-14
 ---
 
 # Metashare coverage + blend fixes (findings 1 top-cut-half, 3, 4, 5, 6)

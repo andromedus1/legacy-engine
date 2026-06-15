@@ -5,10 +5,10 @@ stage: done
 tags: [generation]
 parent: feature-strong-player-signal
 depends_on: [strong-player-signal-identity, strong-player-signal-strength]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 # Player-filtered consensus / tune — regime-safe, gated-additive
