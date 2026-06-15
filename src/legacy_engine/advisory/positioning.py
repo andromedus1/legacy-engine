@@ -31,13 +31,16 @@ Units:
   3  ``positioning_score``                             — single-deck entry point
   4  ``DeckRanking`` + ``rank_decks``                  — ranking entry point
   5  ``delta_var_S``                                    — closed-form sanity check
+  6  ``GranularPositioningResult`` + ``composition_adjusted_winrates``
+     + ``positioning_score_granular``                  — opt-in heuristic overlay
+     PRESENCE-CORRELATIONAL HEURISTIC, NOT CAUSAL PRECISION.  Default OFF;
+     archetype-level S is byte-identical to the baseline when not invoked.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field as dc_field
-from typing import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -816,3 +819,242 @@ def delta_var_S(
         var_S += (w ** 2) * p_hat * (1.0 - p_hat) / n[i]
 
     return var_S
+
+
+# ---------------------------------------------------------------------------
+# Unit 6 — List-granular positioning overlay  (OPT-IN, DEFAULT OFF)
+#
+# HEURISTIC CAVEAT:
+#   ``composition_adjusted_winrates`` and ``positioning_score_granular`` produce a
+#   *presence-correlational* adjustment to per-matchup win-rates based on which
+#   cards in the submitted list deviate from the archetype baseline.
+#
+#   - "Decks containing card X win more vs archetype M" is an *association*, not a
+#     causal effect.  Pilot skill, deck selection, and small samples all confound it.
+#   - The overlay is an EXPERIMENTAL heuristic for differentiating two same-archetype
+#     lists.  Do NOT present it as higher-precision positioning data.
+#   - The default ``positioning_score`` path is completely unchanged.  This unit is
+#     only invoked when callers explicitly call ``positioning_score_granular``.
+# ---------------------------------------------------------------------------
+
+#: Maximum absolute per-matchup nudge in win-rate units.  Caps each card's
+#: lift contribution so a single high-lift card in a thin matchup cannot
+#: swing the overlay by more than this per opponent.
+_GRANULAR_MAX_NUDGE: float = 0.05
+
+#: Scale factor applied to the aggregated card-lift signal before nudging.
+#: Keeps the overlay clearly sub-dominant relative to archetype-level WR.
+_GRANULAR_SCALE: float = 0.5
+
+#: Honesty caveat attached to every GranularPositioningResult.
+GRANULAR_CAVEAT: str = (
+    "[EXPERIMENTAL] List-granular S_granular is a presence-correlational heuristic overlay "
+    "on top of archetype-level S.  Card lift signals reflect registered-75 associations "
+    "(not causal win-rate deltas) and are confounded by pilot skill and sample size.  "
+    "Do not treat S_granular as higher-precision positioning data."
+)
+
+
+@dataclass
+class GranularPositioningResult:
+    """Result of the opt-in list-granular positioning overlay.
+
+    Fields
+    ------
+    base
+        The archetype-level ``PositioningResult`` (unchanged; byte-identical to
+        calling ``positioning_score`` directly).
+    s_granular
+        Field-weighted expected win-rate after nudging per-matchup win-rates by
+        the deck's card-composition deviation from the archetype baseline.
+        This is a presence-correlational heuristic — see ``GRANULAR_CAVEAT``.
+    adjusted_winrates
+        Per-opponent adjusted win-rate used to compute ``s_granular``.
+        Keyed by field archetype (opponents only; mirror is excluded).
+    caveat
+        Always ``GRANULAR_CAVEAT``.  Consumers must display this.
+    """
+
+    base: PositioningResult
+    s_granular: float
+    adjusted_winrates: dict[str, float]
+    caveat: str
+
+
+def composition_adjusted_winrates(
+    matrix: MatchupMatrix,
+    field: FieldDistribution,
+    deck_archetype: str,
+    deck_cards: dict[str, int],
+    card_win_rates,  # CardWinRates — avoid import cycle; callers pass it in
+    *,
+    board: str = "main",
+    max_nudge: float = _GRANULAR_MAX_NUDGE,
+    scale: float = _GRANULAR_SCALE,
+) -> dict[str, float]:
+    """Compute per-matchup win-rates nudged by the deck's card-composition.
+
+    For each field opponent ``opp``:
+      1. Start from the archetype-level shrunk win-rate ``p_shrunk`` (from the
+         matrix cell).  When there is no data (n=0), start from the imputation
+         center used in ``_sample_S`` (mean vs known cells, or 0.5).
+      2. For each card in ``deck_cards``, look up its ``card_value_matchup``
+         lift vs ``opp``.  Only cards with ``tier in ("evolving", "established")``
+         contribute (speculative lift is ignored).
+      3. Aggregate lifts weighted by card count (normalised by total deck size),
+         apply ``scale``, and clamp to ``[-max_nudge, +max_nudge]``.
+      4. Add the nudge to the baseline win-rate, clamping the result to [0, 1].
+
+    Returns
+    -------
+    dict[str, float]
+        Per-opponent adjusted win-rate.  Mirror opponent is NOT included
+        (mirror is fixed at 0.5 and is not meaningful to adjust).
+
+    This is a PRESENCE-CORRELATIONAL heuristic (see ``GRANULAR_CAVEAT``).
+    Caller must expose the caveat to end-users.
+    """
+    from legacy_engine.analytics.card_value import card_value_matchup
+
+    field_archetypes = list(field.shares)
+    wins, n, is_mirror, no_data_list = _row_winrate_inputs(matrix, deck_archetype, field_archetypes)
+
+    # Baseline imputation center — mean vs known cells (replicates _sample_S logic)
+    known_mask = (n > 0) & (~is_mirror)
+    if known_mask.any():
+        imputation_center = float((wins[known_mask] / n[known_mask]).mean())
+    else:
+        imputation_center = 0.5
+
+    total_nonland_count = sum(deck_cards.values())
+    if total_nonland_count == 0:
+        total_nonland_count = 1  # safety: avoid division by zero
+
+    adjusted: dict[str, float] = {}
+
+    for i, opp in enumerate(field_archetypes):
+        if is_mirror[i]:
+            # Mirror: fixed 0.5 — skip
+            continue
+
+        # Baseline win-rate for this matchup
+        if n[i] > 0:
+            cell = matrix.cells.get((deck_archetype, opp))
+            baseline_wr = cell.p_shrunk if (cell is not None and cell.p_shrunk is not None) else (wins[i] / n[i])
+        else:
+            baseline_wr = imputation_center
+
+        # Aggregate card-lift signal
+        lift_sum = 0.0
+        for card_name, count in deck_cards.items():
+            cv = card_value_matchup(card_win_rates, card_name, board, opp)
+            if cv.tier not in ("evolving", "established"):
+                # Speculative lift: ignore (not enough data to trust)
+                continue
+            lift_sum += cv.lift * count
+
+        # Normalise by deck size, scale, clamp
+        nudge = lift_sum / total_nonland_count * scale
+        nudge = max(-max_nudge, min(max_nudge, nudge))
+
+        adjusted_wr = max(0.0, min(1.0, baseline_wr + nudge))
+        adjusted[opp] = adjusted_wr
+
+    return adjusted
+
+
+def positioning_score_granular(
+    matrix: MatchupMatrix,
+    field: FieldDistribution,
+    deck_archetype: str,
+    deck_cards: dict[str, int],
+    card_win_rates,  # CardWinRates
+    *,
+    board: str = "main",
+    max_nudge: float = _GRANULAR_MAX_NUDGE,
+    scale: float = _GRANULAR_SCALE,
+    n_draws: int = _DEFAULT_DRAWS,
+    gamma: float = _DIRICHLET_GAMMA,
+    include_mirror: bool = True,
+    robust: bool = False,
+    restrict_to_covered: bool = True,
+    keep_samples: bool = False,
+    seed: int | None = None,
+) -> GranularPositioningResult:
+    """Opt-in list-granular positioning: archetype S + composition-adjusted S_granular.
+
+    **DEFAULT OFF** — the standard ``positioning_score`` is byte-identical to
+    the archetype-level baseline.  This function is the OPT-IN entry point.
+
+    Returns a ``GranularPositioningResult`` with:
+    - ``base``: the unmodified archetype-level ``PositioningResult`` (unchanged).
+    - ``s_granular``: field-weighted WR after nudging per-matchup rates by the
+      deck's card-composition deviation from the archetype baseline.
+    - ``adjusted_winrates``: per-opponent adjusted WR dict.
+    - ``caveat``: always ``GRANULAR_CAVEAT`` — consumers MUST display this.
+
+    Parameters mirror ``positioning_score``; extra params:
+    deck_cards
+        ``{card_name: count}`` maindeck (non-land; lands carry no matchup lift).
+    card_win_rates
+        ``CardWinRates`` from ``compute_card_win_rates``.  Caller supplies it
+        to keep this function pure and testable without DB access.
+    board
+        Board context for ``card_value_matchup`` lookup (default ``"main"``).
+    max_nudge
+        Maximum absolute per-matchup adjustment (default 0.05 = 5 pp).
+    scale
+        Global scale applied to lift aggregation (default 0.5).
+
+    PRESENCE-CORRELATIONAL HEURISTIC — see ``GRANULAR_CAVEAT``.
+    """
+    # Compute the archetype-level base (byte-identical to calling positioning_score)
+    base = positioning_score(
+        matrix, field, deck_archetype,
+        n_draws=n_draws, gamma=gamma,
+        include_mirror=include_mirror, robust=robust,
+        restrict_to_covered=restrict_to_covered,
+        keep_samples=keep_samples, seed=seed,
+    )
+
+    # Compute composition-adjusted per-matchup win-rates
+    adj_wrs = composition_adjusted_winrates(
+        matrix, field, deck_archetype, deck_cards, card_win_rates,
+        board=board, max_nudge=max_nudge, scale=scale,
+    )
+
+    # Compute S_granular: field-weighted average of adjusted win-rates.
+    # Mirror matchup (self) contributes 0.5 at its field share when include_mirror=True.
+    # Use point shares from the SCORING field (honors restrict_to_covered choice).
+    scoring_field = field
+    if base.restricted and base.excluded_archetypes:
+        # Reuse the restricted scoring field so S_granular is comparable to base.s_mean
+        covered = frozenset(field.shares) - base.excluded_archetypes
+        scoring_field, _ = field.restrict_to(covered)
+
+    scoring_shares = scoring_field.shares
+    s_granular_num = 0.0
+    s_granular_denom = 0.0
+
+    for opp, share in scoring_shares.items():
+        if opp == deck_archetype:
+            # Mirror: always 0.5, included when include_mirror=True
+            if include_mirror:
+                s_granular_num += share * 0.5
+                s_granular_denom += share
+        else:
+            wr = adj_wrs.get(opp)
+            if wr is None:
+                # Opponent not in field (shouldn't happen but be safe)
+                continue
+            s_granular_num += share * wr
+            s_granular_denom += share
+
+    s_granular = s_granular_num / s_granular_denom if s_granular_denom > 0 else float("nan")
+
+    return GranularPositioningResult(
+        base=base,
+        s_granular=s_granular,
+        adjusted_winrates=adj_wrs,
+        caveat=GRANULAR_CAVEAT,
+    )
