@@ -906,9 +906,12 @@ def _print_head_to_head(
     # Also show the reverse direction
     rev = matrix.cells.get((archetype_b, archetype_a))
     if rev is not None and rev.p_shrunk is not None:
+        rev_caveat = (
+            f" [speculative — n={rev.n} < {DISPLAY_GATE_N}]" if not rev.display else ""
+        )
         click.echo(
             f"  {archetype_b!r} win-rate vs {archetype_a!r}: "
-            f"{rev.p_shrunk:.1%} (n={rev.n})"
+            f"{rev.p_shrunk:.1%} (n={rev.n}){rev_caveat}"
         )
 
 
