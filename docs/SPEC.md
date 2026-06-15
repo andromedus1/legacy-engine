@@ -21,7 +21,7 @@ decisions:
   - "HONEST-DEGRADE NFR: thin/absent signal surfaces a labeled banner or degraded flag with a named reason. No silent zeros, no fabricated numbers. Applies in the advisory window (thin-regime banner), sideboard/primer (degraded=True note), speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence (labeled)."
   - "PRICES + ACQUISITION: seed prices + report prices + advise acquire give the user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null is the honest-null signal."
 created: 2026-05-29
-updated: 2026-06-13
+updated: 2026-06-14
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -48,6 +48,8 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **[Built] Sub-archetype split** — `report subgroup` partitions an archetype's pool by card-presence signature and shows per-subgroup matchup deltas and card divergence.
 - **[Built] New-card speculation** — `report new-cards` + `report speculate` forecast new/pre-data cards using `interaction_facts` + role-filtered analogues; always labeled `PRE-DATA FORECAST`.
 - **[Built] Player-strength scoring** — `identify suggest|strong|track`: alias resolution, confidence-gated strength records (min events + tier + win-rate), per-regime archetype history.
+- **[Built] Ban-affectedness report** — `report affectedness --archetype NAME` explains which bans drove an archetype's `valid_since`, with per-ban-event adoption rates and provenance scope.
+- **[Built] Trends movers digest** — `report trends --movers N` appends a biggest-movers table ranking archetypes by share delta between the two most recent ban-list regimes.
 
 ### Pillar 2 — Deck Mechanics (goldfish)
 - **[Later] Deck-as-data model** + **mana solver** (port edh-engine's bipartite-matching `can_pay`) + **London-mulligan Monte Carlo** (straight London, NO free mull — the Legacy delta).
@@ -64,9 +66,12 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **[Later] Goldfish-validated candidate validation** — simulate candidates against projected field; depends on `goldfish/` pillar.
 
 ### Pillar 4 — Meta Attack / Advisory *(differentiator)*
-- **[Built] Meta-positioning score** — `Σ field_share(arch) × winrate(deck vs arch)` = expected WR vs the weighted field; user can supply a custom expected local field.
-- **[Built] Sideboard recommender** — hoser→target bipartite graph solved as weighted set-cover over the expected field; models the anti-hate second order; collection-aware (`--collection`, `--owned-only`).
-- **[Built] "What to play" advisor** — proactive-vs-reactive and best-deck-vs-best-metagame-call framing over the current field.
+- **[Built] Meta-positioning score** — `Σ field_share(arch) × winrate(deck vs arch)` = expected WR vs the weighted field; user can supply a custom expected local field. `--list-granular` opt-in overlay computes S_granular treating the deck as individual cards rather than a named archetype.
+- **[Built] Sideboard recommender** — hoser→target bipartite graph solved as weighted set-cover over the expected field; models the anti-hate second order; collection-aware (`--collection`, `--owned-only`). Considering/bubble pool surfaces near-threshold candidates with residual coverage labels.
+- **[Built] "What to play" advisor** — proactive-vs-reactive and best-deck-vs-best-metagame-call framing over the current field; `ramp` vulnerability coverage included.
+- **[Built] Standalone field read** — `advise field` surfaces field composition and vulnerability/hate-equity profile without requiring a deck argument; respects `--provenance` and window flags.
+- **[Built] Provenance-filtered advisory** — `--provenance online|paper` is available on all `advise` leaves and on `report matchups`, filtering the matchup matrix and field by tournament provenance.
+- **[Built] Head-to-head matchup lookup** — `report matchups --a <arch> --b <arch>` looks up a single directed matchup cell with Wilson CI, confidence tier, and speculative caveat where n is low.
 - **[Built] Collection-aware acquire plan** — `advise acquire` ranks priced buys by field-relevance × archetype-relevance; budget filter; redundancy/over-quantity flags.
 - **[Built] Deck refresh** — `advise refresh` runs a full per-venue tuning pass (field-tuned maindeck + sideboard + primer); loudly labels thin/no-data matchups.
 - **[Built] Matchup primer** — plain-speak per-matchup OUT/IN guide generated from the sideboard plan; `degraded=True` matchups are labeled reasoning-based, never fabricate numbers.

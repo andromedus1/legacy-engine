@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-06-13
+updated: 2026-06-14
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -33,7 +33,7 @@ decisions:
 
 # Architecture: legacy-engine
 
-*Last updated: 2026-06-13* (rolled forward to present implementation)
+*Last updated: 2026-06-14* (rolled forward to present implementation)
 
 > How the system is built. For *what* and *why*, see [VISION.md](VISION.md) and [SPEC.md](SPEC.md).
 > For decision heuristics, see [PRINCIPLES.md](PRINCIPLES.md). For what to build when, the roadmap/epics
@@ -53,8 +53,8 @@ observed → label → analytics → advisory arc.
 │                                  CLI  (cli.py)                                   │
 │  seed (cards|cache|rules|banlist|prices) · refresh (all|cards)                   │
 │  · label · report (meta|matchups|tiers|trends|cards|gaps|subgroup|variants|      │
-│    new-cards|speculate|prices)                                                    │
-│  · advise (positioning|sideboard|whattoplay|report|refresh|acquire)              │
+│    new-cards|speculate|prices|affectedness)                                       │
+│  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire)        │
 │  · identify (suggest|strong|track)                                               │
 │  · generate (consensus|tune|doctor) · export (deck) · viz (deck|meta|matchups|   │
 │    trends|tiers)  [later: goldfish]                                               │
@@ -64,6 +64,8 @@ observed → label → analytics → advisory arc.
 │  Cross-cutting flags: --since/--until/--regime/--all-time (ban-regime windowing)  │
 │  --my-deck (load a saved UserDeck by name) · report meta: --venues/--by-variant  │
 │  generate consensus: --variant/--players/--strong                                 │
+│  --provenance online|paper (all advise leaves + report matchups/meta)             │
+│  advise positioning: --list-granular (opt-in S_granular deck-as-cards overlay)    │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────────┘
     │          │           │            │               │
 ┌───▼─────┐ ┌─▼────────┐ ┌▼──────────┐ ┌▼────────────┐ ┌▼──────────────┐
@@ -180,7 +182,7 @@ without a schema rewrite. CLI-first; no web UI (deferred to its own research).
 |---|---|---|
 | `field.py` | `FieldDistribution` (the SSOT for "what is the field"): global-from-`metashare` (with Dirichlet counts) + custom user field (normalize/impute/Other); consumed by positioning, sideboard, whattoplay. | advisory-methods |
 | `positioning.py` | `score(deck, field) = Σ w_a·winrate(D vs a)`; Bayesian Monte-Carlo (Beta cells + Dirichlet shares) primary, delta-method fast check; custom user field; rank by risk-adjusted lower-posterior-quantile from shared-field draws (P(best) reported as a secondary view) + a data-coverage flag; report S **and** unweighted aggregate. | advisory-methods |
-| `sideboard.py` | **Maindeck-aware.** Weighted submodular max-coverage (ILP/CBC primary + greedy explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements) chooses the 15, additively **augmented** by per-card×matchup value (`card_value`): gate-clearing opponents up-weight elements, and a per-matchup **OUT/IN plan** (`matchup_plans`) sides the maindeck's dead cards out for the 15's best tech in (post-board exactly-60, copy-capped, locked-core protected). Degrades to pure coverage where per-card data is thin → byte-identical to the rounds-less baseline. | advisory-methods |
+| `sideboard.py` | **Maindeck-aware.** Weighted submodular max-coverage (ILP/CBC primary + greedy explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements) chooses the 15, additively **augmented** by per-card×matchup value (`card_value`): gate-clearing opponents up-weight elements, and a per-matchup **OUT/IN plan** (`matchup_plans`) sides the maindeck's dead cards out for the 15's best tech in (post-board exactly-60, copy-capped, locked-core protected). Degrades to pure coverage where per-card data is thin → byte-identical to the rounds-less baseline. Hoser catalog: `data/hosers/legacy.json` (package-shipped, curated SSOT loaded at startup). | advisory-methods |
 | `whattoplay.py` | Composition-derived proactivity score; vulnerability tags (graveyard-reliant/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant); hate-equity (coverage not sum); best-deck vs best-call (matchup-spread variance). | advisory-methods |
 | `report.py` | The "Field Read & Deck Recommendation" surface: field composition + vulnerability profile + ranked decks + sideboard package + audit trail (every number with derivation, n, heuristic-vs-data label). Handles `--venues` cross-venue positioning comparison. | advisory-methods |
 | `window.py` | `resolve_advisory_window` → `WindowResolution`: converts `--since/--until/--regime/--all-time` flags into a concrete window; degrades thin regimes (<500 rounds) to full corpus + a loud banner. `build_advisory_inputs` assembles the regime-aware matrix + field window. Mode field: `adaptive` (per-cell ban-aware, default) / `uniform` / `full`. | — |
@@ -293,8 +295,8 @@ All external data fetched once and mirrored; the engine makes **no network calls
 - **CLI:** Click nested groups:
   - `seed cards|cache|rules|banlist|prices`
   - `refresh all|cards`
-  - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices`
-  - `advise positioning|sideboard|whattoplay|report|refresh|acquire`
+  - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices|affectedness`
+  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire`
   - `identify suggest|strong|track`
   - `generate consensus|tune|doctor` (`tune --discover` adds gap-discovery; `consensus --variant/--players/--strong`)
   - `export deck`
@@ -305,6 +307,10 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - **Regime-aware advisory**: `report matchups|gaps`, `advise positioning|whattoplay|report|refresh` take `--since/--until/--regime/--all-time` and default to the **adaptive per-cell ban-aware matrix + current-regime field** (via `advisory/window.py::resolve_advisory_window` + `build_advisory_inputs`); thin explicit windows degrade to full-corpus with a loud banner.
   - `report meta --venues KEYS` and `advise report --venues KEYS` enable cross-venue comparison; `report meta --by-variant` splits by variant tag.
   - `report meta` is deck-based (windows but never degrades; full-corpus default).
+  - **`--provenance online|paper`** filters by tournament provenance; available on all `advise` leaves (`positioning|sideboard|whattoplay|field|report|refresh|acquire`) and on `report matchups|meta`.
+  - **`advise positioning --list-granular`** enables an opt-in `S_granular` overlay that treats the deck as individual cards rather than a named archetype; experimental, printed alongside the standard S score.
+  - **`report affectedness --archetype NAME`** explains which bans drove an archetype's `valid_since` (ban-affectedness derivation); `--provenance` scopes the archetype frequency check.
+  - **`report trends --movers N`** appends a biggest-movers digest ranking archetypes by share delta between the two most recent regimes.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
 - **Legality:** version-stamped `BanListSnapshot` blacklist, validated as-of-event-date.
