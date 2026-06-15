@@ -5224,16 +5224,19 @@ class TestRedundancyDecay:
 
     # ---- Unit 4: ILP/greedy consistency ----
 
-    def test_ilp_greedy_consistent_with_decay(self):
+    def test_ilp_and_greedy_both_cap_with_decay(self):
+        # Both solvers subtract the SAME per-copy penalty, so both must STOP stacking the
+        # dominant card under decay. They need NOT return the identical multiset in general —
+        # greedy is 1−1/e approximate, the ILP is exact — so we assert the shared *property*
+        # (the cap), not multiset equality (which holds only on degenerate models).
         model = self._dominant_model()
         greedy_cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.10)
+        assert greedy_cards.get("Top", 0) < 4, f"greedy must cap the dominant card: {greedy_cards}"
         try:
             ilp_cards = _ilp_solve(model, budget=4, redundancy_strength=0.10)
         except _ILPFailed:
             pytest.skip("CBC unavailable")
-        # Both solvers share one additive-penalty objective → same card multiset.
-        assert ilp_cards == greedy_cards, f"ilp={ilp_cards} greedy={greedy_cards}"
-        assert ilp_cards.get("Top", 0) < 4
+        assert ilp_cards.get("Top", 0) < 4, f"ilp must cap the dominant card: {ilp_cards}"
 
     def test_ilp_byte_identical_when_off(self):
         model = self._dominant_model()
@@ -5245,27 +5248,69 @@ class TestRedundancyDecay:
 
     # ---- Integration: recommend_sideboard ----
 
-    def test_recommend_sideboard_decay_reduces_stacking(self):
-        """End-to-end: a field whose only castable answer is one max-4 hoser pads to 4 with
-        decay off; decay-on caps the stack and the package is still valid."""
+    @staticmethod
+    def _gy_field_corpus():
+        """A corpus where 'Reanimator' has real graveyard-reliant vulnerability tags (decks
+        loaded so vulnerability_tags is non-empty), so the model is NON-vacuous and the solver
+        actually picks the graveyard hoser. Mirrors TestRecommendSideboard._build_gy_corpus."""
+        import uuid
         con = _con()
-        try:
-            field = _make_field({"Reanimator": 1.0})
-            catalog = {
-                "Surgical Extraction": _minimal_hoser(
-                    "Surgical Extraction", frozenset({"graveyard-reliant"}), max_copies=4,
-                ),
-            }
-            # castable_any so the colorless/empty deck can run it
-            catalog["Surgical Extraction"] = HoserCard(
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Swamp", type_line="Basic Land — Swamp", oracle_text="{T}: Add {B}.",
+                 cmc=0.0, produced_mana=["B"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"])
+        for idx in range(3):
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                        [tid, idx, f"player{idx}", "1st", "Reanimator"])
+            for cn, ct in [("Reanimate", 4), ("Swamp", 10)]:
+                con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", cn, ct])
+        return con
+
+    @staticmethod
+    def _gy_catalog():
+        # A single colorless graveyard hoser at max_copies=4 → the only answer to the field,
+        # so decay-off stacks it to 4 and decay-on must cap it (a non-vacuous spread test).
+        return {
+            "Surgical Extraction": HoserCard(
                 name="Surgical Extraction", attacks=frozenset({"graveyard-reliant"}),
                 colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED, castable_any_color=True,
-            )
-            off = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog,
-                                      redundancy_strength=0.0)
-            on = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog,
-                                     redundancy_strength=0.10)
+            ),
+        }
+
+    def test_recommend_sideboard_decay_reduces_stacking(self):
+        """End-to-end (greedy): the only castable answer (a max-4 GY hoser) pads to 4 with decay
+        off; decay-on caps the stack. Non-vacuous — asserts decay-off actually reaches 4 first."""
+        con = self._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = self._gy_catalog()
+            off = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, redundancy_strength=0.0)
+            on = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, redundancy_strength=0.10)
         finally:
             con.close()
-        assert off.cards.get("Surgical Extraction", 0) >= on.cards.get("Surgical Extraction", 0)
+        assert off.cards.get("Surgical Extraction", 0) == 4, f"decay-off must stack to 4: {dict(off.cards)}"
+        assert on.cards.get("Surgical Extraction", 0) < 4, f"decay-on must cap the stack: {dict(on.cards)}"
         assert sum(on.cards.values()) <= 15
+
+    def test_recommend_sideboard_ilp_path_with_decay(self):
+        """The default solver is "ilp"; exercise the ILP decay path end-to-end (the greedy test
+        above forces solver="greedy", so this covers the other branch). Non-vacuous corpus."""
+        con = self._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            pkg = recommend_sideboard(con, field, {}, solver="ilp", catalog=self._gy_catalog(),
+                                      redundancy_strength=0.10)
+        finally:
+            con.close()
+        if pkg.solver_used != "ilp":
+            pytest.skip("ILP unavailable (fell back to greedy)")
+        assert pkg.cards.get("Surgical Extraction", 0) >= 1, "ILP decay path must still pick the answer"
+        assert pkg.cards.get("Surgical Extraction", 0) < 4, "ILP decay path must cap the stack"
+        assert sum(pkg.cards.values()) <= 15
