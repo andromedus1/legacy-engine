@@ -320,6 +320,52 @@ def _marginal_g(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value)
+# ---------------------------------------------------------------------------
+# The per-element saturating g(n) above already diminishes the value of multiple
+# *answers* to one element (the access-probability term). What it does NOT capture is
+# the disutility of stacking copies of the SAME card: per the sideboard-construction
+# brief, "the 2nd copy in hand is frequently a dead draw that displaces a threat", so
+# the marginal utility of the k-th DRAWN copy decays sharply. We model that as an
+# additive per-copy penalty subtracted from a card's coverage marginal — additive (not
+# a multiplicative factor) so the greedy and the ILP share one LP-representable
+# objective. Gated-additive: strength=0.0 → penalty(k)=0 ∀k → byte-identical baseline.
+
+# Utility weight of the k-th drawn copy (k=1,2,3,4); k>len clamps to the last entry.
+_U_REDUNDANCY_DEFAULT: tuple[float, ...] = (1.0, 0.55, 0.25, 0.10)
+# Penalty scale in coverage-value units. Tunable; default chosen so the 2nd copy of a
+# card competes with covering a fresh element rather than stacking. The natural-budget
+# τ stop (dedicated-core feature) is the real budget control; this only *shapes* copies.
+_REDUNDANCY_STRENGTH: float = 0.10
+
+
+def _u_redundancy(k: int, curve: tuple[float, ...] = _U_REDUNDANCY_DEFAULT) -> float:
+    """Utility weight of the k-th drawn copy of a card (1.0 at k=1, decaying).
+
+    ``k`` clamps to ``len(curve)`` so high copy counts never raise. ``k <= 0`` → 1.0.
+    """
+    if k <= 1:
+        return curve[0]
+    return curve[min(k, len(curve)) - 1]
+
+
+def _redundancy_penalty(
+    k: int,
+    *,
+    strength: float = _REDUNDANCY_STRENGTH,
+    curve: tuple[float, ...] = _U_REDUNDANCY_DEFAULT,
+) -> float:
+    """Additive penalty for the k-th copy of a card: ``strength · (1 − _u_redundancy(k))``.
+
+    ``penalty(1) == 0.0`` (the first copy is never penalized); non-decreasing in k.
+    ``strength == 0.0`` → ``0.0`` for all k (the gated no-op baseline).
+    """
+    if strength <= 0.0:
+        return 0.0
+    return strength * (1.0 - _u_redundancy(k, curve))
+
+
+# ---------------------------------------------------------------------------
 # Heuristic swing constants (NOT empirical — labeled in every package output)
 # ---------------------------------------------------------------------------
 
@@ -1247,6 +1293,7 @@ def _greedy_solve(
     model: CoverageModel,
     *,
     budget: int,
+    redundancy_strength: float = 0.0,
 ) -> tuple[dict[str, int], list[PickTrace]]:
     """Greedy saturating-coverage with diminishing-returns marginal gain.
 
@@ -1288,6 +1335,11 @@ def _greedy_solve(
                     cov_e = cov_counts.get(e, 0)
                     gain += w * _marginal_g(cov_e + 1)
 
+            # Per-card-copy redundancy penalty: the (current_copies+1)-th copy of THIS card
+            # is worth less (or net-negative) than its raw coverage marginal. No-op when
+            # redundancy_strength == 0.0 (byte-identical baseline).
+            gain -= _redundancy_penalty(current_copies + 1, strength=redundancy_strength)
+
             if gain > best_gain or (
                 gain == best_gain and gain > 0 and (best_card is None or card_name < best_card)
             ):
@@ -1322,7 +1374,7 @@ class _ILPFailed(Exception):
     pass
 
 
-def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
+def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float = 0.0) -> dict[str, int]:
     """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
 
     Formulation:
@@ -1376,6 +1428,28 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
             cat="Integer",
         )
 
+    # --- Per-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value) ---
+    # Incremental copy vars z_c^k (the k-th copy of card c) with x_c = Σ_k z_c^k and
+    # monotone fill z_c^k ≥ z_c^{k+1}; the objective subtracts penalty(k) for k≥2. Omitted
+    # entirely when redundancy_strength == 0.0 → model byte-identical to the pre-feature ILP.
+    penalty_terms: list = []
+    if redundancy_strength > 0.0:
+        for card_name, hoser in model.candidate_meta.items():
+            mc = hoser.max_copies
+            if mc < 1:
+                continue
+            z = {
+                k: pulp.LpVariable(name=f"z_{_safe(card_name)}_k{k}", cat="Binary")
+                for k in range(1, mc + 1)
+            }
+            prob += pulp.lpSum(z.values()) == x_vars[card_name], f"zlink_{_safe(card_name)}"
+            for k in range(1, mc):
+                prob += z[k] >= z[k + 1], f"zmono_{_safe(card_name)}_{k}"
+            for k in range(2, mc + 1):
+                pen = _redundancy_penalty(k, strength=redundancy_strength)
+                if pen > 0.0:
+                    penalty_terms.append(-pen * z[k])
+
     # --- Decision variables: y_a^t for each element a and level t ---
     # T_a = min(total possible answers for element a, _ILP_T_CAP)
     y_vars: dict[tuple[str, int], pulp.LpVariable] = {}
@@ -1404,6 +1478,7 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
             coef = weight * _marginal_g(t)
             if coef > 0.0:
                 obj_terms.append(coef * y_vars[(elem_id, t)])
+    obj_terms.extend(penalty_terms)  # negative per-copy redundancy terms (empty when off)
     if obj_terms:
         prob += pulp.lpSum(obj_terms)
     else:
@@ -2006,6 +2081,10 @@ def recommend_sideboard(
     # New optional kwarg (feature-collection-aware-engine).
     # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
     collection: "Optional[object]" = None,
+    # Per-copy redundancy penalty strength (epic-sideboard-core-and-hedge-concave-value).
+    # Gated-additive: 0.0 → no per-copy penalty → byte-identical to the forced-15 baseline.
+    # The gating feature wires a CLI flag to this; the dedicated-core feature adds the τ stop.
+    redundancy_strength: float = 0.0,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -2366,7 +2445,7 @@ def recommend_sideboard(
 
     if solver == "ilp":
         try:
-            ilp_cards = _ilp_solve(model, budget=budget)
+            ilp_cards = _ilp_solve(model, budget=budget, redundancy_strength=redundancy_strength)
             solver_used = "ilp"
         except _ILPFailed as exc:
             log.warning("recommend_sideboard: ILP failed (%s); falling back to greedy", exc)
@@ -2378,7 +2457,7 @@ def recommend_sideboard(
             solver_used = "greedy"
 
     # Always compute greedy trace (explainability rationale)
-    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget)
+    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget, redundancy_strength=redundancy_strength)
 
     # Choose final cards based on solver
     final_cards = ilp_cards if solver_used == "ilp" else greedy_cards
