@@ -30,7 +30,7 @@ for how it's built.
 ## Status
 
 The **observed-data spine, meta analytics, deck generation, the advisory differentiator, and a
-local visualization layer** are built and tested (2199 passing tests). Only the goldfish-simulation
+local visualization layer** are built and tested (2242 passing tests). Only the goldfish-simulation
 pillar remains deferred:
 
 | Capability | State |
@@ -48,6 +48,7 @@ pillar remains deferred:
 | Regime-aware analytics & advisory (adaptive per-cell ban windowing) | ✅ built |
 | Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
+| Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
 | Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
 | Provenance-filtered advisory (`--provenance online|paper` on all advise leaves + report matchups/meta) | ✅ built |
@@ -137,6 +138,7 @@ legacy-engine advise positioning --deck my.txt   # expected WR vs the weighted f
 legacy-engine advise positioning --deck my.txt --list-granular  # + list-granular S_granular overlay
 legacy-engine advise positioning --deck my.txt --provenance paper  # paper-only field + matrix
 legacy-engine advise sideboard   --deck my.txt   # recommended 15-card sideboard (ILP + greedy "why")
+legacy-engine advise sideboard   --deck my.txt --smart  # core+hedge: dedicated core (no 4/4/4 padding) + diversity hedge
 legacy-engine advise whattoplay  --deck my.txt   # proactivity, vulnerability tags, best-deck/best-call
 legacy-engine advise field                        # field composition + vulnerability profile (no deck)
 legacy-engine advise field --provenance online    # online-only field read
@@ -218,7 +220,7 @@ src/legacy_engine/
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (2199 tests)
+tests/         # pytest suite (2242 tests)
 ```
 
 ## License

@@ -7,6 +7,14 @@ g(n) = 1 − (1−p)^n  (saturating model, p = _COVERAGE_P ≈ 0.5).
 The marginal value of the n-th answer covering element e is weight_e·(g(n)−g(n−1)),
 positive but diminishing, so redundant answers earn slots until the budget fills.
 
+Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value): the
+objective optionally subtracts a per-copy penalty so copies of the SAME card saturate,
+  maximize Σ_e weight_e·g(cov_e) − Σ_c Σ_{k≥2} penalty(k)·[card c has ≥k copies].
+Gated by ``redundancy_strength`` (default 0.0 → penalty ≡ 0 → byte-identical to the
+forced-15 model above). With it on, a copy whose coverage gain < its penalty is not
+picked, so the recommendation may be FEWER than 15 cards (the natural-budget τ stop and
+the <15 output contract are owned by sibling features in the epic).
+
 Elements = (archetype, tag) pairs + anti-hate pseudo-elements ``"_hate:<k>"``).
 Weights  = field_share(archetype) × swing(best_hoser_for_that_tag).
 Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
@@ -317,6 +325,138 @@ def _g(n: int) -> float:
 def _marginal_g(n: int) -> float:
     """Marginal value of the n-th answer: g(n) − g(n−1).  Always > 0 for n ≥ 1."""
     return _g(n) - _g(n - 1)
+
+
+# ---------------------------------------------------------------------------
+# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value)
+# ---------------------------------------------------------------------------
+# The per-element saturating g(n) above already diminishes the value of multiple
+# *answers* to one element (the access-probability term). What it does NOT capture is
+# the disutility of stacking copies of the SAME card: per the sideboard-construction
+# brief, "the 2nd copy in hand is frequently a dead draw that displaces a threat", so
+# the marginal utility of the k-th DRAWN copy decays sharply. We model that as an
+# additive per-copy penalty subtracted from a card's coverage marginal — additive (not
+# a multiplicative factor) so the greedy and the ILP share one LP-representable
+# objective. Gated-additive: strength=0.0 → penalty(k)=0 ∀k → byte-identical baseline.
+
+# Utility weight of the k-th drawn copy (k=1,2,3,4); k>len clamps to the last entry.
+_U_REDUNDANCY_DEFAULT: tuple[float, ...] = (1.0, 0.55, 0.25, 0.10)
+# Penalty scale in coverage-value units. Tunable; default chosen so the 2nd copy of a
+# card competes with covering a fresh element rather than stacking. The natural-budget
+# τ stop (dedicated-core feature) is the real budget control; this only *shapes* copies.
+_REDUNDANCY_STRENGTH: float = 0.10
+
+
+def _u_redundancy(k: int, curve: tuple[float, ...] = _U_REDUNDANCY_DEFAULT) -> float:
+    """Utility weight of the k-th drawn copy of a card (1.0 at k=1, decaying).
+
+    ``k`` clamps to ``len(curve)`` so high copy counts never raise. ``k <= 0`` → 1.0.
+    """
+    if k <= 1:
+        return curve[0]
+    return curve[min(k, len(curve)) - 1]
+
+
+def _redundancy_penalty(
+    k: int,
+    *,
+    strength: float = _REDUNDANCY_STRENGTH,
+    curve: tuple[float, ...] = _U_REDUNDANCY_DEFAULT,
+) -> float:
+    """Additive penalty for the k-th copy of a card: ``strength · (1 − _u_redundancy(k))``.
+
+    ``penalty(1) == 0.0`` (the first copy is never penalized); non-decreasing in k.
+    ``strength == 0.0`` → ``0.0`` for all k (the gated no-op baseline).
+    """
+    if strength <= 0.0:
+        return 0.0
+    return strength * (1.0 - _u_redundancy(k, curve))
+
+
+# --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
+# Field-element coverage marginals scale with (field_share × swing × Δg) — typically
+# ~0.005–0.02 — so an ABSOLUTE redundancy_strength/τ tuned on unit models (weight≈1.0)
+# would be wildly over-strong on a real field (→ 1-of-everything). Smart-mode derives both
+# as FRACTIONS of the model's own coverage scale (the value of the best single first pick),
+# so the defaults are field-scale-invariant. Tunable; the hedge feature may revisit.
+_SMART_REDUNDANCY_FRACTION: float = 0.5   # 2nd copy of even the best card competes; weak cards → 1-of
+_SMART_TAU_FRACTION: float = 0.1          # stop committing when a slot is worth <10% of the best pick
+
+
+def _coverage_scale(model: "CoverageModel") -> float:
+    """Value of the best single first-copy pick: max over candidates of Σ_e weight_e·Δg(1).
+
+    The reference scale smart-mode multiplies its fractions by, so redundancy/τ track the
+    actual field-weight magnitudes rather than absolute constants. 0.0 for an empty model.
+    """
+    best = 0.0
+    m1 = _marginal_g(1)
+    for _card, elems in model.candidate_covers.items():
+        g = sum(model.element_weight.get(e, 0.0) for e in elems) * m1
+        if g > best:
+            best = g
+    return best
+
+
+# --- Hedge allocator (epic-sideboard-core-and-hedge-hedge-allocator, fast-follow) ---
+# The dedicated core commits answers for the field you're CONFIDENT about; the leftover slots
+# (when τ stopped the core short of the budget) are filled by the hedge — insurance against the
+# field being different from your point estimate. v1 implements the brief's default mild
+# EXPECTED-coverage hedge: optimize coverage over a field WIDENED toward uniform (so the hedge
+# values archetypes the point estimate underweights), strong 1-of diversity, never re-picking or
+# displacing a core commit. CVaR/worst-tail (the aggressive dial) is a documented future option.
+_HEDGE_BLEND: float = 0.4  # 0 = point estimate, 1 = fully uniform; mild widening of the field
+
+
+def _hedge_fill(
+    model: "CoverageModel",
+    core_cards: dict[str, int],
+    *,
+    budget: int,
+    blend: float = _HEDGE_BLEND,
+) -> dict[str, int]:
+    """Fill leftover slots (budget − core) with diversity-preferring insurance picks.
+
+    Greedily covers the field — WIDENED toward uniform by ``blend`` — that the core left
+    uncovered, one copy per card (pure breadth), starting from the core's coverage state and
+    never re-picking a core card. Returns {card: 1} for the hedge picks only (the insurance set);
+    empty when the core already filled the budget or nothing positive remains.
+    """
+    slots = budget - sum(core_cards.values())
+    if slots <= 0:
+        return {}
+    pos = {e: w for e, w in model.element_weight.items() if w > 0.0}
+    if not pos:
+        return {}
+    # Widened weights: blend each element toward the uniform mean (hedge the field-share estimate).
+    uniform = sum(pos.values()) / len(pos)
+    wide = {e: (1.0 - blend) * w + blend * uniform for e, w in pos.items()}
+    # Coverage state inherited from the core (so the hedge covers what the core left open).
+    cov: dict[str, int] = {}
+    for c, n in core_cards.items():
+        for e in model.candidate_covers.get(c, frozenset()):
+            cov[e] = cov.get(e, 0) + n
+    insurance: dict[str, int] = {}
+    for _ in range(slots):
+        best_card: str | None = None
+        best_gain = 0.0
+        for card, elems in model.candidate_covers.items():
+            if card in core_cards or card in insurance:
+                continue  # 1-of diversity; never touch a core commit
+            gain = sum(
+                wide[e] * _marginal_g(cov.get(e, 0) + 1) for e in elems if e in wide
+            )
+            if gain > best_gain or (
+                gain == best_gain and gain > 0.0 and (best_card is None or card < best_card)
+            ):
+                best_gain = gain
+                best_card = card
+        if best_card is None or best_gain <= 0.0:
+            break  # no remaining card adds positive widened coverage
+        insurance[best_card] = 1
+        for e in model.candidate_covers[best_card]:
+            cov[e] = cov.get(e, 0) + 1
+    return insurance
 
 
 # ---------------------------------------------------------------------------
@@ -1247,6 +1387,8 @@ def _greedy_solve(
     model: CoverageModel,
     *,
     budget: int,
+    redundancy_strength: float = 0.0,
+    tau: float = 0.0,
 ) -> tuple[dict[str, int], list[PickTrace]]:
     """Greedy saturating-coverage with diminishing-returns marginal gain.
 
@@ -1288,6 +1430,11 @@ def _greedy_solve(
                     cov_e = cov_counts.get(e, 0)
                     gain += w * _marginal_g(cov_e + 1)
 
+            # Per-card-copy redundancy penalty: the (current_copies+1)-th copy of THIS card
+            # is worth less (or net-negative) than its raw coverage marginal. No-op when
+            # redundancy_strength == 0.0 (byte-identical baseline).
+            gain -= _redundancy_penalty(current_copies + 1, strength=redundancy_strength)
+
             if gain > best_gain or (
                 gain == best_gain and gain > 0 and (best_card is None or card_name < best_card)
             ):
@@ -1295,8 +1442,12 @@ def _greedy_solve(
                 best_card = card_name
                 best_newly = frozenset(e for e in element_ids if cov_counts.get(e, 0) == 0)
 
-        if best_card is None or best_gain == 0.0:
-            # No more cards provide positive marginal gain; stop early.
+        if best_card is None or best_gain <= tau:
+            # Natural-budget stop (dedicated-core): no card clears the per-slot floor τ.
+            # τ is the opportunity cost of a dedicated slot — when the best remaining net
+            # marginal (coverage − redundancy penalty) ≤ τ, stop rather than padding the
+            # budget. τ == 0.0 (default) reproduces the prior "stop only at zero gain"
+            # behavior exactly (gains are ≥0 by the argmax floor → == 0.0 and ≤ 0.0 coincide).
             break
 
         picks[best_card] = picks.get(best_card, 0) + 1
@@ -1322,7 +1473,7 @@ class _ILPFailed(Exception):
     pass
 
 
-def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
+def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float = 0.0, tau: float = 0.0) -> dict[str, int]:
     """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
 
     Formulation:
@@ -1376,6 +1527,28 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
             cat="Integer",
         )
 
+    # --- Per-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value) ---
+    # Incremental copy vars z_c^k (the k-th copy of card c) with x_c = Σ_k z_c^k and
+    # monotone fill z_c^k ≥ z_c^{k+1}; the objective subtracts penalty(k) for k≥2. Omitted
+    # entirely when redundancy_strength == 0.0 → model byte-identical to the pre-feature ILP.
+    penalty_terms: list = []
+    if redundancy_strength > 0.0:
+        for card_name, hoser in model.candidate_meta.items():
+            mc = hoser.max_copies
+            if mc < 1:
+                continue
+            z = {
+                k: pulp.LpVariable(name=f"z_{_safe(card_name)}_k{k}", cat="Binary")
+                for k in range(1, mc + 1)
+            }
+            prob += pulp.lpSum(z.values()) == x_vars[card_name], f"zlink_{_safe(card_name)}"
+            for k in range(1, mc):
+                prob += z[k] >= z[k + 1], f"zmono_{_safe(card_name)}_{k}"
+            for k in range(2, mc + 1):
+                pen = _redundancy_penalty(k, strength=redundancy_strength)
+                if pen > 0.0:
+                    penalty_terms.append(-pen * z[k])
+
     # --- Decision variables: y_a^t for each element a and level t ---
     # T_a = min(total possible answers for element a, _ILP_T_CAP)
     y_vars: dict[tuple[str, int], pulp.LpVariable] = {}
@@ -1404,6 +1577,13 @@ def _ilp_solve(model: CoverageModel, *, budget: int) -> dict[str, int]:
             coef = weight * _marginal_g(t)
             if coef > 0.0:
                 obj_terms.append(coef * y_vars[(elem_id, t)])
+    obj_terms.extend(penalty_terms)  # negative per-copy redundancy terms (empty when off)
+    # Natural-budget τ (dedicated-core): a per-slot opportunity cost so the ILP only fills
+    # a slot whose marginal coverage clears τ — mirrors the greedy stop, returns <budget at
+    # the knee. τ == 0.0 (default) adds nothing → byte-identical to the pre-feature objective.
+    if tau > 0.0:
+        for card_name, x_var in x_vars.items():
+            obj_terms.append(-tau * x_var)
     if obj_terms:
         prob += pulp.lpSum(obj_terms)
     else:
@@ -1962,6 +2142,22 @@ class SideboardPackage:
     #   Empty tuple when there are no remaining candidates (degenerate / budget-filled model).
     #   Gated-additive: existing callers that don't use this field see no change in cards/trace.
     considering: "tuple[ConsideringCard, ...]" = dc_field(default_factory=tuple)
+    # --- Additive fields (epic-sideboard-core-and-hedge-output-contract) ---
+    # Honest-degrade output for the core+hedge solver. All None/empty in the forced-budget
+    # baseline (redundancy_strength==0 AND tau==0) → byte-identical rendering for every
+    # existing caller. Populated only when the new behavior is active.
+    # natural_budget_count: total copies the dedicated core committed (the "natural budget",
+    #   e.g. 7 of 15), or None in the forced-budget baseline.
+    # marginal_curve: (cumulative copies, cumulative covered weight) after each greedy pick —
+    #   the budget→coverage curve that exposes the knee.
+    # uncovered_tail: (element_id, weight) for the highest-weight field elements the package
+    #   does NOT answer, sorted desc — the honest "what you're leaving open".
+    # insurance_cards: subset of ``cards`` the hedge added in flex slots (empty until the
+    #   hedge feature lands; every other card is "commit" / dedicated core).
+    natural_budget_count: int | None = None
+    marginal_curve: tuple[tuple[int, float], ...] = dc_field(default_factory=tuple)
+    uncovered_tail: tuple[tuple[str, float], ...] = dc_field(default_factory=tuple)
+    insurance_cards: frozenset[str] = dc_field(default_factory=frozenset)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -2006,6 +2202,25 @@ def recommend_sideboard(
     # New optional kwarg (feature-collection-aware-engine).
     # Gated-additive: None → no-op (byte-identical to pre-feature for all existing callers).
     collection: "Optional[object]" = None,
+    # Per-copy redundancy penalty strength (epic-sideboard-core-and-hedge-concave-value).
+    # Gated-additive: 0.0 → no per-copy penalty → byte-identical to the forced-15 baseline.
+    # The gating feature wires a CLI flag to this; the dedicated-core feature adds the τ stop.
+    redundancy_strength: float = 0.0,
+    # Natural-budget floor τ (epic-sideboard-core-and-hedge-dedicated-core): per-slot
+    # opportunity cost — the solver stops committing dedicated cards once the best marginal
+    # coverage ≤ τ, so the package may be FEWER than 15. Gated-additive: 0.0 → no stop →
+    # byte-identical to the forced-15 baseline. The gating feature wires a CLI flag + default.
+    tau: float = 0.0,
+    # Smart-mode master switch (epic-sideboard-core-and-hedge-gating): when True, derive
+    # field-scale-invariant defaults for redundancy_strength/tau from the model's coverage
+    # scale (an explicit non-zero redundancy_strength/tau still wins). False → no derivation;
+    # with the strengths at their 0.0 defaults this is byte-identical to the forced-15 baseline.
+    smart: bool = False,
+    # Hedge mode (epic-sideboard-core-and-hedge-hedge-allocator): "off" (default) | "expected".
+    # When "expected", leftover slots the core left open (τ stopped it short of budget) are
+    # filled with diversity-preferring insurance picks over a uniform-widened field. "off" → no
+    # hedge → byte-identical. (CVaR/worst-tail is a documented future dial.)
+    hedge: str = "off",
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -2360,13 +2575,24 @@ def recommend_sideboard(
             swing_overrides_count=_swing_overrides_count,
         )
 
+    # --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
+    # Derive field-scale-invariant redundancy_strength/τ from the model's coverage scale.
+    # Explicit non-zero values always win (power users / tests). When smart is off and the
+    # strengths are 0.0 (defaults), this is a no-op → byte-identical forced-15 baseline.
+    if smart:
+        _scale = _coverage_scale(model)
+        if redundancy_strength <= 0.0:
+            redundancy_strength = _SMART_REDUNDANCY_FRACTION * _scale
+        if tau <= 0.0:
+            tau = _SMART_TAU_FRACTION * _scale
+
     # --- Step 5 + 6: Solve and always compute greedy trace ---
     solver_used = "greedy"
     ilp_cards: dict[str, int] = {}
 
     if solver == "ilp":
         try:
-            ilp_cards = _ilp_solve(model, budget=budget)
+            ilp_cards = _ilp_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
             solver_used = "ilp"
         except _ILPFailed as exc:
             log.warning("recommend_sideboard: ILP failed (%s); falling back to greedy", exc)
@@ -2378,10 +2604,21 @@ def recommend_sideboard(
             solver_used = "greedy"
 
     # Always compute greedy trace (explainability rationale)
-    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget)
+    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
 
     # Choose final cards based on solver
     final_cards = ilp_cards if solver_used == "ilp" else greedy_cards
+
+    # --- Hedge fill (epic-sideboard-core-and-hedge-hedge-allocator, fast-follow) ---
+    # The core above may have stopped short of the budget (τ). When hedge="expected", fill the
+    # leftover slots with diversity-preferring insurance picks over a uniform-widened field.
+    # "off" → no change → byte-identical. natural_budget_count below reflects the CORE size.
+    _core_count = sum(final_cards.values())
+    _insurance: dict[str, int] = {}
+    if hedge == "expected":
+        _insurance = _hedge_fill(model, final_cards, budget=budget)
+        for _c, _n in _insurance.items():
+            final_cards[_c] = final_cards.get(_c, 0) + _n
 
     # Compute covered weight for the final solution
     cov_weight = _compute_covered_weight(final_cards, model)
@@ -2430,6 +2667,35 @@ def recommend_sideboard(
     from legacy_engine.advisory.collection import annotate_owned
     owned_annotations = annotate_owned(final_cards, collection)  # type: ignore[arg-type]
 
+    # --- Step 6d: Output contract (epic-sideboard-core-and-hedge-output-contract) ---
+    # Honest-degrade structured output. Populated ONLY when the core+hedge behavior is active
+    # (redundancy_strength>0 or tau>0); the forced-budget baseline leaves these None/empty →
+    # byte-identical to every existing caller's package + rendering.
+    _natural_budget_count: int | None = None
+    _marginal_curve: tuple[tuple[int, float], ...] = ()
+    _uncovered_tail: tuple[tuple[str, float], ...] = ()
+    if redundancy_strength > 0.0 or tau > 0.0 or _insurance:
+        # natural_budget_count is the DEDICATED CORE size (excludes hedge/insurance picks).
+        _natural_budget_count = _core_count
+        # Cumulative net marginal value after each greedy pick — the budget→coverage curve
+        # whose flattening shows the natural-budget knee (the explainable greedy trace).
+        _cum = 0.0
+        _curve: list[tuple[int, float]] = []
+        for _i, _pick in enumerate(greedy_trace, start=1):
+            _cum += _pick.marginal_gain
+            _curve.append((_i, round(_cum, 4)))
+        _marginal_curve = tuple(_curve)
+        # Field elements the final solution does NOT answer, by weight (top 8) — the honest
+        # "what you're leaving open" tail.
+        _covered_elems: set[str] = set()
+        for _c in final_cards:
+            _covered_elems |= model.candidate_covers.get(_c, frozenset())
+        _tail = sorted(
+            ((e, w) for e, w in model.element_weight.items() if w > 0.0 and e not in _covered_elems),
+            key=lambda kv: kv[1], reverse=True,
+        )
+        _uncovered_tail = tuple((e, round(w, 4)) for e, w in _tail[:8])
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -2450,4 +2716,8 @@ def recommend_sideboard(
         swing_data_informed=_swing_data_informed,
         swing_overrides_count=_swing_overrides_count,
         considering=tuple(considering_pool),
+        natural_budget_count=_natural_budget_count,
+        marginal_curve=_marginal_curve,
+        uncovered_tail=_uncovered_tail,
+        insurance_cards=frozenset(_insurance),  # hedge picks (commit = the rest)
     )
