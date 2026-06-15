@@ -2546,6 +2546,7 @@ def advise_sideboard(
             smart=smart,
             redundancy_strength=redundancy_strength,
             tau=tau,
+            hedge="expected" if smart else "off",
         )
 
         # Echo adaptive audit line when adaptive mode resolved actual windows.
@@ -2596,15 +2597,17 @@ def advise_sideboard(
 
         if display_cards:
             for card, copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                # commit (dedicated core) vs insurance (hedge) label — only when the hedge ran.
+                role = " [insurance]" if card in pkg.insurance_cards else ""
                 if pkg.collection_aware and pkg.owned:
                     ann = pkg.owned.get(card)
                     if ann is not None:
                         status = "owned" if ann.owned else f"acquire {ann.to_acquire}"
-                        click.echo(f"  {copies}x {card}  [{status}]")
+                        click.echo(f"  {copies}x {card}  [{status}]{role}")
                     else:
-                        click.echo(f"  {copies}x {card}")
+                        click.echo(f"  {copies}x {card}{role}")
                 else:
-                    click.echo(f"  {copies}x {card}")
+                    click.echo(f"  {copies}x {card}{role}")
         else:
             click.echo("  (no recommendations — no castable hosers for this deck's colors)")
 
