@@ -2,14 +2,20 @@
 id: epic-goldfish-simulation
 kind: epic
 stage: drafting
-tags: [goldfish, needs-brief]
+tags: [goldfish, needs-brief, deferred]
 parent: null
-depends_on: [epic-foundations-card-data]
+depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-15
 ---
+
+> **DEFERRED 2026-06-15** — parked by decision; not in scope for the current cycle. Its former
+> dependency `epic-foundations-card-data` shipped in v0.1.0 (collapsed into the release summary), so
+> `depends_on` is cleared and this is unblockable when revisited: lift `deferred`, run
+> `/research-pipeline:brief` on the goldfish-port topic, then `/epic-design`.
+
 
 # Goldfish Simulation (deferred pillar)
 

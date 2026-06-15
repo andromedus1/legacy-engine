@@ -213,12 +213,40 @@ class TestMoxfieldImportBlock:
             socket.socket.connect = original_connect
 
     def test_round_trips_through_parser(self):
+        # The parser skips `//` hint/comment lines natively, so a generated block pipes
+        # straight in with NO manual stripping (the generate→tune round-trip ergonomics fix).
         block = moxfield_import_block(MAINDECK, SIDEBOARD)
-        # Strip hint lines (// comments) and parse the remaining text.
-        card_lines = "\n".join(l for l in block.splitlines() if not l.startswith("//"))
-        parsed_main, parsed_side = _parse_decklist(card_lines)
+        assert any(l.startswith("//") for l in block.splitlines()), "block should carry // hints"
+        parsed_main, parsed_side = _parse_decklist(block)
         assert parsed_main == MAINDECK
         assert parsed_side == SIDEBOARD
+
+
+class TestParserCommentSkipping:
+    """Regression: `parse_decklist` ignores `//` and `#` comments + blank lines, so
+    `generate consensus` / `export deck text` output pipes directly into tune/advise."""
+
+    def test_skips_slash_slash_and_hash_comments(self):
+        text = (
+            "// consensus list for Dimir Tempo\n"
+            "# another comment style\n"
+            "4 Brainstorm\n"
+            "4 Ponder\n"
+            "\n"
+            "// sideboard hints below\n"
+            "Sideboard\n"
+            "2 Surgical Extraction\n"
+        )
+        main, side = _parse_decklist(text)
+        assert main == {"Brainstorm": 4, "Ponder": 4}
+        assert side == {"Surgical Extraction": 2}
+
+    def test_leading_comments_and_blanks_do_not_start_sideboard(self):
+        # Comments/blank lines before any main card must NOT flip into the sideboard.
+        text = "// header\n\n// note\n4 Brainstorm\n"
+        main, side = _parse_decklist(text)
+        assert main == {"Brainstorm": 4}
+        assert side == {}
 
 
 # ---------------------------------------------------------------------------

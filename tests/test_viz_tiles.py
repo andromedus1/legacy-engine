@@ -196,12 +196,38 @@ class TestSpecPositioning:
         for r in non_subj:
             assert r["is_subject"] is False
 
-    def test_low_coverage_deck_has_opacity_in_data(self, sample_ranking):
+    def test_caveated_deck_has_opacity_in_data(self, sample_ranking):
         spec = spec_positioning(sample_ranking, subject="Control")
         rows = spec["data"]["values"]
         aggro_rows = [r for r in rows if r["deck"] == "Aggro"]
         assert len(aggro_rows) == 1
-        assert aggro_rows[0]["low_coverage"] is True
+        assert aggro_rows[0]["coverage_caveated"] is True
+
+    def test_fade_keys_off_coverage_caveated_not_low_coverage(self):
+        """Threshold-consistent fade: a deck that is coverage_caveated (S imputation-dominated,
+        the S* threshold) but NOT in low_coverage (min_coverage, default 0) must still fade.
+        Regression on the nit where the fade keyed off ranking.low_coverage."""
+        decks = ["Control", "Thin"]
+        ranking = DeckRanking(
+            decks=decks,
+            p_best={"Control": 0.7, "Thin": 0.3},
+            s_mean={"Control": 0.54, "Thin": 0.47},
+            s_ci={"Control": (0.52, 0.56), "Thin": (0.43, 0.51)},
+            s_quantile={"Control": 0.52, "Thin": 0.43},
+            quantile_level=0.05,
+            data_coverage={"Control": 0.90, "Thin": 0.40},
+            low_coverage=set(),                  # min_coverage=0 → nothing "low"
+            coverage_caveated={"Thin"},          # but Thin is below the 0.85 caveat threshold
+            pairwise={("Control", "Thin"): 0.7, ("Thin", "Control"): 0.3},
+            field_source="global",
+        )
+        spec = spec_positioning(ranking, subject="Control")
+        rows = {r["deck"]: r for r in spec["data"]["values"]}
+        assert rows["Thin"]["coverage_caveated"] is True       # faded despite empty low_coverage
+        assert rows["Control"]["coverage_caveated"] is False
+        # opacity condition must test the caveated field
+        opacity = spec["layer"][0]["encoding"]["opacity"]["condition"]
+        assert opacity["test"] == "datum.coverage_caveated"
 
     def test_has_ci_layer(self, sample_ranking):
         spec = spec_positioning(sample_ranking, subject="Control")

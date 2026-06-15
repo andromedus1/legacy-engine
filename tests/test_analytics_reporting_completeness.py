@@ -156,10 +156,12 @@ class TestWrwWindowed:
             assert len(full_report.entries) > 0
             assert len(window_report.entries) > 0
 
-            # The windowed n is bounded by in-window match data only.
-            # In regime B: 1 decisive match (alice beats bob) → total_matchup_n <= 2.
-            # Full corpus: 2 decisive matches → total_matchup_n > window total_matchup_n.
-            assert window_report.total_decks <= full_report.total_decks
+            # The windowed corpus is STRICTLY smaller, with known counts:
+            # full = 4 decks (regime A carol/dave + regime B alice/bob);
+            # windowed to regime B = 2 decks (alice/bob only).
+            assert full_report.total_decks == 4
+            assert window_report.total_decks == 2
+            assert window_report.total_decks < full_report.total_decks
         finally:
             con.close()
 
