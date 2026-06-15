@@ -163,7 +163,6 @@ def _rank_acquisitions(
     slots_into_map: dict[str, str] | None = None,   # card → board slot description
     replaces_map: dict[str, str | None] | None = None,  # card → displaced card name
     over_cover_factor: float = _DEFAULT_OVER_COVER_FACTOR,
-    overprice_factor: float = _DEFAULT_OVERPRICE_FACTOR,
     field_source: str = "unknown",
     window: tuple[str | None, str | None] = (None, None),
     # Per-tag field demand for over-cover check: tag → field-weighted demand fraction.
@@ -189,12 +188,10 @@ def _rank_acquisitions(
     Ranking: impact DESC, price ASC (cheaper buys first on ties), card name ASC
     (final lex tie-break for determinism).
 
-    Flags:
+    Flags (this core emits ``over-quantity`` only; ``overpriced-printing`` is emitted by the
+    orchestrator ``acquire_plan``, which owns the price comparison):
     - ``over-quantity``: owned_qty > recommended_copies AND (tag-level field
       demand is over-covered at over_cover_factor×demand OR raw per-card over-cover).
-    - ``overpriced-printing``: owned printing price >= overprice_factor × cheapest
-      price for a fully-owned card; OR the user's default printing for unpriced
-      candidates when a cheaper option exists.
     """
     warnings: list[str] = []
 
@@ -645,7 +642,6 @@ def acquire_plan(
         slots_into_map=slots_into_map,
         replaces_map=replaces_map,
         over_cover_factor=over_cover_factor,
-        overprice_factor=overprice_factor,
         field_source=field.field_source,
         window=(since, until),
         tag_field_demand=tag_field_demand if tag_field_demand else None,

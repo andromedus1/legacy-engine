@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-report-new-cards-db-ignored
 kind: story
-stage: drafting
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []
