@@ -136,47 +136,36 @@ def _load_field(
                     )
             continue
 
-        parts = line.split(None, 2)
-        if len(parts) < 2:
+        head_parts = line.split(None, 1)
+        if len(head_parts) < 2:
             raise ValueError(f"_load_field: malformed line {line!r} (expected '<share> <archetype> [count]')")
         try:
-            share = float(parts[0])
+            share = float(head_parts[0])
         except ValueError:
-            raise ValueError(f"_load_field: non-numeric share {parts[0]!r} in line {line!r}")
+            raise ValueError(f"_load_field: non-numeric share {head_parts[0]!r} in line {line!r}")
 
-        if len(parts) == 3:
-            # 3-token form: <share> <archetype> <count>
-            # archetype may contain spaces only if it were at position 2 with no trailing token;
-            # here parts[1] is the first space-delimited token after share, parts[2] is the rest.
-            # We treat parts[1] as archetype and parts[2] as count — but archetype could itself
-            # have been split.  The format spec is "<share> <archetype> <count>" where count is
-            # the LAST token; reconstruct: split the remainder (parts[1]+' '+parts[2]) from the
-            # right to isolate the count.
-            remainder = parts[1] + " " + parts[2]
-            remainder_parts = remainder.rsplit(None, 1)
-            if len(remainder_parts) == 2:
-                try:
-                    count = int(remainder_parts[1])
-                    if count < 1:
-                        raise ValueError(
-                            f"_load_field: count must be a positive integer on line {line!r}, "
-                            f"got {count}"
-                        )
-                    archetype = remainder_parts[0].strip()
-                    has_per_line_counts = True
-                except ValueError as exc:
-                    if "count" in str(exc) and "positive" in str(exc):
-                        raise
-                    # Not a valid integer — treat remainder as archetype (no count), allow fallback
-                    # to the 2-token path below.  This preserves backward-compat for archetype
-                    # names that happen to look like a number in the last token (unlikely but safe).
-                    archetype = remainder.strip()
-                    count = 0
-            else:
+        # Peel an optional integer count from the right of the remainder.
+        # Format: "<share> <archetype> [count]" where count is the LAST token.
+        remainder = head_parts[1]
+        tail_parts = remainder.rsplit(None, 1)
+        if len(tail_parts) == 2:
+            try:
+                count = int(tail_parts[1])
+                if count < 1:
+                    raise ValueError(
+                        f"_load_field: count must be a positive integer on line {line!r}, "
+                        f"got {count}"
+                    )
+                archetype = tail_parts[0].strip()
+                has_per_line_counts = True
+            except ValueError as exc:
+                if "count" in str(exc) and "positive" in str(exc):
+                    raise
+                # Last token is not an integer — entire remainder is the archetype name.
                 archetype = remainder.strip()
                 count = 0
         else:
-            archetype = parts[1].strip()
+            archetype = remainder.strip()
             count = 0
 
         shares[archetype] = shares.get(archetype, 0.0) + share
