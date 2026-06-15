@@ -46,7 +46,7 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 - **[Built] Matchup matrix** — N×N archetype win-rate table computed from cache standings, with sample-size + confidence per cell.
 - **[Built] Trends & regime shifts** — meta evolution across banned-list announcements (the Entomb-ban-style step change as a first-class view).
 - **[Built] Sub-archetype split** — `report subgroup` partitions an archetype's pool by card-presence signature and shows per-subgroup matchup deltas and card divergence.
-- **[Built] New-card speculation** — `report new-cards` + `report speculate` forecast new/pre-data cards using `interaction_facts` + role-filtered analogues; always labeled `PRE-DATA FORECAST`.
+- **[Built] New-card surfacing + speculation** — `report new-cards` lists the card names added in the most recent `refresh cards` diff-ingest run (the "what's new to test this week" surface); `report speculate` (and `report speculate --new`) forecasts a pre-data card's fitness using `interaction_facts` + role-filtered analogues, always labeled `PRE-DATA FORECAST`.
 - **[Built] Player-strength scoring** — `identify suggest|strong|track`: alias resolution, confidence-gated strength records (min events + tier + win-rate), per-regime archetype history.
 - **[Built] Ban-affectedness report** — `report affectedness --archetype NAME` explains which bans drove an archetype's `valid_since`, with per-ban-event adoption rates and provenance scope.
 - **[Built] Trends movers digest** — `report trends --movers N` appends a biggest-movers table ranking archetypes by share delta between the two most recent ban-list regimes.
