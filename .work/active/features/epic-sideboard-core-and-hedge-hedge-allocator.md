@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-hedge-allocator
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, sideboard, fast-follow]
 parent: epic-sideboard-core-and-hedge
 depends_on: [epic-sideboard-core-and-hedge-dedicated-core, epic-sideboard-core-and-hedge-output-contract]
@@ -52,3 +52,14 @@ Does NOT change the core or the output shape — it fills reserved slots and set
 - `src/legacy_engine/advisory/positioning.py` — Monte-Carlo Dirichlet share draws (the ambiguity set).
 - `src/legacy_engine/advisory/field.py` — `FieldDistribution` + Dirichlet `counts`; local→global blend.
 - Patterns: [[honest-degrade-marker]], [[objective-search-split]].
+
+## Design + implementation (2026-06-15)
+**`_hedge_fill(model, core_cards, *, budget, blend=_HEDGE_BLEND)`**: after the τ-stopped core, fill the leftover slots (budget − core) with diversity-preferring (1-of) insurance picks over a field WIDENED toward uniform (`_HEDGE_BLEND=0.4`) — so the hedge values archetypes the point estimate underweights. Inherits the core's coverage state; never re-picks or displaces a core card (`card in core_cards or card in insurance` guard); breaks when no card adds positive widened coverage. v1 = the brief's default mild EXPECTED-coverage hedge; CVaR/worst-tail is a documented future dial.
+
+**Integration** (`recommend_sideboard`): `hedge: str = "off" | "expected"`; smart-mode (`--smart`) wires `hedge="expected"`. Runs after the core solve, captures `_core_count` first so `natural_budget_count` = the dedicated core (excludes insurance); merges insurance into `final_cards`; `insurance_cards=frozenset(_insurance)`. CLI: per-card `[insurance]` label. `hedge="off"` (default) → byte-identical.
+
+**Files**: `src/legacy_engine/advisory/sideboard.py` (`_hedge_fill`, `_HEDGE_BLEND`, hedge param + block, output-contract core-count fix), `src/legacy_engine/cli.py` (hedge wiring + `[insurance]` label). **Tests**: `tests/test_sideboard.py::TestHedgeAllocator` (5 unit), `TestHedgeIntegrationNonVacuous` (1 — the real-catalog two-tag end-to-end with NON-EMPTY insurance).
+
+**Review (fresh-context deep, required for the riskiest feature): Approve-with-comments, no blockers.** The reviewer empirically validated (200+ checks): the hedge never re-picks/displaces a core card, respects remaining slots, can't loop or exceed budget; `natural_budget_count` is strictly the core; gating is byte-identical; `_coverage_scale` calibration is sound. Two findings:
+- **(Important — FIXED in-session)**: the original end-to-end test used a single/2-card catalog → empty insurance → vacuous wiring assertions. Added `TestHedgeIntegrationNonVacuous` (rich default catalog, dominant+small archetype) that produces real insurance and guards the recommend_sideboard↔insurance wiring (insurance non-empty, ⊆ cards, core < total, total ≤ budget).
+- **(Accepted tunable — NOT changed)**: `_SMART_REDUNDANCY_FRACTION=0.5` yields an all-1-of core on real data, in mild tension with the brief's "dedicated swaps are 3-4 copies." It's the anti-4/4/4 breadth-first behavior the user explicitly wanted, is exposed via `--redundancy-strength`, and is a labeled tunable to revisit against real boards (the brief itself calls for that calibration). Verified: full suite 2242 green; sideboard suite byte-identical with the hedge off; no new ruff.
