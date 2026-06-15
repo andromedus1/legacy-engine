@@ -3186,7 +3186,7 @@ class TestEmpiricalSideboardPool:
     """Unit tests for _empirical_sideboard_pool — DB function with no sideboard data returns None."""
 
     def test_returns_none_on_empty_corpus(self):
-        """An empty DB returns None (not an empty frozenset)."""
+        """An empty DB returns None (not a pair of empty containers)."""
         con = store.connect(":memory:")
         store.init_schema(con)
         result = _empirical_sideboard_pool(con, "Dimir Tempo")
@@ -3209,8 +3209,8 @@ class TestEmpiricalSideboardPool:
         assert result is None
         con.close()
 
-    def test_returns_pool_when_sideboard_data_exists(self):
-        """Archetype with sideboard data returns a non-empty frozenset."""
+    def test_returns_pool_and_freq_map_when_sideboard_data_exists(self):
+        """Archetype with sideboard data returns (pool, freq_map) tuple."""
         import uuid
         con = store.connect(":memory:")
         store.init_schema(con)
@@ -3247,9 +3247,16 @@ class TestEmpiricalSideboardPool:
         result = _empirical_sideboard_pool(
             con, "Dimir Tempo", since="2026-01-01"
         )
-        assert result is not None, "Should return a pool when sideboard data exists"
-        assert "Surgical Extraction" in result, (
+        assert result is not None, "Should return a (pool, freq_map) tuple when sideboard data exists"
+        pool, freq_map = result
+        assert "Surgical Extraction" in pool, (
             "Surgical Extraction (100% adoption) should be in the pool"
+        )
+        assert "Surgical Extraction" in freq_map, (
+            "freq_map should contain modal_count for Surgical Extraction"
+        )
+        assert isinstance(freq_map["Surgical Extraction"], int), (
+            "freq_map values should be integers (modal_count)"
         )
         con.close()
 
