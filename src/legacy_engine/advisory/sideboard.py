@@ -737,15 +737,18 @@ def _empirical_sideboard_pool(
     since: "str | None" = None,
     until: "str | None" = None,
     min_adoption: float = _EMPIRICAL_POOL_MIN_ADOPTION,
-) -> "frozenset[str] | None":
-    """Return the set of cards that real archetype sideboard lists run above ``min_adoption``.
+) -> "tuple[frozenset[str], dict[str, int]] | None":
+    """Return ``(pool, freq_map)`` for the archetype's real sideboard, or None when no data.
+
+    ``pool`` — frozenset of cards whose sideboard adoption >= ``min_adoption``.
+    ``freq_map`` — mapping of card name → modal_count (for max_copies on promoted cards).
 
     Uses ``card_frequencies(board='side')`` — the per-archetype in-regime adoption primitive.
-    Returns None (not empty frozenset) when:
+    Returns None (not a pair of empty containers) when:
     - the archetype has no in-regime sideboard data (thin archetype)
     - card_frequencies raises (schema not initialised, etc.)
 
-    Returning None (vs empty frozenset) allows callers to distinguish "no data → skip filter"
+    Returning None (vs an empty pool) allows callers to distinguish "no data → skip filter"
     from "data says no cards pass threshold → genuinely empty pool".  In practice the latter
     is extremely rare and is still treated as None (skip filter) to avoid producing empty
     sideboards when real archetype data is absent.
@@ -755,10 +758,11 @@ def _empirical_sideboard_pool(
         freqs = card_frequencies(con, archetype, board="side", since=since, until=until)
         if not freqs:
             return None
+        freq_map = {cf.name: cf.modal_count for cf in freqs}
         pool = frozenset(
             cf.name for cf in freqs if cf.inclusion_pct >= min_adoption
         )
-        return pool if pool else None
+        return (pool, freq_map) if pool else None
     except Exception as exc:
         log.debug("_empirical_sideboard_pool: card_frequencies failed for %r: %s", archetype, exc)
         return None
@@ -1662,9 +1666,8 @@ def _plan_matchups(
                 if not _next_in():
                     in_exhausted = True
 
-        # ── Legality enforcement: post_board must sum to exactly 60 ──────
+        # ── Tally swaps ──────────────────────────────────────────────────────
         # Since each swap removes one and adds one, total = sum(deck_maindeck.values()) always.
-        # If deck_maindeck does not sum to 60 (the caller owns that contract), planning is skipped.
         out_total = sum(side_out.values())
         # Invariant: each swap removes one and adds one, so out_total == sum(side_in.values())
         # by construction. post_board is rebuilt independently from side_out/side_in,
@@ -1858,7 +1861,7 @@ def _considering_label(
     """Build a concise label explaining why a card is on the considering bubble.
 
     Extracts the top 1–2 highest-weight uncovered (or under-covered) elements
-    this card addresses and formats them as: "covers <tag> (<archetype> N%),
+    this card addresses and formats them as: "covers <tag> (<archetype>),
     <tag2>".
 
     Pure function — no DB.
@@ -1884,11 +1887,8 @@ def _considering_label(
     parts: list[str] = []
     for e, _ in element_gains[:2]:
         if "|" in e:
-            # Archetype|tag element — format as "tag (Archetype N%)"
+            # Archetype|tag element — format as "tag (Archetype)"
             arch, tag = e.split("|", 1)
-            w = model.element_weight.get(e, 0.0)
-            # Extract archetype share from element weight / best_swing (not directly
-            # available; approximate share from weight so label is indicative).
             parts.append(f"{tag} ({arch})")
         elif e.startswith("_hate:"):
             tag = e[len("_hate:"):]
@@ -2102,21 +2102,11 @@ def recommend_sideboard(
     promoted_candidates: "dict[str, HoserCard] | None" = None
     _empirical_freq_map: "dict[str, int]" = {}  # card → modal_count (for promoted max_copies)
     if archetype is not None:
-        # Fetch raw CardFreq list so we have modal_count for max_copies on promoted cards.
-        try:
-            from legacy_engine.generation.consensus import card_frequencies as _card_frequencies
-            _side_freqs = _card_frequencies(con, archetype, board="side", since=eff_since, until=eff_until)
-            _empirical_freq_map = {cf.name: cf.modal_count for cf in _side_freqs}
-            _pool_raw = frozenset(
-                cf.name for cf in _side_freqs if cf.inclusion_pct >= _EMPIRICAL_POOL_MIN_ADOPTION
-            )
-            empirical_pool = _pool_raw if _pool_raw else None
-        except Exception as exc:
-            log.debug(
-                "recommend_sideboard: _empirical_sideboard_pool fallback (card_frequencies failed): %s",
-                exc,
-            )
-            empirical_pool = None
+        _pool_result = _empirical_sideboard_pool(
+            con, archetype, since=eff_since, until=eff_until
+        )
+        if _pool_result is not None:
+            empirical_pool, _empirical_freq_map = _pool_result
 
         if empirical_pool is not None:
             log.debug(
