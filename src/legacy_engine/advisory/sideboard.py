@@ -1302,6 +1302,7 @@ def _greedy_solve(
     *,
     budget: int,
     redundancy_strength: float = 0.0,
+    tau: float = 0.0,
 ) -> tuple[dict[str, int], list[PickTrace]]:
     """Greedy saturating-coverage with diminishing-returns marginal gain.
 
@@ -1355,8 +1356,12 @@ def _greedy_solve(
                 best_card = card_name
                 best_newly = frozenset(e for e in element_ids if cov_counts.get(e, 0) == 0)
 
-        if best_card is None or best_gain == 0.0:
-            # No more cards provide positive marginal gain; stop early.
+        if best_card is None or best_gain <= tau:
+            # Natural-budget stop (dedicated-core): no card clears the per-slot floor τ.
+            # τ is the opportunity cost of a dedicated slot — when the best remaining net
+            # marginal (coverage − redundancy penalty) ≤ τ, stop rather than padding the
+            # budget. τ == 0.0 (default) reproduces the prior "stop only at zero gain"
+            # behavior exactly (gains are ≥0 by the argmax floor → == 0.0 and ≤ 0.0 coincide).
             break
 
         picks[best_card] = picks.get(best_card, 0) + 1
@@ -1382,7 +1387,7 @@ class _ILPFailed(Exception):
     pass
 
 
-def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float = 0.0) -> dict[str, int]:
+def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float = 0.0, tau: float = 0.0) -> dict[str, int]:
     """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
 
     Formulation:
@@ -1487,6 +1492,12 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
             if coef > 0.0:
                 obj_terms.append(coef * y_vars[(elem_id, t)])
     obj_terms.extend(penalty_terms)  # negative per-copy redundancy terms (empty when off)
+    # Natural-budget τ (dedicated-core): a per-slot opportunity cost so the ILP only fills
+    # a slot whose marginal coverage clears τ — mirrors the greedy stop, returns <budget at
+    # the knee. τ == 0.0 (default) adds nothing → byte-identical to the pre-feature objective.
+    if tau > 0.0:
+        for card_name, x_var in x_vars.items():
+            obj_terms.append(-tau * x_var)
     if obj_terms:
         prob += pulp.lpSum(obj_terms)
     else:
@@ -2093,6 +2104,11 @@ def recommend_sideboard(
     # Gated-additive: 0.0 → no per-copy penalty → byte-identical to the forced-15 baseline.
     # The gating feature wires a CLI flag to this; the dedicated-core feature adds the τ stop.
     redundancy_strength: float = 0.0,
+    # Natural-budget floor τ (epic-sideboard-core-and-hedge-dedicated-core): per-slot
+    # opportunity cost — the solver stops committing dedicated cards once the best marginal
+    # coverage ≤ τ, so the package may be FEWER than 15. Gated-additive: 0.0 → no stop →
+    # byte-identical to the forced-15 baseline. The gating feature wires a CLI flag + default.
+    tau: float = 0.0,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -2453,7 +2469,7 @@ def recommend_sideboard(
 
     if solver == "ilp":
         try:
-            ilp_cards = _ilp_solve(model, budget=budget, redundancy_strength=redundancy_strength)
+            ilp_cards = _ilp_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
             solver_used = "ilp"
         except _ILPFailed as exc:
             log.warning("recommend_sideboard: ILP failed (%s); falling back to greedy", exc)
@@ -2465,7 +2481,7 @@ def recommend_sideboard(
             solver_used = "greedy"
 
     # Always compute greedy trace (explainability rationale)
-    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget, redundancy_strength=redundancy_strength)
+    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
 
     # Choose final cards based on solver
     final_cards = ilp_cards if solver_used == "ilp" else greedy_cards
