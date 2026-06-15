@@ -150,3 +150,6 @@ Deferred (unbound): goldfish-simulation, local-meta geo dimension, web interface
   forecaster in SPEC+README -> gate-docs-new-cards-mischaracterized; report variants mislabeled in
   README -> gate-docs-variants-readme; stale cli.py line anchors in 3 pattern skills ->
   gate-docs-pattern-skill-cli-anchors. ARCHITECTURE clean; module-relative refs all resolve.
+- **gate-patterns** (2026-06-14) — 2 new patterns, 0 inconsistencies. viz-spec-render-write-tail,
+  file-backed-cli-test-db-builder. SKILL.md index regenerated (was stale at 5/12); digest updated.
+  Tracking item gate-patterns-v0.1.0 (done).
