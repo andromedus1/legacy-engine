@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-concave-value
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: []
@@ -193,3 +193,12 @@ penalty competes correctly with `weight_e·Δg`. Keep `_ILP_T_CAP` behavior unch
 - **Submodularity** — coverage(g) is submodular; subtracting a per-copy penalty that is
   non-decreasing in k keeps each card's marginal non-increasing → greedy's 1−1/e intent holds.
   Verify no card's marginal *increases* with copies.
+
+## Implementation notes
+- Files changed: `src/legacy_engine/advisory/sideboard.py` (Unit 1 primitives `_u_redundancy` + `_redundancy_penalty` + constants `_U_REDUNDANCY_DEFAULT`/`_REDUNDANCY_STRENGTH`; Unit 2 `redundancy_strength` param threaded `recommend_sideboard` → both solvers; Unit 3 greedy subtracts the per-copy penalty; Unit 4 ILP adds incremental `z_c^k` copy vars + monotone fill + negative penalty terms).
+- Tests added: `tests/test_sideboard.py::TestRedundancyDecay` (9 tests — penalty primitives, greedy stacks-off/spreads-on, ILP/greedy consistency with decay, ILP byte-identical when off, recommend_sideboard integration).
+- Discrepancies from design: none. Built exactly to the design's additive-penalty form.
+- Verification: full suite 2219 passed (243 in test_sideboard.py, incl. the existing suite byte-identical with decay off); `ruff check` introduces zero new errors in src/ (sideboard.py clean) or the new test class.
+- Gated-additive confirmed: `redundancy_strength=0.0` (default) → `penalty(k)=0 ∀k`, ILP omits the z-vars entirely → byte-identical to the forced-15 baseline.
+- Adjacent issues parked: none. (Noted but NOT fixed: pre-existing ruff debt in tests/test_sideboard.py — unused imports / E402 / F841 `con` — predates this work; CI lints src/ only and is non-blocking.)
+- Downstream: the dedicated-core feature adds the τ natural-budget stop on top of these per-copy marginals; the gating feature wires a CLI flag to `redundancy_strength`.
