@@ -1,7 +1,7 @@
 ---
 id: feature-list-granular-positioning
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, card-level]
 parent: null
 depends_on: []
