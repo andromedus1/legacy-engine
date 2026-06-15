@@ -1,11 +1,8 @@
 # legacy-engine
 
-A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data rather
-than vibes: *"What is the meta, how do I attack it, and how do I tune my deck?"*
+A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data: *"What is the meta, how do I attack it, and how do I tune my deck?"*
 
-Legacy metagaming today is experience- and forum-driven — tier lists scattered across articles,
-matchup knowledge living in Discord and reps, "what should I play this weekend?" answered by feel.
-legacy-engine makes it rigorous and reproducible: it ingests real tournament results, labels every
+legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every
 deck under a consistent archetype taxonomy, and computes the metagame, matchup matrix, and field-aware
 advice on top — every number labeled, sample-gated, and traceable to its source.
 
