@@ -363,7 +363,8 @@ def biggest_movers(
 
     Absent archetypes are treated as 0 share (new entrant or exit), so the
     digest captures both arrivals and departures.  The result is sorted by
-    ``|delta|`` descending, then top-N sliced.
+    ``|delta|`` descending (archetype name ascending as a deterministic
+    tiebreak), then top-N sliced.
 
     Pure function over ``TrendSeries`` — no DB access.
     """
@@ -405,5 +406,7 @@ def biggest_movers(
             )
         )
 
-    movers.sort(key=lambda m: abs(m.delta), reverse=True)
+    # |delta| descending, archetype name ascending as a deterministic tiebreak — `all_archs`
+    # is a set, so equal-|delta| ties would otherwise select nondeterministically.
+    movers.sort(key=lambda m: (-abs(m.delta), m.archetype))
     return movers[:n]
