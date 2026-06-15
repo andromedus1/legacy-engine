@@ -138,4 +138,8 @@ Deferred (unbound): goldfish-simulation, local-meta geo dimension, web interface
 - strong-player-signal-strength
 
 ## Gate runs
-<populated in Phase 5>
+
+- **gate-tests** (2026-06-14) — 3 findings (1 Critical, 2 Low). Critical: ingestion resilience NFR
+  unhonored + untested (one bad deck/event aborts the batch) -> gate-tests-ingestion-bad-deck-resilience
+  (implementing). 2 Low -> backlog (thin-banner named-reason, ban-date boundary). Coverage otherwise
+  strong; 2 candidate gaps confirmed false-positive. 3 prior gate-tests findings already done.
