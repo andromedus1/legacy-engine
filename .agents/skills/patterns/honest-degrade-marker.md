@@ -39,7 +39,7 @@ if n_rounds < thin_floor:
     return WindowResolution(None, None, banner, label, mode="uniform")
 ```
 
-`_echo_window(win)` always echoes `// {win.banner}` before any data output (cli.py:64).
+`_echo_window(win)` always echoes `// {win.banner}` before any data output (cli.py:86, in `_echo_window` at cli.py:75).
 
 ### 2. Degraded Matchup Plan / Primer (sideboard.py + primer.py)
 
@@ -87,7 +87,7 @@ label = f"{PRE_DATA_BANNER} — intrinsic score only (no gated analogues)"
 ```
 
 The CLI always echoes this banner as the first line of speculation output so the user never
-mistakes the forecast for observed data (cli.py:1692).
+mistakes the forecast for observed data (`_print_speculation` at cli.py:2022, label echo at cli.py:2027).
 
 ### 4. all_null / Unpriced Explicit Null (prices.py)
 
@@ -111,7 +111,7 @@ if q.all_null:
 
 The CLI renders `all_null=True` to the user with context:
 ```python
-# cli.py:1579-1580
+# cli.py:1823-1824
 if q.all_null:
     click.echo(f"  all_null=True — no paper USD price in card_prices (source: {q.source})")
 ```
@@ -123,7 +123,7 @@ explicit. When venues differ on share, the `VenueDivergence` carries per-archety
 that are printed verbatim — never combined into a single unlabeled average:
 
 ```python
-# cli.py:646-693  _print_venue_divergence
+# cli.py:675  _print_venue_divergence (called at cli.py:590)
 # Renders: archetype | online_share | paper_share | spread | direction
 ```
 

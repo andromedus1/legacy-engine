@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-deck-load-format-ignored
 kind: story
-stage: drafting
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []

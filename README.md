@@ -123,8 +123,8 @@ legacy-engine report matchups   --a "Dimir Tempo" --b "Sneak & Show"  # single d
 legacy-engine report affectedness --archetype "Dimir Tempo"  # which bans drove valid_since
 legacy-engine report gaps       # under-explored archetypes (high positioning S, low meta-share)
 legacy-engine report subgroup --archetype "Dimir Tempo"  # sub-archetype split + matchup deltas
-legacy-engine report variants --archetype "Dimir Tempo"  # per-variant card inclusion divergence
-legacy-engine report new-cards  # new/pre-data cards with speculative fitness forecast
+legacy-engine report variants --archetype "Dimir Tempo"  # registered variants + meta share within the parent archetype
+legacy-engine report new-cards  # card names added in the latest refresh-cards ingest diff
 legacy-engine report speculate "Psychic Frog"     # PRE-DATA FORECAST for a specific card
 legacy-engine report prices "Force of Will"       # per-printing USD prices for a card
 # report/advise commands take ban-regime windowing: --since / --until / --regime / --all-time

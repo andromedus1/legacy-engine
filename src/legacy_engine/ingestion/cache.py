@@ -57,17 +57,29 @@ def parse_rounds(raw_rounds: list) -> list[RoundMatch]:
 
 
 def parse_cache_item(raw: dict, source: str) -> TournamentResult:
-    """Parse one CacheItem JSON object into a TournamentResult, deriving source + provenance."""
+    """Parse one CacheItem JSON object into a TournamentResult, deriving source + provenance.
+
+    Resilience NFR: a single malformed deck is dropped (logged) rather than aborting the whole
+    event — the community cache is fragile / single-maintainer, so one bad row must not lose an
+    otherwise-valid tournament.
+    """
     tournament = raw.get("Tournament", {}) or {}
     uri = tournament.get("Uri")
+    name = tournament.get("Name", "")
+    decks: list[Deck] = []
+    for i, d in enumerate(raw.get("Decks", []) or []):
+        try:
+            decks.append(Deck.model_validate(d))
+        except Exception as exc:  # noqa: BLE001 — tolerate one bad deck, keep the event
+            logger.warning("Skipping malformed deck %d in event %r (%s): %s", i, name, source, exc)
     return TournamentResult(
-        name=tournament.get("Name", ""),
+        name=name,
         date=tournament.get("Date"),
         uri=uri,
         format=_coerce_format(tournament.get("Formats")),
         source=source,
         provenance=derive_provenance(source, uri),
-        decks=[Deck.model_validate(d) for d in raw.get("Decks", []) or []],
+        decks=decks,
         rounds=parse_rounds(raw.get("Rounds", []) or []),
         standings=[Standing.model_validate(s) for s in raw.get("Standings", []) or []],
     )
@@ -134,12 +146,23 @@ def discover_legacy_events(cache_dir: Path = CACHE_DIR) -> list[tuple[Path, str]
 
 
 def ingest_cache(con, cache_dir: Path = CACHE_DIR) -> int:
-    """Parse + load every discovered Legacy event into the DuckDB store. Returns the count loaded."""
+    """Parse + load every discovered Legacy event into the DuckDB store. Returns the count loaded.
+
+    Resilience NFR: one bad event (unreadable JSON, parse failure, or load failure) is logged and
+    skipped — the batch continues. Returns the count of events successfully loaded.
+    """
     from legacy_engine.ingestion import store
 
     count = 0
+    skipped = 0
     for path, source in discover_legacy_events(cache_dir):
-        raw = json.loads(path.read_text())
-        store.load_tournament(con, parse_cache_item(raw, source))
-        count += 1
+        try:
+            raw = json.loads(path.read_text())
+            store.load_tournament(con, parse_cache_item(raw, source))
+            count += 1
+        except Exception as exc:  # noqa: BLE001 — tolerate one bad event, keep the batch
+            skipped += 1
+            logger.warning("Skipping bad event %s: %s", path, exc)
+    if skipped:
+        logger.warning("Ingest complete: %d events loaded, %d skipped", count, skipped)
     return count
