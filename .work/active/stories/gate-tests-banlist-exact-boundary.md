@@ -1,14 +1,14 @@
 ---
 id: gate-tests-banlist-exact-boundary
 kind: story
-stage: drafting
+stage: done
 tags: [testing, ingestion, documentation]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: tests
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-06-15
 ---
 
 # As-of-date legality: pin the exact ban-date boundary (legal day-before vs on-the-day)
@@ -36,3 +36,9 @@ def test_legality_at_exact_ban_date_boundary():
 
 ## Test location (suggested)
 `tests/test_banlist.py`
+
+## Resolution (2026-06-15)
+SPEC was silent on the boundary, so settled it first: SPEC.md "Version-stamped legality" NFR now
+states a ban takes effect *on* its `banned_date` (`banned_date <= as_of` ⇒ banned), matching the
+existing `banlist_as_of` implementation. Added `test_legality_at_exact_ban_date_boundary` pinning
+Psychic Frog legal 2024-12-15 / banned 2024-12-16.

@@ -21,7 +21,7 @@ decisions:
   - "HONEST-DEGRADE NFR: thin/absent signal surfaces a labeled banner or degraded flag with a named reason. No silent zeros, no fabricated numbers. Applies in the advisory window (thin-regime banner), sideboard/primer (degraded=True note), speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence (labeled)."
   - "PRICES + ACQUISITION: seed prices + report prices + advise acquire give the user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null is the honest-null signal."
 created: 2026-05-29
-updated: 2026-06-14
+updated: 2026-06-15
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -104,7 +104,7 @@ Grouped by pillar. **MVP** = built in the first arc; **Later** = deferred to a s
 ## Non-Functional Requirements
 
 - **Reproducibility** — deterministic given inputs + seed; all external data pre-fetched and cached; the engine makes no network calls at analysis time (mirrors edh-engine).
-- **Version-stamped legality** — every legality check resolves against a dated `BanListSnapshot`, so a 2024 deck that legally ran Psychic Frog validates correctly. Banned-list data refreshed ~quarterly.
+- **Version-stamped legality** — every legality check resolves against a dated `BanListSnapshot`, so a 2024 deck that legally ran Psychic Frog validates correctly. A ban takes effect *on* its `banned_date`: a card is legal the day before and illegal on the date itself (`banned_date <= as_of` ⇒ banned). Banned-list data refreshed ~quarterly.
 - **Confidence-gated stats** — matchup cells and derived metrics carry sample size + confidence; low-n (n<100) flagged by default. Reuses edh-engine's confidence-metadata pattern.
 - **Source transparency** — every meta-% and matchup figure is labeled with its source, window, and online/paper/blend basis. No unlabeled headline numbers.
 - **Resilience** — ingestion tolerates a single bad deck/event (catch, log, continue); mirror the community cache locally (it's fragile / community-run).

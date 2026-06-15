@@ -1,14 +1,14 @@
 ---
 id: gate-tests-thin-banner-named-reason
 kind: story
-stage: drafting
+stage: done
 tags: [testing, analytics]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: tests
 created: 2026-06-14
-updated: 2026-06-14
+updated: 2026-06-15
 ---
 
 # Thin-regime banner: assert the named reason (round count + floor), not just substring "THIN"
@@ -41,3 +41,10 @@ def test_exactly_floor_rounds_does_not_degrade():
 
 ## Test location (suggested)
 `tests/test_advisory_window.py`
+
+## Resolution (2026-06-15)
+`WindowResolution` exposes no `n_rounds` field, so pinned the banner string directly:
+`test_thin_banner_states_count_and_floor` asserts the regex `\d+ rounds < floor 500` (named reason =
+actual count + floor, not just "THIN"). `test_exactly_floor_rounds_does_not_degrade` reads the
+in-window count via `_count_rounds` then sets `thin_floor == n`, pinning that `n_rounds == floor`
+does NOT degrade (degrade is strictly `< floor`).
