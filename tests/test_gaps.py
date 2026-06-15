@@ -162,3 +162,155 @@ class TestReportGapsCLI:
         con.close()
         result = CliRunner().invoke(main, ["report", "gaps", "--db", db_path])
         assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# TestThinCoverageExclusion
+# ---------------------------------------------------------------------------
+
+
+class TestThinCoverageExclusion:
+    """E2E test: a real thin-coverage archetype is excluded from gaps via rank_decks.
+
+    Closes the deep-review nit on epic-gap-discovery-archetype-gaps.
+
+    Design
+    ------
+    3 archetypes in a hermetic :memory: corpus:
+      * "Control"  — 2 players, 50 decisive rounds vs Combo → data_coverage ≈ 1.0
+      * "Combo"    — 2 players, 50 decisive rounds vs Control → data_coverage ≈ 1.0
+      * "ThinArch" — 1 player, 0 decisive rounds → data_coverage = 0.0
+
+    ThinArch has a small field share (~5%) so Control and Combo's coverage of
+    each other is not materially affected.  compute_archetype_gaps is called
+    with min_coverage=0.5 (the default) so ThinArch's data_coverage=0 < 0.5
+    triggers the low_coverage gate inside rank_decks, which feeds the
+    excluded_low_coverage list inside _assemble_gaps.
+
+    All DB access is hermetic (:memory:) — the real legacy.duckdb is never touched.
+    """
+
+    @staticmethod
+    def _build_thin_coverage_corpus() -> "duckdb.DuckDBPyConnection":
+        """Build a 3-archetype :memory: corpus where ThinArch has no decisive rounds."""
+        from legacy_engine.ingestion import store
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        con = store.connect(":memory:")
+
+        # 50 repeats so Control vs Combo has n=100 decisive rounds (≥30 → displayed)
+        for i in range(50):
+            date = f"2026-01-{i + 1:02d}"
+            uri = f"https://www.mtgo.com/decklist/thin-cov-{i + 1:03d}"
+            raw = {
+                "Tournament": {
+                    "Name": f"Thin Coverage Test {i + 1}",
+                    "Date": date,
+                    "Uri": uri,
+                    "Formats": "Legacy",
+                },
+                "Decks": [
+                    # Control pair
+                    {
+                        "Player": "alice",
+                        "Result": "1st",
+                        "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                        "Sideboard": [],
+                    },
+                    {
+                        "Player": "alice2",
+                        "Result": "2nd",
+                        "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                        "Sideboard": [],
+                    },
+                    # Combo pair
+                    {
+                        "Player": "bob",
+                        "Result": "3rd",
+                        "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}],
+                        "Sideboard": [],
+                    },
+                    {
+                        "Player": "bob2",
+                        "Result": "4th",
+                        "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}],
+                        "Sideboard": [],
+                    },
+                    # ThinArch — present in the corpus but plays NO decisive rounds
+                    {
+                        "Player": "thin",
+                        "Result": "5th",
+                        "Mainboard": [{"Count": 4, "CardName": "Lightning Bolt"}],
+                        "Sideboard": [],
+                    },
+                ],
+                "Rounds": [
+                    # Control beats Combo (decisive)
+                    {"Player1": "alice",  "Player2": "bob",  "Result": "2-1"},
+                    {"Player1": "alice2", "Player2": "bob2", "Result": "2-1"},
+                    # ThinArch gets only draws — excluded from decisive round accounting
+                    {"Player1": "thin", "Player2": "alice", "Result": "1-1"},
+                ],
+                "Standings": [],
+            }
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            con.execute(
+                "UPDATE decks SET archetype = 'Control' "
+                "WHERE tournament_id = ? AND player IN ('alice', 'alice2')",
+                [tid],
+            )
+            con.execute(
+                "UPDATE decks SET archetype = 'Combo' "
+                "WHERE tournament_id = ? AND player IN ('bob', 'bob2')",
+                [tid],
+            )
+            con.execute(
+                "UPDATE decks SET archetype = 'ThinArch' "
+                "WHERE tournament_id = ? AND player = 'thin'",
+                [tid],
+            )
+
+        return con
+
+    def test_thin_archetype_excluded_from_gaps(self):
+        """ThinArch (data_coverage=0) appears in excluded_low_coverage, not in gaps."""
+        con = self._build_thin_coverage_corpus()
+        try:
+            report = compute_archetype_gaps(
+                con,
+                min_coverage=0.5,   # default; ThinArch coverage=0 → excluded
+                seed=SEED,
+            )
+        finally:
+            con.close()
+
+        gap_names = {g.archetype for g in report.gaps}
+        assert "ThinArch" in report.excluded_low_coverage, (
+            f"ThinArch (data_coverage≈0) should be in excluded_low_coverage; "
+            f"got excluded={report.excluded_low_coverage}, gaps={sorted(gap_names)}"
+        )
+        assert "ThinArch" not in gap_names, (
+            f"ThinArch should NOT appear in gaps; got gaps={sorted(gap_names)}"
+        )
+        # Sanity: Control and Combo (well-measured) should surface as gaps
+        assert gap_names, "Expected at least one gap archetype (Control or Combo)"
+
+    def test_thin_archetype_included_when_gate_disabled(self):
+        """With min_coverage=0.0 (gate disabled), ThinArch is NOT excluded."""
+        con = self._build_thin_coverage_corpus()
+        try:
+            report = compute_archetype_gaps(
+                con,
+                min_coverage=0.0,   # gate off
+                seed=SEED,
+            )
+        finally:
+            con.close()
+
+        gap_names = {g.archetype for g in report.gaps}
+        assert "ThinArch" not in report.excluded_low_coverage, (
+            "min_coverage=0.0 should disable the gate — ThinArch must not be excluded"
+        )
+        assert "ThinArch" in gap_names, (
+            "With gate disabled, ThinArch (data_coverage=0) should still rank as a gap"
+        )
