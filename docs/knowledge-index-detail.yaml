@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-15T01:39:49Z'
+generated_at: '2026-06-15T15:56:07Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -83,8 +83,10 @@ documents:
       and identify suggest|strong|track.'
     - 'HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag
       + named reason + suppressed magnitude. No silent zeros. Applies in window.py
-      (thin-regime banner), primer/sideboard (degraded=True note), speculation (PRE-DATA
-      FORECAST label), prices (all_null flag), venue divergence.'
+      (thin-regime banner), primer/sideboard (degraded=True note), the sideboard recommender
+      (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
+      rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
+      prices (all_null flag), venue divergence.'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
@@ -255,8 +257,9 @@ documents:
     - 'HONEST-DEGRADE NFR: thin/absent signal surfaces a labeled banner or degraded
       flag with a named reason. No silent zeros, no fabricated numbers. Applies in
       the advisory window (thin-regime banner), sideboard/primer (degraded=True note),
-      speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence
-      (labeled).'
+      the sideboard recommender (returns fewer than 15 with commit/insurance labels
+      + a marginal-coverage curve rather than padding to a forced 15), speculation
+      (PRE-DATA FORECAST label), prices (all_null flag), venue divergence (labeled).'
     - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
@@ -1072,6 +1075,48 @@ documents:
     - The universally-agreed format constant: dedicated graveyard hate + free counters
         belong in every sideboard (Reanimator + Oops + Sneak&Show + Painter are all
         GY/combo-adjacent).
+  docs/briefs/sideboard-core-and-hedge.md:
+    summary: 'Curated context for reworking the sideboard recommender into a two-stage
+      core+hedge solver.
+
+      Extends advisory-methods.md (which already owns max-coverage / greedy-1−1/e
+      / Dirichlet). Resolves
+
+      four deferred decisions: the per-copy access-probability curve, sideboard construction
+      theory (the
+
+      "natural budget"), the hedge''s field-uncertainty objective, and the core/hedge
+      boundary τ. Recommends
+
+      defaults where evidence is strong (the copy curve, the construction principles);
+      stays neutral where
+
+      the call is judgment (hedge aggressiveness, τ).
+
+      '
+    key_findings:
+    - The naive 'P(≥1 access)' hypergeometric curve is only MILDLY concave (opening-7
+      marginal per copy ≈ 11.7→10.5→9.4→8.4%); it does NOT by itself justify capping
+      copies. The real saturation driver is the disutility of redundant DRAWN copies
+      (a 2nd hate card in hand is often a dead draw crowding out threats) + 15-slot
+      scarcity.
+    - 'Sideboard practice: dedicated swap packages run 3-4 copies; flexible/overlapping
+      answers run as 1-2-ofs; over-sideboarding (''too many answers, not enough threats'')
+      is a named failure. The padding bug = 4-of THREE overlapping hate pieces (12
+      cards) with zero flex, not any single 4-of.'
+    - Recommended Stage-1 marginal value of copy k of card C = swing(C) · ΔP_access(k)
+      · U_redundancy(k), where ΔP_access is the hypergeometric increment and U_redundancy
+      decays sharply after the 1st-2nd in-hand copy. This keeps the objective submodular
+      (greedy 1−1/e holds; ILP via piecewise-linear concavity).
+    - 'Hedge (Stage 2) is naturally framed as optimizing coverage over a WIDER field
+      than the point estimate: reuse positioning.py''s Dirichlet share draws as the
+      ambiguity set; expected-coverage is the simple dial, CVaR/worst-tail is the
+      conservative dial (coherent risk measure). How wide / how conservative is a
+      genuine judgment call — expose it, don''t hardcode.'
+    - 'τ (core/hedge boundary) options: confidence-tier-linked (reuse tier_for_sample),
+      a swing-floor, or operator-tunable. No evidence forces one; recommend operator-tunable
+      with a tier-aware default and surface the marginal-coverage curve so the human
+      can see the knee.'
   docs/briefs/ingestion-archetype-contracts/parent.md:
     summary: 'Synthesizes a 7-specialist deep-research campaign into one buildable
       design for legacy-engine''s

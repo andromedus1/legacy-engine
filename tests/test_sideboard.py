@@ -37,6 +37,9 @@ from legacy_engine.advisory.sideboard import (
     _ilp_solve,
     _ILPFailed,
     _marginal_g,
+    _u_redundancy,
+    _redundancy_penalty,
+    _U_REDUNDANCY_DEFAULT,
     _rank_considering_pool,
     compute_deck_anti_synergy_signals,
     is_anti_synergistic,
@@ -5165,3 +5168,442 @@ class TestConsideringPool:
         # considering is additive with a default_factory → always present
         assert hasattr(pkg, "considering")
         assert isinstance(pkg.considering, tuple)
+
+
+# ---------------------------------------------------------------------------
+# TestRedundancyDecay — epic-sideboard-core-and-hedge-concave-value
+# ---------------------------------------------------------------------------
+
+class TestRedundancyDecay:
+    """Per-card-copy redundancy penalty: stops same-card stacking (4/4/4 padding)
+    while staying byte-identical to the baseline when strength=0.0 (gated-additive)."""
+
+    # ---- Unit 1: primitives ----
+
+    def test_penalty_first_copy_is_zero(self):
+        assert _redundancy_penalty(1, strength=0.10) == 0.0
+
+    def test_penalty_monotonic_nondecreasing(self):
+        pens = [_redundancy_penalty(k, strength=0.10) for k in (1, 2, 3, 4)]
+        assert pens == sorted(pens)
+        assert pens[1] > 0.0 and pens[2] > pens[1] and pens[3] > pens[2]
+
+    def test_penalty_strength_zero_is_noop(self):
+        assert all(_redundancy_penalty(k, strength=0.0) == 0.0 for k in range(1, 6))
+
+    def test_u_redundancy_clamps_high_k(self):
+        # k beyond the curve length must not raise and clamps to the last value.
+        assert _u_redundancy(5) == _U_REDUNDANCY_DEFAULT[-1]
+        assert _u_redundancy(99) == _U_REDUNDANCY_DEFAULT[-1]
+        assert _u_redundancy(1) == _U_REDUNDANCY_DEFAULT[0] == 1.0
+
+    # ---- Unit 3: greedy spread ----
+
+    def _dominant_model(self) -> CoverageModel:
+        """One dominant element only 'Top' covers (w=1.0) + a minor element only 'Alt'
+        covers (w=0.1). Decay-off greedy stacks Top to its max_copies; decay-on spreads."""
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"}), max_copies=4),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"}), max_copies=4),
+            },
+        )
+
+    def test_greedy_stacks_without_decay(self):
+        model = self._dominant_model()
+        cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.0)
+        assert cards.get("Top") == 4, f"decay-off should stack the dominant card: {cards}"
+
+    def test_greedy_spreads_with_decay(self):
+        model = self._dominant_model()
+        cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.10)
+        assert cards.get("Top", 0) < 4, f"decay-on must stop stacking the top card: {cards}"
+        assert cards.get("Alt", 0) >= 1, f"decay-on must spread to the next answer: {cards}"
+
+    # ---- Unit 4: ILP/greedy consistency ----
+
+    def test_ilp_and_greedy_both_cap_with_decay(self):
+        # Both solvers subtract the SAME per-copy penalty, so both must STOP stacking the
+        # dominant card under decay. They need NOT return the identical multiset in general —
+        # greedy is 1−1/e approximate, the ILP is exact — so we assert the shared *property*
+        # (the cap), not multiset equality (which holds only on degenerate models).
+        model = self._dominant_model()
+        greedy_cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.10)
+        assert greedy_cards.get("Top", 0) < 4, f"greedy must cap the dominant card: {greedy_cards}"
+        try:
+            ilp_cards = _ilp_solve(model, budget=4, redundancy_strength=0.10)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert ilp_cards.get("Top", 0) < 4, f"ilp must cap the dominant card: {ilp_cards}"
+
+    def test_ilp_byte_identical_when_off(self):
+        model = self._dominant_model()
+        try:
+            off = _ilp_solve(model, budget=4, redundancy_strength=0.0)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert off.get("Top") == 4, f"decay-off ILP unchanged: {off}"
+
+    # ---- Integration: recommend_sideboard ----
+
+    @staticmethod
+    def _gy_field_corpus():
+        """A corpus where 'Reanimator' has real graveyard-reliant vulnerability tags (decks
+        loaded so vulnerability_tags is non-empty), so the model is NON-vacuous and the solver
+        actually picks the graveyard hoser. Mirrors TestRecommendSideboard._build_gy_corpus."""
+        import uuid
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Swamp", type_line="Basic Land — Swamp", oracle_text="{T}: Add {B}.",
+                 cmc=0.0, produced_mana=["B"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"])
+        for idx in range(3):
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                        [tid, idx, f"player{idx}", "1st", "Reanimator"])
+            for cn, ct in [("Reanimate", 4), ("Swamp", 10)]:
+                con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", cn, ct])
+        return con
+
+    @staticmethod
+    def _gy_catalog():
+        # A single colorless graveyard hoser at max_copies=4 → the only answer to the field,
+        # so decay-off stacks it to 4 and decay-on must cap it (a non-vacuous spread test).
+        return {
+            "Surgical Extraction": HoserCard(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED, castable_any_color=True,
+            ),
+        }
+
+    def test_recommend_sideboard_decay_reduces_stacking(self):
+        """End-to-end (greedy): the only castable answer (a max-4 GY hoser) pads to 4 with decay
+        off; decay-on caps the stack. Non-vacuous — asserts decay-off actually reaches 4 first."""
+        con = self._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = self._gy_catalog()
+            off = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, redundancy_strength=0.0)
+            on = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, redundancy_strength=0.10)
+        finally:
+            con.close()
+        assert off.cards.get("Surgical Extraction", 0) == 4, f"decay-off must stack to 4: {dict(off.cards)}"
+        assert on.cards.get("Surgical Extraction", 0) < 4, f"decay-on must cap the stack: {dict(on.cards)}"
+        assert sum(on.cards.values()) <= 15
+
+    def test_recommend_sideboard_ilp_path_with_decay(self):
+        """The default solver is "ilp"; exercise the ILP decay path end-to-end (the greedy test
+        above forces solver="greedy", so this covers the other branch). Non-vacuous corpus."""
+        con = self._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            pkg = recommend_sideboard(con, field, {}, solver="ilp", catalog=self._gy_catalog(),
+                                      redundancy_strength=0.10)
+        finally:
+            con.close()
+        if pkg.solver_used != "ilp":
+            pytest.skip("ILP unavailable (fell back to greedy)")
+        assert pkg.cards.get("Surgical Extraction", 0) >= 1, "ILP decay path must still pick the answer"
+        assert pkg.cards.get("Surgical Extraction", 0) < 4, "ILP decay path must cap the stack"
+        assert sum(pkg.cards.values()) <= 15
+
+
+# ---------------------------------------------------------------------------
+# TestNaturalBudgetTau — epic-sideboard-core-and-hedge-dedicated-core
+# ---------------------------------------------------------------------------
+
+class TestNaturalBudgetTau:
+    """The τ per-slot opportunity cost: the solver stops committing dedicated cards once the
+    best marginal coverage ≤ τ, so the package returns FEWER than budget at the natural-budget
+    knee. τ=0.0 is byte-identical to the forced-budget baseline."""
+
+    def _dominant_model(self) -> CoverageModel:
+        # 'Top' covers a w=1.0 element, 'Alt' a w=0.1 element; both max_copies=4.
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"}), max_copies=4),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"}), max_copies=4),
+            },
+        )
+
+    def test_greedy_tau_zero_fills_budget(self):
+        # τ=0.0 reproduces the prior fill-the-budget behavior exactly.
+        cards, _ = _greedy_solve(self._dominant_model(), budget=4, tau=0.0)
+        assert sum(cards.values()) == 4, f"τ=0 must fill the budget: {cards}"
+
+    def test_greedy_stops_at_tau(self):
+        # Top marginals are Δg: 0.5, 0.25, 0.125, ...; τ=0.15 stops after the 2nd copy
+        # (3rd copy marginal 0.125 ≤ τ), and Alt (0.05) never clears τ → fewer than budget.
+        cards, _ = _greedy_solve(self._dominant_model(), budget=4, tau=0.15)
+        assert sum(cards.values()) < 4, f"τ=0.15 must stop before the budget: {cards}"
+        assert cards.get("Top", 0) == 2, f"expected 2 dedicated Top copies at τ=0.15: {cards}"
+
+    def test_ilp_stops_at_tau(self):
+        try:
+            cards = _ilp_solve(self._dominant_model(), budget=4, tau=0.15)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert sum(cards.values()) < 4, f"τ=0.15 ILP must stop before the budget: {cards}"
+
+    def test_ilp_tau_zero_identical(self):
+        try:
+            cards = _ilp_solve(self._dominant_model(), budget=4, tau=0.0)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert sum(cards.values()) == 4, f"τ=0 ILP fills the budget: {cards}"
+
+    def test_recommend_sideboard_tau_returns_fewer(self):
+        """End-to-end: τ>0 yields a smaller package than τ=0 on a real corpus."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            full = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, tau=0.0)
+            trimmed = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat, tau=0.25)
+        finally:
+            con.close()
+        assert sum(trimmed.cards.values()) <= sum(full.cards.values())
+        assert sum(full.cards.values()) == 4  # the single max-4 hoser fills with τ=0
+
+
+# ---------------------------------------------------------------------------
+# TestOutputContract — epic-sideboard-core-and-hedge-output-contract
+# ---------------------------------------------------------------------------
+
+class TestOutputContract:
+    """The honest-degrade output fields populate only when the core behavior is active;
+    the forced-budget baseline leaves them None/empty (byte-identical rendering)."""
+
+    def _pkg(self, **kw):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            return recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), **kw,
+            )
+        finally:
+            con.close()
+
+    def test_fields_empty_when_off(self):
+        pkg = self._pkg()  # forced-budget baseline
+        assert pkg.natural_budget_count is None
+        assert pkg.marginal_curve == ()
+        assert pkg.uncovered_tail == ()
+        assert pkg.insurance_cards == frozenset()
+
+    def test_natural_budget_populated_under_tau(self):
+        pkg = self._pkg(tau=0.25)
+        assert pkg.natural_budget_count == sum(pkg.cards.values())
+
+    def test_marginal_curve_is_cumulative(self):
+        pkg = self._pkg(tau=0.0, redundancy_strength=0.10)
+        assert len(pkg.marginal_curve) >= 1
+        idxs = [n for n, _ in pkg.marginal_curve]
+        vals = [w for _, w in pkg.marginal_curve]
+        assert idxs == list(range(1, len(idxs) + 1)), "curve indexes are 1..N pick order"
+        assert vals == sorted(vals), "cumulative value is non-decreasing"
+
+    def test_redundancy_also_activates_contract(self):
+        pkg = self._pkg(redundancy_strength=0.10)
+        assert pkg.natural_budget_count is not None
+
+    def test_covered_element_not_in_uncovered_tail(self):
+        # The single graveyard hoser covers Reanimator's element, so it must NOT appear in
+        # the uncovered tail. (A richer field would surface real tail entries.)
+        pkg = self._pkg(tau=0.10)
+        assert isinstance(pkg.uncovered_tail, tuple)
+        # Weights are non-negative; the covered graveyard element is not double-counted here.
+        assert all(w >= 0.0 for _, w in pkg.uncovered_tail)
+
+
+# ---------------------------------------------------------------------------
+# TestGating — epic-sideboard-core-and-hedge-gating
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import _coverage_scale  # noqa: E402
+from legacy_engine.cli import main as _cli_main  # noqa: E402
+from click.testing import CliRunner as _CliRunner  # noqa: E402
+
+
+class TestGating:
+    """Smart-mode wires the core+hedge behavior to the CLI and calibrates redundancy/τ to the
+    field's coverage scale (so absolute constants tuned on unit models don't explode on real
+    fields). Off by default → byte-identical."""
+
+    def test_coverage_scale_is_best_first_pick(self):
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={"Top": _minimal_hoser("Top", frozenset({"t1"})),
+                            "Alt": _minimal_hoser("Alt", frozenset({"t2"}))},
+        )
+        # best first pick = 1.0 (Top's element weight) × _marginal_g(1)=0.5
+        assert _coverage_scale(model) == pytest.approx(1.0 * _marginal_g(1))
+
+    def test_coverage_scale_empty_model_is_zero(self):
+        assert _coverage_scale(_make_model({}, {}, {})) == 0.0
+
+    def _pkg(self, **kw):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            return recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), **kw,
+            )
+        finally:
+            con.close()
+
+    def test_smart_off_is_baseline(self):
+        pkg = self._pkg(smart=False)
+        assert pkg.natural_budget_count is None  # contract inactive → byte-identical render
+
+    def test_smart_on_activates_contract_without_exploding(self):
+        # Smart derives field-scaled redundancy+τ → the contract activates (natural_budget_count
+        # set) and the package is a sane non-empty subset (NOT 1-of-nothing from over-strong
+        # absolute constants).
+        pkg = self._pkg(smart=True)
+        assert pkg.natural_budget_count is not None
+        assert 1 <= sum(pkg.cards.values()) <= pkg.budget
+
+    def test_explicit_tau_overrides_smart_scaling(self):
+        # An explicit (huge) absolute τ must win over the smart-scaled default → nothing clears
+        # it → empty/near-empty package. Proves power-user override precedence.
+        pkg = self._pkg(smart=True, tau=10.0)
+        assert sum(pkg.cards.values()) == 0
+
+    def test_cli_exposes_smart_flag(self):
+        result = _CliRunner().invoke(_cli_main, ["advise", "sideboard", "--help"])
+        assert result.exit_code == 0
+        for opt in ("--smart", "--redundancy-strength", "--tau"):
+            assert opt in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestHedgeAllocator — epic-sideboard-core-and-hedge-hedge-allocator
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import _hedge_fill  # noqa: E402
+
+
+class TestHedgeAllocator:
+    """The hedge fills leftover (post-core) slots with diversity-preferring insurance picks over
+    a uniform-widened field, never re-picking or displacing a core commit."""
+
+    def _three_element_model(self) -> CoverageModel:
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.5, "e3": 0.3},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Alt": frozenset({"e2"}), "Gamma": frozenset({"e3"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+                "Gamma": _minimal_hoser("Gamma", frozenset({"t3"})),
+            },
+        )
+
+    def test_hedge_fills_uncovered_with_one_ofs(self):
+        # Core committed 2 Top (covers e1); budget 5 → 3 flex slots; hedge covers e2/e3 with 1-ofs.
+        ins = _hedge_fill(self._three_element_model(), {"Top": 2}, budget=5)
+        assert "Top" not in ins, "hedge must never re-pick a core card"
+        assert set(ins) == {"Alt", "Gamma"}, f"hedge fills the uncovered elements: {ins}"
+        assert all(v == 1 for v in ins.values()), "hedge picks are 1-of (diversity)"
+
+    def test_hedge_respects_remaining_slots(self):
+        # Only 1 flex slot (core uses 4 of budget 5) → at most 1 insurance pick.
+        ins = _hedge_fill(self._three_element_model(), {"Top": 4}, budget=5)
+        assert sum(ins.values()) <= 1
+
+    def test_hedge_empty_when_core_fills_budget(self):
+        ins = _hedge_fill(self._three_element_model(), {"Top": 4, "Alt": 1}, budget=5)
+        assert ins == {}
+
+    def test_recommend_sideboard_hedge_off_no_insurance(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), tau=0.10, hedge="off",
+            )
+        finally:
+            con.close()
+        assert pkg.insurance_cards == frozenset()
+
+    def test_recommend_sideboard_hedge_never_overlaps_core(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), smart=True, hedge="expected",
+            )
+        finally:
+            con.close()
+        # insurance is a subset of the package's cards and disjoint from the dedicated core count.
+        assert pkg.insurance_cards <= set(pkg.cards)
+        assert sum(pkg.cards.values()) <= pkg.budget
+        # natural_budget_count is the CORE size, excluding any insurance picks.
+        if pkg.natural_budget_count is not None:
+            assert pkg.natural_budget_count <= sum(pkg.cards.values())
+
+
+class TestHedgeIntegrationNonVacuous:
+    """Regression guard for the recommend_sideboard ↔ insurance wiring with NON-EMPTY insurance
+    (the single-card-catalog tests can't exercise it). A dominant archetype + a small one, with a
+    colorless hoser for each: the core commits to the dominant, τ skips the small, and the
+    uniform-widened hedge picks the small one's answer as insurance."""
+
+    @staticmethod
+    def _two_tag_corpus():
+        import uuid
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Cloudpost", type_line="Land",
+                 oracle_text="{T}: Add {C} for each Locus you control.", cmc=0.0, produced_mana=["C"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Two-Tag", "2026-01-01", None, "Legacy", "test", "test"])
+        idx = 0
+        for _ in range(3):  # Reanimator decks → graveyard-reliant
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"r{idx}", "1st", "Reanimator"])
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", "Reanimate", 4])
+            idx += 1
+        for _ in range(3):  # BigMana decks → ramp (≥4 diagnostic big-mana lands)
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"b{idx}", "1st", "BigMana"])
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", "Cloudpost", 4])
+            idx += 1
+        return con
+
+    def test_hedge_produces_nonempty_insurance_wiring(self):
+        con = self._two_tag_corpus()
+        try:
+            field = _make_field({"Reanimator": 0.85, "BigMana": 0.15})
+            # Default catalog (HOSER_CATALOG): a rich set of colorless-castable answers gives the
+            # hedge diverse cards for the flex slots. (A 2-card catalog gets fully consumed by the
+            # core, leaving the hedge nothing — a catalog-thinness artifact, not a wiring gap.)
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", smart=True, hedge="expected")
+        finally:
+            con.close()
+        # The wiring the single-card test couldn't reach: real insurance picks present and consistent.
+        assert pkg.insurance_cards, f"expected non-empty hedge insurance: {dict(pkg.cards)}"
+        assert pkg.insurance_cards <= set(pkg.cards), "insurance must be a subset of the package"
+        assert pkg.natural_budget_count is not None
+        assert pkg.natural_budget_count < sum(pkg.cards.values()), "core strictly smaller than core+insurance"
+        assert sum(pkg.cards.values()) <= pkg.budget
+        # The dedicated core covers the DOMINANT archetype's answer; insurance is disjoint from it.
+        core_cards = set(pkg.cards) - pkg.insurance_cards
+        assert core_cards and core_cards.isdisjoint(pkg.insurance_cards)

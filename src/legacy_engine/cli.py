@@ -2439,6 +2439,28 @@ def _render_list_granular(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@click.option(
+    "--smart/--no-smart",
+    "smart",
+    default=False,
+    help="Smart sideboard (epic-sideboard-core-and-hedge): stop padding the 15 with redundant "
+         "copies — commit a dedicated core sized to the field (may return <15), surface the "
+         "coverage curve + uncovered field. Off by default (byte-identical to the forced-15 model).",
+)
+@click.option(
+    "--redundancy-strength",
+    type=float,
+    default=0.0,
+    help="Absolute per-copy redundancy penalty strength (power-user override; 0 = none). "
+         "With --smart, a field-scaled default is used unless this is set non-zero.",
+)
+@click.option(
+    "--tau",
+    type=float,
+    default=0.0,
+    help="Absolute natural-budget floor τ (power-user override; 0 = fill the budget). "
+         "With --smart, a field-scaled default is used unless this is set non-zero.",
+)
 @_provenance_opt
 @_window_opts
 @_verbose
@@ -2452,6 +2474,9 @@ def advise_sideboard(
     collection_file: str | None,
     owned_only: bool,
     db: str | None,
+    smart: bool,
+    redundancy_strength: float,
+    tau: float,
     provenance: str | None,
     since: str | None,
     until: str | None,
@@ -2518,6 +2543,10 @@ def advise_sideboard(
             until=plan_until,
             adaptive=use_adaptive,
             collection=cv,
+            smart=smart,
+            redundancy_strength=redundancy_strength,
+            tau=tau,
+            hedge="expected" if smart else "off",
         )
 
         # Echo adaptive audit line when adaptive mode resolved actual windows.
@@ -2538,6 +2567,25 @@ def advise_sideboard(
         click.echo(f"  Budget: {pkg.budget}  |  Reserved: {pkg.reserved}")
         click.echo(f"  Covered weight: {pkg.covered_weight:.4f}")
 
+        # --- Output contract (epic-sideboard-core-and-hedge-output-contract) ---
+        # Honest-degrade core+hedge surface: the natural dedicated budget, the marginal-coverage
+        # curve (its flattening = the knee), and the uncovered-field tail. Printed only when the
+        # core behavior is active; the forced-budget baseline (natural_budget_count is None)
+        # renders byte-identically to before.
+        if pkg.natural_budget_count is not None:
+            click.echo(
+                f"  // natural budget: {pkg.natural_budget_count}/{pkg.budget} dedicated "
+                f"(remaining slots left flexible, not padded)"
+            )
+            if pkg.marginal_curve:
+                curve_str = "  ".join(f"{n}:{w:.3f}" for n, w in pkg.marginal_curve)
+                click.echo(f"  // coverage curve (cards:cumulative value): {curve_str}")
+            if pkg.uncovered_tail:
+                tail_str = ", ".join(f"{e} ({w:.3f})" for e, w in pkg.uncovered_tail)
+                click.echo(f"  // uncovered field (top, by weight): {tail_str}")
+            if pkg.insurance_cards:
+                click.echo(f"  // insurance (hedge) slots: {', '.join(sorted(pkg.insurance_cards))}")
+
         # Render cards (with owned annotations when collection is wired).
         display_cards = pkg.cards
         suppressed_count = 0
@@ -2549,15 +2597,17 @@ def advise_sideboard(
 
         if display_cards:
             for card, copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                # commit (dedicated core) vs insurance (hedge) label — only when the hedge ran.
+                role = " [insurance]" if card in pkg.insurance_cards else ""
                 if pkg.collection_aware and pkg.owned:
                     ann = pkg.owned.get(card)
                     if ann is not None:
                         status = "owned" if ann.owned else f"acquire {ann.to_acquire}"
-                        click.echo(f"  {copies}x {card}  [{status}]")
+                        click.echo(f"  {copies}x {card}  [{status}]{role}")
                     else:
-                        click.echo(f"  {copies}x {card}")
+                        click.echo(f"  {copies}x {card}{role}")
                 else:
-                    click.echo(f"  {copies}x {card}")
+                    click.echo(f"  {copies}x {card}{role}")
         else:
             click.echo("  (no recommendations — no castable hosers for this deck's colors)")
 
