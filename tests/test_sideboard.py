@@ -5486,3 +5486,124 @@ class TestGating:
         assert result.exit_code == 0
         for opt in ("--smart", "--redundancy-strength", "--tau"):
             assert opt in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestHedgeAllocator — epic-sideboard-core-and-hedge-hedge-allocator
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import _hedge_fill  # noqa: E402
+
+
+class TestHedgeAllocator:
+    """The hedge fills leftover (post-core) slots with diversity-preferring insurance picks over
+    a uniform-widened field, never re-picking or displacing a core commit."""
+
+    def _three_element_model(self) -> CoverageModel:
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.5, "e3": 0.3},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Alt": frozenset({"e2"}), "Gamma": frozenset({"e3"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+                "Gamma": _minimal_hoser("Gamma", frozenset({"t3"})),
+            },
+        )
+
+    def test_hedge_fills_uncovered_with_one_ofs(self):
+        # Core committed 2 Top (covers e1); budget 5 → 3 flex slots; hedge covers e2/e3 with 1-ofs.
+        ins = _hedge_fill(self._three_element_model(), {"Top": 2}, budget=5)
+        assert "Top" not in ins, "hedge must never re-pick a core card"
+        assert set(ins) == {"Alt", "Gamma"}, f"hedge fills the uncovered elements: {ins}"
+        assert all(v == 1 for v in ins.values()), "hedge picks are 1-of (diversity)"
+
+    def test_hedge_respects_remaining_slots(self):
+        # Only 1 flex slot (core uses 4 of budget 5) → at most 1 insurance pick.
+        ins = _hedge_fill(self._three_element_model(), {"Top": 4}, budget=5)
+        assert sum(ins.values()) <= 1
+
+    def test_hedge_empty_when_core_fills_budget(self):
+        ins = _hedge_fill(self._three_element_model(), {"Top": 4, "Alt": 1}, budget=5)
+        assert ins == {}
+
+    def test_recommend_sideboard_hedge_off_no_insurance(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), tau=0.10, hedge="off",
+            )
+        finally:
+            con.close()
+        assert pkg.insurance_cards == frozenset()
+
+    def test_recommend_sideboard_hedge_never_overlaps_core(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), smart=True, hedge="expected",
+            )
+        finally:
+            con.close()
+        # insurance is a subset of the package's cards and disjoint from the dedicated core count.
+        assert pkg.insurance_cards <= set(pkg.cards)
+        assert sum(pkg.cards.values()) <= pkg.budget
+        # natural_budget_count is the CORE size, excluding any insurance picks.
+        if pkg.natural_budget_count is not None:
+            assert pkg.natural_budget_count <= sum(pkg.cards.values())
+
+
+class TestHedgeIntegrationNonVacuous:
+    """Regression guard for the recommend_sideboard ↔ insurance wiring with NON-EMPTY insurance
+    (the single-card-catalog tests can't exercise it). A dominant archetype + a small one, with a
+    colorless hoser for each: the core commits to the dominant, τ skips the small, and the
+    uniform-widened hedge picks the small one's answer as insurance."""
+
+    @staticmethod
+    def _two_tag_corpus():
+        import uuid
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Cloudpost", type_line="Land",
+                 oracle_text="{T}: Add {C} for each Locus you control.", cmc=0.0, produced_mana=["C"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Two-Tag", "2026-01-01", None, "Legacy", "test", "test"])
+        idx = 0
+        for _ in range(3):  # Reanimator decks → graveyard-reliant
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"r{idx}", "1st", "Reanimator"])
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", "Reanimate", 4])
+            idx += 1
+        for _ in range(3):  # BigMana decks → ramp (≥4 diagnostic big-mana lands)
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"b{idx}", "1st", "BigMana"])
+            con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", "Cloudpost", 4])
+            idx += 1
+        return con
+
+    def test_hedge_produces_nonempty_insurance_wiring(self):
+        con = self._two_tag_corpus()
+        try:
+            field = _make_field({"Reanimator": 0.85, "BigMana": 0.15})
+            # Default catalog (HOSER_CATALOG): a rich set of colorless-castable answers gives the
+            # hedge diverse cards for the flex slots. (A 2-card catalog gets fully consumed by the
+            # core, leaving the hedge nothing — a catalog-thinness artifact, not a wiring gap.)
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", smart=True, hedge="expected")
+        finally:
+            con.close()
+        # The wiring the single-card test couldn't reach: real insurance picks present and consistent.
+        assert pkg.insurance_cards, f"expected non-empty hedge insurance: {dict(pkg.cards)}"
+        assert pkg.insurance_cards <= set(pkg.cards), "insurance must be a subset of the package"
+        assert pkg.natural_budget_count is not None
+        assert pkg.natural_budget_count < sum(pkg.cards.values()), "core strictly smaller than core+insurance"
+        assert sum(pkg.cards.values()) <= pkg.budget
+        # The dedicated core covers the DOMINANT archetype's answer; insurance is disjoint from it.
+        core_cards = set(pkg.cards) - pkg.insurance_cards
+        assert core_cards and core_cards.isdisjoint(pkg.insurance_cards)

@@ -398,6 +398,67 @@ def _coverage_scale(model: "CoverageModel") -> float:
     return best
 
 
+# --- Hedge allocator (epic-sideboard-core-and-hedge-hedge-allocator, fast-follow) ---
+# The dedicated core commits answers for the field you're CONFIDENT about; the leftover slots
+# (when τ stopped the core short of the budget) are filled by the hedge — insurance against the
+# field being different from your point estimate. v1 implements the brief's default mild
+# EXPECTED-coverage hedge: optimize coverage over a field WIDENED toward uniform (so the hedge
+# values archetypes the point estimate underweights), strong 1-of diversity, never re-picking or
+# displacing a core commit. CVaR/worst-tail (the aggressive dial) is a documented future option.
+_HEDGE_BLEND: float = 0.4  # 0 = point estimate, 1 = fully uniform; mild widening of the field
+
+
+def _hedge_fill(
+    model: "CoverageModel",
+    core_cards: dict[str, int],
+    *,
+    budget: int,
+    blend: float = _HEDGE_BLEND,
+) -> dict[str, int]:
+    """Fill leftover slots (budget − core) with diversity-preferring insurance picks.
+
+    Greedily covers the field — WIDENED toward uniform by ``blend`` — that the core left
+    uncovered, one copy per card (pure breadth), starting from the core's coverage state and
+    never re-picking a core card. Returns {card: 1} for the hedge picks only (the insurance set);
+    empty when the core already filled the budget or nothing positive remains.
+    """
+    slots = budget - sum(core_cards.values())
+    if slots <= 0:
+        return {}
+    pos = {e: w for e, w in model.element_weight.items() if w > 0.0}
+    if not pos:
+        return {}
+    # Widened weights: blend each element toward the uniform mean (hedge the field-share estimate).
+    uniform = sum(pos.values()) / len(pos)
+    wide = {e: (1.0 - blend) * w + blend * uniform for e, w in pos.items()}
+    # Coverage state inherited from the core (so the hedge covers what the core left open).
+    cov: dict[str, int] = {}
+    for c, n in core_cards.items():
+        for e in model.candidate_covers.get(c, frozenset()):
+            cov[e] = cov.get(e, 0) + n
+    insurance: dict[str, int] = {}
+    for _ in range(slots):
+        best_card: str | None = None
+        best_gain = 0.0
+        for card, elems in model.candidate_covers.items():
+            if card in core_cards or card in insurance:
+                continue  # 1-of diversity; never touch a core commit
+            gain = sum(
+                wide[e] * _marginal_g(cov.get(e, 0) + 1) for e in elems if e in wide
+            )
+            if gain > best_gain or (
+                gain == best_gain and gain > 0.0 and (best_card is None or card < best_card)
+            ):
+                best_gain = gain
+                best_card = card
+        if best_card is None or best_gain <= 0.0:
+            break  # no remaining card adds positive widened coverage
+        insurance[best_card] = 1
+        for e in model.candidate_covers[best_card]:
+            cov[e] = cov.get(e, 0) + 1
+    return insurance
+
+
 # ---------------------------------------------------------------------------
 # Heuristic swing constants (NOT empirical — labeled in every package output)
 # ---------------------------------------------------------------------------
@@ -2155,6 +2216,11 @@ def recommend_sideboard(
     # scale (an explicit non-zero redundancy_strength/tau still wins). False → no derivation;
     # with the strengths at their 0.0 defaults this is byte-identical to the forced-15 baseline.
     smart: bool = False,
+    # Hedge mode (epic-sideboard-core-and-hedge-hedge-allocator): "off" (default) | "expected".
+    # When "expected", leftover slots the core left open (τ stopped it short of budget) are
+    # filled with diversity-preferring insurance picks over a uniform-widened field. "off" → no
+    # hedge → byte-identical. (CVaR/worst-tail is a documented future dial.)
+    hedge: str = "off",
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -2543,6 +2609,17 @@ def recommend_sideboard(
     # Choose final cards based on solver
     final_cards = ilp_cards if solver_used == "ilp" else greedy_cards
 
+    # --- Hedge fill (epic-sideboard-core-and-hedge-hedge-allocator, fast-follow) ---
+    # The core above may have stopped short of the budget (τ). When hedge="expected", fill the
+    # leftover slots with diversity-preferring insurance picks over a uniform-widened field.
+    # "off" → no change → byte-identical. natural_budget_count below reflects the CORE size.
+    _core_count = sum(final_cards.values())
+    _insurance: dict[str, int] = {}
+    if hedge == "expected":
+        _insurance = _hedge_fill(model, final_cards, budget=budget)
+        for _c, _n in _insurance.items():
+            final_cards[_c] = final_cards.get(_c, 0) + _n
+
     # Compute covered weight for the final solution
     cov_weight = _compute_covered_weight(final_cards, model)
 
@@ -2597,8 +2674,9 @@ def recommend_sideboard(
     _natural_budget_count: int | None = None
     _marginal_curve: tuple[tuple[int, float], ...] = ()
     _uncovered_tail: tuple[tuple[str, float], ...] = ()
-    if redundancy_strength > 0.0 or tau > 0.0:
-        _natural_budget_count = sum(final_cards.values())
+    if redundancy_strength > 0.0 or tau > 0.0 or _insurance:
+        # natural_budget_count is the DEDICATED CORE size (excludes hedge/insurance picks).
+        _natural_budget_count = _core_count
         # Cumulative net marginal value after each greedy pick — the budget→coverage curve
         # whose flattening shows the natural-budget knee (the explainable greedy trace).
         _cum = 0.0
@@ -2641,5 +2719,5 @@ def recommend_sideboard(
         natural_budget_count=_natural_budget_count,
         marginal_curve=_marginal_curve,
         uncovered_tail=_uncovered_tail,
-        insurance_cards=frozenset(),  # populated by the hedge-allocator feature (v1: all commit)
+        insurance_cards=frozenset(_insurance),  # hedge picks (commit = the rest)
     )
