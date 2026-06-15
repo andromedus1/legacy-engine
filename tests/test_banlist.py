@@ -33,6 +33,12 @@ class TestAsOfDate:
         assert banlist_as_of(date(2026, 1, 1)).is_banned("Entomb")
         assert banlist_as_of(date(2026, 1, 1)).is_legal("Undercity Informer")  # banned 2026-05-18
 
+    def test_legality_at_exact_ban_date_boundary(self):
+        # Pin the half-open semantics (SPEC: a ban takes effect ON banned_date).
+        # Psychic Frog banned 2024-12-16: legal the day before, illegal on the day itself.
+        assert banlist_as_of(date(2024, 12, 15)).is_legal("Psychic Frog")
+        assert banlist_as_of(date(2024, 12, 16)).is_banned("Psychic Frog")
+
 
 class TestValidateDeck:
     def _legal_60(self):
