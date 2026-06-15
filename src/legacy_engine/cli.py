@@ -2439,6 +2439,28 @@ def _render_list_granular(
     default=None,
     help="Path to the DuckDB database file (defaults to project default).",
 )
+@click.option(
+    "--smart/--no-smart",
+    "smart",
+    default=False,
+    help="Smart sideboard (epic-sideboard-core-and-hedge): stop padding the 15 with redundant "
+         "copies — commit a dedicated core sized to the field (may return <15), surface the "
+         "coverage curve + uncovered field. Off by default (byte-identical to the forced-15 model).",
+)
+@click.option(
+    "--redundancy-strength",
+    type=float,
+    default=0.0,
+    help="Absolute per-copy redundancy penalty strength (power-user override; 0 = none). "
+         "With --smart, a field-scaled default is used unless this is set non-zero.",
+)
+@click.option(
+    "--tau",
+    type=float,
+    default=0.0,
+    help="Absolute natural-budget floor τ (power-user override; 0 = fill the budget). "
+         "With --smart, a field-scaled default is used unless this is set non-zero.",
+)
 @_provenance_opt
 @_window_opts
 @_verbose
@@ -2452,6 +2474,9 @@ def advise_sideboard(
     collection_file: str | None,
     owned_only: bool,
     db: str | None,
+    smart: bool,
+    redundancy_strength: float,
+    tau: float,
     provenance: str | None,
     since: str | None,
     until: str | None,
@@ -2518,6 +2543,9 @@ def advise_sideboard(
             until=plan_until,
             adaptive=use_adaptive,
             collection=cv,
+            smart=smart,
+            redundancy_strength=redundancy_strength,
+            tau=tau,
         )
 
         # Echo adaptive audit line when adaptive mode resolved actual windows.

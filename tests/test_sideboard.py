@@ -5424,3 +5424,65 @@ class TestOutputContract:
         assert isinstance(pkg.uncovered_tail, tuple)
         # Weights are non-negative; the covered graveyard element is not double-counted here.
         assert all(w >= 0.0 for _, w in pkg.uncovered_tail)
+
+
+# ---------------------------------------------------------------------------
+# TestGating — epic-sideboard-core-and-hedge-gating
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import _coverage_scale  # noqa: E402
+from legacy_engine.cli import main as _cli_main  # noqa: E402
+from click.testing import CliRunner as _CliRunner  # noqa: E402
+
+
+class TestGating:
+    """Smart-mode wires the core+hedge behavior to the CLI and calibrates redundancy/τ to the
+    field's coverage scale (so absolute constants tuned on unit models don't explode on real
+    fields). Off by default → byte-identical."""
+
+    def test_coverage_scale_is_best_first_pick(self):
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={"Top": _minimal_hoser("Top", frozenset({"t1"})),
+                            "Alt": _minimal_hoser("Alt", frozenset({"t2"}))},
+        )
+        # best first pick = 1.0 (Top's element weight) × _marginal_g(1)=0.5
+        assert _coverage_scale(model) == pytest.approx(1.0 * _marginal_g(1))
+
+    def test_coverage_scale_empty_model_is_zero(self):
+        assert _coverage_scale(_make_model({}, {}, {})) == 0.0
+
+    def _pkg(self, **kw):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            return recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), **kw,
+            )
+        finally:
+            con.close()
+
+    def test_smart_off_is_baseline(self):
+        pkg = self._pkg(smart=False)
+        assert pkg.natural_budget_count is None  # contract inactive → byte-identical render
+
+    def test_smart_on_activates_contract_without_exploding(self):
+        # Smart derives field-scaled redundancy+τ → the contract activates (natural_budget_count
+        # set) and the package is a sane non-empty subset (NOT 1-of-nothing from over-strong
+        # absolute constants).
+        pkg = self._pkg(smart=True)
+        assert pkg.natural_budget_count is not None
+        assert 1 <= sum(pkg.cards.values()) <= pkg.budget
+
+    def test_explicit_tau_overrides_smart_scaling(self):
+        # An explicit (huge) absolute τ must win over the smart-scaled default → nothing clears
+        # it → empty/near-empty package. Proves power-user override precedence.
+        pkg = self._pkg(smart=True, tau=10.0)
+        assert sum(pkg.cards.values()) == 0
+
+    def test_cli_exposes_smart_flag(self):
+        result = _CliRunner().invoke(_cli_main, ["advise", "sideboard", "--help"])
+        assert result.exit_code == 0
+        for opt in ("--smart", "--redundancy-strength", "--tau"):
+            assert opt in result.output
