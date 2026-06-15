@@ -2171,6 +2171,18 @@ def advise() -> None:
     help="RNG seed for deterministic MC output.",
 )
 @click.option(
+    "--list-granular",
+    "list_granular",
+    is_flag=True,
+    default=False,
+    help=(
+        "[EXPERIMENTAL] Show a list-granular S_granular score alongside archetype S. "
+        "Nudges per-matchup win-rates by the deck's card composition vs the archetype baseline "
+        "(presence-correlational heuristic — NOT causal precision). "
+        "Caveat is always shown. Default OFF; archetype S is byte-identical when absent."
+    ),
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -2187,6 +2199,7 @@ def advise_positioning(
     candidates_file: str | None,
     reserved: int,
     seed: int | None,
+    list_granular: bool,
     db: str | None,
     provenance: str | None,
     since: str | None,
@@ -2283,8 +2296,94 @@ def advise_positioning(
                 click.echo(f"  Imputed opponents ({len(pos.imputed)}): {', '.join(sorted(pos.imputed))}")
             for w in pos.warnings:
                 click.echo(f"  [warn] {w}")
+
+            # ── List-granular overlay (OPT-IN via --list-granular) ───────────
+            # Default OFF: this block is completely skipped when the flag is absent,
+            # keeping the output byte-identical to the pre-flag baseline.
+            if list_granular:
+                _render_list_granular(
+                    con, mainboard, matrix, field, resolved_archetype, seed=seed,
+                    provenance=provenance, field_since=inputs.field_since, field_until=inputs.field_until,
+                )
     finally:
         con.close()
+
+
+def _render_list_granular(
+    con,
+    mainboard: dict[str, int],
+    matrix,
+    field,
+    deck_archetype: str,
+    *,
+    seed: int | None,
+    provenance: str | None,
+    field_since: str | None,
+    field_until: str | None,
+) -> None:
+    """Compute and render the list-granular S_granular overlay.
+
+    Called ONLY when ``--list-granular`` is set.  The default ``advise positioning``
+    path is completely unaffected (byte-identical) when this function is not called.
+
+    Live-plumbing: resolves ``CardWinRates`` from the LIVE corpus using the SAME
+    window the positioning path uses (``field_since``/``field_until``) so the card-
+    lift signals are consistent with the matchup matrix.  Filters lands from
+    ``mainboard`` before passing to ``positioning_score_granular`` (lands carry no
+    matchup lift and would dilute the signal).
+    """
+    from legacy_engine.advisory.positioning import (
+        GRANULAR_CAVEAT,
+        filter_nonland_cards,
+        positioning_score_granular,
+    )
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.ingestion.store import fetch_card
+
+    # ── Resolve CardWinRates from the live corpus ───────────────────────────
+    # Honor the same window as the positioning path (field_since/field_until);
+    # pass provenance through for consistency with the matchup matrix.
+    card_win_rates = compute_card_winrates(
+        con,
+        provenance=provenance,
+        since=field_since,
+        until=field_until,
+    )
+
+    # ── Filter lands out of mainboard ───────────────────────────────────────
+    # Lands carry no meaningful matchup lift signal; including them would dilute
+    # the composition signal by increasing the denominator without contributing lift.
+    # Unknown cards (not in DB) are kept (conservative: unknown ≠ definitely land).
+    def _is_land(name: str) -> bool:
+        row = fetch_card(con, name)
+        if row is None:
+            return False
+        return bool(row.get("is_land", False))
+
+    nonland_main = filter_nonland_cards(mainboard, _is_land)
+
+    # ── Compute granular positioning ─────────────────────────────────────────
+    gr = positioning_score_granular(
+        matrix, field, deck_archetype, nonland_main, card_win_rates,
+        seed=seed,
+    )
+
+    # ── Render (caveat always shown — honesty contract) ──────────────────────
+    # The audit line uses the `//` convention so it's clearly metadata, not a stat.
+    click.echo("")
+    click.echo(f"// {GRANULAR_CAVEAT}")
+    click.echo(f"  S_granular (list-granular, experimental): {gr.s_granular:.3f}")
+    click.echo(f"  S (archetype-level, baseline):            {gr.base.s_mean:.3f}")
+    delta = gr.s_granular - gr.base.s_mean
+    sign = "+" if delta >= 0 else ""
+    click.echo(f"  delta (S_granular − S):                  {sign}{delta:.3f}")
+    n_nonland = sum(nonland_main.values())
+    n_total = sum(mainboard.values())
+    n_lands = n_total - n_nonland
+    click.echo(
+        f"  Deck composition: {n_nonland} nonland cards used for lift signal"
+        + (f" ({n_lands} land(s) excluded)" if n_lands > 0 else "")
+    )
 
 
 @advise.command("sideboard")
