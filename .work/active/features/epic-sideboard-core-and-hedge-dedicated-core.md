@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-dedicated-core
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: [epic-sideboard-core-and-hedge-concave-value]
@@ -49,3 +49,13 @@ Does NOT cover how leftover slots get used (hedge feature) or the output renderi
 - `src/legacy_engine/advisory/sideboard.py` — `recommend_sideboard` solve path.
 - `src/legacy_engine/confidence.py` — `tier_for_sample` for the τ default.
 - Patterns: [[objective-search-split]], [[confidence-metadata]].
+
+## Design + implementation (2026-06-15)
+**Architectural choice**: τ is a **per-slot opportunity cost** subtracted uniformly per picked card, composing cleanly with concave-value's per-copy redundancy penalty. A slot is worth filling iff its net marginal (coverage − redundancy penalty) > τ; the natural-budget knee is where that fails. This mirrors the redundancy-penalty shape and keeps greedy and ILP consistent:
+- greedy (`_greedy_solve`): stop when `best_gain <= tau` (was `== 0.0`; τ=0 → identical since gains are ≥0 by the argmax floor).
+- ILP (`_ilp_solve`): objective subtracts `τ·Σ_c x_c` (only when τ>0) — each slot costs τ, so the optimum stops filling at the knee, returning <budget.
+- `recommend_sideboard` threads `tau: float = 0.0` to both. Default 0.0 → byte-identical forced-budget baseline.
+
+**Files**: `src/legacy_engine/advisory/sideboard.py` (`_greedy_solve`, `_ilp_solve`, `recommend_sideboard` + module docstring already notes <15). **Tests**: `tests/test_sideboard.py::TestNaturalBudgetTau` (5 — greedy fills at τ=0 / stops at τ=0.15 to exactly 2 dedicated copies; ILP same; ILP τ=0 identical; recommend_sideboard τ>0 returns ≤ the τ=0 count).
+
+**Review (self, focused — lower-risk than the deep-reviewed ILP z-vars)**: τ is a constant per-slot coefficient (LP-trivial), composes additively with the penalty, preserves submodularity (per-slot cost doesn't change marginal monotonicity), and is provably no-op at τ=0. Gated-additive verified: existing sideboard suite 258 green byte-identical; full suite 2225 green; ruff clean. The <15-return surfacing/labels are owned by output-contract (next). No blockers.
