@@ -1018,25 +1018,41 @@ class TestTuneDeckNoSignalFallback:
         if result.positioning_s is not None:
             assert isinstance(result.positioning_s, float)
 
-    def test_positioning_s_none_at_zero_coverage(self, con, gy_field):
+    def test_positioning_s_none_at_zero_coverage(self, make_rounds_corpus):
         """Fix 4: TunedDeck.positioning_s must be None (not NaN) when s_computable=False.
 
-        Zero coverage occurs when the archetype has no measured (n≥30) opponent cells.
-        Before this fix, tune_deck assigned pos.s_mean directly — NaN when not computable.
-        After the fix, the guard 'pos.s_mean if pos.s_computable else None' prevents NaN.
+        Exercises the `pos.s_mean if pos.s_computable else None` guard *specifically*.
+        The corpus has Control vs Combo at n=30, so "Control" IS in the matrix and
+        tune_deck passes the `archetype in matrix.archetypes` branch and actually calls
+        positioning_score. But the field contains only archetypes Control has NO measured
+        cell against → data_coverage 0 → s_computable=False with a NaN s_mean. The guard
+        must convert that NaN to None rather than leak it into the serialized TunedDeck.
+
+        (The earlier version scored an archetype absent from the matrix, which took the
+        early no-match branch and never reached the guard.)
         """
         import math
-        # Use an archetype that is in the DB but has zero matchup coverage (no rounds).
-        # "TuneDelver" archetype was labeled in the corpus fixture but the no-signal
-        # path here uses an archetype that is NOT in the matrix archetypes set.
-        # Simplest: use an archetype not present in the matrix at all → positioning_s=None.
-        maindeck = self._starting_maindeck()
-        result = tune_deck(con, "NonexistentArchNoMatch", maindeck, {}, field=gy_field)
-        # Either None (not in matrix) or a non-NaN float (has coverage).
-        if result.positioning_s is not None:
-            assert not math.isnan(result.positioning_s), (
-                "positioning_s must never be NaN — use None when not computable"
-            )
+
+        from legacy_engine.advisory.field import build_custom_field
+        from legacy_engine.advisory.positioning import positioning_score
+        from legacy_engine.analytics.matchup import build_matrix
+
+        con, _ = make_rounds_corpus(n_repeats=15)  # Control vs Combo, n=30 → both in matrix
+        try:
+            # A field of archetypes Control has no measured matchup against → zero coverage.
+            field = build_custom_field({"Reanimator": 0.80, "Burn": 0.20})
+
+            # Precondition: Control is a real matrix archetype, but uncomputable vs this field.
+            matrix = build_matrix(con)
+            assert "Control" in matrix.archetypes, "guard only fires when archetype IS in the matrix"
+            pos = positioning_score(matrix, field, "Control", seed=42)
+            assert pos.s_computable is False, "field with no covered matchups must be uncomputable"
+            assert math.isnan(pos.s_mean), "s_mean is NaN when not computable — the guard's whole point"
+
+            result = tune_deck(con, "Control", self._starting_maindeck(), {}, field=field)
+            assert result.positioning_s is None  # guard converted NaN → None
+        finally:
+            con.close()
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,6 @@ component's own provenance into the audit trail.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 
 import duckdb
@@ -28,19 +27,15 @@ log = logging.getLogger(__name__)
 # Unit 1 — Deck/field input plumbing
 # ---------------------------------------------------------------------------
 
-# _COUNT_RE kept for any other callers in this file.
-_COUNT_RE = re.compile(r"^(\d+)[xX]?\s+(.+)$")
-
 
 def _parse_decklist(text: str) -> tuple[dict[str, int], dict[str, int]]:
     """Parse a plain-text decklist into (mainboard, sideboard).
 
     Thin wrapper around ``models.decklist.parse_decklist`` (the canonical
     implementation, promoted there so ``collection/`` can import it without a
-    sideways ``collection → advisory`` dependency).  Error messages previously
-    said ``_parse_decklist:``; the promoted function says ``parse_decklist:``
-    — callers catching ``ValueError`` should match on the exception type, not
-    the prefix string.
+    sideways ``collection → advisory`` dependency).  Callers catching the
+    ``ValueError`` it raises should match on the exception type, not on any
+    message prefix.
 
     Lines ``<count> <name>`` or ``<count>x <name>``; a line equal to
     ``Sideboard`` (case-insensitive) or a blank line after main cards starts

@@ -545,19 +545,21 @@ def spec_positioning(
 
     ``ranking`` is a ``DeckRanking`` from ``advisory.positioning.rank_decks``.
     The subject deck is highlighted via a Vega-Lite condition on ``datum.deck == subject``.
-    Low-coverage decks are rendered at reduced opacity.
+    Coverage-caveated decks (S imputation-dominated) are rendered at reduced opacity —
+    the same threshold that earns the ``S*`` caveat label in the CLI, so the visual cue
+    is threshold-consistent.
 
     Visual semantics:
     - y = deck (sorted best→worst by s_quantile)
     - x = s_quantile (quantitative)
     - bar color condition: subject = #D55E00 (orange-red), others = #56B4E9 (blue)
-    - opacity condition: low_coverage = 0.35, normal = 0.85
+    - opacity condition: coverage_caveated = 0.35, normal = 0.85
     - CI rule from s_ci low to high, yellow
     - optional u_bar overlay (dotted rule, best-deck lens)
     - tooltip: deck, s_mean, s_quantile, p_best, coverage, tier (from data_coverage)
     """
     q_level = ranking.quantile_level
-    low_coverage = ranking.low_coverage
+    coverage_caveated = ranking.coverage_caveated
 
     vl_rows = []
     for deck in ranking.decks:
@@ -567,7 +569,7 @@ def spec_positioning(
         p_best = ranking.p_best[deck]
         cov = ranking.data_coverage[deck]
         is_subj = deck == subject
-        is_low = deck in low_coverage
+        is_caveated = deck in coverage_caveated
         vl_rows.append({
             "deck": deck,
             "s_quantile": s_q,
@@ -577,11 +579,10 @@ def spec_positioning(
             "p_best": p_best,
             "data_coverage": cov,
             "is_subject": is_subj,
-            "low_coverage": is_low,
+            "coverage_caveated": is_caveated,
             "sort_key": s_q,
         })
 
-    q_pct = f"{q_level:.0%}" if q_level < 1 else "mean"
     subtitle = (
         f"field_source={ranking.field_source}  "
         f"sort=S(q{q_level:.2f})  "
@@ -590,7 +591,7 @@ def spec_positioning(
     spec = _base(
         description=(
             f"Positioning ranking: s_quantile bars for candidate decks. "
-            f"Subject={subject!r} highlighted. Low-coverage decks faded."
+            f"Subject={subject!r} highlighted. Coverage-caveated decks faded."
         ),
         title={"text": "Positioning Ranking", "subtitle": subtitle},
     )
@@ -616,7 +617,7 @@ def spec_positioning(
                 "value": "#56B4E9",
             },
             "opacity": {
-                "condition": {"test": "datum.low_coverage", "value": 0.35},
+                "condition": {"test": "datum.coverage_caveated", "value": 0.35},
                 "value": 0.85,
             },
             "tooltip": [
