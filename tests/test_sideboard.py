@@ -37,6 +37,9 @@ from legacy_engine.advisory.sideboard import (
     _ilp_solve,
     _ILPFailed,
     _marginal_g,
+    _u_redundancy,
+    _redundancy_penalty,
+    _U_REDUNDANCY_DEFAULT,
     _rank_considering_pool,
     compute_deck_anti_synergy_signals,
     is_anti_synergistic,
@@ -5165,3 +5168,104 @@ class TestConsideringPool:
         # considering is additive with a default_factory → always present
         assert hasattr(pkg, "considering")
         assert isinstance(pkg.considering, tuple)
+
+
+# ---------------------------------------------------------------------------
+# TestRedundancyDecay — epic-sideboard-core-and-hedge-concave-value
+# ---------------------------------------------------------------------------
+
+class TestRedundancyDecay:
+    """Per-card-copy redundancy penalty: stops same-card stacking (4/4/4 padding)
+    while staying byte-identical to the baseline when strength=0.0 (gated-additive)."""
+
+    # ---- Unit 1: primitives ----
+
+    def test_penalty_first_copy_is_zero(self):
+        assert _redundancy_penalty(1, strength=0.10) == 0.0
+
+    def test_penalty_monotonic_nondecreasing(self):
+        pens = [_redundancy_penalty(k, strength=0.10) for k in (1, 2, 3, 4)]
+        assert pens == sorted(pens)
+        assert pens[1] > 0.0 and pens[2] > pens[1] and pens[3] > pens[2]
+
+    def test_penalty_strength_zero_is_noop(self):
+        assert all(_redundancy_penalty(k, strength=0.0) == 0.0 for k in range(1, 6))
+
+    def test_u_redundancy_clamps_high_k(self):
+        # k beyond the curve length must not raise and clamps to the last value.
+        assert _u_redundancy(5) == _U_REDUNDANCY_DEFAULT[-1]
+        assert _u_redundancy(99) == _U_REDUNDANCY_DEFAULT[-1]
+        assert _u_redundancy(1) == _U_REDUNDANCY_DEFAULT[0] == 1.0
+
+    # ---- Unit 3: greedy spread ----
+
+    def _dominant_model(self) -> CoverageModel:
+        """One dominant element only 'Top' covers (w=1.0) + a minor element only 'Alt'
+        covers (w=0.1). Decay-off greedy stacks Top to its max_copies; decay-on spreads."""
+        return _make_model(
+            element_weight={"e1": 1.0, "e2": 0.1},
+            candidate_covers={"Top": frozenset({"e1"}), "Alt": frozenset({"e2"})},
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"}), max_copies=4),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"}), max_copies=4),
+            },
+        )
+
+    def test_greedy_stacks_without_decay(self):
+        model = self._dominant_model()
+        cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.0)
+        assert cards.get("Top") == 4, f"decay-off should stack the dominant card: {cards}"
+
+    def test_greedy_spreads_with_decay(self):
+        model = self._dominant_model()
+        cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.10)
+        assert cards.get("Top", 0) < 4, f"decay-on must stop stacking the top card: {cards}"
+        assert cards.get("Alt", 0) >= 1, f"decay-on must spread to the next answer: {cards}"
+
+    # ---- Unit 4: ILP/greedy consistency ----
+
+    def test_ilp_greedy_consistent_with_decay(self):
+        model = self._dominant_model()
+        greedy_cards, _ = _greedy_solve(model, budget=4, redundancy_strength=0.10)
+        try:
+            ilp_cards = _ilp_solve(model, budget=4, redundancy_strength=0.10)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        # Both solvers share one additive-penalty objective → same card multiset.
+        assert ilp_cards == greedy_cards, f"ilp={ilp_cards} greedy={greedy_cards}"
+        assert ilp_cards.get("Top", 0) < 4
+
+    def test_ilp_byte_identical_when_off(self):
+        model = self._dominant_model()
+        try:
+            off = _ilp_solve(model, budget=4, redundancy_strength=0.0)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert off.get("Top") == 4, f"decay-off ILP unchanged: {off}"
+
+    # ---- Integration: recommend_sideboard ----
+
+    def test_recommend_sideboard_decay_reduces_stacking(self):
+        """End-to-end: a field whose only castable answer is one max-4 hoser pads to 4 with
+        decay off; decay-on caps the stack and the package is still valid."""
+        con = _con()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            catalog = {
+                "Surgical Extraction": _minimal_hoser(
+                    "Surgical Extraction", frozenset({"graveyard-reliant"}), max_copies=4,
+                ),
+            }
+            # castable_any so the colorless/empty deck can run it
+            catalog["Surgical Extraction"] = HoserCard(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-reliant"}),
+                colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED, castable_any_color=True,
+            )
+            off = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog,
+                                      redundancy_strength=0.0)
+            on = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog,
+                                     redundancy_strength=0.10)
+        finally:
+            con.close()
+        assert off.cards.get("Surgical Extraction", 0) >= on.cards.get("Surgical Extraction", 0)
+        assert sum(on.cards.values()) <= 15
