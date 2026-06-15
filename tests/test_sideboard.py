@@ -791,6 +791,48 @@ class TestRecommendSideboard:
                 )
         return con
 
+    def _build_bigmana_corpus(self):
+        """Corpus with a ramp/big-mana archetype: decks running ≥4 diagnostic big-mana lands.
+
+        vulnerability_tags resolves card types via the `cards` table, so the lands must be
+        loaded there (else fetch_card returns None and they don't count toward the ramp gate).
+        """
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Cloudpost", type_line="Land", oracle_text="{T}: Add {C} for each Locus you control.",
+                 cmc=0.0, produced_mana=["C"]),
+            Card(name="Eldrazi Temple", type_line="Land", oracle_text="{T}: Add {C}{C}. Spend only to cast Eldrazi.",
+                 cmc=0.0, produced_mana=["C"]),
+        ])
+        import uuid
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "BigMana Open", "2026-05-20", None, "Legacy", "test", "test"])
+        for idx in range(3):
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"player{idx}", "1st", "BigMana"])
+            for card_name, count in [("Cloudpost", 4), ("Eldrazi Temple", 4)]:
+                con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", card_name, count])
+        return con
+
+    def test_ramp_heavy_field_yields_ramp_hoser(self):
+        """E2E: a ramp/big-mana-heavy field surfaces a ramp hoser (e.g. Damping Sphere) in the
+        chosen 15. BigMana's decks run ≥4 diagnostic big-mana lands → 'ramp' vulnerability tag →
+        the coverage model weights the ramp tag → a colorless ramp hoser is castable in any deck."""
+        con = self._build_bigmana_corpus()
+        try:
+            from legacy_engine.advisory.whattoplay import vulnerability_tags
+            assert "ramp" in vulnerability_tags(con, "BigMana"), "BigMana must earn the ramp tag"
+
+            field = _make_field({"BigMana": 1.0})
+            pkg = recommend_sideboard(con, field, {}, reserved=0, solver="greedy")
+        finally:
+            con.close()
+
+        # Damping Sphere is the colorless ramp hoser castable in a deck with no resolved colors.
+        assert "Damping Sphere" in pkg.cards, (
+            f"expected a ramp hoser (Damping Sphere) in the chosen 15; got {dict(pkg.cards)}"
+        )
+
     def test_heuristic_note_always_present(self):
         """SideboardPackage always has a non-empty heuristic_note."""
         con = self._build_gy_corpus()
@@ -4750,6 +4792,83 @@ class TestEmpiricalSideboardSwings:
             "heuristic_note must mention 'curated' or 'heuristic' when no data-informed swings used"
         )
         con.close()
+
+    @staticmethod
+    def _build_swing_contrast_corpus():
+        """Current-regime corpus where a side tech card is presence-correlated with wins.
+
+        Control decks that run the tech card BEAT Combo; Control decks WITHOUT it LOSE to
+        Combo → the (tech, side, Combo) card-value cell carries a positive lift the empirical
+        swing proxy can pick up. Dated 2026-05-19+ so it falls inside the current ban regime,
+        which is the window recommend_sideboard scans by default (adaptive mode). 50 events
+        → n=50 (evolving) for the seeded cell.
+        """
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        for i in range(50):
+            d = f"2026-05-{(i % 13) + 19:02d}"
+            raw = {
+                "Tournament": {"Name": f"Swing {i}", "Date": d,
+                               "Uri": f"https://www.mtgo.com/decklist/swing-{i:03d}", "Formats": "Legacy"},
+                "Decks": [
+                    # Control WITH the side tech beats Combo
+                    {"Player": "alice", "Result": "1st",
+                     "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}],
+                     "Sideboard": [{"Count": 2, "CardName": "Surgical Extraction"}]},
+                    # Control WITHOUT the tech loses to Combo
+                    {"Player": "carol", "Result": "5th",
+                     "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}], "Sideboard": []},
+                    {"Player": "bob", "Result": "3rd",
+                     "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}], "Sideboard": []},
+                    {"Player": "dave", "Result": "4th",
+                     "Mainboard": [{"Count": 4, "CardName": "Dark Ritual"}], "Sideboard": []},
+                ],
+                "Rounds": [
+                    {"Player1": "alice", "Player2": "bob", "Result": "2-0"},   # with-tech beats Combo
+                    {"Player1": "carol", "Player2": "dave", "Result": "0-2"},  # no-tech loses to Combo
+                ],
+                "Standings": [],
+            }
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            con.execute("UPDATE decks SET archetype='Control' WHERE tournament_id=? AND player IN ('alice','carol')", [tid])
+            con.execute("UPDATE decks SET archetype='Combo' WHERE tournament_id=? AND player IN ('bob','dave')", [tid])
+        return con
+
+    def test_package_swing_data_informed_true_with_correlated_tech(self):
+        """POSITIVE path (Step 3e): a side card with a strong presence-correlational lift gets a
+        data-informed swing override → swing_data_informed=True, swing_overrides_count>0, and
+        heuristic_note flips to the data-informed (presence-correlational) note.
+
+        The catalog gives the tech card a deliberately low curated swing (0.05) so the empirical
+        proxy clearly exceeds it; the point under test is that the proxy *replaces* the constant.
+        """
+        con = self._build_swing_contrast_corpus()
+        try:
+            catalog = {
+                "Surgical Extraction": HoserCard(
+                    name="Surgical Extraction",
+                    attacks=frozenset({"graveyard-reliant"}),
+                    colors=frozenset(),
+                    max_copies=2,
+                    swing=0.05,                 # low curated constant → proxy wins
+                    castable_any_color=True,
+                ),
+            }
+            field = _make_field({"Combo": 0.6, "Control": 0.4})
+            # archetype set + no explicit since/until → adaptive mode → swing-override path runs.
+            pkg = recommend_sideboard(
+                con, field, {"Brainstorm": 4}, archetype="Control", solver="greedy", catalog=catalog,
+            )
+        finally:
+            con.close()
+
+        assert pkg.swing_data_informed is True, "a strongly-correlated side card must produce a data-informed swing"
+        assert pkg.swing_overrides_count >= 1, f"expected ≥1 override, got {pkg.swing_overrides_count}"
+        assert "presence-correlational" in pkg.heuristic_note.lower(), (
+            f"data-informed note must label the proxy as presence-correlational; got {pkg.heuristic_note!r}"
+        )
 
     def test_package_swing_data_informed_defaults_false(self):
         """SideboardPackage default: swing_data_informed=False, swing_overrides_count=0.

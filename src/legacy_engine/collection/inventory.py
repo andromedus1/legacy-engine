@@ -21,7 +21,6 @@ def import_inventory(
     text: str,
     *,
     owner: str = LOCAL_OWNER,
-    merge: bool = True,
 ) -> Inventory:
     """Parse a plain-text decklist into an Inventory.
 
@@ -30,13 +29,10 @@ def import_inventory(
     "sideboard" section of a decklist is just a secondary block here — useful
     if someone pastes a full 75 where the 15 live after a blank line).
 
-    ``merge=True`` (default): if the caller supplies an existing inventory via
-    a subsequent call, they should merge the returned inventory into their
-    existing one using ``merge_inventory``.  This function always returns a
-    fresh Inventory built from the text.
-
-    ``merge=False``: the returned Inventory fully *replaces* the existing one
-    (but callers must still call ``save_inventory`` to persist it).
+    Always returns a fresh Inventory built from the text.  The merge-vs-replace
+    decision belongs to the caller: fold the result into an existing inventory
+    with ``merge_inventory``, or substitute it with ``replace_inventory`` (then
+    persist either via ``save_inventory``).
     """
     mainboard, sideboard = parse_decklist(text)
 

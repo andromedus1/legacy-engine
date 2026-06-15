@@ -7,10 +7,16 @@ corpus has ZERO rounds in the current regime — a natural thin-degrade case.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from click.testing import CliRunner
 
-from legacy_engine.advisory.window import WindowResolution, resolve_advisory_window
+from legacy_engine.advisory.window import (
+    WindowResolution,
+    _count_rounds,
+    resolve_advisory_window,
+)
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
 
@@ -56,6 +62,27 @@ class TestResolveAdvisoryWindow:
         con, _ = make_rounds_corpus(n_repeats=2)             # 8 rounds total
         res = resolve_advisory_window(con, since="2026-01-01", until="2026-01-03", thin_floor=500)
         assert res.since is None and res.until is None and res.banner is not None
+        con.close()
+
+    def test_thin_banner_states_count_and_floor(self, make_rounds_corpus):
+        # HONEST-DEGRADE NFR: the banner must carry the NAMED REASON — the actual round
+        # count AND the floor — not merely the word "THIN". A regression dropping either
+        # {n_rounds} or {thin_floor} from the banner must fail here.
+        con, _ = make_rounds_corpus(n_repeats=2)
+        res = resolve_advisory_window(con, since="2026-01-01", until="2026-01-03", thin_floor=500)
+        assert res.banner is not None
+        assert re.search(r"\b\d+ rounds < floor 500\b", res.banner), res.banner
+        con.close()
+
+    def test_exactly_floor_rounds_does_not_degrade(self, make_rounds_corpus):
+        # Degrade is strictly `n_rounds < floor`, so a window with EXACTLY floor rounds
+        # must NOT degrade (boundary pin). Read the in-window count, then set floor == it.
+        con, _ = make_rounds_corpus(n_repeats=2)
+        n = _count_rounds(con, since="2026-01-01", until="2026-01-03", provenance=None)
+        assert n > 0, "window must actually contain rounds for this boundary test"
+        res = resolve_advisory_window(con, since="2026-01-01", until="2026-01-03", thin_floor=n)
+        assert res.banner is None                                   # n == floor → not thin
+        assert res.since == "2026-01-01" and res.until == "2026-01-03"
         con.close()
 
     def test_thin_floor_zero_disables_degrade(self, make_rounds_corpus):

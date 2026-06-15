@@ -2,14 +2,18 @@
 id: feature-web-interface
 kind: feature
 stage: drafting
-tags: [interface, needs-research, hold-for-review]
+tags: [interface, needs-research, hold-for-review, deferred]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-15
 ---
+
+> **DEFERRED 2026-06-15** — parked by decision; not in scope for the current cycle. Revisit by
+> lifting `deferred`/`hold-for-review` and running the research pass below.
+
 
 Build a better way to interact with the engine than the CLI alone — most likely a **website / web
 app**. Today every read (meta, trends, advise, tune, consensus, viz) is a CLI invocation; a hosted
