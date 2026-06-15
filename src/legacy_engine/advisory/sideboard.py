@@ -373,6 +373,31 @@ def _redundancy_penalty(
     return strength * (1.0 - _u_redundancy(k, curve))
 
 
+# --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
+# Field-element coverage marginals scale with (field_share × swing × Δg) — typically
+# ~0.005–0.02 — so an ABSOLUTE redundancy_strength/τ tuned on unit models (weight≈1.0)
+# would be wildly over-strong on a real field (→ 1-of-everything). Smart-mode derives both
+# as FRACTIONS of the model's own coverage scale (the value of the best single first pick),
+# so the defaults are field-scale-invariant. Tunable; the hedge feature may revisit.
+_SMART_REDUNDANCY_FRACTION: float = 0.5   # 2nd copy of even the best card competes; weak cards → 1-of
+_SMART_TAU_FRACTION: float = 0.1          # stop committing when a slot is worth <10% of the best pick
+
+
+def _coverage_scale(model: "CoverageModel") -> float:
+    """Value of the best single first-copy pick: max over candidates of Σ_e weight_e·Δg(1).
+
+    The reference scale smart-mode multiplies its fractions by, so redundancy/τ track the
+    actual field-weight magnitudes rather than absolute constants. 0.0 for an empty model.
+    """
+    best = 0.0
+    m1 = _marginal_g(1)
+    for _card, elems in model.candidate_covers.items():
+        g = sum(model.element_weight.get(e, 0.0) for e in elems) * m1
+        if g > best:
+            best = g
+    return best
+
+
 # ---------------------------------------------------------------------------
 # Heuristic swing constants (NOT empirical — labeled in every package output)
 # ---------------------------------------------------------------------------
@@ -2125,6 +2150,11 @@ def recommend_sideboard(
     # coverage ≤ τ, so the package may be FEWER than 15. Gated-additive: 0.0 → no stop →
     # byte-identical to the forced-15 baseline. The gating feature wires a CLI flag + default.
     tau: float = 0.0,
+    # Smart-mode master switch (epic-sideboard-core-and-hedge-gating): when True, derive
+    # field-scale-invariant defaults for redundancy_strength/tau from the model's coverage
+    # scale (an explicit non-zero redundancy_strength/tau still wins). False → no derivation;
+    # with the strengths at their 0.0 defaults this is byte-identical to the forced-15 baseline.
+    smart: bool = False,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -2478,6 +2508,17 @@ def recommend_sideboard(
             swing_data_informed=_swing_data_informed,
             swing_overrides_count=_swing_overrides_count,
         )
+
+    # --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
+    # Derive field-scale-invariant redundancy_strength/τ from the model's coverage scale.
+    # Explicit non-zero values always win (power users / tests). When smart is off and the
+    # strengths are 0.0 (defaults), this is a no-op → byte-identical forced-15 baseline.
+    if smart:
+        _scale = _coverage_scale(model)
+        if redundancy_strength <= 0.0:
+            redundancy_strength = _SMART_REDUNDANCY_FRACTION * _scale
+        if tau <= 0.0:
+            tau = _SMART_TAU_FRACTION * _scale
 
     # --- Step 5 + 6: Solve and always compute greedy trace ---
     solver_used = "greedy"

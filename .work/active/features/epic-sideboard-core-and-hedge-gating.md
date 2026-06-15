@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-gating
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: [epic-sideboard-core-and-hedge-dedicated-core, epic-sideboard-core-and-hedge-output-contract]
@@ -43,3 +43,12 @@ This feature covers ONLY the core's flag + dials. The hedge feature adds its own
   (`advise sideboard` flags).
 - Patterns: [[gated-additive-augmentation]] (the defining shape — no-op path byte-identical to
   baseline, existing tests stay green untouched), [[cli-nested-groups]].
+
+## Design + implementation (2026-06-15)
+**CLI flags** on `advise sideboard`: `--smart/--no-smart` (default off — the opt-in master switch), plus power-user absolute overrides `--redundancy-strength FLOAT` and `--tau FLOAT`. Off + zero strengths → byte-identical forced-15 baseline.
+
+**Key calibration fix** (the real correctness work): absolute redundancy/τ tuned on unit models (weight≈1.0) would be wildly over-strong on a real field (element marginals ~0.005–0.02 → 1-of-everything). Smart-mode derives both as FRACTIONS of the model's own coverage scale via `_coverage_scale(model)` (= the best single first-pick value, `max_c Σ_e weight_e·Δg(1)`): `_SMART_REDUNDANCY_FRACTION=0.5` (2nd copy of even the best card competes; weak cards → 1-of), `_SMART_TAU_FRACTION=0.1` (stop when a slot is worth <10% of the best pick). Field-scale-invariant. Explicit non-zero `--redundancy-strength`/`--tau` always win (power-user override).
+
+**Files**: `src/legacy_engine/advisory/sideboard.py` (`_coverage_scale` + `_SMART_*` constants + `smart` param + the calibration block before solve), `src/legacy_engine/cli.py` (3 flags + threaded into the `recommend_sideboard` call). **Tests**: `tests/test_sideboard.py::TestGating` (6 — `_coverage_scale` value + empty; smart-off baseline; smart-on activates the contract without exploding to a sane 1..budget subset; explicit τ override wins; CLI exposes the flags).
+
+**Review (self, focused)**: smart-scaling is a pure pre-solve derivation of the already-reviewed strength/τ params; explicit values bypass it; off → no-op. Gated-additive verified: sideboard suite 269 green byte-identical with --smart off, full suite 2236, no new ruff errors (still 16 pre-existing cli.py F821 forward-ref hints). No blockers. The `--smart` default stays OFF ("flip default once trusted" is a deliberate later step — the user can test-drive via `advise sideboard --smart`).
