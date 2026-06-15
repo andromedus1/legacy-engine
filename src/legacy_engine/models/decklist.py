@@ -23,7 +23,9 @@ def parse_decklist(text: str) -> tuple[dict[str, int], dict[str, int]]:
 
     Lines ``<count> <name>`` or ``<count>x <name>``; a line equal to
     ``Sideboard`` (case-insensitive) or a blank line after main cards starts
-    the sideboard.  Ignores ``#``-prefixed comments and leading blank lines.
+    the sideboard.  Ignores ``#``- and ``//``-prefixed comments and leading
+    blank lines (so ``generate consensus`` / ``export deck text`` output can
+    be piped directly into ``generate tune --deck`` / ``advise``).
     Raises ``ValueError`` on a malformed line or an empty maindeck.
     """
     mainboard: dict[str, int] = {}
@@ -34,8 +36,8 @@ def parse_decklist(text: str) -> tuple[dict[str, int], dict[str, int]]:
     for raw_line in text.splitlines():
         line = raw_line.strip()
 
-        # Skip comments
-        if line.startswith("#"):
+        # Skip comments (# and // prefix)
+        if line.startswith("#") or line.startswith("//"):
             continue
 
         # Blank line: after we've seen at least one main card, switch to side
