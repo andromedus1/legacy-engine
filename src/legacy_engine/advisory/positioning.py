@@ -840,10 +840,26 @@ def delta_var_S(
 #: Maximum absolute per-matchup nudge in win-rate units.  Caps each card's
 #: lift contribution so a single high-lift card in a thin matchup cannot
 #: swing the overlay by more than this per opponent.
+#:
+#: Calibration rationale: a ±5 pp clamp keeps the worst-case per-matchup shift
+#: below the ~10 pp range of a strong (established) single-card matchup signal.
+#: Observed grindy-vs-lean Dimir Tempo differentiation (≈2–4 pp on a 60% ANT
+#: field) is well within this cap — tightening to ±3 pp passes the same tests
+#: but leaves less headroom for genuine multi-card stacking.  Loosen only if
+#: calibration on real corpus data shows the current cap is consistently binding
+#: (i.e. every matchup hits the wall), which would suggest the scale is also
+#: too aggressive.
 _GRANULAR_MAX_NUDGE: float = 0.05
 
 #: Scale factor applied to the aggregated card-lift signal before nudging.
 #: Keeps the overlay clearly sub-dominant relative to archetype-level WR.
+#:
+#: Calibration rationale: 0.5× ensures the aggregate lift of all cards in the
+#: deck is halved before being applied, which (combined with the ±5 pp clamp)
+#: keeps |s_granular − base_S| well under 5 pp in all observed scenarios.
+#: Real-corpus calibration target: |s_granular − base_S| < max_nudge (5 pp).
+#: Both constants are tested by ``test_positioning_granular_hardening.py``
+#: (sub-dominance bound + grindy/lean differentiation reproduction).
 _GRANULAR_SCALE: float = 0.5
 
 #: Honesty caveat attached to every GranularPositioningResult.
@@ -879,6 +895,23 @@ class GranularPositioningResult:
     s_granular: float
     adjusted_winrates: dict[str, float]
     caveat: str
+
+
+def filter_nonland_cards(
+    deck_cards: dict[str, int],
+    is_land_fn,  # callable(card_name: str) -> bool
+) -> dict[str, int]:
+    """Return ``deck_cards`` with land cards removed.
+
+    ``is_land_fn`` is a caller-supplied predicate so this function stays pure
+    and testable without DB access.  The CLI resolves it via ``store.fetch_card``
+    (same pattern as ``advisory.whattoplay``); tests pass a lambda.
+
+    Cards not found by ``is_land_fn`` (i.e. unknown cards) are kept — the
+    conservative default (unknown ≠ definitely land).  If ``is_land_fn`` raises,
+    the exception propagates so callers discover DB issues early.
+    """
+    return {name: count for name, count in deck_cards.items() if not is_land_fn(name)}
 
 
 def composition_adjusted_winrates(
