@@ -519,7 +519,7 @@ def report_meta(
     """Metagame share (raw / top-cut / win-rate-weighted; online vs paper)."""
     _setup_logging(verbose)
     from legacy_engine.advisory.window import resolve_advisory_window
-    from legacy_engine.analytics.metashare import MetaShareReport, compute_all, compute_metashare
+    from legacy_engine.analytics.metashare import compute_metashare
     from legacy_engine.ingestion import store
 
     # --venues and --provenance (non-default) are mutually exclusive.
@@ -1443,7 +1443,7 @@ def report_cards(
     """
     _setup_logging(verbose)
 
-    from legacy_engine.analytics.card_value import CardValue, card_value_marginal, card_value_matchup, card_values_vs
+    from legacy_engine.analytics.card_value import card_value_marginal, card_values_vs
     from legacy_engine.analytics.match_results import compute_card_winrates
     from legacy_engine.ingestion import store
 
@@ -1805,7 +1805,7 @@ def report_prices(name: str, db: str | None, verbose: bool) -> None:
     """
     _setup_logging(verbose)
     from legacy_engine.ingestion import store
-    from legacy_engine.ingestion.prices import deck_cost, price_quote, printing_prices
+    from legacy_engine.ingestion.prices import price_quote, printing_prices
     from legacy_engine.ingestion.scryfall import ScryfallClient, normalize_name
 
     con = store.connect(db) if db else store.connect()
@@ -1857,14 +1857,8 @@ def report_prices(name: str, db: str | None, verbose: bool) -> None:
 @report.command("new-cards")
 @click.option("--limit", type=int, default=50, show_default=True,
               help="Maximum number of new cards to display.")
-@click.option(
-    "--db",
-    type=click.Path(exists=True, dir_okay=False),
-    default=None,
-    help="Path to the DuckDB database file (defaults to project default).",
-)
 @_verbose
-def report_new_cards(limit: int, db: str | None, verbose: bool) -> None:
+def report_new_cards(limit: int, verbose: bool) -> None:
     """Show cards added in the most recent diff-ingest run.
 
     Reads the persisted ingest diff written by `refresh cards` to list the
@@ -2696,7 +2690,6 @@ def advise_whattoplay(
 
         # Build a minimal report shell for the renderer
         from legacy_engine.advisory.sideboard import SideboardPackage
-        from legacy_engine.advisory.sideboard import PickTrace
         dummy_sb = SideboardPackage(
             cards={}, trace=[], covered_weight=0.0, budget=15, reserved=0,
             solver_used="none", field_source=field.field_source,
@@ -3091,7 +3084,7 @@ def advise_refresh(
     """
     _setup_logging(verbose)
 
-    from legacy_engine.advisory.refresh import RefreshResult, run_refresh, render_refresh_result
+    from legacy_engine.advisory.refresh import run_refresh, render_refresh_result
     from legacy_engine.advisory.report import _classify_deck
     from legacy_engine.advisory.window import resolve_advisory_window
     from legacy_engine.analytics.venue import resolve_venues
@@ -5226,27 +5219,18 @@ def deck_save(
 @deck.command("load")
 @click.option("--name", "deck_name", required=True, help="Deck name.")
 @click.option("--version", "version_num", type=int, default=None, help="Version number (default: current).")
-@click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["moxfield", "archidekt", "mtggoldfish", "text", "dec"], case_sensitive=False),
-    default="moxfield",
-    show_default=True,
-    help="Export format.",
-)
 @click.option("--out", type=click.Path(dir_okay=False), default=None, help="Write to file instead of stdout.")
 @_verbose
 def deck_load(
     deck_name: str,
     version_num: int | None,
-    fmt: str,
     out: str | None,
     verbose: bool,
 ) -> None:
     """Print a saved deck as a plain-text decklist.
 
     Example: legacy-engine deck load --name "my Dimir Tempo"
-    Example: legacy-engine deck load --name "my Dimir Tempo" --version 1 --format dec
+    Example: legacy-engine deck load --name "my Dimir Tempo" --version 1
     """
     _setup_logging(verbose)
     from pathlib import Path

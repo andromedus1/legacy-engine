@@ -68,7 +68,7 @@ finally:
 ## Canonical Examples
 
 ```python
-# advise_positioning  (cli.py:1970)
+# advise_positioning  (cli.py:2191)
 con = store.connect(db) if db else store.connect()
 try:
     win = resolve_advisory_window(
@@ -82,7 +82,7 @@ try:
 finally:
     con.close()
 
-# advise_refresh  (cli.py:2586) — simpler form without build_advisory_inputs
+# advise_refresh  (cli.py:3053) — simpler form without build_advisory_inputs
 con = store.connect(db) if db else store.connect()
 try:
     _echo_data_freshness(con)

@@ -58,6 +58,37 @@ class TestDeriveProvenance:
         assert derive_provenance(source, uri) == expected
 
 
+class TestBadDeckResilience:
+    """Resilience NFR: one malformed deck is dropped (logged), not fatal to the event."""
+
+    _MALFORMED_DECK = {"Player": "mallory", "Mainboard": [{"Count": "not-an-int", "CardName": "Foo"}]}
+
+    def test_one_bad_deck_does_not_drop_the_event(self, caplog):
+        raw = {
+            "Tournament": {"Name": "Legacy Challenge", "Date": "2026-05-25", "Formats": "Legacy"},
+            "Decks": [
+                {"Player": "alice", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}]},
+                self._MALFORMED_DECK,
+                {"Player": "bob", "Mainboard": [{"Count": 4, "CardName": "Ponder"}]},
+            ],
+            "Rounds": [],
+            "Standings": [],
+        }
+        with caplog.at_level("WARNING"):
+            result = parse_cache_item(raw, "MTGO")
+        assert [d.player for d in result.decks] == ["alice", "bob"]  # bad deck dropped, event kept
+        assert "malformed deck" in caplog.text.lower()  # logged, not silent
+
+    def test_all_good_decks_kept(self):
+        raw = {
+            "Tournament": {"Name": "x", "Date": "2026-05-25", "Formats": "Legacy"},
+            "Decks": [{"Player": "a", "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}]}],
+            "Rounds": [],
+            "Standings": [],
+        }
+        assert len(parse_cache_item(raw, "MTGO").decks) == 1
+
+
 class TestParseRounds:
     def test_flat_matches(self):
         rounds = parse_rounds([{"Player1": "a", "Player2": "b", "Result": "2-1"}])
