@@ -463,7 +463,6 @@ class TestRankAcquisitions:
             field_adoption={"Dismember": 0.3},
             owned=cv,
             price_fn=price_fn,
-            overprice_factor=3.0,
         )
         # Fully owned → not in buy list.
         assert len(plan.buy_list) == 0

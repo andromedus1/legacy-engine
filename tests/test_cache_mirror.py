@@ -54,6 +54,32 @@ class TestIngestCache:
         con.close()
 
 
+class TestIngestResilience:
+    """Resilience NFR: one bad event is logged and skipped; the batch continues."""
+
+    def test_one_bad_event_does_not_abort_the_batch(self, tmp_path, caplog):
+        root = tmp_path / "Tournaments"
+        (root / "MTGO" / "2026" / "05" / "24").mkdir(parents=True)
+        (root / "MTGmelee" / "2026" / "05" / "24").mkdir(parents=True)
+        (root / "MTGO" / "2026" / "05" / "24" / "good1.json").write_text(json.dumps(_CHALLENGE))
+        # Valid JSON, Formats=Legacy (so discovery includes it), but a malformed Standing makes
+        # parse_cache_item raise at the EVENT level (standings aren't per-row tolerated).
+        bad = {
+            "Tournament": {"Name": "Bad", "Date": "2026-05-24", "Formats": "Legacy"},
+            "Decks": [{"Player": "x", "Mainboard": [{"Count": 4, "CardName": "Foo"}]}],
+            "Rounds": [], "Standings": [{"Rank": "not-an-int", "Player": "x"}],
+        }
+        (root / "MTGO" / "2026" / "05" / "24" / "bad.json").write_text(json.dumps(bad))
+        (root / "MTGmelee" / "2026" / "05" / "24" / "good2.json").write_text(json.dumps(_PAPER))
+
+        con = store.connect(":memory:")
+        with caplog.at_level("WARNING"):
+            n = cache.ingest_cache(con, tmp_path)
+        assert n == 2  # two good events load; the bad one is skipped, batch continues
+        assert "skipping bad event" in caplog.text.lower()
+        con.close()
+
+
 class TestMirrorCache:
     def test_clones_when_absent(self, tmp_path):
         calls = []

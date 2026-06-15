@@ -1,7 +1,7 @@
 ---
 id: gate-tests-ingestion-bad-deck-resilience
 kind: story
-stage: implementing
+stage: done
 tags: [testing, ingestion, bug]
 parent: null
 depends_on: []

@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-overprice-factor-dead-param
 kind: story
-stage: drafting
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []
