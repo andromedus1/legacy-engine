@@ -2538,6 +2538,25 @@ def advise_sideboard(
         click.echo(f"  Budget: {pkg.budget}  |  Reserved: {pkg.reserved}")
         click.echo(f"  Covered weight: {pkg.covered_weight:.4f}")
 
+        # --- Output contract (epic-sideboard-core-and-hedge-output-contract) ---
+        # Honest-degrade core+hedge surface: the natural dedicated budget, the marginal-coverage
+        # curve (its flattening = the knee), and the uncovered-field tail. Printed only when the
+        # core behavior is active; the forced-budget baseline (natural_budget_count is None)
+        # renders byte-identically to before.
+        if pkg.natural_budget_count is not None:
+            click.echo(
+                f"  // natural budget: {pkg.natural_budget_count}/{pkg.budget} dedicated "
+                f"(remaining slots left flexible, not padded)"
+            )
+            if pkg.marginal_curve:
+                curve_str = "  ".join(f"{n}:{w:.3f}" for n, w in pkg.marginal_curve)
+                click.echo(f"  // coverage curve (cards:cumulative value): {curve_str}")
+            if pkg.uncovered_tail:
+                tail_str = ", ".join(f"{e} ({w:.3f})" for e, w in pkg.uncovered_tail)
+                click.echo(f"  // uncovered field (top, by weight): {tail_str}")
+            if pkg.insurance_cards:
+                click.echo(f"  // insurance (hedge) slots: {', '.join(sorted(pkg.insurance_cards))}")
+
         # Render cards (with owned annotations when collection is wired).
         display_cards = pkg.cards
         suppressed_count = 0

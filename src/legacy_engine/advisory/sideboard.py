@@ -2056,6 +2056,22 @@ class SideboardPackage:
     #   Empty tuple when there are no remaining candidates (degenerate / budget-filled model).
     #   Gated-additive: existing callers that don't use this field see no change in cards/trace.
     considering: "tuple[ConsideringCard, ...]" = dc_field(default_factory=tuple)
+    # --- Additive fields (epic-sideboard-core-and-hedge-output-contract) ---
+    # Honest-degrade output for the core+hedge solver. All None/empty in the forced-budget
+    # baseline (redundancy_strength==0 AND tau==0) → byte-identical rendering for every
+    # existing caller. Populated only when the new behavior is active.
+    # natural_budget_count: total copies the dedicated core committed (the "natural budget",
+    #   e.g. 7 of 15), or None in the forced-budget baseline.
+    # marginal_curve: (cumulative copies, cumulative covered weight) after each greedy pick —
+    #   the budget→coverage curve that exposes the knee.
+    # uncovered_tail: (element_id, weight) for the highest-weight field elements the package
+    #   does NOT answer, sorted desc — the honest "what you're leaving open".
+    # insurance_cards: subset of ``cards`` the hedge added in flex slots (empty until the
+    #   hedge feature lands; every other card is "commit" / dedicated core).
+    natural_budget_count: int | None = None
+    marginal_curve: tuple[tuple[int, float], ...] = dc_field(default_factory=tuple)
+    uncovered_tail: tuple[tuple[str, float], ...] = dc_field(default_factory=tuple)
+    insurance_cards: frozenset[str] = dc_field(default_factory=frozenset)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -2533,6 +2549,34 @@ def recommend_sideboard(
     from legacy_engine.advisory.collection import annotate_owned
     owned_annotations = annotate_owned(final_cards, collection)  # type: ignore[arg-type]
 
+    # --- Step 6d: Output contract (epic-sideboard-core-and-hedge-output-contract) ---
+    # Honest-degrade structured output. Populated ONLY when the core+hedge behavior is active
+    # (redundancy_strength>0 or tau>0); the forced-budget baseline leaves these None/empty →
+    # byte-identical to every existing caller's package + rendering.
+    _natural_budget_count: int | None = None
+    _marginal_curve: tuple[tuple[int, float], ...] = ()
+    _uncovered_tail: tuple[tuple[str, float], ...] = ()
+    if redundancy_strength > 0.0 or tau > 0.0:
+        _natural_budget_count = sum(final_cards.values())
+        # Cumulative net marginal value after each greedy pick — the budget→coverage curve
+        # whose flattening shows the natural-budget knee (the explainable greedy trace).
+        _cum = 0.0
+        _curve: list[tuple[int, float]] = []
+        for _i, _pick in enumerate(greedy_trace, start=1):
+            _cum += _pick.marginal_gain
+            _curve.append((_i, round(_cum, 4)))
+        _marginal_curve = tuple(_curve)
+        # Field elements the final solution does NOT answer, by weight (top 8) — the honest
+        # "what you're leaving open" tail.
+        _covered_elems: set[str] = set()
+        for _c in final_cards:
+            _covered_elems |= model.candidate_covers.get(_c, frozenset())
+        _tail = sorted(
+            ((e, w) for e, w in model.element_weight.items() if w > 0.0 and e not in _covered_elems),
+            key=lambda kv: kv[1], reverse=True,
+        )
+        _uncovered_tail = tuple((e, round(w, 4)) for e, w in _tail[:8])
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -2553,4 +2597,8 @@ def recommend_sideboard(
         swing_data_informed=_swing_data_informed,
         swing_overrides_count=_swing_overrides_count,
         considering=tuple(considering_pool),
+        natural_budget_count=_natural_budget_count,
+        marginal_curve=_marginal_curve,
+        uncovered_tail=_uncovered_tail,
+        insurance_cards=frozenset(),  # populated by the hedge-allocator feature (v1: all commit)
     )
