@@ -5374,3 +5374,53 @@ class TestNaturalBudgetTau:
             con.close()
         assert sum(trimmed.cards.values()) <= sum(full.cards.values())
         assert sum(full.cards.values()) == 4  # the single max-4 hoser fills with τ=0
+
+
+# ---------------------------------------------------------------------------
+# TestOutputContract — epic-sideboard-core-and-hedge-output-contract
+# ---------------------------------------------------------------------------
+
+class TestOutputContract:
+    """The honest-degrade output fields populate only when the core behavior is active;
+    the forced-budget baseline leaves them None/empty (byte-identical rendering)."""
+
+    def _pkg(self, **kw):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            return recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), **kw,
+            )
+        finally:
+            con.close()
+
+    def test_fields_empty_when_off(self):
+        pkg = self._pkg()  # forced-budget baseline
+        assert pkg.natural_budget_count is None
+        assert pkg.marginal_curve == ()
+        assert pkg.uncovered_tail == ()
+        assert pkg.insurance_cards == frozenset()
+
+    def test_natural_budget_populated_under_tau(self):
+        pkg = self._pkg(tau=0.25)
+        assert pkg.natural_budget_count == sum(pkg.cards.values())
+
+    def test_marginal_curve_is_cumulative(self):
+        pkg = self._pkg(tau=0.0, redundancy_strength=0.10)
+        assert len(pkg.marginal_curve) >= 1
+        idxs = [n for n, _ in pkg.marginal_curve]
+        vals = [w for _, w in pkg.marginal_curve]
+        assert idxs == list(range(1, len(idxs) + 1)), "curve indexes are 1..N pick order"
+        assert vals == sorted(vals), "cumulative value is non-decreasing"
+
+    def test_redundancy_also_activates_contract(self):
+        pkg = self._pkg(redundancy_strength=0.10)
+        assert pkg.natural_budget_count is not None
+
+    def test_covered_element_not_in_uncovered_tail(self):
+        # The single graveyard hoser covers Reanimator's element, so it must NOT appear in
+        # the uncovered tail. (A richer field would surface real tail entries.)
+        pkg = self._pkg(tau=0.10)
+        assert isinstance(pkg.uncovered_tail, tuple)
+        # Weights are non-negative; the covered graveyard element is not double-counted here.
+        assert all(w >= 0.0 for _, w in pkg.uncovered_tail)

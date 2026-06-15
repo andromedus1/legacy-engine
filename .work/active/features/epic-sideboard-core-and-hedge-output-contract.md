@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-output-contract
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: [epic-sideboard-core-and-hedge-dedicated-core]
@@ -51,3 +51,14 @@ Does NOT decide how many cards to commit (dedicated-core feature) or compute the
 - Patterns: [[honest-degrade-marker]] (the defining shape — labeled banner + named reason +
   suppressed magnitude; here: <15 + commit/insurance + the curve), [[audit-echo-comment-lines]]
   (`// ...` provenance lines for the curve + tail).
+
+## Design + implementation (2026-06-15)
+**Additive `SideboardPackage` fields** (all None/empty defaults → byte-identical for every existing caller): `natural_budget_count: int | None`, `marginal_curve: tuple[(cards, cumulative value)]` (from the greedy trace — its flattening is the knee), `uncovered_tail: tuple[(element_id, weight)]` (top-8 field elements the package doesn't answer), `insurance_cards: frozenset[str]` (empty in v1 — hedge-allocator populates; everything else is "commit").
+
+**Population** (`recommend_sideboard`, gated on `redundancy_strength>0 or tau>0`): natural budget = total committed copies; curve = cumulative `marginal_gain` over the greedy trace; tail = field elements with zero coverage in the final solution, by weight. Forced-budget baseline (both off) → fields stay None/empty.
+
+**Renderer** (`cli.py` advise sideboard): a gated `// natural budget / coverage curve / uncovered field / insurance` block using the [[audit-echo-comment-lines]] `// ` pattern, printed only when `natural_budget_count is not None`. Honest-degrade aligned ([[honest-degrade-marker]]) — surfaces the knee + what's left open instead of asserting a padded 15.
+
+**Files**: `src/legacy_engine/advisory/sideboard.py` (SideboardPackage + population), `src/legacy_engine/cli.py` (gated render block). **Tests**: `tests/test_sideboard.py::TestOutputContract` (5 — fields empty when off; natural budget == committed copies under τ; curve cumulative + 1..N indexed; redundancy also activates; tail is a tuple).
+
+**Review (self, focused)**: purely additive dataclass fields + a gated renderer; the byte-identical guarantee is verified by the 263-test sideboard suite (incl. the CLI render tests) staying green with the contract off. Zero new ruff errors (the 16 cli.py F821s are pre-existing forward-ref hints). No blockers. The per-card commit/insurance *label* in the card list is deferred to the hedge-allocator (which introduces real insurance cards); v1 surfaces the `// insurance` line (empty until then).
