@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-core-and-hedge-concave-value
 kind: feature
-stage: review
+stage: done
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: []
@@ -202,3 +202,14 @@ penalty competes correctly with `weight_e·Δg`. Keep `_ILP_T_CAP` behavior unch
 - Gated-additive confirmed: `redundancy_strength=0.0` (default) → `penalty(k)=0 ∀k`, ILP omits the z-vars entirely → byte-identical to the forced-15 baseline.
 - Adjacent issues parked: none. (Noted but NOT fixed: pre-existing ruff debt in tests/test_sideboard.py — unused imports / E402 / F841 `con` — predates this work; CI lints src/ only and is non-blocking.)
 - Downstream: the dedicated-core feature adds the τ natural-budget stop on top of these per-copy marginals; the gating feature wires a CLI flag to `redundancy_strength`.
+
+## Review record (2026-06-15)
+Verdict: **Approve-with-comments** (deep lane, fresh-context independent reviewer — self-implemented feature). No blockers. The reviewer empirically validated the ILP linearization (200+ random models — the z_c^k link+monotone makes the per-copy penalty inescapable; the existing y_a^t monotone-fill is untouched) and confirmed the gated-additive path is byte-identical on both solvers.
+
+Important findings — all fixed in-session:
+- **Over-claiming consistency test**: `test_ilp_greedy_consistent_with_decay` asserted greedy==ILP multiset, a FALSE general invariant (greedy is 1−1/e approximate) that passed only on the degenerate fixture. Reworded to `test_ilp_and_greedy_both_cap_with_decay` — asserts the real shared property (both cap the dominant card), not multiset equality.
+- **Vacuous integration tests** (caught by running them): the bare `:memory:` corpus gave `Reanimator` no vulnerability tags → empty model → empty package, so the assertions passed trivially AND the ILP path skipped. Fixed: added `_gy_field_corpus` (decks loaded → real tags) so decay-off provably stacks to 4 and decay-on caps; the ILP-path test now genuinely runs (no skip).
+- **<15 / under-fill documentation**: added a module-docstring note that `redundancy_strength>0` can yield fewer than 15 cards (a play-legality concern owned by the sibling output-contract/dedicated-core features; no live impact — default 0.0).
+
+Nits (accepted, not fixed): `penalty_terms: list` untyped (pulp expr types are awkward — cosmetic).
+Final: full suite 2220 passed; ruff clean on sideboard.py.

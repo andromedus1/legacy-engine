@@ -7,6 +7,14 @@ g(n) = 1 − (1−p)^n  (saturating model, p = _COVERAGE_P ≈ 0.5).
 The marginal value of the n-th answer covering element e is weight_e·(g(n)−g(n−1)),
 positive but diminishing, so redundant answers earn slots until the budget fills.
 
+Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value): the
+objective optionally subtracts a per-copy penalty so copies of the SAME card saturate,
+  maximize Σ_e weight_e·g(cov_e) − Σ_c Σ_{k≥2} penalty(k)·[card c has ≥k copies].
+Gated by ``redundancy_strength`` (default 0.0 → penalty ≡ 0 → byte-identical to the
+forced-15 model above). With it on, a copy whose coverage gain < its penalty is not
+picked, so the recommendation may be FEWER than 15 cards (the natural-budget τ stop and
+the <15 output contract are owned by sibling features in the epic).
+
 Elements = (archetype, tag) pairs + anti-hate pseudo-elements ``"_hate:<k>"``).
 Weights  = field_share(archetype) × swing(best_hoser_for_that_tag).
 Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
