@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, data-model, foundation, hold-for-review]
 parent: feature-personal-inventory-and-decks
 depends_on: [feature-personal-inventory-and-decks]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 # `--my-deck NAME` integration into the existing decklist-consuming leaves

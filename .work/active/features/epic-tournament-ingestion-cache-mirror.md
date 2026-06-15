@@ -5,10 +5,10 @@ stage: done
 tags: [ingestion]
 parent: epic-tournament-ingestion
 depends_on: [epic-tournament-ingestion-cache-parser, epic-tournament-ingestion-duckdb-tables]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-14
 ---
 
 # Cache Mirror + `seed cache` Wiring

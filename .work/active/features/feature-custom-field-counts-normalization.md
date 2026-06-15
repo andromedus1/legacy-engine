@@ -5,7 +5,7 @@ stage: done
 tags: [advisory]
 parent: epic-local-meta-support
 depends_on: [feature-advise-provenance-flag]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-14
 updated: 2026-06-14

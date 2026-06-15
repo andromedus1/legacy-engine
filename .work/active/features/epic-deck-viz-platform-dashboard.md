@@ -5,10 +5,10 @@ stage: done
 tags: [viz]
 parent: epic-deck-viz-platform
 depends_on: [epic-deck-viz-platform-foundation, epic-deck-viz-platform-charts-migration]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-14
 ---
 
 # Per-Deck Dashboard + viz CLI

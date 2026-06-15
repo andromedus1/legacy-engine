@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: [feature-oracle-text-interaction-tags]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 The sideboard / coverage recommender draws cards from a **global card universe** via a heuristic

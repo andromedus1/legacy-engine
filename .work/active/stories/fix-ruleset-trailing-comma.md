@@ -5,10 +5,10 @@ stage: done
 tags: [bug, archetype]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-14
 ---
 
 # Fix: load_ruleset crashes on trailing commas in upstream rule files

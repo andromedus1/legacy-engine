@@ -5,10 +5,10 @@ stage: done
 tags: [generation, advisory]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-per-card-value]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-31
-updated: 2026-05-31
+updated: 2026-06-14
 ---
 
 # Maindeck-aware sideboard (per-matchup OUT/IN plan)

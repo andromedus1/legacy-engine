@@ -5,10 +5,10 @@ stage: done
 tags: [archetype]
 parent: epic-archetype-classifier
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-06-14
 ---
 
 # Rules Vendoring + Typed Rule Loader

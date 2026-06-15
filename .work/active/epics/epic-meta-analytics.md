@@ -5,10 +5,10 @@ stage: done
 tags: [analytics]
 parent: null
 depends_on: [epic-tournament-ingestion, epic-archetype-classifier]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-29
-updated: 2026-05-30
+updated: 2026-06-14
 ---
 
 # Meta & Performance Analytics

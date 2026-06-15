@@ -5,10 +5,10 @@ stage: done
 tags: [analytics, methodology]
 parent: feature-new-set-ingestion-and-speculation
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 ## Design

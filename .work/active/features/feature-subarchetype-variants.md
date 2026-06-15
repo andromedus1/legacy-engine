@@ -5,10 +5,10 @@ stage: done
 tags: [archetype]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-04
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 Archetype labels collapse meaningful sub-variants: "Smallpox" lumped Loam Pox and non-Loam Pox together (57%/43% split — strategically distinct, and exactly what a user asked about). Add sub-archetype resolution (variant tags by signature cards, e.g. Loam vs non-Loam) so meta/overlap/matchup queries can distinguish builds within a parent archetype.

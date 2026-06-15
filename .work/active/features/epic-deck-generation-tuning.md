@@ -5,10 +5,10 @@ stage: done
 tags: [generation]
 parent: epic-deck-generation
 depends_on: [epic-deck-generation-consensus, epic-deck-generation-sideboard-maindeck]
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-05-30
-updated: 2026-05-31
+updated: 2026-06-14
 ---
 
 # Field-tuning (optimize a shell against the field)

@@ -5,10 +5,10 @@ stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.1.0
 gate_origin: null
 created: 2026-06-13
-updated: 2026-06-13
+updated: 2026-06-14
 ---
 
 Standardize meta analysis as a default **three-lens read** rather than one global field:
