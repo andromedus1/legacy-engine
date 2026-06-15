@@ -1,8 +1,8 @@
 ---
 id: epic-sideboard-core-and-hedge
 kind: epic
-stage: drafting
-tags: [advisory, sideboard, needs-brief]
+stage: implementing
+tags: [advisory, sideboard]
 parent: null
 depends_on: []
 release_binding: null
@@ -44,17 +44,14 @@ contract to be honest about how many cards the field actually justifies.
   instead of one padding over the other. Output labels each card commit (core) vs insurance (hedge).
 - **Gating**: opt-in flag first (gated-additive — byte-identical to today until opted in), then flip
   the default once trusted. — see [[gated-additive-augmentation]].
-- **Foundation roll-forward — DEFERRED to epic-design**: this epic is `[needs-brief]`; the
-  access-probability and field-robustness models are unresolved, so rolling SPEC/ARCHITECTURE forward
-  now would document intent the brief may reshape. Current docs are still true (they describe today's
-  set-cover solver). `/epic-design` rolls them forward once the brief lands (rolling-foundation: docs
-  describe present intent, not planned phases). Anticipated foundation impact, for epic-design:
-  - SPEC §"Built capability set" / "Sideboard recommender": the "weighted set-cover over the expected
-    field" framing becomes two-stage core+hedge; the `SideboardPackage` entity ("a recommended 15")
-    becomes "up to 15".
-  - SPEC/ARCHITECTURE HONEST-DEGRADE NFR: add the new honest shape — returning fewer than 15 with a
-    named reason + commit/insurance labels + the marginal-coverage curve (this is honest-degrade
-    applied to SB construction; see [[honest-degrade-marker]]).
+- **Foundation roll-forward — DONE at epic-design (2026-06-15)**: brief landed, decisions resolved,
+  so the SPEC/NFR intent was rolled forward: SPEC "Sideboard recommender" capability → two-stage
+  core+hedge / up-to-15; `SideboardPackage` entity → "up to 15" + commit/insurance labels +
+  marginal-coverage curve; SPEC HONEST-DEGRADE NFR decision + ARCHITECTURE HONEST-DEGRADE POLICY →
+  added the SB returns-fewer-than-15 shape. **Deferred to implementation:** the ARCHITECTURE
+  `sideboard.py` module row (line ~185) still accurately describes the current max-coverage module;
+  it updates when the code lands (rolling-foundation: a concrete architecture row matches code, so it
+  rolls at build time, not design time — unlike the capability spec/NFR which lead).
 
 ## Architecture (agreed shape)
 
@@ -104,12 +101,26 @@ Resolve in `/research-pipeline:brief` (sideboard-construction theory + the two m
 - Patterns: [[honest-degrade-marker]], [[gated-additive-augmentation]], [[objective-search-split]],
   [[confidence-metadata]].
 
-## Anticipated child features
-(provisional — real decomposition after the brief + `/epic-design`)
-- Access-probability concavity term + Stage-1 dedicated-core solver (natural-budget stop at `τ`).
-- Stage-2 hedge allocator (robustness over a sampled/blended field, diversity-preferring).
-- Output-contract rework: <15 return, commit/insurance labels, marginal-coverage curve, uncovered tail.
-- Operator controls + flag gating; flip default once trusted.
+## Decomposition
+
+Split by capability into a sequential core path plus a separable hedge fast-follow. Decision (scope +
+brief): **core-first** — the dedicated-core fix alone ends the padding bug, so v1 ships the proven
+core path and the model-hedging (the speculative part) lands as a clearly-separable second wave. The
+chain is mostly linear because a solver rework genuinely builds on itself (value model → core solver
+→ output contract → gating); see Decomposition risks.
+
+### Child features
+
+- `epic-sideboard-core-and-hedge-concave-value` — concave per-copy value model (`share·swing·ΔP_access·U_redundancy`; the brief's correction that `U_redundancy` — not access prob — is the saturation driver); submodularity preserved — depends on: `[]`
+- `epic-sideboard-core-and-hedge-dedicated-core` — Stage-1 dedicated-core solver + natural-budget τ stop (tier-aware default, tunable); may return <15 — depends on: `[concave-value]`
+- `epic-sideboard-core-and-hedge-output-contract` — <15 return, commit/insurance labels, marginal-coverage curve, uncovered-field tail; `SideboardPackage` shape + renderer — depends on: `[dedicated-core]`
+- `epic-sideboard-core-and-hedge-gating` — opt-in flag (gated-additive, byte-identical until opted in) + core dials (τ, budget cap); flip default once trusted — closes the v1 core wave — depends on: `[dedicated-core, output-contract]`
+- `epic-sideboard-core-and-hedge-hedge-allocator` — **FAST-FOLLOW** (tagged `fast-follow`): Stage-2 hedge over a wider field (Dirichlet ambiguity set / local→global blend; expected vs CVaR-α dial; diversity-preferring); adds the insurance label. Separable from v1; carries the epic's most open design judgment — depends on: `[dedicated-core, output-contract]`
+
+### Decomposition risks
+- **Mostly-linear critical path.** v1 is concave-value → dedicated-core → output-contract → gating, which limits parallelism. This is inherent to a solver rework (each stage consumes the prior's output), not a slicing error — accepted. The hedge-allocator parallelizes against gating once the core + output-contract land.
+- **The concave-value feature is the riskiest.** It's the foundation everything consumes and the place the brief's key correction lives (`U_redundancy`, not access-prob, drives saturation). If its calibration is wrong, the core's natural budget is wrong. Its `/feature-design` pass should pin the `U_redundancy` decay shape carefully and lean on [[objective-search-split]] so it's unit-testable with hand-built inputs (no DB).
+- **Hedge design judgment is deferred, not resolved.** The hedge-allocator's "how wide / expected vs CVaR / which α" is intentionally unpinned (brief decision 3, NEUTRAL). Its feature-design owns that call against the brief's framing; flagged so it isn't mistaken for a settled spec.
 
 ## Provenance
 Surfaced during a dogfooding test-drive of `advise sideboard` for Dimir Tempo vs the the local meta

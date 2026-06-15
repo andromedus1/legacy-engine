@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-06-15T15:44:56Z'
+generated_at: '2026-06-15T15:56:07Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -83,8 +83,10 @@ documents:
       and identify suggest|strong|track.'
     - 'HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag
       + named reason + suppressed magnitude. No silent zeros. Applies in window.py
-      (thin-regime banner), primer/sideboard (degraded=True note), speculation (PRE-DATA
-      FORECAST label), prices (all_null flag), venue divergence.'
+      (thin-regime banner), primer/sideboard (degraded=True note), the sideboard recommender
+      (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
+      rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
+      prices (all_null flag), venue divergence.'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
@@ -255,8 +257,9 @@ documents:
     - 'HONEST-DEGRADE NFR: thin/absent signal surfaces a labeled banner or degraded
       flag with a named reason. No silent zeros, no fabricated numbers. Applies in
       the advisory window (thin-regime banner), sideboard/primer (degraded=True note),
-      speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence
-      (labeled).'
+      the sideboard recommender (returns fewer than 15 with commit/insurance labels
+      + a marginal-coverage curve rather than padding to a forced 15), speculation
+      (PRE-DATA FORECAST label), prices (all_null flag), venue divergence (labeled).'
     - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
