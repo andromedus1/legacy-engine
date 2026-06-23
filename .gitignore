@@ -11,3 +11,6 @@ venv/
 
 # peeragent cross-model review session scratch
 .peeragent/
+
+# generated deck-vs-cohort viz output (regenerate via scripts/deck_vs_cohort_viz.py)
+decks/*-vs-cohort.html
