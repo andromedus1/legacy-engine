@@ -1,0 +1,54 @@
+// Andrew's total collection (binder) — quantities summed across both binders.
+// Source: full collection export. Used for collection-aware deck prep.
+4 Baleful Strix
+3 Barrowgoyf
+2 Bloodstained Mire
+1 Brazen Borrower
+3 Consign to Memory
+2 Dauthi Voidwalker
+4 Daze
+1 Disruptor Flute
+2 Duress
+2 Engineered Explosives
+4 Fatal Push
+1 Feed the Cycle
+4 Flow State
+3 Force of Negation
+4 Force of Will
+1 Grafdigger's Cage
+2 Harbinger of the Seas
+2 Hydroblast
+1 Island
+3 Kaito, Bane of Nightmares
+4 Leyline of the Void
+3 Murktide Regent
+4 Nethergoyf
+1 Nihil Spellbomb
+1 Null Rod
+4 Orcish Bowmasters
+4 Polluted Delta
+4 Ponder
+3 Scalding Tarn
+3 Sheoldred's Edict
+3 Snuff Out
+3 Surgical Extraction
+1 Swamp
+4 Tamiyo, Inquisitive Student
+4 Thoughtseize
+2 Toxic Deluge
+1 Undercity Sewers
+4 Wasteland
+4 Watery Grave
+4 Brainstorm
+3 Hymn to Tourach
+1 Pithing Needle
+2 Damping Sphere
+1 Dismember
+2 Hurkyl's Recall
+1 Long Goodbye
+2 Massacre
+1 Mindbreak Trap
+2 Mystical Dispute
+2 Spell Pierce
+1 Unlicensed Hearse
+4 Mishra's Bauble
