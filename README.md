@@ -180,6 +180,24 @@ legacy-engine viz deck "Dimir Tempo" --out dash.html   # per-deck attack-focused
 legacy-engine viz meta --out meta.html           # also: viz matchups | viz trends | viz tiers (.html or .png)
 ```
 
+### Deck-prep tooling (`scripts/`)
+
+Standalone analysis helpers that sit alongside the CLI:
+
+```bash
+# Overlay a decklist against a cohort's per-card copy-count distribution (HTML).
+# Prototype for the planned deck-doctor visualization (see .work/ feature-deck-doctor-viz).
+.venv/bin/python scripts/deck_vs_cohort_viz.py \
+  --deck decks/dimir-tempo-current.txt --archetype "Dimir Tempo" \
+  --require "Flow State>=1" --require "Nethergoyf=3" \
+  --out decks/dimir-tempo-vs-cohort.html
+```
+
+It renders, per card, your count vs the cohort's 0x/1x/2x/3x/4x histogram with
+inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plus a
+confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
+window defaults to the current ban regime (override with `--since`).
+
 Each leaf takes `-v/--verbose`; all `advise` leaves and `report matchups|meta` take
 `--provenance [online|paper|all]` and a `--db` path. Every emitted number is labeled with its
 definition/basis, sample size, and confidence tier; advisory output carries a heuristic-vs-data-driven
@@ -219,6 +237,7 @@ src/legacy_engine/
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, Variant,
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
+scripts/       # standalone helpers: knowledge-index generator, deck-prep (deck_vs_cohort_viz.py)
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
 tests/         # pytest suite (2242 tests)
 ```
