@@ -193,7 +193,20 @@ Standalone analysis helpers that sit alongside the CLI:
   --out decks/dimir-tempo-vs-cohort.html
 ```
 
-It renders, per card, your count vs the cohort's 0x/1x/2x/3x/4x histogram with
+```bash
+# Render the meta-landscape report (deck-agnostic): composition + trends + movers,
+# and best-deck/best-call positioning over time. Optionally also emit a deck's matchups.
+.venv/bin/python scripts/meta_view.py --out decks/meta.html \
+  --deck "Dimir Tempo" --matchups-out decks/dimir-tempo-matchups.html
+```
+
+`meta_view.py` is the **meta view** (where the field is, how it's moving, what's
+best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
+75 compares to the field). Both render to self-contained inline SVG (no Chrome / Node /
+CDN) and carry confidence tiers honestly. `meta_view.py` knobs: `--bands-top`,
+`--pos-top`, `--ema-span`, `--last-months`.
+
+The cohort tool renders, per card, your count vs the cohort's 0x/1x/2x/3x/4x histogram with
 inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plus a
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
@@ -237,7 +250,7 @@ src/legacy_engine/
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, Variant,
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
-scripts/       # standalone helpers: knowledge-index generator, deck-prep (deck_vs_cohort_viz.py)
+scripts/       # standalone helpers: knowledge-index gen; viz prototypes (meta_view.py, deck_vs_cohort_viz.py)
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
 tests/         # pytest suite (2242 tests)
 ```
