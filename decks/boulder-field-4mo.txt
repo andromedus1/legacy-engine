@@ -1,0 +1,26 @@
+# local paper meta, last 4 months — from the maintainer's tournament-org data (Table 3).
+# Format: <share> <Engine Archetype> <player-count>.  Counts feed the Dirichlet field-share model.
+# Mapping notes (human label -> engine archetype):
+#   Izzet Tempo->Izzet Delver | Sneak and Show->Show and Tell | Red Painter->Painter
+#   Jeskai Control + Jeskai Tempo -> Jeskai Midrange (24) | Black Stompy->Black Midrange
+#   Doomsday Tempo + Doomsday Turbo -> Doomsday (23) | Esper Control->Esper Midrange
+#   Azorius Tempo->Azorius Midrange | Beanstalk Control->White Beanstalk | Pox Stompy->Smallpox
+#   Saga Storm->TES | Stoneblade->Azorius Stoneblade | Affinity Stompy->Blue Artifacts
+0.141 Izzet Delver 38
+0.089 Jeskai Midrange 24
+0.086 Doomsday 23
+0.078 Dimir Tempo 21
+0.074 Show and Tell 20
+0.071 Painter 19
+0.056 Black Midrange 15
+0.052 Eldrazi 14
+0.052 Esper Midrange 14
+0.037 Azorius Midrange 10
+0.037 White Beanstalk 10
+0.037 Cradle Control 10
+0.037 Smallpox 10
+0.037 Stiflenought 10
+0.030 Death & Taxes 8
+0.030 TES 8
+0.030 Azorius Stoneblade 8
+0.026 Blue Artifacts 7

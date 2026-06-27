@@ -1,0 +1,31 @@
+# Current-regime PAPER composition (since 2026-05-18). Regime-clean field; feed to ADAPTIVE matrix (no --regime flag).
+# NOTE: this is GLOBAL paper, not local-field-specific — best regime-clean proxy until local-meta data is re-pulled post-5/18.
+0.089 Izzet Delver 43
+0.083 Show and Tell 40
+0.075 Blue Artifacts 36
+0.060 Lands 29
+0.056 Dimir Tempo 27
+0.050 Death & Taxes 24
+0.048 Energy 23
+0.039 Tron 19
+0.035 Doomsday 17
+0.033 Painter 16
+0.031 Cradle Control 15
+0.029 Grixis Reanimator 14
+0.029 Aluren 14
+0.029 Azorius Midrange 14
+0.027 Eldrazi 13
+0.027 Red Stompy 13
+0.027 Dimir Delver 13
+0.027 Dimir Midrange 13
+0.025 White Beanstalk 12
+0.025 Jeskai Midrange 12
+0.025 Azorius Stoneblade 12
+0.021 TES 10
+0.021 Dredge 10
+0.021 Smallpox 10
+0.017 Grixis Midrange 8
+0.014 Oops! All Spells 7
+0.014 Stiflenought 7
+0.014 Izzet Midrange 7
+0.010 Burn 5
