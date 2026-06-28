@@ -7,7 +7,9 @@
 #   Doomsday Tempo->Doomsday | Death and Taxes - BW (Yorion)->Death & Taxes | Boros Energy->Energy
 #   Saga Storm->Black Saga Storm  (Urza's Saga / Beseech / Ad Nauseam ritual storm — NOT TES)
 #   Affinity Stompy->Blue Artifacts  (Mox Opal / Emry / Kappa Cannoneer artifact deck)
-#   Affinity Combo->Mystic Forge Combo  (Karn / One Ring big-mana artifact — TENTATIVE, confirm w/ organizer; may be Blue Artifacts)
+#   Affinity Combo (4 players) -> UNMAPPED: no local decklists to classify it, and the name doesn't
+#     pin the deck (could be a combo-Affinity = Blue Artifacts, or a big-mana artifact deck = Mystic Forge
+#     Combo). Held out of this field (103 of 107 players modeled) until the organizer confirms.
 0.112 Izzet Delver 12
 0.103 Show and Tell 11
 0.075 White Beanstalk 8
@@ -20,7 +22,6 @@
 0.056 Doomsday 6
 0.056 Eldrazi 6
 0.047 Painter 5
-0.037 Mystic Forge Combo 4
 0.037 Blue Artifacts 4
 0.037 Energy 4
 0.037 Esper Midrange 4
