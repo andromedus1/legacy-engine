@@ -80,6 +80,54 @@ top-to-bottom in one turn. Don't fire a Doomsday you can't finish.
 
 ---
 
+## Playing out the combo — a worked pile
+
+**The goal:** after Doomsday resolves, your library *is* the five pile cards. Win by
+emptying it down to your blue devotion and resolving Thassa's Oracle. Devotion counts
+`{U}` symbols in your permanents' costs — **Thassa's Oracle is `{U}{U}`, so it pays for
+itself**: with just the Oracle out, devotion is 2, so a library of **2 or fewer wins.**
+(Each extra blue permanent — a Tamiyo — raises that ceiling.)
+
+**The engine of every pile is free draws.** Street Wraith (cycle — pay 2 life) and Edge
+of Autumn (cycle — sacrifice a land) each draw a card for *no mana*, so they chain you
+down the pile in a single turn. Every draw removes the top card of your library.
+
+**A clean five-card pile** (top → bottom):
+
+1. **Street Wraith**
+2. **Edge of Autumn**
+3. **Thassa's Oracle**
+4. buffer (any card)
+5. buffer (any card)
+
+**The line** — you need one *kickoff* draw (your draw step, a held Consider, or a Street
+Wraith already in hand) plus `{U}{U}` for the Oracle:
+
+1. Kickoff draw → **Street Wraith** to hand. *(library: 4)*
+2. Cycle Street Wraith (pay 2 life) → draw **Edge of Autumn**. *(library: 3)*
+3. Cycle Edge of Autumn (sacrifice a spare land) → draw **Thassa's Oracle**. *(library: 2)*
+4. Cast Thassa's Oracle for `{U}{U}`. Devotion 2 ≥ library 2 → **you win.**
+
+**The mana math** is why Dark Ritual / Lotus Petal / Lion's Eye Diamond are in the deck:
+in one turn you need `{B}{B}{B}` for Doomsday *and* the kickoff *and* `{U}{U}` for the
+Oracle — more than your lands alone usually make. **LED is the closer:** cast Doomsday
+off lands, then crack LED (discarding your now-spent hand) for the `{U}{U}{U}` that powers
+the kickoff + the Oracle. That's also how you combo at instant speed or on their end step.
+
+**Practical sequencing:**
+- **Disrupt first.** Thoughtseize to strip the counter and confirm the path, *then* go
+  off. Daze / Force of Will protect the Oracle on the stack; Cavern (Merfolk) makes it
+  uncounterable outright.
+- **Count before you commit.** Verify you have the kickoff draw, the free-draw cards (or
+  mana to dig), and `{U}{U}` *before* casting Doomsday. A pile you can't finish just
+  halves your life and shows them your hand.
+- **You don't always need an empty library.** Extra blue permanents (Tamiyo, a second
+  Oracle) raise your devotion, letting you stop the chain a card or two early.
+- **Unearth is your insurance** — if the Oracle is countered or discarded, Unearth (`{B}`)
+  returns it from the graveyard for a second swing; Jace (post-board) is a third.
+
+---
+
 ## The maindeck (stock current-regime consensus)
 
 **Combo core (13)**
@@ -122,6 +170,35 @@ Merfolk) · **3 Wasteland**.
 global movers — **hypotheses to test at the table, not proven local tech.** The cuts
 (−1 Fatal Push, −1 Consign, −Bitter Triumph) track what the global meta shed since the
 ban (Eldrazi −2.0%, Mystic Forge −2.3%).*
+
+---
+
+## Boulder sideboard vs. the consensus global sideboard
+
+The maindeck is stock consensus; the sideboard is where the Boulder read lives. For
+reference, the **consensus global Tempo-Doomsday sideboard** (15) is:
+
+> 4 Barrowgoyf · 2 Force of Negation · 2 Dauthi Voidwalker · 2 Fatal Push ·
+> 2 Consign to Memory · 1 Long Goodbye · 1 Bitter Triumph · 1 Jace, Wielder of Mysteries
+
+This build keeps that core and makes a **3-card swap** for the local field:
+
+| Change | Card | Why |
+|---|---|---|
+| **IN** | **+2 Hydroblast** | Boulder is ~21% red (Izzet Delver 14% + Painter 7%) — kills Dragon's Rage Channeler, Cori-Steel Cutter, Lightning Bolt. *Off-consensus, Boulder-specific.* |
+| **IN** | **+1 Surgical Extraction** | Tracks the post-ban global shift — Grixis Reanimator rose +1.9%; also covers the mirror + Dredge. *Off-consensus.* |
+| **OUT** | **−1 Bitter Triumph** | Redundant removal next to Long Goodbye + Fatal Push. |
+| **OUT** | **−1 Fatal Push** (2→1) | Hydroblast now covers the red creatures it would have killed. |
+| **OUT** | **−1 Consign to Memory** (2→1) | The field shed its colorless-spell decks since the ban (Eldrazi −2.0%, Mystic Forge −2.3%), so one copy is enough. |
+
+**Unchanged from consensus:** 4 Barrowgoyf, 2 Force of Negation, 2 Dauthi Voidwalker,
+1 Long Goodbye, 1 Jace.
+
+> **Honesty note:** Hydroblast and Surgical are *reasoned* deviations from your field +
+> the global movers — not observed local tech. There are only 6–18 paper Doomsday decks
+> in the data and zero Boulder decklists, so treat these two as **hypotheses to test at
+> the table**, not proven includes. The consensus 15 is the safer default if you're
+> unsure.
 
 ---
 
