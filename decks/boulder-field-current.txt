@@ -2,19 +2,21 @@
 # Source: Andrew's tournament-org pull (Table 3, post-ban), 107 players. Feed to the ADAPTIVE matrix (no --regime flag):
 #   advise positioning|sideboard --deck <deck> --field decks/boulder-field-current.txt
 # Replaces the prior global-paper proxy now that real post-5/18 Boulder data exists.
-# Dated snapshot preserved at boulder-field-since-518.txt; engine-label mapping documented there.
+# Dated snapshot + full engine-label mapping documented in boulder-field-since-518.txt.
+# Mappings validated against decklist content; one open question: Affinity Combo->Mystic Forge Combo (tentative).
 0.112 Izzet Delver 12
 0.103 Show and Tell 11
-0.075 Blue Artifacts 8
 0.075 White Beanstalk 8
 0.075 Dimir Tempo 8
 0.075 Jeskai Midrange 8
 0.065 Azorius Midrange 7
 0.065 Black Midrange 7
-0.065 TES 7
+0.065 Black Saga Storm 7
 0.056 Death & Taxes 6
 0.056 Doomsday 6
 0.056 Eldrazi 6
 0.047 Painter 5
+0.037 Mystic Forge Combo 4
+0.037 Blue Artifacts 4
 0.037 Energy 4
 0.037 Esper Midrange 4
