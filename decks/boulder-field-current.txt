@@ -3,7 +3,8 @@
 #   advise positioning|sideboard --deck <deck> --field decks/boulder-field-current.txt
 # Replaces the prior global-paper proxy now that real post-5/18 Boulder data exists.
 # Dated snapshot + full engine-label mapping documented in boulder-field-since-518.txt.
-# Mappings validated against decklist content; one open question: Affinity Combo->Mystic Forge Combo (tentative).
+# Mappings validated against decklist content. Affinity Combo (4 players) is UNMAPPED (no decklists to
+# classify it) and held out — 103 of 107 players modeled. See boulder-field-since-518.txt for detail.
 0.112 Izzet Delver 12
 0.103 Show and Tell 11
 0.075 White Beanstalk 8
@@ -16,7 +17,6 @@
 0.056 Doomsday 6
 0.056 Eldrazi 6
 0.047 Painter 5
-0.037 Mystic Forge Combo 4
 0.037 Blue Artifacts 4
 0.037 Energy 4
 0.037 Esper Midrange 4
