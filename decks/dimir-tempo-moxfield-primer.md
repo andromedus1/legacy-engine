@@ -153,6 +153,48 @@ IN: 1 Harbinger, 1 Echoing Truth · OUT: 2 Fatal Push.
 
 ---
 
+## Playing with Harbinger of the Seas out
+
+Harbinger (`{1}{U}{U}` 2/2 Merfolk) reads *"Nonbasic lands are Islands"* — and that's
+**symmetric**. It wrecks the opponent's greedy mana, but it also turns **your own**
+manabase nearly mono-blue. Misplay it and you lock *yourself* out. Know what it does to
+your side:
+
+| Your land | Under Harbinger |
+|---|---|
+| **Underground Sea / Undercity Sewers** | become Islands — tap for **{U} only** (no more black, no surveil) |
+| **Polluted Delta / Scalding Tarn / Bloodstained Mire** | become Islands — **can't be cracked** (lose the fetch ability); they just tap {U} |
+| **Wasteland** | becomes an Island — **no land destruction**, taps {U} |
+| **basic Swamp** | unaffected — **your only reliable black source under Harbinger** |
+| **basic Island** | unaffected |
+
+So once Harbinger is down, **almost all of your black spells become uncastable** unless
+you have the basic Swamp (or black already available): Thoughtseize, Fatal Push, Snuff Out
+(its free mode also needs a Swamp), Barrowgoyf, Orcish Bowmasters, and Kaito's `{2}{U}{B}`
+all want black your duals no longer make.
+
+**How to sequence it:**
+- **Get your black online *first*.** Crack fetches for a Swamp/dual and cast your black
+  spells (Thoughtseize, removal, deploy Barrowgoyf/Bowmasters/Kaito) **before** Harbinger
+  resolves — afterward your fetches are bricked and your duals make only blue.
+- **Hold Harbinger as a mid-game pivot,** not a turn-3 reflex. The ideal spot: you've
+  disrupted and deployed, and now you flip to a **mono-blue lock-and-clock** — turn off
+  their mana and ride the blue half.
+- **The blue half still works fully:** Tamiyo, Murktide (delve), Brazen Borrower, Flow
+  State, Brainstorm, Ponder, Daze, and Force of Will are all castable post-Harbinger. That
+  *is* your gameplan once it's out.
+- **Keep a basic Swamp around** if you'll still need black (more removal, a Kaito). Fetch
+  it before you play Harbinger.
+- **Use your own Wasteland *before* Harbinger** — it's just an Island afterward.
+- **Don't strand your hand.** If you're holding black-heavy cards and only have blue duals,
+  Harbinger can brick you harder than the opponent. When in doubt, deploy black first.
+
+Bottom line: bring Harbinger in against greedy/colorless manabases (Lands, Eldrazi, Cradle,
+Tron) where neutering their mana is worth going mono-blue — and treat it as a pivot you
+*sequence into*, not a card you slam on curve.
+
+---
+
 ## Mulligan & play tips
 
 - **Keep disruption + a way to find threats**, not just threats. T1 Thoughtseize into
