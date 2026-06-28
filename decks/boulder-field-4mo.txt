@@ -5,7 +5,7 @@
 #   Jeskai Control + Jeskai Tempo -> Jeskai Midrange (24) | Black Stompy->Black Midrange
 #   Doomsday Tempo + Doomsday Turbo -> Doomsday (23) | Esper Control->Esper Midrange
 #   Azorius Tempo->Azorius Midrange | Beanstalk Control->White Beanstalk | Pox Stompy->Smallpox
-#   Saga Storm->TES | Stoneblade->Azorius Stoneblade | Affinity Stompy->Blue Artifacts
+#   Saga Storm->Black Saga Storm | Stoneblade->Azorius Stoneblade | Affinity Stompy->Blue Artifacts
 0.141 Izzet Delver 38
 0.089 Jeskai Midrange 24
 0.086 Doomsday 23
@@ -21,6 +21,6 @@
 0.037 Smallpox 10
 0.037 Stiflenought 10
 0.030 Death & Taxes 8
-0.030 TES 8
+0.030 Black Saga Storm 8
 0.030 Azorius Stoneblade 8
 0.026 Blue Artifacts 7

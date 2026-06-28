@@ -1,23 +1,26 @@
 # Boulder paper meta, SINCE 5/18 ban (Undercity Informer) — from Andrew's tournament-org data (Table 3, post-ban pull).
 # Format: <share> <Engine Archetype> <player-count>.  Counts feed the Dirichlet field-share model.
-# 107 players total. Mapping (human label -> engine archetype), same conventions as boulder-field-4mo.txt:
+# 107 players total. Mapping (human label -> engine archetype), validated against decklist content:
 #   Izzet Tempo->Izzet Delver | Sneak and Show->Show and Tell | Red Painter->Painter
 #   Jeskai Control->Jeskai Midrange | Black Stompy->Black Midrange | Azorius Tempo->Azorius Midrange
-#   Beanstalk Control (Non-Yorion)->White Beanstalk | Saga Storm->TES | Esper Control->Esper Midrange
+#   Beanstalk Control (Non-Yorion)->White Beanstalk | Esper Control->Esper Midrange
 #   Doomsday Tempo->Doomsday | Death and Taxes - BW (Yorion)->Death & Taxes | Boros Energy->Energy
-#   Affinity Combo (4) + Affinity Stompy (4) -> Blue Artifacts (8)  [both artifact decks, same hate package; single well-sampled cell]
+#   Saga Storm->Black Saga Storm  (Urza's Saga / Beseech / Ad Nauseam ritual storm — NOT TES)
+#   Affinity Stompy->Blue Artifacts  (Mox Opal / Emry / Kappa Cannoneer artifact deck)
+#   Affinity Combo->Mystic Forge Combo  (Karn / One Ring big-mana artifact — TENTATIVE, confirm w/ organizer; may be Blue Artifacts)
 0.112 Izzet Delver 12
 0.103 Show and Tell 11
-0.075 Blue Artifacts 8
 0.075 White Beanstalk 8
 0.075 Dimir Tempo 8
 0.075 Jeskai Midrange 8
 0.065 Azorius Midrange 7
 0.065 Black Midrange 7
-0.065 TES 7
+0.065 Black Saga Storm 7
 0.056 Death & Taxes 6
 0.056 Doomsday 6
 0.056 Eldrazi 6
 0.047 Painter 5
+0.037 Mystic Forge Combo 4
+0.037 Blue Artifacts 4
 0.037 Energy 4
 0.037 Esper Midrange 4
