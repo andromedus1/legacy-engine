@@ -1,7 +1,7 @@
 ---
 id: epic-sb-config-evaluation-config-comparator
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-sb-config-evaluation
 depends_on: [epic-sb-config-evaluation-matchup-slot-test]
@@ -264,3 +264,27 @@ def slot_lift(con, archetype: str, card: str, opponent: str, *, board: str = "si
   cap `n_draws` and reuse one cell-draw across configs. **Fallback**: lower default draws if slow.
 - **Imputation dominance**: a config whose mode has little field coverage gets a 0.5-heavy EV.
   **Mitigation**: report `coverage_*` and warn when low (mirror positioning's coverage honesty).
+
+## Implementation notes
+- **Files changed**: `src/legacy_engine/advisory/compare.py` (new — config model, point engine,
+  MC base layer, break-even, `slot_lift`); `src/legacy_engine/cli.py` (new `advise compare` leaf +
+  `_parse_lift_spec`/`_apply_slot_lifts`/`_echo_comparison` helpers).
+- **Tests added**: `tests/advisory/test_compare.py` (13 — point EV, transform max + chosen_mode,
+  lift overlay + clamp, break-even ahead/feasible/infeasible, coverage/imputation, MC determinism /
+  dominating→P≈1 / identical→P≈0.5 / CI-shrinks-with-n, `slot_lift`); `tests/test_cli.py::
+  TestAdviseCompare` (6). Full suite green: **2278 passed**.
+- **Stories**: engine + cli both done.
+- **Validated on real data**: `advise compare --field boulder-field-current.txt --a "Dimir Tempo"
+  --a-lift-slot "Toxic Deluge@Death & Taxes" --b "Doomsday" --b-transform "Dimir Tempo"` →
+  P(A beats B)=0.00 (transform-into-Dimir weakly dominates plain Dimir by construction), Doomsday
+  mode chosen for D&T (68.8%), break-even = +35 pts on D&T to tie vs the +10.7 Toxic Deluge
+  delivers — reproduces the session's opportunity-cost verdict.
+- **Discrepancies from design**:
+  - `p_a_beats_b` splits ties (`>` + 0.5·`==`) so identical configs read 0.5 not 0.0 (shared
+    per-draw cell draws make identical configs element-wise equal).
+  - `compare_configs` ignores a lift opponent absent from the field; the CLI fail-fasts on it
+    (validation belongs at the boundary, not the pure engine).
+- **Adjacent issues parked**: none.
+
+## Review record
+<!-- filled by /agile-workflow:review -->

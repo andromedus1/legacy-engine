@@ -1,7 +1,7 @@
 ---
 id: epic-sb-config-evaluation-config-comparator-engine
 kind: story
-stage: implementing
+stage: done
 tags: [advisory]
 parent: epic-sb-config-evaluation-config-comparator
 depends_on: []

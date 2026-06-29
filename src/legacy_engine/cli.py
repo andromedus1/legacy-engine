@@ -2254,6 +2254,176 @@ def advise() -> None:
     """Meta attack / advisory — how to attack the field."""
 
 
+def _parse_lift_spec(spec: str | None) -> dict[str, float]:
+    """Parse `--*-lift` "opp=+0.11,opp2=-0.03" → {opponent: delta}. Opp names may contain spaces."""
+    out: dict[str, float] = {}
+    if not spec:
+        return out
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise click.ClickException(f"--lift entry {part!r} must be 'opponent=delta' (e.g. 'Death & Taxes=+0.11').")
+        opp, val = part.rsplit("=", 1)
+        try:
+            out[opp.strip()] = float(val)
+        except ValueError:
+            raise click.ClickException(f"--lift delta {val!r} for {opp.strip()!r} is not a number.")
+    return out
+
+
+def _apply_slot_lifts(con, archetype: str, slot_specs: tuple[str, ...], lifts: dict[str, float], board: str) -> list[str]:
+    """Merge slot-test-measured diffs ("Card@Opponent") into `lifts` (user-supplied wins). Returns notes."""
+    from legacy_engine.advisory.compare import slot_lift
+
+    notes: list[str] = []
+    for spec in slot_specs:
+        if "@" not in spec:
+            raise click.ClickException(f"--lift-slot entry {spec!r} must be 'Card@Opponent'.")
+        card, opp = spec.rsplit("@", 1)
+        card, opp = card.strip(), opp.strip()
+        measured = slot_lift(con, archetype, card, opp, board=board)
+        if measured is None:
+            notes.append(f"// lift-slot: no computable diff for {card!r} vs {opp!r} — skipped.")
+            continue
+        if opp in lifts:
+            notes.append(f"// lift-slot: {card!r} vs {opp!r} measured {measured:+.3f}, but --lift override {lifts[opp]:+.3f} kept.")
+        else:
+            lifts[opp] = measured
+            notes.append(f"// lift-slot: {card!r} vs {opp!r} → measured lift {measured:+.3f}.")
+    return notes
+
+
+def _echo_comparison(result) -> None:
+    """Render a ComparisonResult: EV summary + per-matchup table + break-even + honesty banners."""
+    a, b = result.a_label, result.b_label
+    click.echo(f"\n=== Configuration comparison vs field (source={result.field_source}) ===")
+    click.echo("// lifts are presence-correlational assumptions (point overlay), NOT in the MC base.")
+    click.echo("// transform = max-over-modes per matchup — the optimistic ceiling (assumes you reach the better mode post-board).")
+
+    ac_lo, ac_hi = result.ev_a_base_ci
+    bc_lo, bc_hi = result.ev_b_base_ci
+    click.echo("\n// base field EV (no lifts) [95% MC CI]:")
+    click.echo(f"//   A {a!r}: {result.ev_a_base*100:5.1f}%  [{ac_lo*100:4.1f}, {ac_hi*100:4.1f}]")
+    click.echo(f"//   B {b!r}: {result.ev_b_base*100:5.1f}%  [{bc_lo*100:4.1f}, {bc_hi*100:4.1f}]")
+    click.echo(f"//   P(A beats B), base: {result.p_a_beats_b_base:.2f}  ({result.n_draws} draws)")
+    if any(r.wr_a_adj != r.wr_a_base or r.wr_b_adj != r.wr_b_base for r in result.rows):
+        click.echo(f"// adjusted field EV (with lifts):  A {result.ev_a_adj*100:5.1f}%   B {result.ev_b_adj*100:5.1f}%")
+
+    click.echo(f"\n{'Opponent':<20}{'share':>6}  {'A (mode)':<26}{'B (mode)':<26}{'contrib':>8}")
+    click.echo("-" * 88)
+
+    def _cell(wr: float, mode: str, imputed: bool) -> str:
+        tag = mode + ("*" if imputed else "")
+        return f"{wr*100:5.1f}% ({tag})"
+
+    for r in result.rows:
+        click.echo(
+            f"{r.opponent:<20}{r.share*100:>5.1f}%  "
+            f"{_cell(r.wr_a_adj, r.chosen_mode_a, r.imputed_a):<26}"
+            f"{_cell(r.wr_b_adj, r.chosen_mode_b, r.imputed_b):<26}"
+            f"{r.contribution_diff*100:>+7.1f}"
+        )
+
+    click.echo()
+    if result.breakeven_lift is None:
+        click.echo(f"// break-even: A is already at/ahead of B on base EV — no sideboard lift needed.")
+    elif not result.breakeven_feasible:
+        click.echo(
+            f"// break-even: A's hate package would need +{result.breakeven_lift*100:.0f} pts on each of "
+            f"{result.breakeven_targets} to tie B — NOT achievable within [0,100%]."
+        )
+    else:
+        click.echo(
+            f"// break-even: A's hate package must add +{result.breakeven_lift*100:.0f} pts to EACH of "
+            f"{result.breakeven_targets} to tie B's EV."
+        )
+    click.echo(f"// matchup-data coverage: A={result.coverage_a:.0%}, B={result.coverage_b:.0%}  (* = imputed cell)")
+    for w in result.warnings:
+        click.echo(f"// warning: {w}")
+
+
+@advise.command("compare")
+@click.option("--field", "field_file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Custom field file (<share> <archetype> lines); recommended for a meaningful comparison.")
+@click.option("--a", "arch_a", default=None, help="Config A primary archetype (required).")
+@click.option("--b", "arch_b", default=None, help="Config B primary archetype (required).")
+@click.option("--a-transform", "a_transform", default=None, help="Add a transform mode to Config A (per-matchup max).")
+@click.option("--b-transform", "b_transform", default=None, help="Add a transform mode to Config B (per-matchup max).")
+@click.option("--a-lift", "a_lift", default=None, help="Config A SB lifts: 'opp=+0.11,opp2=-0.03'.")
+@click.option("--b-lift", "b_lift", default=None, help="Config B SB lifts.")
+@click.option("--a-lift-slot", "a_lift_slot", multiple=True, help="Pull a measured lift for Config A: 'Card@Opponent' (repeatable).")
+@click.option("--b-lift-slot", "b_lift_slot", multiple=True, help="Pull a measured lift for Config B: 'Card@Opponent' (repeatable).")
+@click.option("--break-even-matchups", "be_matchups", default=None, help="Comma-separated opponents the break-even lift spreads over (default: A's declared-lift matchups).")
+@click.option("--board", default="side", show_default=True, help="Board for --*-lift-slot pulls.")
+@click.option("--seed", type=int, default=None, help="RNG seed for deterministic MC.")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), default=None, help="DuckDB path (defaults to project default).")
+@_provenance_opt
+@_window_opts
+@_verbose
+def advise_compare(
+    field_file: str | None, arch_a: str | None, arch_b: str | None,
+    a_transform: str | None, b_transform: str | None,
+    a_lift: str | None, b_lift: str | None,
+    a_lift_slot: tuple[str, ...], b_lift_slot: tuple[str, ...],
+    be_matchups: str | None, board: str, seed: int | None, db: str | None,
+    provenance: str | None, since: str | None, until: str | None, regime: str | None,
+    all_time: bool, verbose: bool,
+) -> None:
+    """Compare two deck configurations (incl. transform-alternates) across the field.
+
+    A "config" is one or more modes; its per-opponent win-rate is the max over modes. A plain deck
+    with a hate sideboard is one mode + --a-lift; a transform-alternate is --a + --a-transform.
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.compare import ConfigMode, DeckConfig, compare_configs
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.advisory.window import build_advisory_inputs, resolve_advisory_window
+    from legacy_engine.ingestion import store
+
+    if not arch_a or not arch_b:
+        raise click.ClickException("advise compare requires both --a and --b (the two configs' primary archetypes).")
+
+    field_text = Path(field_file).read_text() if field_file else None
+    if provenance is not None:
+        click.echo(f"// provenance: {provenance}")
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        win = resolve_advisory_window(con, regime=regime, since=since, until=until, all_time=all_time, provenance=provenance)
+        _echo_window(win)
+        inputs = build_advisory_inputs(con, win, provenance=provenance)
+        for line in inputs.audit:
+            click.echo(line)
+        matrix = inputs.matrix
+        field_provenance = None if field_text is not None else provenance
+        field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+
+        lifts_a = _parse_lift_spec(a_lift)
+        lifts_b = _parse_lift_spec(b_lift)
+        slot_notes = _apply_slot_lifts(con, arch_a, a_lift_slot, lifts_a, board)
+        slot_notes += _apply_slot_lifts(con, arch_b, b_lift_slot, lifts_b, board)
+        for note in slot_notes:
+            click.echo(note)
+
+        # Fail-fast: a declared lift opponent must be in the field.
+        for opp in {*lifts_a, *lifts_b}:
+            if opp not in field.shares:
+                raise click.ClickException(f"lift opponent {opp!r} is not in the field — check spelling / --field.")
+
+        config_a = DeckConfig(arch_a, [ConfigMode(arch_a, lifts_a)] + ([ConfigMode(a_transform)] if a_transform else []))
+        config_b = DeckConfig(arch_b, [ConfigMode(arch_b, lifts_b)] + ([ConfigMode(b_transform)] if b_transform else []))
+        be_targets = [t.strip() for t in be_matchups.split(",") if t.strip()] if be_matchups else None
+
+        result = compare_configs(matrix, field, config_a, config_b, seed=seed, breakeven_targets=be_targets)
+        _echo_comparison(result)
+    finally:
+        con.close()
+
+
 @advise.command("positioning")
 @click.option(
     "--deck",
