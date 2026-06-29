@@ -811,3 +811,89 @@ class TestReportCardsContrast:
         assert result.exit_code == 0, result.output
         assert "Sideboard-slot contrast" not in result.output
         assert "Card Win-Rates" in result.output
+
+
+# ---------------------------------------------------------------------------
+# advise compare — config/transform comparator
+# (feature epic-sb-config-evaluation-config-comparator)
+# ---------------------------------------------------------------------------
+
+
+class TestAdviseCompare:
+    """CLI tests for `advise compare`."""
+
+    @pytest.fixture
+    def compare_db(self, tmp_path, make_rounds_corpus):
+        db_path = tmp_path / "compare.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=20)  # n=40 cells → established-ish
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                ph = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({ph})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    @pytest.fixture
+    def field_file(self, tmp_path):
+        f = tmp_path / "field.txt"
+        f.write_text("0.5 Control\n0.5 Combo\n")
+        return str(f)
+
+    def test_requires_a_and_b(self, runner, compare_db, field_file):
+        result = runner.invoke(main, ["advise", "compare", "--field", field_file, "--a", "Control", "--db", compare_db])
+        assert result.exit_code != 0
+        assert "requires both --a and --b" in result.output
+
+    def test_basic_comparison_prints_ev_and_breakeven(self, runner, compare_db, field_file):
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Configuration comparison" in result.output
+        assert "P(A beats B)" in result.output
+        assert "break-even" in result.output
+        assert "coverage" in result.output
+
+    def test_transform_mode_shown(self, runner, compare_db, field_file):
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Combo", "--b", "Combo",
+             "--b-transform", "Control", "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert result.exit_code == 0, result.output
+        # B = max(Combo, Control) — Control wins the max where it's better, so it appears as a mode.
+        assert "Control" in result.output
+
+    def test_a_lift_parsed(self, runner, compare_db, field_file):
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--a-lift", "Combo=+0.1", "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "adjusted field EV" in result.output
+
+    def test_a_lift_slot_folds_measured_diff(self, runner, compare_db, field_file):
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--a-lift-slot", "Surgical Extraction@Combo", "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "lift-slot:" in result.output
+
+    def test_lift_opponent_not_in_field_fails(self, runner, compare_db, field_file):
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--a-lift", "Nonexistent=+0.1", "--db", compare_db],
+        )
+        assert result.exit_code != 0
+        assert "not in the field" in result.output

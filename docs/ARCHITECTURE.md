@@ -54,7 +54,7 @@ observed → label → analytics → advisory arc.
 │  seed (cards|cache|rules|banlist|prices) · refresh (all|cards)                   │
 │  · label · report (meta|matchups|tiers|trends|cards|gaps|subgroup|variants|      │
 │    new-cards|speculate|prices|affectedness)                                       │
-│  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire)        │
+│  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire|compare)│
 │  · identify (suggest|strong|track)                                               │
 │  · generate (consensus|tune|doctor) · export (deck) · viz (deck|meta|matchups|   │
 │    trends|tiers)  [later: goldfish]                                               │
@@ -296,7 +296,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - `seed cards|cache|rules|banlist|prices`
   - `refresh all|cards`
   - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices|affectedness`
-  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire`
+  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`
   - `identify suggest|strong|track`
   - `generate consensus|tune|doctor` (`tune --discover` adds gap-discovery; `consensus --variant/--players/--strong`)
   - `export deck`
@@ -307,10 +307,11 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - **Regime-aware advisory**: `report matchups|gaps`, `advise positioning|whattoplay|report|refresh` take `--since/--until/--regime/--all-time` and default to the **adaptive per-cell ban-aware matrix + current-regime field** (via `advisory/window.py::resolve_advisory_window` + `build_advisory_inputs`); thin explicit windows degrade to full-corpus with a loud banner.
   - `report meta --venues KEYS` and `advise report --venues KEYS` enable cross-venue comparison; `report meta --by-variant` splits by variant tag.
   - `report meta` is deck-based (windows but never degrades; full-corpus default).
-  - **`--provenance online|paper`** filters by tournament provenance; available on all `advise` leaves (`positioning|sideboard|whattoplay|field|report|refresh|acquire`) and on `report matchups|meta`.
+  - **`--provenance online|paper`** filters by tournament provenance; available on all `advise` leaves (`positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`) and on `report matchups|meta`.
   - **`advise positioning --list-granular`** enables an opt-in `S_granular` overlay that treats the deck as individual cards rather than a named archetype; experimental, printed alongside the standard S score.
   - **`report affectedness --archetype NAME`** explains which bans drove an archetype's `valid_since` (ban-affectedness derivation); `--provenance` scopes the archetype frequency check.
   - **`report trends --movers N`** appends a biggest-movers digest ranking archetypes by share delta between the two most recent regimes.
+  - **`advise compare`** compares two deck configurations against the field (named-archetype + flags); a config is 1+ modes with per-opponent `max`-over-modes WR, so a transform-alternate is `--a`/`--a-transform` and a hate sideboard is `--a-lift`/`--a-lift-slot`. Two layers: a Bayesian-MC base (field-EV CIs + P(A beats B)) and a point-estimate lift overlay + break-even solver. Lifts are presence-correlational overlays, never in the MC.
   - **`report cards --contrast`** runs the matchup-conditioned sideboard-slot test: for `--archetype` vs `--vs` opponent, the WITH-card vs WITHOUT-card win-rate on `--board` (defaults `side` in this mode), with Wilson/Jeffreys CIs + a Fisher's-exact significance test on the diff, shown for both the adaptive ban-aware and full-corpus windows. Presence-correlational, NOT causal.
 - **Error handling:** ingestion tolerates one bad deck/event (catch, log, continue); unresolved card names → `unmatched` bucket (never drop a deck); **fail-fast** on unknown archetype condition-type (load time, not match time).
 - **Confidence everywhere:** every emitted stat carries `established|evolving|speculative` + sample size; low-n gated (matchup n<30 hidden, BEST-CALL only on established/evolving).
