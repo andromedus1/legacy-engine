@@ -1406,6 +1406,101 @@ def _print_gap_report(report: "GapReport") -> None:
         )
 
 
+def _echo_slot_contrast(report) -> None:
+    """Render one SlotContrastReport window as a table with honesty banners."""
+    click.echo(
+        f"\n// window: {report.window_label}  |  decisive "
+        f"{report.archetype} vs {report.opponent} matches: {report.n_matches}"
+    )
+    if report.degraded:
+        click.echo(f"// degraded: {report.note}")
+        return
+
+    def _cohort(p: float | None, n: int, ci) -> str:
+        if not n:
+            return "—  (n=0)"
+        lo, hi = ci
+        return f"{p * 100:5.1f}% (n={n:>3}) [{lo * 100:>2.0f}-{hi * 100:<2.0f}]"
+
+    click.echo(
+        f"{'Card':<26}  {'WITH card':<24}  {'WITHOUT card':<24}  {'diff':>6}  significance"
+    )
+    click.echo("-" * 96)
+    for c in report.cells:
+        diff_str = f"{c.diff * 100:+5.1f}" if c.diff is not None else "—"
+        if c.p_value is None:
+            sig = "—"
+        elif c.significant:
+            sig = f"yes (p={c.p_value:.2f})"
+        else:
+            sig = f"no  (p={c.p_value:.2f})"
+        click.echo(
+            f"{c.card:<26}  {_cohort(c.p_with, c.n_with, c.ci_with):<24}  "
+            f"{_cohort(c.p_without, c.n_without, c.ci_without):<24}  {diff_str:>6}  {sig}"
+        )
+    if report.any_thin:
+        click.echo("// thin: cohorts with n<30 are speculative — diffs indicative only, CIs wide.")
+
+
+def _report_cards_contrast(
+    *,
+    archetype: str | None,
+    opponent: str | None,
+    board: str,
+    card: str | None,
+    since: str | None,
+    until: str | None,
+    db: str | None,
+) -> None:
+    """Matchup-conditioned sideboard-slot test (the `report cards --contrast` path)."""
+    from legacy_engine.analytics.slot_test import card_matchup_contrast, pair_adaptive_since
+    from legacy_engine.ingestion import store
+
+    if not archetype or not opponent:
+        raise click.ClickException(
+            "--contrast requires both --archetype and --vs "
+            "(the archetype to test, and the opponent matchup to test the slot against)."
+        )
+
+    cards = [card] if card else None
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        click.echo(f"\n=== Sideboard-slot contrast: {archetype!r} vs {opponent!r} [board={board}] ===")
+        click.echo(
+            "// presence-correlational, NOT causal — owning a card != boarding it in; "
+            "selection confounds apply."
+        )
+        if card is None:
+            click.echo(
+                "// scan: per-card p-values are uncorrected — treat a lone 'significant' "
+                "with skepticism (multiple comparisons)."
+            )
+
+        if since is not None or until is not None:
+            windows = [(since, until, f"custom ({since or 'start'} → {until or 'now'})")]
+        else:
+            adaptive_since = pair_adaptive_since(con, archetype, opponent)
+            adaptive_label = (
+                f"adaptive ban-aware (since {adaptive_since})"
+                if adaptive_since
+                else "adaptive ban-aware (full corpus — neither archetype ban-affected)"
+            )
+            windows = [
+                (adaptive_since, None, adaptive_label),
+                (None, None, "full-corpus (all-time)"),
+            ]
+
+        for win_since, win_until, label in windows:
+            report = card_matchup_contrast(
+                con, archetype, opponent, board=board, cards=cards,
+                since=win_since, until=win_until, window_label=label,
+            )
+            _echo_slot_contrast(report)
+    finally:
+        con.close()
+
+
 @report.command("cards")
 @click.option("--archetype", default=None, help="Restrict to cards an archetype plays (via card_frequencies).")
 @click.option("--vs", "opponent", default=None, help="Show per-matchup value vs this opponent; else shows marginal.")
@@ -1420,6 +1515,18 @@ def _print_gap_report(report: "GapReport") -> None:
 @click.option("--since", default=None, help="ISO date lower bound (inclusive) for tournament window.")
 @click.option("--until", default=None, help="ISO date upper bound (inclusive) for tournament window.")
 @click.option(
+    "--contrast",
+    is_flag=True,
+    default=False,
+    help="Sideboard-slot test: WITH-vs-WITHOUT card win-rate in a specific matchup "
+    "(requires --archetype and --vs). Shows adaptive + full-corpus windows.",
+)
+@click.option(
+    "--card",
+    default=None,
+    help="With --contrast: focus a single card (default: scan all cards the archetype runs on --board).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -1433,6 +1540,8 @@ def report_cards(
     min_tier: str,
     since: str | None,
     until: str | None,
+    contrast: bool,
+    card: str | None,
     db: str | None,
     verbose: bool,
 ) -> None:
@@ -1440,8 +1549,26 @@ def report_cards(
 
     Shows how a card's decks perform relative to the archetype's baseline win-rate.
     Thin cells (below --min-tier) are suppressed with a note, never fabricated.
+
+    With --contrast, instead shows the matchup-conditioned sideboard-slot test: for an
+    --archetype vs --vs opponent, the WITH-card vs WITHOUT-card win-rate (on --board),
+    with Wilson CIs and a Fisher's-exact significance test on the difference.
     """
     _setup_logging(verbose)
+
+    if contrast:
+        # This is the *sideboard*-slot test — default --board to "side" for the contrast path
+        # unless the user explicitly passed --board (the shared option defaults to "main" for
+        # the normal report-cards path, which we must not change).
+        ctx = click.get_current_context()
+        eff_board = board
+        if ctx.get_parameter_source("board") == click.core.ParameterSource.DEFAULT:
+            eff_board = "side"
+        _report_cards_contrast(
+            archetype=archetype, opponent=opponent, board=eff_board,
+            card=card, since=since, until=until, db=db,
+        )
+        return
 
     from legacy_engine.analytics.card_value import card_value_marginal, card_values_vs
     from legacy_engine.analytics.match_results import compute_card_winrates
