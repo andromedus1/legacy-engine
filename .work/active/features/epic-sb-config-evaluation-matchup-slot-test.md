@@ -1,7 +1,7 @@
 ---
 id: epic-sb-config-evaluation-matchup-slot-test
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-sb-config-evaluation
 depends_on: []
@@ -71,6 +71,27 @@ side-based contrast isn't corrupted by maindeck copies — but the spec should s
   samples).
 - Output feeds the config comparator (the next feature) as its measured per-matchup SB-lift
   input.
+
+## Implementation notes
+- **Files changed**: `src/legacy_engine/analytics/slot_test.py` (new — compute + dataclasses +
+  `pair_adaptive_since`), `src/legacy_engine/cli.py` (extended `report cards` with `--contrast`
+  / `--card`; added `_report_cards_contrast` + `_echo_slot_contrast` render helpers).
+- **Tests added**: `tests/analytics/test_slot_test.py` (buckets + exclusions, no-fan-out on
+  duplicate player, significant vs near-50/50 Fisher, empty cohort, cards=None scan). Full
+  suite green (2248 passed).
+- **Validated against the hand-prototype**: full-corpus Toxic Deluge vs Death & Taxes reads
+  40.6% (n=69) / 29.9% (n=87), diff +10.7 — exact match. Dual-window pays off immediately:
+  Null Rod vs D&T shows +13.8 in the adaptive (regime-current) window vs the full-corpus
+  Blue-Artifacts −8.2 — different opponents, different stories, both visible.
+- **Discrepancies from design**:
+  - Sort refined from pure `abs(diff)` desc to **robust-cohort-first** (cells whose smaller
+    cohort has n≥30 sort above thinner ones, then by `abs(diff)`; no-diff cells last). Pure
+    `abs(diff)` floated n=1/n=2 noise (+67% on a single deck) to the top and buried the real
+    signal. Still shows every cell (honest-degrade) — just demotes the noise. In the design's
+    intent ("surface the slots that pull weight"), not a deviation from it.
+  - Numpy scalars from `scipy.stats.fisher_exact` coerced to native `float`/`bool` so the
+    public dataclass never leaks numpy types.
+- **Adjacent issues parked**: none.
 
 ## Design decisions
 - **CLI surface**: Extend `report cards` with a `--contrast` mode (NOT a new leaf, NOT
