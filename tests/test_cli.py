@@ -710,3 +710,104 @@ class TestWindowEchoRegimeConsistency:
         )
         assert result.exit_code == 0, result.output
         assert "// window:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# report cards --contrast — matchup-conditioned sideboard-slot test
+# (feature epic-sb-config-evaluation-matchup-slot-test)
+# ---------------------------------------------------------------------------
+
+
+class TestReportCardsContrast:
+    """CLI tests for the `report cards --contrast` sideboard-slot test."""
+
+    @pytest.fixture
+    def contrast_db(self, tmp_path, make_rounds_corpus):
+        """File-backed DuckDB with the Control-vs-Combo rounds corpus (Surgical in side)."""
+        db_path = tmp_path / "contrast.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_contrast_requires_vs(self, runner, contrast_db):
+        result = runner.invoke(
+            main, ["report", "cards", "--contrast", "--archetype", "Control", "--db", contrast_db]
+        )
+        assert result.exit_code != 0
+        assert "requires both --archetype and --vs" in result.output
+
+    def test_contrast_requires_archetype(self, runner, contrast_db):
+        result = runner.invoke(
+            main, ["report", "cards", "--contrast", "--vs", "Combo", "--db", contrast_db]
+        )
+        assert result.exit_code != 0
+        assert "requires both --archetype and --vs" in result.output
+
+    def test_contrast_prints_both_windows_and_disclaimer(self, runner, contrast_db):
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Sideboard-slot contrast" in result.output
+        assert "adaptive ban-aware" in result.output
+        assert "full-corpus (all-time)" in result.output
+        assert "NOT causal" in result.output
+
+    def test_contrast_defaults_to_side_board(self, runner, contrast_db):
+        """No --board on the contrast path defaults to side (the sideboard-slot test)."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "[board=side]" in result.output
+
+    def test_contrast_respects_explicit_board(self, runner, contrast_db):
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--board", "main", "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "[board=main]" in result.output
+
+    def test_contrast_scan_shows_multiple_comparisons_caution(self, runner, contrast_db):
+        """Scanning all cards (no --card) prints the multiple-comparisons caution."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "multiple comparisons" in result.output
+
+    def test_contrast_single_card_no_multiple_comparisons_caution(self, runner, contrast_db):
+        """Focusing one --card suppresses the multiple-comparisons caution."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--card", "Surgical Extraction", "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "multiple comparisons" not in result.output
+
+    def test_non_contrast_path_unchanged(self, runner, contrast_db):
+        """Without --contrast, the normal marginal/lift report still renders (no contrast header)."""
+        result = runner.invoke(
+            main, ["report", "cards", "--db", contrast_db, "--board", "main", "--since", "2025-01-01"]
+        )
+        assert result.exit_code == 0, result.output
+        assert "Sideboard-slot contrast" not in result.output
+        assert "Card Win-Rates" in result.output

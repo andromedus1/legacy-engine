@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-from legacy_engine.analytics.slot_test import card_matchup_contrast
+from legacy_engine.analytics.slot_test import card_matchup_contrast, pair_adaptive_since
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
 
@@ -186,6 +186,62 @@ class TestStats:
         assert cell.n_with == 0
         assert cell.p_with is None and cell.ci_with is None
         assert cell.diff is None and cell.p_value is None and cell.significant is False
+        con.close()
+
+
+class TestWindowing:
+    def test_explicit_window_restricts_matches(self):
+        con = _con()
+        # Two tournaments on different dates, each with one Tempo-vs-Foe match.
+        for suffix, date in (("jan", "2026-01-15"), ("mar", "2026-03-15")):
+            decks = [
+                _deck(f"h_{suffix}", main=["Bolt"], side=["Tech"]),
+                _deck(f"f_{suffix}", main=["Rock"], side=[]),
+            ]
+            rounds = [{"Player1": f"h_{suffix}", "Player2": f"f_{suffix}", "Result": "2-0"}]
+            labels = {f"h_{suffix}": "Tempo", f"f_{suffix}": "Foe"}
+            _build(con, suffix, decks, rounds, labels, date=date)
+
+        full = card_matchup_contrast(con, "Tempo", "Foe", board="side", cards=["Tech"])
+        assert full.n_matches == 2
+
+        windowed = card_matchup_contrast(
+            con, "Tempo", "Foe", board="side", cards=["Tech"],
+            since="2026-02-01", until=None,
+        )
+        assert windowed.n_matches == 1   # only the March match falls in [2026-02-01, ∞)
+        con.close()
+
+    def test_pair_adaptive_since_none_when_unaffected(self):
+        con = _con()
+        # Archetypes that run no banned cards are never ban-affected → full corpus (None).
+        decks = [_deck("h1", main=["Bolt"], side=["Tech"]), _deck("f1", main=["Rock"], side=[])]
+        rounds = [{"Player1": "h1", "Player2": "f1", "Result": "2-0"}]
+        _build(con, "adp", decks, rounds, {"h1": "Tempo", "f1": "Foe"})
+        assert pair_adaptive_since(con, "Tempo", "Foe") is None
+        con.close()
+
+
+class TestThinTier:
+    def test_small_cohort_is_speculative_and_flagged(self):
+        con = _con()
+        decks = [
+            _deck("hw", main=["Bolt"], side=["Tech"]),
+            _deck("hp", main=["Bolt"], side=["Filler"]),
+            _deck("f1", main=["Rock"], side=[]),
+            _deck("f2", main=["Rock"], side=[]),
+        ]
+        rounds = [
+            {"Player1": "hw", "Player2": "f1", "Result": "2-0"},
+            {"Player1": "hp", "Player2": "f2", "Result": "0-2"},
+        ]
+        labels = {"hw": "Tempo", "hp": "Tempo", "f1": "Foe", "f2": "Foe"}
+        _build(con, "thin", decks, rounds, labels)
+        report = card_matchup_contrast(con, "Tempo", "Foe", board="side", cards=["Tech"])
+        cell = report.cells[0]
+        assert cell.tier_with == "speculative"      # n=1 < 30
+        assert cell.tier_without == "speculative"
+        assert report.any_thin is True
         con.close()
 
 

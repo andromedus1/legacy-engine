@@ -1,7 +1,7 @@
 ---
 id: epic-sb-config-evaluation-matchup-slot-test
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-sb-config-evaluation
 depends_on: []
@@ -71,6 +71,25 @@ side-based contrast isn't corrupted by maindeck copies — but the spec should s
   samples).
 - Output feeds the config comparator (the next feature) as its measured per-matchup SB-lift
   input.
+
+## Review record
+- **Verdict**: Approve with comments (deep lane, fresh-context reviewer). No blockers.
+- **Statistics verified correct**: Fisher 2x2 orientation, Wilson/Jeffreys CI usage, exclusion
+  parity with `compute_match_results`, `(tid, hero_norm)` dedup grain (no fan-out),
+  `pair_adaptive_since` ≡ `build_adaptive_matrix` windowing, no numpy leakage.
+- **Findings — all resolved in-session before advancing** (chose fix-now over follow-up items
+  since the test gaps were stated acceptance criteria and #1 was a real bug):
+  - *Important #1*: `--contrast` defaulted `--board main`; this is the sideboard test → now
+    defaults `side` unless `--board` is explicitly passed (Click `get_parameter_source`).
+  - *Important #2*: added CLI tests (`tests/test_cli.py::TestReportCardsContrast`) — fail-fast
+    without `--vs`/`--archetype`, both windows print, disclaimer prints, scan-vs-single-card
+    multiple-comparisons banner, board default, non-contrast path unchanged.
+  - *Important #3*: added dual-window + `pair_adaptive_since` tests (`TestWindowing`).
+  - *Important #4*: added thin-tier test (`TestThinTier`) asserting speculative tier + `any_thin`.
+  - *Nit #5*: removed the dead `multi_card` param from `_echo_slot_contrast`.
+  - *Nit #6*: added a `report cards --contrast` line to `docs/ARCHITECTURE.md` CLI conventions.
+  - *Nit #7*: commented the deliberate half-open `[since, until)` alignment in `_RESOLVE_SQL`.
+- Full suite green after fixes: **2259 passed**.
 
 ## Implementation notes
 - **Files changed**: `src/legacy_engine/analytics/slot_test.py` (new — compute + dataclasses +

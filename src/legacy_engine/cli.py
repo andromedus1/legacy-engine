@@ -1406,7 +1406,7 @@ def _print_gap_report(report: "GapReport") -> None:
         )
 
 
-def _echo_slot_contrast(report, *, multi_card: bool) -> None:
+def _echo_slot_contrast(report) -> None:
     """Render one SlotContrastReport window as a table with honesty banners."""
     click.echo(
         f"\n// window: {report.window_label}  |  decisive "
@@ -1496,7 +1496,7 @@ def _report_cards_contrast(
                 con, archetype, opponent, board=board, cards=cards,
                 since=win_since, until=win_until, window_label=label,
             )
-            _echo_slot_contrast(report, multi_card=(card is None))
+            _echo_slot_contrast(report)
     finally:
         con.close()
 
@@ -1557,8 +1557,15 @@ def report_cards(
     _setup_logging(verbose)
 
     if contrast:
+        # This is the *sideboard*-slot test — default --board to "side" for the contrast path
+        # unless the user explicitly passed --board (the shared option defaults to "main" for
+        # the normal report-cards path, which we must not change).
+        ctx = click.get_current_context()
+        eff_board = board
+        if ctx.get_parameter_source("board") == click.core.ParameterSource.DEFAULT:
+            eff_board = "side"
         _report_cards_contrast(
-            archetype=archetype, opponent=opponent, board=board,
+            archetype=archetype, opponent=opponent, board=eff_board,
             card=card, since=since, until=until, db=db,
         )
         return

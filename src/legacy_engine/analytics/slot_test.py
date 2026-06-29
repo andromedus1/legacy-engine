@@ -99,7 +99,8 @@ LEFT JOIN dup du1 ON du1.tournament_id = r.tournament_id AND du1.norm = lower(tr
 LEFT JOIN dup du2 ON du2.tournament_id = r.tournament_id AND du2.norm = lower(trim(r.player2))
 WHERE (? IS NULL OR t.provenance = ?)
   AND (? IS NULL OR t.date >= ?)
-  AND (? IS NULL OR t.date <  ?)
+  AND (? IS NULL OR t.date <  ?)   -- half-open [since, until): aligns with compute_match_results'
+                                   -- _JOIN_SQL, NOT compute_card_winrates' inclusive upper bound.
   AND ((d1.archetype = ? AND d2.archetype = ?) OR (d1.archetype = ? AND d2.archetype = ?))
 """
 
