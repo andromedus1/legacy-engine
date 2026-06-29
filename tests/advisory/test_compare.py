@@ -76,6 +76,22 @@ class TestPointEngine:
         assert wr_x == 1.0
 
 
+class TestBaseDecoupledFromAdjWinner:
+    def test_wr_base_is_max_of_base_not_adj_winners_base(self):
+        # Two modes vs X: M1 base .6, M2 base .4 but M2 carries a +.3 lift → M2 wins the ADJ max.
+        # wr_base must be max(.6,.4)=.6 (the base max), NOT .4 (the adj-winner's base) — finding #1.
+        m = _matrix({("M1", "X"): (600, N), ("M1", "Y"): (500, N),
+                     ("M2", "X"): (400, N), ("M2", "Y"): (500, N)})
+        f = build_custom_field({"X": 0.6, "Y": 0.4})
+        a = DeckConfig("A", [ConfigMode("M1"), ConfigMode("M2", {"X": 0.30})])
+        b = DeckConfig("B", [ConfigMode("M1")])
+        r = compare_configs(m, f, a, b, n_draws=1000, seed=1)
+        row_x = next(row for row in r.rows if row.opponent == "X")
+        assert abs(row_x.wr_a_base - 0.60) < 0.02     # base max (NOT 0.40)
+        assert abs(row_x.wr_a_adj - 0.70) < 0.02      # adj max = M2 + lift
+        assert row_x.chosen_mode_a == "M2"            # adj winner is M2
+
+
 class TestBreakEven:
     def test_breakeven_lift_for_parity(self):
         m = _matrix(WR)
@@ -121,6 +137,19 @@ class TestCoverage:
         assert abs(r.coverage_a - 0.8) < 1e-9                  # X + Y measured; Z imputed
         z = next(row for row in r.rows if row.opponent == "Z")
         assert z.imputed_a is True
+
+    def test_thin_cell_excluded_from_coverage(self):
+        # n=10 cell (0<n<30) is present-but-thin → NOT covered (n>=30 display gate, finding #2).
+        m = _matrix({("TempoA", "X"): (6, 10), ("TempoA", "Y"): (400, N),
+                     ("ComboB", "X"): (5, 10), ("ComboB", "Y"): (500, N)})
+        f = build_custom_field({"X": 0.5, "Y": 0.5})
+        a = DeckConfig("TempoA", [ConfigMode("TempoA")])
+        b = DeckConfig("ComboB", [ConfigMode("ComboB")])
+        r = compare_configs(m, f, a, b, n_draws=1000, seed=1)
+        assert abs(r.coverage_a - 0.5) < 1e-9                  # only Y (n=1000) covered; X (n=10) thin
+        x = next(row for row in r.rows if row.opponent == "X")
+        assert x.imputed_a is False                            # present (not imputed) but thin
+        assert x.n_a == 10
 
 
 class TestMonteCarlo:

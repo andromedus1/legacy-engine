@@ -31,7 +31,7 @@ from legacy_engine.advisory.positioning import (
     _NODATA_STRENGTH,
     _row_winrate_inputs,
 )
-from legacy_engine.confidence import ConfidenceLevel
+_DISPLAY_N = 30  # n>=30 display/coverage gate (matches matchup tiering: evolving_min)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +66,8 @@ class MatchupContribution:
     chosen_mode_b: str
     imputed_a: bool
     imputed_b: bool
+    n_a: int  # chosen mode's cell match-count (0 = mirror/imputed) — for the n>=30 display gate
+    n_b: int
     contribution_diff: float  # share * (wr_a_adj - wr_b_adj)
 
 
@@ -95,69 +97,77 @@ class ComparisonResult:
 # Point-estimate row WR (mirrors positioning's mean-vs-known imputation, on p_shrunk)
 # ---------------------------------------------------------------------------
 
-def _row_point_wr(matrix, archetype: str, field_archetypes: list[str]) -> tuple[np.ndarray, np.ndarray]:
+def _row_point_wr(
+    matrix, archetype: str, field_archetypes: list[str]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Per-opponent point win-rate for ``archetype`` over ``field_archetypes``.
 
     Uses the matchup cell ``p_shrunk``; mirror → 0.5; no-data → mean of known (non-mirror) cells
-    (else 0.5). Returns ``(wr, imputed_mask)``.
+    (else 0.5). Returns ``(wr, imputed_mask, n)`` where ``n`` is the cell match count (0 for
+    mirror/absent) — the caller uses it for the n≥30 display gate (coverage + thin marking).
     """
     m = len(field_archetypes)
     wr = np.full(m, 0.5, dtype=np.float64)
     imputed = np.zeros(m, dtype=bool)
+    ncell = np.zeros(m, dtype=np.int64)
     known: list[float] = []
     for i, opp in enumerate(field_archetypes):
         if opp == archetype:
             wr[i] = 0.5  # mirror
+            cell = matrix.cells.get((archetype, archetype))
+            if cell is not None:
+                ncell[i] = cell.n
             continue
         cell = matrix.cells.get((archetype, opp))
         if cell is not None and cell.n > 0:
             wr[i] = float(cell.p_shrunk)
+            ncell[i] = cell.n
             known.append(wr[i])
         else:
             imputed[i] = True
     if known:
         wr[imputed] = float(np.mean(known))
     # else: imputed stay 0.5
-    return wr, imputed
+    return wr, imputed, ncell
 
 
 def _config_point(
     matrix, config: DeckConfig, field_archetypes: list[str]
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], np.ndarray]:
     """Per-opponent max-over-modes point WR for a config.
 
-    Returns ``(wr_base, wr_adj, imputed_chosen, chosen_mode)``:
-      - ``wr_base``: max over modes of base p_shrunk (no lifts).
+    Returns ``(wr_base, wr_adj, imputed_chosen, chosen_mode, n_chosen)``:
+      - ``wr_base``: max over modes of *base* p_shrunk (no lifts) — independent of the adj winner.
       - ``wr_adj``: max over modes of (base + mode lift), clamped [0,1] — lift can change the winner.
-      - ``imputed_chosen``: whether the mode that wins ``wr_adj`` was imputed for that opponent.
-      - ``chosen_mode``: the winning mode's archetype per opponent.
+      - ``imputed_chosen`` / ``n_chosen`` / ``chosen_mode``: the mode that wins ``wr_adj`` (the mode
+        you'd actually present) — its imputed flag, cell match-count, and archetype per opponent.
     """
     m = len(field_archetypes)
-    mode_wr = []
-    mode_imp = []
+    modes_data = []  # (archetype, base, adj, imp, ncell)
     for mode in config.modes:
-        wr, imp = _row_point_wr(matrix, mode.archetype, field_archetypes)
+        wr, imp, ncell = _row_point_wr(matrix, mode.archetype, field_archetypes)
         adj = wr.copy()
         for opp, delta in mode.lifts.items():
             if opp in field_archetypes:
                 j = field_archetypes.index(opp)
                 adj[j] = min(1.0, max(0.0, adj[j] + delta))
-        mode_wr.append((wr, adj))
-        mode_imp.append(imp)
+        modes_data.append((mode.archetype, wr, adj, imp, ncell))
 
     wr_base = np.full(m, -1.0)
     wr_adj = np.full(m, -1.0)
     imputed_chosen = np.zeros(m, dtype=bool)
+    n_chosen = np.zeros(m, dtype=np.int64)
     chosen = [""] * m
-    for mi, mode in enumerate(config.modes):
-        base, adj = mode_wr[mi]
+    for arch, base, adj, imp, ncell in modes_data:
         for i in range(m):
-            if adj[i] > wr_adj[i]:
-                wr_adj[i] = adj[i]
+            if base[i] > wr_base[i]:   # base max is decoupled from the adj winner
                 wr_base[i] = base[i]
-                imputed_chosen[i] = bool(mode_imp[mi][i])
-                chosen[i] = mode.archetype
-    return wr_base, wr_adj, imputed_chosen, chosen
+            if adj[i] > wr_adj[i]:      # adj winner = the mode actually presented
+                wr_adj[i] = adj[i]
+                imputed_chosen[i] = bool(imp[i])
+                n_chosen[i] = int(ncell[i])
+                chosen[i] = arch
+    return wr_base, wr_adj, imputed_chosen, chosen, n_chosen
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +242,8 @@ def compare_configs(
     if not field_archetypes:
         raise ValueError("compare_configs: field has no archetypes")
 
-    a_base, a_adj, a_imp, a_mode = _config_point(matrix, config_a, field_archetypes)
-    b_base, b_adj, b_imp, b_mode = _config_point(matrix, config_b, field_archetypes)
+    a_base, a_adj, a_imp, a_mode, a_n = _config_point(matrix, config_a, field_archetypes)
+    b_base, b_adj, b_imp, b_mode, b_n = _config_point(matrix, config_b, field_archetypes)
 
     ev_a_base = float((shares * a_base).sum())
     ev_b_base = float((shares * b_base).sum())
@@ -247,14 +257,17 @@ def compare_configs(
             wr_a_adj=float(a_adj[i]), wr_b_adj=float(b_adj[i]),
             chosen_mode_a=a_mode[i], chosen_mode_b=b_mode[i],
             imputed_a=bool(a_imp[i]), imputed_b=bool(b_imp[i]),
+            n_a=int(a_n[i]), n_b=int(b_n[i]),
             contribution_diff=float(shares[i] * (a_adj[i] - b_adj[i])),
         )
         for i, opp in enumerate(field_archetypes)
     ]
     rows.sort(key=lambda r: -abs(r.contribution_diff))
 
-    coverage_a = float(shares[~a_imp].sum())
-    coverage_b = float(shares[~b_imp].sum())
+    # Coverage honors the n>=30 display gate (matches positioning): a thin (0<n<30) cell is NOT
+    # "covered" — its win-rate is present-but-unreliable, not measured-with-confidence.
+    coverage_a = float(shares[a_n >= _DISPLAY_N].sum())
+    coverage_b = float(shares[b_n >= _DISPLAY_N].sum())
     if coverage_a < 0.5 or coverage_b < 0.5:
         warnings.append(
             f"low matchup-data coverage (A={coverage_a:.0%}, B={coverage_b:.0%}) — EV leans on 0.5 imputation"

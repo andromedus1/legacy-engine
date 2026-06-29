@@ -2311,24 +2311,29 @@ def _echo_comparison(result) -> None:
     if any(r.wr_a_adj != r.wr_a_base or r.wr_b_adj != r.wr_b_base for r in result.rows):
         click.echo(f"// adjusted field EV (with lifts):  A {result.ev_a_adj*100:5.1f}%   B {result.ev_b_adj*100:5.1f}%")
 
-    click.echo(f"\n{'Opponent':<20}{'share':>6}  {'A (mode)':<26}{'B (mode)':<26}{'contrib':>8}")
-    click.echo("-" * 88)
+    click.echo(f"\n{'Opponent':<20}{'share':>6}  {'A (mode)':<28}{'B (mode)':<28}{'contrib':>8}")
+    click.echo("-" * 92)
 
-    def _cell(wr: float, mode: str, imputed: bool) -> str:
-        tag = mode + ("*" if imputed else "")
-        return f"{wr*100:5.1f}% ({tag})"
+    def _cell(wr: float, mode: str, imputed: bool, n: int) -> str:
+        # * = imputed (no data); ~ = thin (0<n<30, present-but-unreliable)
+        mark = "*" if imputed else ("~" if n < 30 else "")
+        return f"{wr*100:5.1f}% ({mode}{mark})"
 
     for r in result.rows:
         click.echo(
             f"{r.opponent:<20}{r.share*100:>5.1f}%  "
-            f"{_cell(r.wr_a_adj, r.chosen_mode_a, r.imputed_a):<26}"
-            f"{_cell(r.wr_b_adj, r.chosen_mode_b, r.imputed_b):<26}"
+            f"{_cell(r.wr_a_adj, r.chosen_mode_a, r.imputed_a, r.n_a):<28}"
+            f"{_cell(r.wr_b_adj, r.chosen_mode_b, r.imputed_b, r.n_b):<28}"
             f"{r.contribution_diff*100:>+7.1f}"
         )
+    click.echo("// cell marks: * = imputed (no matchup data); ~ = thin (n<30, present-but-unreliable).")
 
     click.echo()
     if result.breakeven_lift is None:
-        click.echo(f"// break-even: A is already at/ahead of B on base EV — no sideboard lift needed.")
+        if result.ev_a_base >= result.ev_b_adj:
+            click.echo("// break-even: A is already at/ahead of B on base EV — no sideboard lift needed.")
+        else:
+            click.echo("// break-even: A trails B but no target matchups declared — pass --a-lift or --break-even-matchups.")
     elif not result.breakeven_feasible:
         click.echo(
             f"// break-even: A's hate package would need +{result.breakeven_lift*100:.0f} pts on each of "

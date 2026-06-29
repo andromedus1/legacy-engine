@@ -1,7 +1,7 @@
 ---
 id: epic-sb-config-evaluation-config-comparator
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-sb-config-evaluation
 depends_on: [epic-sb-config-evaluation-matchup-slot-test]
@@ -287,4 +287,23 @@ def slot_lift(con, archetype: str, card: str, opponent: str, *, board: str = "si
 - **Adjacent issues parked**: none.
 
 ## Review record
-<!-- filled by /agile-workflow:review -->
+- **Verdict**: Approve with comments (deep lane, fresh-context reviewer). No blockers.
+- **Verified correct**: MC shares field weights + reuses one Beta draw per distinct cell across
+  configs (shared modes correlate); lifts kept strictly out of the MC; tie-split `p_a_beats_b`;
+  Beta/Dirichlet params + imputation consistent with positioning; no numpy leakage; advisory-window
+  + audit-echo patterns followed.
+- **Findings — all resolved in-session before advancing**:
+  - *Important #1 (bug)*: `_config_point` set `wr_base` to the adj-winning mode's base, not the
+    max-over-modes base — understated `ev_a_base` and overstated the break-even for `--a-transform`
+    + `--a-lift`. Fixed: `wr_base` is now an independent max over modes' base WRs. Regression test
+    added (`TestBaseDecoupledFromAdjWinner`).
+  - *Important #2*: coverage ignored the n≥30 display gate (a thin n=5 cell counted as measured).
+    Fixed: `_row_point_wr` returns cell `n`; coverage uses `n>=_DISPLAY_N`. Test added.
+  - *Important #3*: missing thin-cell honesty marker (unmet AC). Fixed: cells now render `*`
+    (imputed) / `~` (0<n<30 thin) with a legend line.
+  - *Important #4*: ARCHITECTURE.md drift — added `compare` to the `advise` enumerations
+    (CLI box, leaf list, `--provenance` list) + a descriptive bullet.
+  - *Nit #5*: break-even `None` message disambiguated (A-ahead vs no-targets, via `ev_a_base`
+    vs `ev_b_adj`).
+  - *Nit #6*: dropped a stray f-string.
+- Full suite green after fixes: **2280 passed**.
