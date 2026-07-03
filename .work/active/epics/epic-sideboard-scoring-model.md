@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-scoring-model
 kind: epic
-stage: drafting
+stage: implementing
 tags: [advisory, analytics]
 parent: null
 depends_on: []
