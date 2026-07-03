@@ -14,8 +14,12 @@ from legacy_engine.advisory.whattoplay import (
     ProactivityProfile,
     _archetype_composition,
     _card_roles,
+    _color_contingent_tags,
     _load_deck_cards,
     _proactivity_from_cards,
+    _COLOR_SPELL_MIN,
+    _GY_FUEL_DENSITY,
+    _GY_RECURSION_DENSITY,
     best_deck_vs_best_call,
     covered_share,
     field_vulnerability_tags,
@@ -189,6 +193,56 @@ class TestCardRoles:
         )
         roles = _card_roles(exhume2)
         assert "graveyard_recursion" in roles
+
+    def test_delve_card_has_graveyard_fuel_not_recursion(self):
+        cruise = _make_card(
+            name="Treasure Cruise",
+            type_line="Sorcery",
+            oracle_text=(
+                "Delve (Each card you exile from your graveyard while casting this "
+                "spell pays for {1}.)\nDraw three cards."
+            ),
+            cmc=7.0,
+        )
+        roles = _card_roles(cruise)
+        assert "graveyard_fuel" in roles
+        assert "graveyard_recursion" not in roles
+
+    def test_delirium_card_has_graveyard_fuel(self):
+        card = _make_card(
+            name="Test Delirium Payoff",
+            type_line="Creature — Horror",
+            oracle_text="Delirium — This creature gets +2/+2 as long as there are four or more card types among cards in your graveyard.",
+            cmc=3.0,
+        )
+        roles = _card_roles(card)
+        assert "graveyard_fuel" in roles
+
+    def test_threshold_card_has_graveyard_fuel(self):
+        card = _make_card(
+            name="Test Threshold Payoff",
+            type_line="Instant",
+            oracle_text="Threshold — This spell costs {2} less to cast if there are seven or more cards in your graveyard.",
+            cmc=4.0,
+        )
+        roles = _card_roles(card)
+        assert "graveyard_fuel" in roles
+
+    def test_goyf_named_card_has_graveyard_fuel(self):
+        """*goyf-suffixed cards (Tarmogoyf, Nethergoyf, Barrowgoyf) size off graveyard
+        quantity — matched by name suffix regardless of oracle_text phrasing."""
+        goyf = _make_card(
+            name="Tarmogoyf",
+            type_line="Creature — Lhurgoyf",
+            oracle_text=(
+                "Tarmogoyf's power is equal to the number of card types among cards in "
+                "all graveyards and its toughness is that number plus 1."
+            ),
+            cmc=2.0,
+        )
+        roles = _card_roles(goyf)
+        assert "graveyard_fuel" in roles
+        assert "graveyard_recursion" not in roles
 
     def test_counterspell_has_counter(self):
         cs = _make_card(
@@ -827,10 +881,10 @@ class TestVulnerabilityTags:
                 )
         return con
 
-    def test_reanimator_archetype_has_graveyard_reliant(self):
+    def test_reanimator_archetype_has_graveyard_recursion(self):
         con = self._build_reanimator_corpus()
         tags = vulnerability_tags(con, "Reanimator")
-        assert "graveyard-reliant" in tags, f"Expected graveyard-reliant in {tags}"
+        assert "graveyard-recursion" in tags, f"Expected graveyard-recursion in {tags}"
         con.close()
 
     def test_death_and_taxes_has_creature_based(self):
@@ -956,8 +1010,137 @@ class TestVulnerabilityTags:
         store.load_cards(con, cards)
         maindeck = {"Reanimate": 4, "Animate Dead": 4, "Swamp": 16}
         tags = vulnerability_tags_for_deck(con, maindeck)
-        assert "graveyard-reliant" in tags
+        assert "graveyard-recursion" in tags
         con.close()
+
+    def test_delve_goyf_deck_has_graveyard_fuel_not_recursion(self):
+        """A delve/*goyf-shaped deck emits graveyard-fuel, not graveyard-recursion."""
+        con = _con()
+        cards = [
+            Card(
+                name="Tarmogoyf",
+                type_line="Creature — Lhurgoyf",
+                oracle_text=(
+                    "Tarmogoyf's power is equal to the number of card types among "
+                    "cards in all graveyards and its toughness is that number plus 1."
+                ),
+                cmc=2.0,
+            ),
+            Card(
+                name="Treasure Cruise",
+                type_line="Sorcery",
+                oracle_text=(
+                    "Delve (Each card you exile from your graveyard while casting "
+                    "this spell pays for {1}.)\nDraw three cards."
+                ),
+                cmc=7.0,
+            ),
+            Card(name="Swamp", type_line="Basic Land — Swamp", oracle_text="{T}: Add {B}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Tarmogoyf": 4, "Treasure Cruise": 4, "Swamp": 16}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "graveyard-fuel" in tags, f"Expected graveyard-fuel in {tags}"
+        assert "graveyard-recursion" not in tags, f"Unexpected graveyard-recursion in {tags}"
+        con.close()
+
+    def test_graveyard_reliant_never_emitted(self):
+        """The retired monolithic graveyard tag must never appear, on any composition shape."""
+        retired_tag = "graveyard" + "-reliant"  # constructed to avoid a false grep hit here
+        for corpus_builder, archetype in (
+            (self._build_reanimator_corpus, "Reanimator"),
+            (self._build_dnt_corpus, "Death and Taxes"),
+            (self._build_storm_corpus, "ANT Storm"),
+        ):
+            con = corpus_builder()
+            tags = vulnerability_tags(con, archetype)
+            assert retired_tag not in tags, f"{archetype}: unexpected {retired_tag} in {tags}"
+            con.close()
+
+    def test_red_heavy_deck_gets_plays_red(self):
+        """A deck with >= _COLOR_SPELL_MIN red nonland spell copies emits plays-red."""
+        con = _con()
+        cards = [
+            Card(
+                name="Lightning Bolt", type_line="Instant",
+                oracle_text="Lightning Bolt deals 3 damage to any target.",
+                cmc=1.0, colors=["R"],
+            ),
+            Card(
+                name="Brainstorm", type_line="Instant",
+                oracle_text="Draw three cards, then put two cards from your hand on top of your library.",
+                cmc=1.0, colors=["U"],
+            ),
+            Card(name="Mountain", type_line="Basic Land — Mountain", oracle_text="{T}: Add {R}.", cmc=0.0),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Lightning Bolt": _COLOR_SPELL_MIN, "Brainstorm": 2, "Mountain": 10, "Island": 10}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "plays-red" in tags, f"Expected plays-red in {tags}"
+        assert "plays-blue" not in tags, f"2 blue copies is below _COLOR_SPELL_MIN; got {tags}"
+        con.close()
+
+    def test_mono_blue_deck_does_not_get_plays_red(self):
+        """A mono-blue deck never emits plays-red (no red spells at all)."""
+        con = _con()
+        cards = [
+            Card(
+                name="Brainstorm", type_line="Instant",
+                oracle_text="Draw three cards, then put two cards from your hand on top of your library.",
+                cmc=1.0, colors=["U"],
+            ),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Brainstorm": _COLOR_SPELL_MIN + 2, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "plays-red" not in tags, f"Unexpected plays-red in {tags}"
+        assert "plays-blue" in tags, f"Expected plays-blue in {tags}"
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestColorContingentTags — pure-function tests for _color_contingent_tags
+# ---------------------------------------------------------------------------
+
+class TestColorContingentTags:
+    """plays-<color> fires at/above _COLOR_SPELL_MIN nonland spell copies, not below."""
+
+    def test_fires_at_threshold(self):
+        cards = [(_make_card(name="Lightning Bolt", colors=["R"]), _COLOR_SPELL_MIN)]
+        tags = _color_contingent_tags(cards)
+        assert "plays-red" in tags
+
+    def test_does_not_fire_below_threshold(self):
+        cards = [(_make_card(name="Lightning Bolt", colors=["R"]), _COLOR_SPELL_MIN - 1)]
+        tags = _color_contingent_tags(cards)
+        assert "plays-red" not in tags
+
+    def test_lands_excluded_even_with_matching_color(self):
+        mountain = _make_card(
+            name="Mountain", type_line="Basic Land — Mountain", colors=["R"],
+        )
+        cards = [(mountain, _COLOR_SPELL_MIN + 10)]
+        tags = _color_contingent_tags(cards)
+        assert tags == set()
+
+    def test_multiple_colors_independent(self):
+        cards = [
+            (_make_card(name="Lightning Bolt", colors=["R"]), _COLOR_SPELL_MIN),
+            (_make_card(name="Brainstorm", colors=["U"]), 2),
+        ]
+        tags = _color_contingent_tags(cards)
+        assert tags == {"plays-red"}
+
+    def test_counts_accumulate_across_cards_of_same_color(self):
+        """Multiple distinct red cards' counts sum toward the same color threshold."""
+        cards = [
+            (_make_card(name="Lightning Bolt", colors=["R"]), _COLOR_SPELL_MIN - 2),
+            (_make_card(name="Chain Lightning", colors=["R"]), 2),
+        ]
+        tags = _color_contingent_tags(cards)
+        assert "plays-red" in tags
 
 
 # ---------------------------------------------------------------------------
@@ -966,16 +1149,16 @@ class TestVulnerabilityTags:
 
 class TestHateEquity:
     def test_hate_equity_graveyard_tag(self):
-        """Field {GY-reliant A:0.4, GY-reliant B:0.2, combo C:0.3} → hate_equity['graveyard-reliant']==0.6."""
+        """Field {GY-recursion A:0.4, GY-recursion B:0.2, combo C:0.3} → hate_equity['graveyard-recursion']==0.6."""
         field = _make_field({"A": 0.4, "B": 0.2, "C": 0.3, "D": 0.1})
         archetype_tags = {
-            "A": frozenset({"graveyard-reliant"}),
-            "B": frozenset({"graveyard-reliant"}),
+            "A": frozenset({"graveyard-recursion"}),
+            "B": frozenset({"graveyard-recursion"}),
             "C": frozenset({"combo"}),
             "D": frozenset(),
         }
         equity = hate_equity(field, archetype_tags)
-        assert pytest.approx(equity["graveyard-reliant"], abs=1e-6) == pytest.approx(
+        assert pytest.approx(equity["graveyard-recursion"], abs=1e-6) == pytest.approx(
             field.shares["A"] + field.shares["B"]
         )
         assert "combo" in equity
@@ -984,7 +1167,7 @@ class TestHateEquity:
         """An archetype with multiple tags contributes its share to each tag."""
         field = _make_field({"Reanimator": 0.4, "Storm": 0.3, "Fair": 0.3})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant", "combo"}),
+            "Reanimator": frozenset({"graveyard-recursion", "combo"}),
             "Storm": frozenset({"storm-reliant", "combo"}),
             "Fair": frozenset({"creature-based"}),
         }

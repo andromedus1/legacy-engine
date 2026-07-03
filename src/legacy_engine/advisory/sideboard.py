@@ -66,7 +66,10 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
       Attribution rules (``_derive_attacks_for_promoted``):
         - "counter target" or "counter that spell" in oracle_text → ``{"combo", "storm-reliant"}``
-        - "exile" + "graveyard" in oracle_text → ``{"graveyard-reliant"}``
+        - "target red/blue spell/permanent" or "if it's red/blue" (color-blast template
+          shared by Pyroblast/Hydroblast/Blue|Red Elemental Blast) → ``{"plays-red"}`` /
+          ``{"plays-blue"}``
+        - "exile" + "graveyard" in oracle_text → ``{"graveyard-recursion"}``
         - Removal keywords ("destroy target", "exile target creature") → ``{"creature-based"}``
         - ``staple_role`` == "free_interaction" → ``{"combo", "storm-reliant"}``
         - Unattributed cards: a conservative ``{"combo"}`` set (labeled in a warning) so
@@ -581,6 +584,18 @@ class HoserCard:
                  castable regardless of deck color identity (e.g. Phyrexian mana,
                  free-activation abilities).  When True the color pre-filter is
                  bypassed so all decks can receive the card as a candidate.
+    ``symmetry``: ``"asymmetric"`` (default; affects only the opponent/their stuff) or
+                 ``"symmetric"`` (affects the controller too — e.g. Grafdigger's Cage
+                 stops ALL players casting from graveyard/library, including a
+                 graveyard-recursion deck's own plan).  Consumed by Feature B's
+                 self-hosing check; validated-but-inert in this feature.
+    ``cast_requires``: a structured cast-condition token, or ``None`` when the card has
+                 no conditional-cast requirement.  Known tokens: ``None``,
+                 ``"opp_controls_plains"`` (e.g. Massacre's free-cast clause).
+    ``functional_group``: identical-effect group key, or ``None``.  Cards sharing a
+                 ``functional_group`` (Hydroblast ≡ Blue Elemental Blast, both
+                 ``"red-blast"``) are de-duplicated to one coverage contribution in
+                 ``_build_coverage_model`` — they don't stack as distinct coverage.
     """
 
     name: str
@@ -589,6 +604,9 @@ class HoserCard:
     max_copies: int
     swing: float
     castable_any_color: bool = False
+    symmetry: str = "asymmetric"
+    cast_requires: "str | None" = None
+    functional_group: "str | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +623,14 @@ _SWING_ALIAS: dict[str, float] = {
 
 _VALID_COLORS = frozenset("WUBRG")
 
+# HoserCard.symmetry: valid values (Unit 2, feature-sb-effect-tagging-model).
+_VALID_SYMMETRY = frozenset({"asymmetric", "symmetric"})
+
+# HoserCard.cast_requires: known structured cast-condition tokens.  "opp_controls_plains"
+# is Massacre's free-cast clause; Massacre itself is empirically promoted (not a curated
+# catalog entry), so no shipped entry uses this token yet — the loader must still accept it.
+_VALID_CAST_REQUIRES = frozenset({"opp_controls_plains"})
+
 
 def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
     """Load and validate a hoser catalog from a JSON data file.
@@ -620,10 +646,14 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
     Optional:
       ``castable_any_color`` (bool, default False)
+      ``symmetry``           (str, one of "asymmetric"/"symmetric"; default "asymmetric")
+      ``cast_requires``      (str or null; one of the known tokens; default null)
+      ``functional_group``   (str or null; identical-effect group key; default null)
       ``_comment``           (str, ignored)
 
     Raises ``ValueError`` on schema violations (bad swing alias, empty attacks,
-    invalid colors, max_copies < 1) or ``FileNotFoundError`` when the path is absent.
+    invalid colors, max_copies < 1, unrecognized ``symmetry``/``cast_requires``)
+    or ``FileNotFoundError`` when the path is absent.
     Duplicate names raise ``ValueError`` so catalog integrity is enforced at load time.
 
     This is a module-level loader called once at import; the result is cached as
@@ -695,6 +725,26 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
         castable_any_color = bool(entry.get("castable_any_color", False))
 
+        symmetry = entry.get("symmetry", "asymmetric")
+        if symmetry not in _VALID_SYMMETRY:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'symmetry' {symmetry!r} must be one of "
+                f"{sorted(_VALID_SYMMETRY)}"
+            )
+
+        cast_requires = entry.get("cast_requires")
+        if cast_requires is not None and cast_requires not in _VALID_CAST_REQUIRES:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'cast_requires' {cast_requires!r} must be "
+                f"null or one of {sorted(_VALID_CAST_REQUIRES)}"
+            )
+
+        functional_group_raw = entry.get("functional_group")
+        if functional_group_raw is not None and not isinstance(functional_group_raw, str):
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'functional_group' must be a string or null"
+            )
+
         catalog[name] = HoserCard(
             name=name,
             attacks=attacks,
@@ -702,6 +752,9 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
             max_copies=max_copies,
             swing=swing,
             castable_any_color=castable_any_color,
+            symmetry=symmetry,
+            cast_requires=cast_requires,
+            functional_group=functional_group_raw,
         )
 
     return catalog
@@ -921,6 +974,13 @@ _EMPIRICAL_PROMOTE_MIN_ADOPTION: float = _EMPIRICAL_POOL_MIN_ADOPTION
 # Conservative single tag so the card participates but does not over-capture.
 _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 
+# Color-blast oracle-text detection (feature-sb-effect-tagging-model, Unit 5).
+# Matches the "Choose one — Counter target <color> spell; or Destroy target <color>
+# permanent." template shared by Pyroblast/Hydroblast/Blue Elemental Blast/Red Elemental
+# Blast, plus the "if it's <color>" phrasing Pyroblast/Hydroblast themselves use.
+_RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
+_RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
+
 
 def _derive_attacks_for_promoted(
     card_name: str,
@@ -933,15 +993,17 @@ def _derive_attacks_for_promoted(
 
     1. Counter magic:  "counter target" / "counter that spell"
        → {combo, storm-reliant}   (answers the most common free-spell targets)
-    2. Graveyard exile: "exile" AND "graveyard" present
-       → {graveyard-reliant}
-    3. Removal: "destroy target" / "exile target creature" / "exile target attacking"
+    2. Color blast: "target red/blue spell" / "target red/blue permanent" / "if it's red/blue"
+       → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
+    3. Graveyard exile: "exile" AND "graveyard" present
+       → {graveyard-recursion}
+    4. Removal: "destroy target" / "exile target creature" / "exile target attacking"
        → {creature-based}
-    4. staple_role == "free_interaction" (card_tags lookup)
+    5. staple_role == "free_interaction" (card_tags lookup)
        → {combo, storm-reliant}   (Force of Negation, Daze, etc.)
-    5. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
+    6. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
        → {greedy-manabase}        (answers Blood Moon, Back to Basics, Chalice)
-    6. Fallback: {combo}  (conservative — labeled in warning by caller).
+    7. Fallback: {combo}  (conservative — labeled in warning by caller).
 
     Returns a frozenset of tag strings.  Never returns the empty frozenset so
     ``HoserCard.attacks`` is always non-empty.
@@ -955,23 +1017,34 @@ def _derive_attacks_for_promoted(
     if "counter target" in text_lower or "counter that spell" in text_lower:
         tags.update({"combo", "storm-reliant"})
 
-    # 2. Graveyard exile
-    if "graveyard" in text_lower and "exile" in text_lower:
-        tags.add("graveyard-reliant")
+    # 2. Color blast — checked before the generic "destroy target" removal rule below,
+    # since blasts phrase permanent-destruction as "destroy target red/blue permanent",
+    # which would otherwise false-positive into creature-based.
+    is_color_blast = False
+    if _RE_BLAST_RED.search(text_lower):
+        tags.add("plays-red")
+        is_color_blast = True
+    if _RE_BLAST_BLUE.search(text_lower):
+        tags.add("plays-blue")
+        is_color_blast = True
 
-    # 3. Creature removal
-    if (
+    # 3. Graveyard exile
+    if "graveyard" in text_lower and "exile" in text_lower:
+        tags.add("graveyard-recursion")
+
+    # 4. Creature removal (skip when already attributed as a color blast — see #2)
+    if not is_color_blast and (
         "destroy target" in text_lower
         or "exile target creature" in text_lower
         or "exile target attacking" in text_lower
     ):
         tags.add("creature-based")
 
-    # 4. staple_role == free_interaction (Force of Negation, Daze, etc.)
+    # 5. staple_role == free_interaction (Force of Negation, Daze, etc.)
     if staple_role(card_name) == "free_interaction":
         tags.update({"combo", "storm-reliant"})
 
-    # 5. Artifact/enchantment removal → answers lock pieces / mana hosers
+    # 6. Artifact/enchantment removal → answers lock pieces / mana hosers
     if (
         "destroy target artifact" in text_lower
         or "destroy target enchantment" in text_lower
@@ -1361,6 +1434,39 @@ def _build_coverage_model(
                     "_build_coverage_model: promoted %r covers no live elements — skipped",
                     card_name,
                 )
+
+    # --- Step 5: functional_group de-dup (feature-sb-effect-tagging-model, Unit 5) ---
+    # Cards sharing a functional_group are mechanically identical effects (Hydroblast ≡
+    # Blue Elemental Blast, both "red-blast") — only the best-swing candidate per group
+    # stays in the candidate universe so they don't stack as distinct coverage.  Ties break
+    # on name for determinism.  Ownership is deliberately NOT a tiebreaker here: the
+    # coverage model must stay collection-blind (byte-identical contract, Unit 2 of
+    # epic-deck-generation-sideboard-maindeck) — ownership is a post-hoc annotation layer.
+    _group_best: dict[str, tuple[float, str]] = {}
+    for name, hoser in candidate_meta.items():
+        group = hoser.functional_group
+        if group is None:
+            continue
+        effective_swing = (
+            card_swing_overrides[name]
+            if card_swing_overrides and name in card_swing_overrides
+            else hoser.swing
+        )
+        current = _group_best.get(group)
+        if current is None or effective_swing > current[0] or (
+            effective_swing == current[0] and name < current[1]
+        ):
+            _group_best[group] = (effective_swing, name)
+
+    for name in list(candidate_meta.keys()):
+        group = candidate_meta[name].functional_group
+        if group is not None and _group_best[group][1] != name:
+            log.debug(
+                "_build_coverage_model: dropping %r — functional_group %r de-dup (kept %r)",
+                name, group, _group_best[group][1],
+            )
+            del candidate_meta[name]
+            del candidate_covers[name]
 
     return CoverageModel(
         element_weight=element_weight,
@@ -1935,7 +2041,7 @@ class ConsideringCard:
     ``covers_elements``: frozenset of element IDs (archetype|tag or _hate:tag) this
                         card covers that are not yet fully saturated by the solution.
     ``label``:          human-readable "why on bubble" string (coverage contribution
-                        and value tier; e.g. "covers graveyard-reliant (Dredge 18%)").
+                        and value tier; e.g. "covers graveyard-recursion (Dredge 18%)").
     ``promoted``:       True when the card was promoted from the empirical pool (not
                         in the hand-curated catalog) — indicates best-effort attribution.
     """
