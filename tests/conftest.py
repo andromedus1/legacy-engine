@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from legacy_engine.advisory.linchpins import Linchpin
+from legacy_engine.advisory.sideboard import HoserCard
 from legacy_engine.confidence import ConfidenceMetadata
 from legacy_engine.config import VL_SCHEMA_URL
 
@@ -25,6 +27,42 @@ def make_confidence():
         }
         defaults.update(kwargs)
         return ConfidenceMetadata(**defaults)
+
+    return _make
+
+
+@pytest.fixture
+def make_hoser():
+    """Return a builder for HoserCard with overridable defaults (feature-sb-field-weighted-scorer)."""
+
+    def _make(**kwargs) -> HoserCard:
+        defaults: dict = {
+            "name": "Test Hoser",
+            "attacks": frozenset({"graveyard-recursion"}),
+            "colors": frozenset({"B"}),
+            "max_copies": 4,
+            "swing": 0.20,
+        }
+        defaults.update(kwargs)
+        return HoserCard(**defaults)
+
+    return _make
+
+
+@pytest.fixture
+def make_linchpin():
+    """Return a builder for Linchpin with overridable defaults (feature-sb-field-weighted-scorer)."""
+
+    def _make(**kwargs) -> Linchpin:
+        defaults: dict = {
+            "archetype": "Test Archetype",
+            "name": "Test Linchpin",
+            "role": "combo-engine",
+            "centrality": 1.0,
+            "neutralized_by": frozenset({"artifact-removal"}),
+        }
+        defaults.update(kwargs)
+        return Linchpin(**defaults)
 
     return _make
 
