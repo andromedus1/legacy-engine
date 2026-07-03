@@ -64,3 +64,30 @@ score carries the caveat and gates by sample tier.
 Motivating session (2026-07-03): hand-computed exactly this for Andrew's Dimir Tempo board vs the
 107-player Boulder field; surfaced Mystical Dispute (~43%) and Spell Pierce (~54%) as high-coverage
 anti-blue cards absent from the current SB.
+
+## Design decisions
+
+Captured via `feature-design --only-questions` (2026-07-03), interactive alignment before autopilot.
+These are fixed inputs for the eventual full design pass.
+
+- **Impact-factor combination**: **Multiplicative (hard gates).**
+  `impact = centrality × symmetry × castability × draw-prob`, each ∈ [0,1]. Any factor near 0
+  zeroes the card — a fully symmetric self-hoser or an uncastable card is worthless regardless of
+  coverage. Encodes "a self-hosing SB card is a trap" directly and stays interpretable.
+- **Δequity base magnitude**: **Reuse existing swing, modulated by impact.** Base magnitude from the
+  curated `_SWING_DEDICATED`/`_SWING_SOFT` constants + the empirical presence-correlational proxy
+  where n≥30 (as today), then modulated by the decomposed impact factors. Inherits the honest-degrade
+  gating already built; does not discard curated expertise or the empirical proxy.
+- **Output surface**: **Replace `advise sideboard`'s scoring core in place.** The decomposed score
+  becomes how `advise sideboard` ranks candidates (Feature A already feeds this command); add the
+  explainable per-card breakdown to its output. One operator surface, one code path (SSOT); existing
+  output/flags preserved, tests re-baselined. No parallel command or dual scoring paths.
+- **Draw-probability × ILP**: **Feed per-copy value into the ILP (tapers copies).** Draw-probability
+  `P(draw ≥1 in a Bo3)` modulates the marginal value of each successive copy, so the existing
+  pulp/CBC solver naturally tapers (3rd copy worth less than 1st). "How many copies" becomes a
+  first-class, principled output — the solver change lives here, respecting `max_copies`.
+
+Implication for the full design pass: the objective stays `Σ(field_share × Δequity)`; Dirichlet
+field-share uncertainty (from `advise positioning`) annotates confidence and shrinks tiny-share
+matchups so the multiplicative score isn't over-committed to noisy cells (resolve exact treatment at
+design time — annotate + shrink is the default, full robust optimization is out of scope for v1).
