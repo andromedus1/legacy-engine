@@ -6187,3 +6187,320 @@ class TestHedgeIntegrationNonVacuous:
         # The dedicated core covers the DOMINANT archetype's answer; insurance is disjoint from it.
         core_cards = set(pkg.cards) - pkg.insurance_cards
         assert core_cards and core_cards.isdisjoint(pkg.insurance_cards)
+
+
+# ---------------------------------------------------------------------------
+# Unit B5 (feature-sb-field-weighted-scorer-output): explainable per-card breakdown +
+# coverage% diagnostic + Dirichlet field-share uncertainty.
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _board_coverage_pct,
+    _build_impact_annotations,
+    _card_coverage_pct,
+    _dirichlet_share_lower_bound,
+    _relevant_field_archetypes,
+)
+
+
+class TestRelevantFieldArchetypesAndCoveragePct:
+    """_relevant_field_archetypes / _card_coverage_pct / _board_coverage_pct — the
+    field-coverage% DIAGNOSTIC axis (locked decision: never the optimization objective)."""
+
+    def test_relevant_archetypes_is_tag_overlap(self, make_hoser):
+        field = _make_field({"Reanimator": 0.4, "Storm": 0.35, "WhiteWeenie": 0.25})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo", "storm-reliant"}),
+            "WhiteWeenie": frozenset({"creature-based"}),
+        }
+        hoser = make_hoser(attacks=frozenset({"graveyard-recursion", "combo"}))
+        assert _relevant_field_archetypes(hoser, field, archetype_tags) == frozenset(
+            {"Reanimator", "Storm"}
+        )
+
+    def test_card_coverage_pct_sums_relevant_shares(self, make_hoser):
+        field = _make_field({"Reanimator": 0.4, "Storm": 0.35, "WhiteWeenie": 0.25})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+            "WhiteWeenie": frozenset({"creature-based"}),
+        }
+        hoser = make_hoser(attacks=frozenset({"graveyard-recursion", "combo"}))
+        assert _card_coverage_pct(hoser, field, archetype_tags) == pytest.approx(0.75)
+
+    def test_counter_hoser_has_zero_coverage_pct(self, make_hoser):
+        """A '_hate' counter-hoser matches no archetype's tags (no archetype carries the
+        pseudo-tag '_hate') -> 0% field coverage by this measure; its value is
+        deck-protection, out of scope for this diagnostic."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        hoser = make_hoser(attacks=frozenset({"_hate"}))
+        assert _card_coverage_pct(hoser, field, archetype_tags) == 0.0
+
+    def test_board_coverage_pct_is_union_not_sum(self, make_hoser):
+        """Two cards covering the SAME archetype must not double-count its share."""
+        field = _make_field({"Reanimator": 0.6, "Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+        }
+        candidate_meta = {
+            "A": make_hoser(name="A", attacks=frozenset({"graveyard-recursion"})),
+            "B": make_hoser(name="B", attacks=frozenset({"graveyard-recursion"})),
+        }
+        final_cards = {"A": 2, "B": 1}
+        assert _board_coverage_pct(
+            final_cards, candidate_meta, field, archetype_tags
+        ) == pytest.approx(0.6)
+
+    def test_board_coverage_pct_unions_across_distinct_archetypes(self, make_hoser):
+        field = _make_field({"Reanimator": 0.6, "Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+        }
+        candidate_meta = {
+            "A": make_hoser(name="A", attacks=frozenset({"graveyard-recursion"})),
+            "B": make_hoser(name="B", attacks=frozenset({"combo"})),
+        }
+        final_cards = {"A": 2, "B": 1}
+        assert _board_coverage_pct(
+            final_cards, candidate_meta, field, archetype_tags
+        ) == pytest.approx(1.0)
+
+
+class TestDirichletShareLowerBound:
+    """_dirichlet_share_lower_bound — reuses `advise positioning`'s Dirichlet field-share
+    uncertainty model (verbatim constants) via the exact independent-marginal Beta shortcut."""
+
+    def test_none_when_counts_absent(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4})  # share-only, no counts
+        assert _dirichlet_share_lower_bound(field) is None
+
+    def test_thin_count_share_shrinks_well_below_point_estimate(self):
+        field = build_custom_field(
+            {"Big": 0.5, "Established": 0.47, "Thin": 0.03},
+            counts={"Big": 200, "Established": 188, "Thin": 3},
+        )
+        bounds = _dirichlet_share_lower_bound(field)
+        assert bounds["Thin"] / field.shares["Thin"] < 0.5
+        # Well-sampled archetypes stay close to their point estimate (light-touch shrink).
+        assert bounds["Big"] / field.shares["Big"] > 0.9
+        assert bounds["Established"] / field.shares["Established"] > 0.9
+
+    def test_bounds_are_monotonic_in_quantile(self):
+        field = build_custom_field({"A": 0.5, "B": 0.5}, counts={"A": 10, "B": 10})
+        low = _dirichlet_share_lower_bound(field, quantile=0.05)
+        high = _dirichlet_share_lower_bound(field, quantile=0.45)
+        for arch in field.shares:
+            assert low[arch] < high[arch]
+
+    def test_single_archetype_field_degenerates_to_point_share(self):
+        field = build_custom_field({"Solo": 1.0}, counts={"Solo": 5})
+        bounds = _dirichlet_share_lower_bound(field)
+        assert bounds["Solo"] == pytest.approx(1.0)
+
+
+class TestBuildImpactAnnotations:
+    """_build_impact_annotations — the explainable per-card breakdown + confidence/brittle
+    honest-uncertainty annotation, computed from the ALREADY-SOLVED final_cards."""
+
+    def test_none_opponent_linchpins_returns_empty(self, make_hoser):
+        """The no-impact-data path: nothing fabricated when opponent_linchpins is None."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins=None, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        assert annotations == {}
+
+    def test_populates_breakdown_reference_archetype_and_confidence(self, make_hoser, make_linchpin):
+        field = build_custom_field(
+            {"Reanimator": 0.7, "Storm": 0.3}, counts={"Reanimator": 150, "Storm": 60}
+        )
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"graveyard-recursion"}),
+        }
+        hoser = make_hoser(
+            name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+        )
+        candidate_meta = {"Surgical Extraction": hoser}
+        opp_lps = {
+            "Reanimator": [
+                make_linchpin(
+                    archetype="Reanimator", name="Entomb", centrality=1.0,
+                    neutralized_by=frozenset({"exile-graveyard"}),
+                )
+            ],
+            "Storm": [],
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 3}, candidate_meta, field, archetype_tags,
+            opponent_linchpins=opp_lps, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        # Reanimator (0.7) outranks Storm (0.3) as the anchor matchup.
+        assert ann.reference_archetype == "Reanimator"
+        assert ann.reference_share == pytest.approx(0.7)
+        assert ann.breakdown.centrality == 1.0  # confirmed Entomb hit via exile-graveyard
+        assert ann.breakdown.draw_prob == pytest.approx(_draw_probability(3))  # actual copy count
+        assert ann.confidence == "established"  # tier_for_sample(150)
+        assert ann.brittle is False  # 150 backing decks is not thin
+
+    def test_hate_counter_hoser_skipped(self, make_hoser):
+        """Counter-hosers have no single coherent opponent to anchor a breakdown to."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Defense Grid": make_hoser(name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset())
+        }
+        annotations = _build_impact_annotations(
+            {"Defense Grid": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+        )
+        assert annotations == {}
+
+    def test_card_with_no_relevant_archetype_skipped(self, make_hoser):
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Off Topic": make_hoser(name="Off Topic", attacks=frozenset({"ramp"}), colors=frozenset())
+        }
+        annotations = _build_impact_annotations(
+            {"Off Topic": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset(),
+        )
+        assert annotations == {}
+
+    def test_brittle_flag_fires_on_thin_reference_archetype(self, make_hoser):
+        field = build_custom_field(
+            {"Reanimator": 0.03, "Storm": 0.97}, counts={"Reanimator": 2, "Storm": 300},
+        )
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}  # Storm not relevant
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 1}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        assert ann.reference_archetype == "Reanimator"
+        assert ann.confidence == "speculative"  # tier_for_sample(2)
+        assert ann.brittle is True
+
+    def test_no_counts_never_fabricates_confidence_or_brittle(self, make_hoser):
+        """Share-only field (no backing counts) -> confidence stays None, brittle stays False
+        (never guessed) — honest-degrade convention: absence of data is never silently
+        upgraded to a graded tier."""
+        field = _make_field({"Reanimator": 1.0})  # no counts
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 1}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        assert ann.confidence is None
+        assert ann.brittle is False
+
+
+class TestRecommendSideboardOutputFieldsIntegration:
+    """End-to-end: recommend_sideboard populates the new B5 fields through the real,
+    non-mocked pipeline (objective-search-split's DB-glue seam), not just the pure helpers."""
+
+    @staticmethod
+    def _painter_corpus():
+        """Real decks labeled 'Painter' running a graveyard-recursion card, so
+        field_vulnerability_tags derives a real (archetype, tag) AND _field_opponent_linchpins
+        picks up Painter's CURATED LINCHPIN_OVERRIDES entry (Grindstone / Painter's Servant) —
+        curated overrides are composition-independent (see TestArchetypeLinchpinsAndCards),
+        so this corpus doesn't need to actually run Grindstone. Mirrors
+        TestRedundancyDecay._gy_field_corpus, relabeled to 'Painter' specifically to piggyback
+        on real, non-mocked linchpin data for this integration test."""
+        import uuid
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Swamp", type_line="Basic Land — Swamp", oracle_text="{T}: Add {B}.",
+                 cmc=0.0, produced_mana=["B"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"])
+        for idx in range(3):
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                        [tid, idx, f"player{idx}", "1st", "Painter"])
+            for cn, ct in [("Reanimate", 4), ("Swamp", 10)]:
+                con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", cn, ct])
+        return con
+
+    def test_impact_annotations_and_coverage_populate_via_curated_override(self):
+        """Null Rod (curated capability: artifact-ability-lock, see impact._CAPABILITY_BY_NAME)
+        is retagged here to attack 'graveyard-recursion' so it covers Painter's derived tag;
+        its NAME still resolves via hoser_capabilities to the capability that neutralizes
+        Painter's curated Grindstone linchpin (neutralized_by includes artifact-ability-lock)."""
+        con = self._painter_corpus()
+        try:
+            field = _make_field({"Painter": 1.0})
+            catalog = {
+                "Null Rod": HoserCard(
+                    name="Null Rod", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+            }
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog)
+        finally:
+            con.close()
+
+        assert pkg.cards.get("Null Rod", 0) > 0, f"expected Null Rod recommended: {dict(pkg.cards)}"
+        assert "Null Rod" in pkg.impact_annotations
+        ann = pkg.impact_annotations["Null Rod"]
+        assert ann.reference_archetype == "Painter"
+        assert ann.breakdown.centrality == 1.0  # confirmed Grindstone hit
+        assert ann.confidence is None  # share-only custom field -> no backing counts
+        assert ann.brittle is False  # no counts -> never fabricated
+        assert pkg.board_coverage_pct == pytest.approx(1.0)
+        assert pkg.card_coverage_pct["Null Rod"] == pytest.approx(1.0)
+
+    def test_no_linchpin_data_leaves_impact_annotations_empty_but_coverage_populates(self):
+        """Regression guard for the documented independence (item 2 vs item 3): the
+        coverage% diagnostic needs only tags and populates even when impact_annotations is
+        the empty no-data dict (Reanimator here has no curated override and the corpus
+        composition doesn't derive one — mirrors the existing Unit B3 gate-off precedent)."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+        finally:
+            con.close()
+        assert pkg.impact_annotations == {}
+        assert pkg.card_coverage_pct.get("Surgical Extraction", 0.0) == pytest.approx(1.0)
+        assert pkg.board_coverage_pct == pytest.approx(1.0)

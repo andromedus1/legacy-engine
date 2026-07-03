@@ -2916,6 +2916,50 @@ def advise_sideboard(
         if owned_only and suppressed_count > 0:
             click.echo(f"  [--owned-only: {suppressed_count} acquire-card(s) suppressed]")
 
+        # --- Coverage% diagnostic (feature-sb-field-weighted-scorer-output, Unit B5) ---
+        # Locked decision (parent feature § "Design decisions"): coverage% is a DIAGNOSTIC —
+        # the share of the field a card/board is meaningfully relevant against — never the
+        # optimization objective (that's Σ field_share × Δequity, computed elsewhere). Always
+        # rendered when cards were recommended; independent of whether impact data is present.
+        if display_cards and pkg.card_coverage_pct:
+            click.echo(
+                "  // coverage diagnostic — NOT the optimization objective "
+                "(field-share relevance, not a measured win-rate lift):"
+            )
+            for card, _copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                cov = pkg.card_coverage_pct.get(card)
+                if cov is not None:
+                    click.echo(f"    // {card}: ~{cov:.0%} of field")
+            click.echo(
+                f"  // board coverage diagnostic: ~{pkg.board_coverage_pct:.0%} of field "
+                "addressed by this board (union across cards, not additive)"
+            )
+
+        # --- Explainable per-card impact breakdown + field-share uncertainty (Unit B5) ---
+        # Empty pkg.impact_annotations = no-impact-data path (opponent_linchpins was None) —
+        # nothing rendered, never a fabricated breakdown. confidence/brittle reuse `advise
+        # positioning`'s Dirichlet field-share machinery (honest-degrade: a thin/uncovered
+        # matchup is labeled, never silently treated as solid).
+        if display_cards and pkg.impact_annotations:
+            click.echo("  // impact breakdown (auditable factors — see advisory/impact.py):")
+            for card, _copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                ann = pkg.impact_annotations.get(card)
+                if ann is None:
+                    continue
+                b = ann.breakdown
+                confidence_label = ann.confidence if ann.confidence is not None else "no-data"
+                brittle_note = (
+                    "  [BRITTLE — thin-sample matchup, don't over-commit a silver bullet]"
+                    if ann.brittle
+                    else ""
+                )
+                click.echo(
+                    f"    // {card} vs {ann.reference_archetype} ({ann.reference_share:.1%} share): "
+                    f"centrality={b.centrality:.2f} symmetry={b.symmetry:.2f} "
+                    f"castability={b.castability:.2f} draw={b.draw_prob:.2f} "
+                    f"→ impact={b.score():.3f}  [confidence={confidence_label}]{brittle_note}"
+                )
+
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")

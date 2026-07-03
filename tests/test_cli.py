@@ -897,3 +897,142 @@ class TestAdviseCompare:
         )
         assert result.exit_code != 0
         assert "not in the field" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSideboardOutputDiagnostics — feature-sb-field-weighted-scorer-output, Unit B5
+# ---------------------------------------------------------------------------
+
+
+class TestSideboardOutputDiagnostics:
+    """CLI render tests for `advise sideboard`'s coverage% diagnostic + explainable
+    per-card impact-breakdown audit lines (Unit B5)."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """File-backed DuckDB for `advise sideboard --db <path>` (never the default DB —
+        file-backed-cli-test-db-builder pattern)."""
+        db_path = tmp_path / "test_sb_output.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_coverage_diagnostic_and_impact_breakdown_render(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A SideboardPackage carrying populated coverage%/impact_annotations renders the
+        labeled coverage diagnostic + the per-card auditable-factor breakdown line."""
+        from legacy_engine.advisory import sideboard as sb_mod
+        from legacy_engine.advisory.impact import ImpactBreakdown
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            card_coverage_pct={"Surgical Extraction": 0.26},
+            board_coverage_pct=0.26,
+            impact_annotations={
+                "Surgical Extraction": sb_mod.CardImpactAnnotation(
+                    breakdown=ImpactBreakdown(
+                        centrality=1.0, symmetry=1.0, castability=1.0, draw_prob=0.7
+                    ),
+                    reference_archetype="Reanimator",
+                    reference_share=0.26,
+                    confidence="established",
+                    brittle=False,
+                ),
+            },
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_diag.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// coverage diagnostic — NOT the optimization objective" in result.output
+        assert "Surgical Extraction: ~26% of field" in result.output
+        assert "board coverage diagnostic: ~26% of field" in result.output
+        assert "// impact breakdown" in result.output
+        assert "Surgical Extraction vs Reanimator (26.0% share)" in result.output
+        assert "centrality=1.00 symmetry=1.00 castability=1.00 draw=0.70" in result.output
+        assert "impact=0.700" in result.output
+        assert "confidence=established" in result.output
+        assert "BRITTLE" not in result.output
+
+    def test_brittle_flag_renders_honest_degrade_note(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A brittle=True annotation (thin-sample reference matchup) renders the labeled
+        honest-degrade BRITTLE note, and its confidence tier is shown."""
+        from legacy_engine.advisory import sideboard as sb_mod
+        from legacy_engine.advisory.impact import ImpactBreakdown
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Null Rod": 1},
+            trace=[],
+            covered_weight=0.1,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            card_coverage_pct={"Null Rod": 0.03},
+            board_coverage_pct=0.03,
+            impact_annotations={
+                "Null Rod": sb_mod.CardImpactAnnotation(
+                    breakdown=ImpactBreakdown(
+                        centrality=0.5, symmetry=1.0, castability=1.0, draw_prob=0.3
+                    ),
+                    reference_archetype="ThinArchetype",
+                    reference_share=0.03,
+                    confidence="speculative",
+                    brittle=True,
+                ),
+            },
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_brittle.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "BRITTLE" in result.output
+        assert "confidence=speculative" in result.output
+
+    def test_no_impact_data_omits_breakdown_block(self, runner, db_with_corpus, tmp_path):
+        """Real (non-mocked) recommend_sideboard on a corpus with no curated/derivable
+        linchpin data for 'Control' -> impact_annotations={} -> no impact-breakdown block
+        rendered (the no-impact-data path never fabricates a breakdown)."""
+        deck = tmp_path / "sb_deck_plain.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// impact breakdown" not in result.output

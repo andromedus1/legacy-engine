@@ -140,10 +140,12 @@ from pathlib import Path
 from typing import Optional
 
 import duckdb
+from scipy.stats import beta as _beta_dist
 
 import re
 
 from legacy_engine.advisory.field import FieldDistribution
+from legacy_engine.advisory.impact import ImpactBreakdown
 from legacy_engine.advisory.impact import draw_probability as _draw_probability
 from legacy_engine.advisory.impact import impact as _compute_impact
 from legacy_engine.advisory.linchpins import Linchpin, linchpins_for_archetype
@@ -153,6 +155,14 @@ from legacy_engine.advisory.whattoplay import (
     _load_deck_cards,
 )
 from legacy_engine.colors import compute_deck_colors
+from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
+
+# Reused verbatim from `advise positioning`'s Dirichlet field-share uncertainty model
+# (SSOT — see Unit B5's `_dirichlet_share_lower_bound` docstring below for why sideboard.py
+# needs only the independent-marginal shortcut, not positioning's full joint-MC machinery).
+# `compare.py` already establishes the precedent of importing these two private constants
+# directly from `positioning` rather than re-declaring them.
+from legacy_engine.advisory.positioning import _DEFAULT_RISK_QUANTILE, _DIRICHLET_GAMMA
 
 # Alternative-cost ("pitch") spell detection — mirrors card_tags._FREE_SPELL_RE.
 # Force of Will (CMC 5), Force of Negation (CMC 3), Daze (CMC 2), etc. are playable
@@ -2389,6 +2399,260 @@ def _considering_label(
 
 
 # ---------------------------------------------------------------------------
+# Unit B5 (feature-sb-field-weighted-scorer-output): explainable per-card breakdown +
+# coverage% diagnostic + Dirichlet field-share uncertainty.
+#
+# SCOPE: this unit is output/explainability/uncertainty-annotation ONLY. It does NOT touch
+# `_build_coverage_model`'s element_weight computation (Units B1-B4, already wired + reviewed
+# on main) — the ILP/greedy objective, and therefore which cards get recommended, is
+# byte-identical before and after this unit. Everything below is computed from the ALREADY-
+# SOLVED `final_cards` and is purely additive to `SideboardPackage`.
+# ---------------------------------------------------------------------------
+
+_BRITTLE_SHARE_SHRINK_RATIO = 0.5
+"""A recommendation's reference matchup is flagged ``brittle`` when the Dirichlet
+lower-quantile (risk-adjusted) share estimate for that archetype falls below this fraction
+of its raw point-estimate share — i.e. the field's own share-uncertainty could plausibly cut
+the matchup's true weight by half or more. This is the concrete, numeric form of "don't
+over-commit a silver bullet to a noisy small-share matchup" (parent feature § commitments):
+a genuinely well-sampled archetype's lower quantile sits close to its point estimate (ratio
+~1.0) regardless of the raw share's size, so this only fires for THIN-count archetypes, not
+merely small ones with plenty of backing data."""
+
+
+def _relevant_field_archetypes(
+    hoser: HoserCard,
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> "frozenset[str]":
+    """Field archetypes this hoser is meaningfully relevant against.
+
+    "Relevant" = the hoser's ``attacks`` tags overlap the archetype's vulnerability tags —
+    the same tag-overlap test ``_build_coverage_model`` uses to decide coverage, but recomputed
+    here directly against ``field``/``archetype_tags`` (already-resolved, DB-free inputs) rather
+    than the model's internal ``_archetype_tag_keys`` bookkeeping, so this helper works for any
+    hoser independent of whether it ended up in the final solution.
+
+    This is the "field coverage" axis from the feature's design input: "the share of the
+    current field a card is meaningfully relevant against, summing field-shares of the
+    archetypes it impacts" (e.g. "Null Rod hits ~26%"). Deliberately independent of
+    ``opponent_linchpins`` — coverage% renders even when impact data (Unit B1-B4's per-opponent
+    linchpin signal) is unavailable, since it needs only tags, not linchpins.
+
+    Counter-hosers (``"_hate"`` in ``hoser.attacks``) never match here — no archetype carries
+    the pseudo-tag ``"_hate"`` — so they correctly report 0% field coverage by this measure;
+    their value is deck-protection, not archetype-targeted relevance, and is out of scope for
+    this diagnostic.
+    """
+    return frozenset(
+        arch
+        for arch, tags in archetype_tags.items()
+        if arch in field.shares and hoser.attacks & tags
+    )
+
+
+def _card_coverage_pct(
+    hoser: HoserCard,
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> float:
+    """Σ field-share of archetypes this one hoser is relevant against (point estimate)."""
+    return sum(
+        field.shares[arch] for arch in _relevant_field_archetypes(hoser, field, archetype_tags)
+    )
+
+
+def _board_coverage_pct(
+    final_cards: "dict[str, int]",
+    candidate_meta: "dict[str, HoserCard]",
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> float:
+    """Σ field-share of archetypes the WHOLE recommended board is relevant against.
+
+    Union across all recommended cards, not a sum of per-card coverage — an archetype
+    double-covered by two cards (e.g. two graveyard hosers vs Reanimator) contributes its
+    share once, not twice. This is a diagnostic headline number for the package as a whole,
+    the board-level analogue of ``_card_coverage_pct``.
+    """
+    relevant: "set[str]" = set()
+    for card_name in final_cards:
+        hoser = candidate_meta.get(card_name)
+        if hoser is None:
+            continue
+        relevant |= _relevant_field_archetypes(hoser, field, archetype_tags)
+    return sum(field.shares.get(arch, 0.0) for arch in relevant)
+
+
+def _dirichlet_share_lower_bound(
+    field: FieldDistribution,
+    *,
+    quantile: float = _DEFAULT_RISK_QUANTILE,
+    gamma: float = _DIRICHLET_GAMMA,
+) -> "dict[str, float] | None":
+    """Risk-adjusted (lower-quantile) field share per archetype.
+
+    Reuses `advise positioning`'s Dirichlet field-share uncertainty model verbatim
+    (``positioning._DIRICHLET_GAMMA`` for the Jeffreys pseudo-count, and the same
+    ``_DEFAULT_RISK_QUANTILE`` positioning's own ``rank_decks`` uses to risk-adjust away from
+    thin-data spikes) rather than reinventing a shrinkage scheme for this feature.
+
+    Positioning treats the field share vector as ``w ~ Dirichlet(counts + gamma)`` and draws
+    it jointly via Monte Carlo (``rng.dirichlet``) because it needs cross-archetype
+    CORRELATION to produce an honest P(best) across competing decks (``_sample_S``). Nothing
+    here needs that correlation — this function only needs a conservative bound on ONE
+    archetype's share in isolation, so it uses the standard Dirichlet identity that each
+    component's MARGINAL distribution is exactly ``Beta(alpha_i, alpha_0 - alpha_i)`` where
+    ``alpha_i = counts[i] + gamma`` and ``alpha_0 = Σ alpha``. The lower quantile is then read
+    off in closed form via ``scipy.stats.beta.ppf`` — deterministic and exact, no RNG/seed
+    needed, and cheap enough to run on every ``recommend_sideboard`` call.
+
+    A thin-count archetype's Beta marginal is wide, so its lower quantile sits well below its
+    point share; a well-sampled archetype's marginal is tight, so its lower quantile sits close
+    to its point share. This is the numeric form of "don't over-commit a silver bullet to a
+    noisy small-share matchup" — see ``_BRITTLE_SHARE_SHRINK_RATIO``.
+
+    Returns ``None`` when ``field.counts`` is ``None`` — a share-only custom field (built via
+    ``build_custom_field`` without ``counts``) has no backing sample to build a posterior over,
+    mirroring positioning's own "counts=None -> fixed point shares, no share-variance"
+    contract. Callers should fall back to treating every share as fully-trusted (no shrink, no
+    confidence gating) in that case.
+    """
+    if field.counts is None:
+        return None
+
+    archetypes = list(field.shares)
+    if not archetypes:
+        return {}
+
+    alphas = {arch: field.counts.get(arch, 0) + gamma for arch in archetypes}
+    alpha_total = sum(alphas.values())
+
+    bounds: "dict[str, float]" = {}
+    for arch in archetypes:
+        alpha_i = alphas[arch]
+        beta_i = alpha_total - alpha_i
+        if beta_i <= 0:
+            # Degenerate (single-archetype field): the Beta marginal collapses to a point
+            # mass at 1.0 — no meaningful "lower bound" below the point share itself.
+            bounds[arch] = field.shares[arch]
+        else:
+            bounds[arch] = float(_beta_dist.ppf(quantile, alpha_i, beta_i))
+    return bounds
+
+
+@dataclass(frozen=True)
+class CardImpactAnnotation:
+    """Per-recommended-card explainability + honest-uncertainty annotation (Unit B5).
+
+    ``breakdown``: the ``ImpactBreakdown`` (centrality/symmetry/castability/draw_prob) computed
+        for this card against ``reference_archetype`` at its ACTUAL recommended copy count —
+        so the pilot can audit exactly why the card scored the way it did, factor by factor.
+    ``reference_archetype``: the highest-field-share opponent archetype this card's ``attacks``
+        tags actually address. Impact is inherently per-(card, opponent) — never a flat score
+        (see ``advisory.impact`` module docstring) — so one concrete anchor matchup is chosen
+        rather than averaging across unrelated archetypes into a meaningless composite. The
+        highest-share relevant archetype is the most consequential single matchup to audit.
+    ``reference_share``: that archetype's point-estimate field share (for display context).
+    ``confidence``: ``tier_for_sample(field.counts[reference_archetype])`` — ``None`` when the
+        field carries no backing counts at all (share-only custom field; honestly "no data" is
+        distinct from a graded tier, never silently defaulted to a tier).
+    ``brittle``: True when the Dirichlet lower-quantile share estimate for
+        ``reference_archetype`` falls below ``_BRITTLE_SHARE_SHRINK_RATIO`` of its point share —
+        this card's coverage leans on a thin-count matchup whose true weight the field's own
+        uncertainty could materially cut. False (never fabricated True) when ``field.counts``
+        is unavailable — the flag requires backing counts to compute honestly.
+    """
+
+    breakdown: "ImpactBreakdown"
+    reference_archetype: str
+    reference_share: float
+    confidence: "ConfidenceLevel | None"
+    brittle: bool
+
+
+def _build_impact_annotations(
+    final_cards: "dict[str, int]",
+    candidate_meta: "dict[str, HoserCard]",
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+    opponent_linchpins: "dict[str, list[Linchpin]] | None",
+    opponent_cards: "dict[str, dict[str, int]] | None",
+    deck_colors: "frozenset[str]",
+    deck_tags: "frozenset[str]",
+) -> "dict[str, CardImpactAnnotation]":
+    """Build the per-card ``CardImpactAnnotation`` map for the FINAL recommended cards.
+
+    Gated on ``opponent_linchpins is not None`` — the same gate ``_build_coverage_model``
+    (Unit B3) already uses to decide whether real per-opponent linchpin data was found for
+    this field. When it's None, no per-card breakdown is fabricated: the no-impact-data path
+    returns ``{}`` (nothing to render), consistent with the honest-degrade convention of never
+    showing a number that wasn't actually computed from data.
+
+    Counter-hosers (``"_hate"`` in ``hoser.attacks``) and cards with zero relevant field
+    archetypes are skipped — impact is defined per-(card, opponent), and neither has a single
+    coherent opponent to anchor a breakdown to.
+
+    Uses each card's ACTUAL recommended copy count (not a fixed ``copies=1`` like Unit B3's
+    element-weight computation) — this is a display-only recomputation, so it can afford to
+    show the more informative, copy-count-accurate draw probability without affecting the
+    (already-solved, unchanged) objective.
+    """
+    if opponent_linchpins is None:
+        return {}
+
+    conservative_shares = _dirichlet_share_lower_bound(field)
+
+    annotations: "dict[str, CardImpactAnnotation]" = {}
+    for card_name, copies in final_cards.items():
+        hoser = candidate_meta.get(card_name)
+        if hoser is None or "_hate" in hoser.attacks:
+            continue
+
+        relevant = _relevant_field_archetypes(hoser, field, archetype_tags)
+        if not relevant:
+            continue
+
+        reference_archetype = max(relevant, key=lambda arch: field.shares.get(arch, 0.0))
+        reference_share = field.shares.get(reference_archetype, 0.0)
+
+        opp_lps = opponent_linchpins.get(reference_archetype, [])
+        opp_cards_for_arch = (
+            opponent_cards.get(reference_archetype) if opponent_cards else None
+        )
+        breakdown = _compute_impact(
+            hoser,
+            reference_archetype,
+            opp_linchpins=opp_lps,
+            my_vulnerability_tags=deck_tags,
+            my_colors=deck_colors,
+            copies=copies,
+            opp_cards=opp_cards_for_arch,
+        )
+
+        confidence: "ConfidenceLevel | None" = None
+        brittle = False
+        if field.counts is not None:
+            confidence = tier_for_sample(field.counts.get(reference_archetype, 0))
+        if (
+            conservative_shares is not None
+            and reference_share > 0.0
+            and conservative_shares.get(reference_archetype, 0.0) / reference_share
+            < _BRITTLE_SHARE_SHRINK_RATIO
+        ):
+            brittle = True
+
+        annotations[card_name] = CardImpactAnnotation(
+            breakdown=breakdown,
+            reference_archetype=reference_archetype,
+            reference_share=reference_share,
+            confidence=confidence,
+            brittle=brittle,
+        )
+    return annotations
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -2467,6 +2731,21 @@ class SideboardPackage:
     marginal_curve: tuple[tuple[int, float], ...] = dc_field(default_factory=tuple)
     uncovered_tail: tuple[tuple[str, float], ...] = dc_field(default_factory=tuple)
     insurance_cards: frozenset[str] = dc_field(default_factory=frozenset)
+    # --- Additive fields (feature-sb-field-weighted-scorer-output, Unit B5) ---
+    # Explainable per-card breakdown + honest field-share uncertainty annotation. Empty/0.0
+    # defaults are the byte-identical no-op path (matches every other gated-additive field
+    # above): a caller ignoring these fields sees no change; recommend_sideboard only
+    # populates them when the underlying data (impact linchpins / field counts) exists.
+    # impact_annotations: card -> CardImpactAnnotation (ImpactBreakdown + reference opponent +
+    #   confidence tier + brittle flag). Empty dict when opponent_linchpins was None (no
+    #   per-opponent impact data available) — never a fabricated breakdown.
+    # board_coverage_pct / card_coverage_pct: the coverage% DIAGNOSTIC (locked decision: a
+    #   relevance number, NOT the optimization objective) — Σ field-share of archetypes the
+    #   board/card is meaningfully relevant against (union at board level, per-card at card
+    #   level). Always computed (needs only tags, independent of impact-data availability).
+    impact_annotations: "dict[str, CardImpactAnnotation]" = dc_field(default_factory=dict)
+    board_coverage_pct: float = 0.0
+    card_coverage_pct: "dict[str, float]" = dc_field(default_factory=dict)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -3031,6 +3310,28 @@ def recommend_sideboard(
         )
         _uncovered_tail = tuple((e, round(w, 4)) for e, w in _tail[:8])
 
+    # --- Step 6e: Explainable breakdown + coverage% diagnostic + field-share uncertainty
+    # (feature-sb-field-weighted-scorer-output, Unit B5) ---
+    # Purely additive/derived from the ALREADY-SOLVED final_cards; does not affect the
+    # objective, solver_used, or which cards were picked (see Unit B5's module-level scope
+    # note above `_relevant_field_archetypes`).
+    _impact_annotations = _build_impact_annotations(
+        final_cards,
+        model.candidate_meta,
+        field,
+        archetype_tags,
+        opponent_linchpins,
+        opponent_cards,
+        deck_colors,
+        deck_tags,
+    )
+    _board_coverage = _board_coverage_pct(final_cards, model.candidate_meta, field, archetype_tags)
+    _card_coverage = {
+        card_name: _card_coverage_pct(hoser, field, archetype_tags)
+        for card_name, hoser in model.candidate_meta.items()
+        if card_name in final_cards
+    }
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -3055,4 +3356,7 @@ def recommend_sideboard(
         marginal_curve=_marginal_curve,
         uncovered_tail=_uncovered_tail,
         insurance_cards=frozenset(_insurance),  # hedge picks (commit = the rest)
+        impact_annotations=_impact_annotations,
+        board_coverage_pct=_board_coverage,
+        card_coverage_pct=_card_coverage,
     )
