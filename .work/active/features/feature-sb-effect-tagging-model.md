@@ -1,7 +1,7 @@
 ---
 id: feature-sb-effect-tagging-model
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-sideboard-scoring-model
 depends_on: []
