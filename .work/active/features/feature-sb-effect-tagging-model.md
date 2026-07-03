@@ -1,7 +1,7 @@
 ---
 id: feature-sb-effect-tagging-model
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-sideboard-scoring-model
 depends_on: []
@@ -319,3 +319,14 @@ Curated JSON schema (`data/linchpins/legacy.json`):
   overrides correct it, and the derived default centrality (0.6) is deliberately below curated 1.0;
   Feature B treats centrality as a multiplier, so a mild false positive is a small error, not a
   blowup.
+
+## Implementation summary (2026-07-03)
+
+Both child stories implemented and verified; feature advanced implementing → review.
+
+- **`…-vocab-catalog`** (units 1,2,3,5) — done. Replaced `graveyard-reliant` → `graveyard-recursion`/`graveyard-fuel`; added `plays-<color>` color-contingent tags; extended `HoserCard` with `symmetry`/`cast_requires`/`functional_group` + fail-fast loader validation; rewrote the catalog (32→34: fixed the mis-tagged Hydroblast **and** Pyroblast, added Blue/Red Elemental Blast, oracle-grounded per-card gy re-tags, broad oracle-based symmetry classification); wired `_derive_attacks_for_promoted` + a `functional_group` de-dup into `advise sideboard`. Caught + fixed an out-of-scope break in `report.py`'s `_interaction_annotation` (referenced the old tag).
+- **`…-linchpin`** (unit 4) — done. New `advisory/linchpins.py` (hybrid derive + curated overrides), curated `data/linchpins/legacy.json` (Painter/Grindstone+Servant, Show and Tell, Eldrazi/Chalice), config paths, 41 tests. `neutralized_by` capability vocabulary owned by this model; hoser→capability bridging + centrality scoring explicitly deferred to Feature B.
+
+**Verification**: full suite green — 2349 passed (was 2308 pre-feature). Grep-clean of `graveyard-reliant` in `src/`.
+
+**Deferred (not blockers)**: doc drift in `docs/ARCHITECTURE.md` + `docs/briefs/advisory-methods.md` (new vocabulary) flagged for the docs gate at release; hoser→capability bridging + centrality consumption belong to Feature B.

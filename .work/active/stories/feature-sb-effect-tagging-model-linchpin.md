@@ -1,7 +1,7 @@
 ---
 id: feature-sb-effect-tagging-model-linchpin
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-sb-effect-tagging-model
 depends_on: [feature-sb-effect-tagging-model-vocab-catalog]
