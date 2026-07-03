@@ -1,7 +1,7 @@
 ---
 id: feature-sb-field-weighted-scorer
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-sideboard-scoring-model
 depends_on: [feature-sb-effect-tagging-model]
@@ -181,3 +181,15 @@ Each recommended card surfaces its `ImpactBreakdown` (centrality/symmetry/castab
 - **Core-replacement regression** — changing element weights risks the existing coverage tests. *Fallback*: byte-identical no-impact-data path + deliberate re-baseline; the no-collection contract test is the guard.
 - **Draw-prob assumptions** (Bo3 cards-seen, deck size) — modeling choices. *Fallback*: named constants; the taper *shape* matters more than absolute values.
 - **Centrality bridge false-matches** — a hoser miscredited with neutralizing a linchpin. *Fallback*: conservative `hoser_capabilities`; non-linchpin coverage still scores at `_CENTRALITY_BASELINE`, so a miss degrades gracefully rather than swinging wildly.
+
+## Implementation summary (2026-07-03)
+
+All three child stories done; feature advanced implementing → review.
+
+- **`…-impact`** (B1+B2) — new `advisory/impact.py`: `ImpactBreakdown` + `centrality/symmetry/castability/draw_probability` factors combined multiplicatively (hard gates), plus the `hoser_capabilities` bridge to the linchpin `neutralized_by` vocabulary. Pure/DB-free. (Also surfaced + fixed the Null Rod catalog-color bug.)
+- **`…-wiring`** (B3+B4) — `_build_coverage_model` element weight = `share × swing × impact(best hoser, opp | my deck).score()` (`copies=1` to avoid double-tapering); per-copy redundancy curve replaced with the hypergeometric draw-prob marginal `(1.0, .61, .37, .22)`. Byte-identical no-impact path (gated like `matchup_pressure is None`) — zero re-baselining.
+- **`…-output`** (B5) — explainable per-card `CardImpactAnnotation` audit lines, coverage% diagnostic (labeled NOT-the-objective, union at board level), and Dirichlet field-share uncertainty reused from `advise positioning` (closed-form Beta marginal) driving a `brittle` flag + `confidence` tier. Annotate + real computed shrink, NOT live reweighting of the solver (zero blast radius to the reviewed objective).
+
+**Verification**: full suite green — 2419 passed (was 2308 at feature-A start). Smoke-tested end-to-end against the real DB + the live Boulder field.
+
+**Locked decisions honored**: multiplicative hard gates; swing reused-and-modulated; `advise sideboard` core replaced in place (one command, one code path); draw-prob feeds per-copy ILP value. Objective stays `Σ(share × Δequity)`; coverage% is diagnostic-only.
