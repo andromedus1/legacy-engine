@@ -1948,6 +1948,254 @@ class TestValueAwareWeighting:
                 assert pytest.approx(baseline.element_weight[key]) == pressured.element_weight.get(key, 0.0)
 
 
+# ---------------------------------------------------------------------------
+# TestImpactModulatedWeighting — feature-sb-field-weighted-scorer-wiring, Unit B3
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _archetype_linchpins_and_cards,
+    _field_opponent_linchpins,
+    _draw_prob_redundancy_curve,
+)
+from legacy_engine.advisory.impact import (
+    _CENTRALITY_BASELINE,
+    _SYMMETRY_FLOOR,
+    draw_probability as _draw_probability,
+)
+
+
+class TestImpactModulatedWeighting:
+    """Unit B3: (archetype, tag) element weight = field_share × swing × impact(...).score().
+
+    Mirrors TestValueAwareWeighting's house style (hand-built field + archetype_tags, no DB).
+    """
+
+    def test_opponent_linchpins_none_identical_to_baseline(self):
+        """opponent_linchpins=None (the default) -> byte-identical to omitting it entirely."""
+        field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Combo": frozenset({"combo"}),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset()
+        )
+        with_none = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            opponent_linchpins=None,
+            opponent_cards=None,
+        )
+        assert baseline.element_weight == with_none.element_weight
+        assert baseline.candidate_covers == with_none.candidate_covers
+
+    def test_linchpin_hit_outweighs_no_linchpin_data(self, make_hoser, make_linchpin):
+        """A hoser that neutralizes a confirmed opponent linchpin outweighs the SAME hoser
+        when no linchpin data is available for that opponent (baseline centrality)."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        catalog = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),  # colorless -> always castable
+            ),
+        }
+        key = "Reanimator|graveyard-recursion"
+
+        no_data = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        linchpin_hit = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={
+                "Reanimator": [
+                    make_linchpin(
+                        archetype="Reanimator",
+                        name="Entomb",
+                        centrality=1.0,
+                        neutralized_by=frozenset({"exile-graveyard"}),  # Surgical's capability
+                    )
+                ]
+            },
+        )
+        # No data -> centrality floors at _CENTRALITY_BASELINE; a confirmed hit -> full 1.0.
+        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless, draw_prob(copies=1)
+        # is the same fixed factor on both sides, so it cancels in the ratio but must still
+        # be included in the absolute expected value.)
+        draw_prob_1 = _draw_probability(1)
+        assert pytest.approx(no_data.element_weight[key]) == (
+            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE * draw_prob_1
+        )
+        assert pytest.approx(linchpin_hit.element_weight[key]) == (
+            1.0 * _SWING_DEDICATED * 1.0 * draw_prob_1
+        )
+        assert linchpin_hit.element_weight[key] > no_data.element_weight[key]
+        assert pytest.approx(linchpin_hit.element_weight[key] / no_data.element_weight[key]) == (
+            1.0 / _CENTRALITY_BASELINE
+        )
+
+    def test_symmetric_self_hosing_hoser_weight_drops_to_floor(self, make_hoser):
+        """A symmetric hoser whose axis the deck itself carries drops to _SYMMETRY_FLOOR;
+        the identical hoser against a deck NOT exposed on that axis keeps full weight."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        catalog = {
+            "Grafdigger's Cage": make_hoser(
+                name="Grafdigger's Cage",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),
+                symmetry="symmetric",
+            ),
+        }
+        key = "Reanimator|graveyard-recursion"
+
+        not_exposed = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),  # deck_tags empty
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        self_hosing = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset({"graveyard-recursion"}),
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        assert pytest.approx(self_hosing.element_weight[key]) == pytest.approx(
+            not_exposed.element_weight[key] * _SYMMETRY_FLOOR
+        )
+
+    def test_cast_requires_unmet_gates_weight_to_zero(self, make_hoser):
+        """A cast_requires-conditioned hoser (Massacre-style) whose condition is unmet for
+        THIS specific opponent hard-gates its element weight to 0.0; met -> nonzero."""
+        field = _make_field({"WhiteWeenie": 1.0})
+        archetype_tags = {"WhiteWeenie": frozenset({"creature-based"})}
+        catalog = {
+            "Massacre": make_hoser(
+                name="Massacre",
+                attacks=frozenset({"creature-based"}),
+                colors=frozenset({"W"}),
+                cast_requires="opp_controls_plains",
+            ),
+        }
+        key = "WhiteWeenie|creature-based"
+
+        unmet = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards={"WhiteWeenie": {}},  # no Plains known
+        )
+        met = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards={"WhiteWeenie": {"Plains": 4}},
+        )
+        assert unmet.element_weight[key] == 0.0
+        assert met.element_weight[key] > 0.0
+
+    def test_opponent_cards_absent_defaults_to_unmet(self, make_hoser):
+        """opponent_cards=None (no composition data at all) is treated the same as 'unmet' —
+        conservative: a conditional-cast hoser is never credited without evidence."""
+        field = _make_field({"WhiteWeenie": 1.0})
+        archetype_tags = {"WhiteWeenie": frozenset({"creature-based"})}
+        catalog = {
+            "Massacre": make_hoser(
+                name="Massacre",
+                attacks=frozenset({"creature-based"}),
+                colors=frozenset({"W"}),
+                cast_requires="opp_controls_plains",
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards=None,
+        )
+        assert model.element_weight["WhiteWeenie|creature-based"] == 0.0
+
+
+class TestArchetypeLinchpinsAndCards:
+    """_archetype_linchpins_and_cards / _field_opponent_linchpins (Unit B3 DB glue)."""
+
+    def test_no_corpus_no_curated_override_returns_empty(self):
+        con = _con()
+        try:
+            lps, cards = _archetype_linchpins_and_cards(con, "Some Made Up Archetype")
+        finally:
+            con.close()
+        assert lps == []
+        assert cards == {}
+
+    def test_curated_override_returned_even_without_corpus_decks(self):
+        """Painter has a curated LINCHPIN_OVERRIDES entry (Grindstone/Painter's Servant) —
+        it must surface even against a corpus with zero 'Painter' decks (Unit B3's docstring
+        contract: curated overrides don't require in-regime composition data)."""
+        con = _con()
+        try:
+            lps, cards = _archetype_linchpins_and_cards(con, "Painter")
+        finally:
+            con.close()
+        assert cards == {}  # no corpus decks -> no composition data
+        assert {lp.name for lp in lps} == {"Grindstone", "Painter's Servant"}
+
+    def test_field_opponent_linchpins_keys_every_archetype(self):
+        con = _con()
+        try:
+            field = _make_field({"Painter": 0.5, "Some Made Up Archetype": 0.5})
+            linchpins_by_arch, cards_by_arch = _field_opponent_linchpins(con, field)
+        finally:
+            con.close()
+        assert set(linchpins_by_arch) == {"Painter", "Some Made Up Archetype"}
+        assert set(cards_by_arch) == {"Painter", "Some Made Up Archetype"}
+        assert linchpins_by_arch["Some Made Up Archetype"] == []
+        assert len(linchpins_by_arch["Painter"]) == 2
+
+    def test_recommend_sideboard_gate_stays_off_without_linchpin_data(self):
+        """Integration smoke test: a real, non-vacuous corpus whose archetype name has no
+        curated override and whose composition doesn't qualify as a derived linchpin
+        (Reanimate's `graveyard_recursion` role isn't in derive_linchpins's tutor/storm/
+        ritual/fast_mana priority list) keeps the impact gate off — recommend_sideboard
+        behaves exactly as it did before Unit B3 (mirrors TestRedundancyDecay's corpus, which
+        stacks the sole graveyard hoser to its max_copies with redundancy_strength=0.0)."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+        finally:
+            con.close()
+        assert pkg.cards.get("Surgical Extraction", 0) == 4
+
+
+class TestDrawProbabilityRedundancyCurve:
+    """Unit B4: the per-copy utility curve is derived from impact.draw_probability's
+    hypergeometric marginal instead of a curated constant."""
+
+    def test_curve_matches_hand_computed_draw_probability_marginal(self):
+        m1 = _draw_probability(1) - _draw_probability(0)
+        expected = tuple(
+            (_draw_probability(k) - _draw_probability(k - 1)) / m1 for k in range(1, 5)
+        )
+        assert _U_REDUNDANCY_DEFAULT == pytest.approx(expected)
+
+    def test_first_copy_is_exactly_one(self):
+        assert _U_REDUNDANCY_DEFAULT[0] == 1.0
+
+    def test_curve_strictly_decreasing_and_concave(self):
+        c = _U_REDUNDANCY_DEFAULT
+        assert c[0] > c[1] > c[2] > c[3] > 0.0
+        # concave marginal: each successive drop is smaller than the last
+        drops = [c[i] - c[i + 1] for i in range(len(c) - 1)]
+        assert drops == sorted(drops, reverse=True)
+
+    def test_default_curve_is_the_draw_prob_curve(self):
+        assert _U_REDUNDANCY_DEFAULT == _draw_prob_redundancy_curve()
+
+
 class TestPlanMatchups:
     """Unit 3: _plan_matchups planner correctness.
 

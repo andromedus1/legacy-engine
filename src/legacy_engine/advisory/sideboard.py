@@ -90,6 +90,45 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
       lookup dict).  No promotion → no-op.
     - Existing tests supply empty maindecks and no archetype → both filters are no-ops →
       test output is byte-identical to pre-feature.
+
+Impact-modulated element weights + draw-probability copy-shaping
+(feature-sb-field-weighted-scorer, Units B3+B4 — "replace the scoring core in place"):
+  The decomposed ``advisory.impact`` model (centrality × symmetry × castability × draw_prob,
+  see that module) modulates two, and only two, things in the existing ILP+greedy+τ+hedge
+  machinery — everything else (swing sourcing, coverage saturation g(n), the natural-budget
+  stop, the hedge allocator) is untouched:
+
+  (B3) Element weight for an (archetype, tag) pair becomes
+       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score()`` instead of
+       plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1 already
+       selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
+       *modulates* the weight computed from it).  The impact call uses ``copies=1`` (the value
+       of the FIRST copy being present); the copy-count taper itself is (B4)'s job, so applying
+       ``draw_probability`` a second time here at ``max_copies`` would double-count the taper.
+       Needs, per opponent archetype: that opponent's ``Linchpin`` list (``opp_linchpins``) and
+       optionally its known maindeck composition (``opp_cards``, for ``cast_requires`` gating)
+       — both precomputed ONCE by ``recommend_sideboard`` (objective-search-split:
+       ``_field_opponent_linchpins`` does the DB work; ``_build_coverage_model`` stays pure) and
+       threaded in via the new ``opponent_linchpins``/``opponent_cards`` params.  My deck's own
+       colors/vulnerability-tags reuse the ``deck_colors``/``deck_tags`` params already threaded
+       through for the anti-hate elements — no new "my-side" parameters needed.
+
+       GATING: ``opponent_linchpins=None`` (the default) → every impact multiplier is 1.0 →
+       element weights are BYTE-IDENTICAL to pre-impact (mirrors the ``matchup_pressure is None``
+       precedent above).  ``recommend_sideboard`` only supplies a non-None dict when it found
+       real linchpin data (derived from corpus composition OR a curated override) for at least
+       one field archetype — a field of archetypes with no in-regime decks and no curated
+       overrides degrades to the same None gate.
+
+  (B4) The per-card-copy utility curve ``_U_REDUNDANCY_DEFAULT`` (consumed by ``_u_redundancy``
+       / ``_redundancy_penalty``, unchanged otherwise) is now DERIVED from the
+       ``advisory.impact.draw_probability`` hypergeometric marginal (``P(draw≥1 in a Bo3)``)
+       instead of the generic curated ``(1.0, 0.55, 0.25, 0.10)`` constants — the Nth copy's
+       utility is ``(draw_prob(N) − draw_prob(N−1))`` normalized so the 1st copy stays exactly
+       1.0 (preserving ``_redundancy_penalty``'s ``penalty(1) == 0`` contract).  This is still a
+       precomputed tuple of floats (LP-representable exactly like the curve it replaces); the
+       ILP's ``z_c^k`` incremental-copy linearization and the greedy per-copy subtraction are
+       untouched.  Still fully gated by ``redundancy_strength``/``tau`` == 0.0 → no-op.
 """
 
 from __future__ import annotations
@@ -105,6 +144,9 @@ import duckdb
 import re
 
 from legacy_engine.advisory.field import FieldDistribution
+from legacy_engine.advisory.impact import draw_probability as _draw_probability
+from legacy_engine.advisory.impact import impact as _compute_impact
+from legacy_engine.advisory.linchpins import Linchpin, linchpins_for_archetype
 from legacy_engine.advisory.whattoplay import (
     field_vulnerability_tags,
     vulnerability_tags_for_deck,
@@ -312,6 +354,88 @@ def _field_matchup_values(
 
 
 # ---------------------------------------------------------------------------
+# Per-opponent linchpins + composition (feature-sb-field-weighted-scorer-wiring, Unit B3)
+# ---------------------------------------------------------------------------
+# Objective-search-split: the DB work (resolving an archetype's in-regime maindeck
+# composition to feed advisory.linchpins.linchpins_for_archetype) happens HERE, once per
+# archetype, so _build_coverage_model's impact-modulated weight computation stays a pure,
+# DB-free function fed a precomputed dict — exactly like matchup_pressure / empirical_pool /
+# card_swing_overrides above.
+
+def _archetype_linchpins_and_cards(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> "tuple[list[Linchpin], dict[str, int]]":
+    """Resolve one archetype's linchpins + known maindeck composition from the corpus.
+
+    ``card_frequencies`` (board="main") supplies inclusion_pct + modal_count for the
+    archetype's real 60; ``_load_deck_cards`` resolves those names to ``Card`` objects so
+    ``linchpins_for_archetype`` (pure — see linchpins.py) can classify roles/derive centrality.
+
+    ``linchpins_for_archetype`` is called even when the corpus has NO in-regime decks for this
+    archetype (empty ``cards_with_counts``/``inclusion_pct``) — it always merges in curated
+    ``LINCHPIN_OVERRIDES`` regardless of derived candidates, so a well-known archetype (e.g.
+    Painter) still yields its curated linchpins against a thin or synthetic corpus.
+
+    Returns ``([], {})`` — an honest "no data", not a crash — on any DB/lookup failure, or
+    when the archetype has neither corpus composition nor a curated override.  The second
+    element (``dict[name, modal_count]``) doubles as the ``opp_cards`` composition signal for
+    ``impact.castability_factor``'s ``cast_requires`` gating (e.g. "does this opponent run a
+    Plains").
+    """
+    cards_with_counts: "list[tuple[Card, int]]" = []
+    inclusion_pct: "dict[str, float]" = {}
+    modal_counts: "dict[str, int]" = {}
+    try:
+        from legacy_engine.generation.consensus import card_frequencies
+        freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+        inclusion_pct = {cf.name: cf.inclusion_pct for cf in freqs}
+        modal_counts = {cf.name: cf.modal_count for cf in freqs}
+        if modal_counts:
+            cards_with_counts = _load_deck_cards(con, modal_counts)
+    except Exception as exc:
+        log.debug(
+            "_archetype_linchpins_and_cards: composition lookup failed for %r: %s", archetype, exc
+        )
+
+    try:
+        linchpins = linchpins_for_archetype(archetype, cards_with_counts, inclusion_pct)
+    except Exception as exc:
+        log.debug(
+            "_archetype_linchpins_and_cards: linchpins_for_archetype failed for %r: %s",
+            archetype, exc,
+        )
+        linchpins = []
+
+    return linchpins, modal_counts
+
+
+def _field_opponent_linchpins(
+    con: duckdb.DuckDBPyConnection,
+    field: FieldDistribution,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> "tuple[dict[str, list[Linchpin]], dict[str, dict[str, int]]]":
+    """``_archetype_linchpins_and_cards`` for every archetype in the field.
+
+    Mirrors ``field_vulnerability_tags``'s one-query-per-archetype precedent.  Returns
+    ``(linchpins_by_archetype, cards_by_archetype)`` — both keyed by every archetype in
+    ``field.shares`` (values are ``[]``/``{}`` for archetypes with no data, never a missing key).
+    """
+    linchpins_by_arch: "dict[str, list[Linchpin]]" = {}
+    cards_by_arch: "dict[str, dict[str, int]]" = {}
+    for archetype in field.shares:
+        lps, cards = _archetype_linchpins_and_cards(con, archetype, since=since, until=until)
+        linchpins_by_arch[archetype] = lps
+        cards_by_arch[archetype] = cards
+    return linchpins_by_arch, cards_by_arch
+
+
+# ---------------------------------------------------------------------------
 # Saturating coverage model  g(n) = 1 − (1−p)^n
 # ---------------------------------------------------------------------------
 
@@ -331,7 +455,9 @@ def _marginal_g(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value)
+# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value;
+# curve replaced by the draw-probability marginal in feature-sb-field-weighted-scorer-wiring,
+# Unit B4)
 # ---------------------------------------------------------------------------
 # The per-element saturating g(n) above already diminishes the value of multiple
 # *answers* to one element (the access-probability term). What it does NOT capture is
@@ -343,7 +469,32 @@ def _marginal_g(n: int) -> float:
 # objective. Gated-additive: strength=0.0 → penalty(k)=0 ∀k → byte-identical baseline.
 
 # Utility weight of the k-th drawn copy (k=1,2,3,4); k>len clamps to the last entry.
-_U_REDUNDANCY_DEFAULT: tuple[float, ...] = (1.0, 0.55, 0.25, 0.10)
+#
+# Unit B4: derived from advisory.impact.draw_probability's hypergeometric marginal —
+# P(draw>=1 copy in a Bo3) — instead of a hand-curated (1.0, 0.55, 0.25, 0.10) constant.
+# u(k) = (draw_prob(k) - draw_prob(k-1)) / (draw_prob(1) - draw_prob(0)), normalized so
+# u(1) == 1.0 exactly (preserving _redundancy_penalty's "penalty(1) == 0" contract). The
+# hypergeometric marginal is concave/decreasing over 1..4 copies by construction (see
+# draw_probability's docstring) — same SHAPE as the constant it replaces, now grounded in
+# the mechanics-based draw model instead of a curated guess. Still a plain tuple of floats
+# precomputed once at import time, so it stays a drop-in, LP-representable replacement:
+# _u_redundancy / _redundancy_penalty / the ILP's z_c^k linearization are all unchanged.
+def _draw_prob_redundancy_curve(max_k: int = 4) -> tuple[float, ...]:
+    """Build the B4 per-copy utility curve from the draw-probability marginal.
+
+    Degrades to an all-1.0 curve (no shaping) in the defensive case ``draw_probability(1)``
+    is somehow 0 — cannot happen with the module's own default constants, but keeps this a
+    total function rather than one that could divide by zero if the underlying constants are
+    ever retuned to something degenerate.
+    """
+    marginals = [_draw_probability(k) - _draw_probability(k - 1) for k in range(1, max_k + 1)]
+    m1 = marginals[0]
+    if m1 <= 0.0:
+        return tuple(1.0 for _ in range(max_k))
+    return tuple(m / m1 for m in marginals)
+
+
+_U_REDUNDANCY_DEFAULT: tuple[float, ...] = _draw_prob_redundancy_curve()
 # Penalty scale in coverage-value units. Tunable; default chosen so the 2nd copy of a
 # card competes with covering a fresh element rather than stacking. The natural-budget
 # τ stop (dedicated-core feature) is the real budget control; this only *shapes* copies.
@@ -1186,6 +1337,8 @@ def _build_coverage_model(
     empirical_pool: "frozenset[str] | None" = None,
     promoted_candidates: "dict[str, HoserCard] | None" = None,
     card_swing_overrides: "dict[str, float] | None" = None,
+    opponent_linchpins: "dict[str, list[Linchpin]] | None" = None,
+    opponent_cards: "dict[str, dict[str, int]] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -1234,6 +1387,22 @@ def _build_coverage_model(
     when computing ``best_swing_for_tag``.  Where data is thin (not in overrides), the
     catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
     → no-op (byte-identical to pre-feature for callers without card-value data).
+
+    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3):
+    When ``opponent_linchpins`` is not None, each (archetype, tag) element's weight is
+    additionally multiplied by ``impact(best_hoser_for_tag, archetype, ...).score()`` — the
+    decomposed centrality × symmetry × castability × draw_prob score (see ``advisory.impact``)
+    of the SAME hoser Step 1 already selected as the tag's best-swing answer, evaluated
+    specifically against that opponent archetype's linchpins (``opponent_linchpins[archetype]``,
+    defaulting to ``[]``) and this deck's own colors/vulnerability-tags (``deck_colors``/
+    ``deck_tags`` — reused as-is; no separate "my-side" parameters needed).  ``opponent_cards``
+    optionally supplies each opponent's known maindeck composition for the ``cast_requires``
+    castability gate (e.g. Massacre's "opponent controls a Plains" clause).  Uses ``copies=1``
+    (the value of the card's first copy being present) — the copy-count taper itself is Unit
+    B4's job (the ILP/greedy per-copy marginal), so reapplying ``draw_probability`` here at
+    ``max_copies`` would double-count it.  Gated-additive: ``opponent_linchpins=None`` (the
+    default) → every impact multiplier is 1.0 → element weights are BYTE-IDENTICAL to
+    pre-impact (mirrors the ``matchup_pressure is None`` no-op above).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -1247,7 +1416,12 @@ def _build_coverage_model(
     # Data-informed swing overrides (feature-empirical-sideboard-swings): when provided,
     # a card's override swing (presence-correlational proxy, gate-cleared) replaces its
     # catalog swing in this computation.  Thin-data cards retain the catalog constant.
+    # best_hoser_for_tag (Unit B3): the specific hoser object achieving best_swing_for_tag[tag],
+    # tracked alongside so the impact multiplier in Step 2 can be computed for "the same best
+    # hoser for the tag the code already selects" — best_swing_for_tag's VALUES are unaffected
+    # (still the strict running max), only this extra hoser-identity bookkeeping is new.
     best_swing_for_tag: dict[str, float] = {}
+    best_hoser_for_tag: dict[str, HoserCard] = {}
     _all_hosers_for_swing = list(catalog.values())
     if promoted_candidates:
         _all_hosers_for_swing.extend(promoted_candidates.values())
@@ -1261,7 +1435,9 @@ def _build_coverage_model(
                 if card_swing_overrides and hoser.name in card_swing_overrides
                 else hoser.swing
             )
-            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), effective_swing)
+            if effective_swing > best_swing_for_tag.get(tag, 0.0):
+                best_swing_for_tag[tag] = effective_swing
+                best_hoser_for_tag[tag] = hoser
 
     # --- Step 2: Build (archetype, tag) element weights ---
     # Each element is keyed as "<archetype>|<tag>" so a soft hoser covering only
@@ -1278,7 +1454,34 @@ def _build_coverage_model(
             swing = best_swing_for_tag.get(tag, 0.0)
             if swing > 0.0:
                 key = f"{archetype}|{tag}"
-                element_weight[key] = share * swing
+                weight = share * swing
+
+                # Impact modulation (Unit B3): scale by the decomposed impact score of the
+                # tag's best-swing hoser against THIS specific opponent archetype. A
+                # symmetric self-hosing hoser or one this deck can't cast for this matchup
+                # shouldn't carry full weight just because it's the theoretical best swing.
+                # copies=1: the taper across MULTIPLE copies is Unit B4's job (the ILP/greedy
+                # per-copy marginal) — reusing draw_probability here at max_copies would
+                # double-count that taper.
+                if opponent_linchpins is not None:
+                    best_hoser = best_hoser_for_tag.get(tag)
+                    if best_hoser is not None:
+                        opp_lps = opponent_linchpins.get(archetype, [])
+                        opp_cards_for_arch = (
+                            opponent_cards.get(archetype) if opponent_cards else None
+                        )
+                        breakdown = _compute_impact(
+                            best_hoser,
+                            archetype,
+                            opp_linchpins=opp_lps,
+                            my_vulnerability_tags=deck_tags,
+                            my_colors=deck_colors,
+                            copies=1,
+                            opp_cards=opp_cards_for_arch,
+                        )
+                        weight *= breakdown.score()
+
+                element_weight[key] = weight
                 archetype_element_keys.add(key)
                 any_covered = True
         _archetype_tag_keys[archetype] = archetype_element_keys
@@ -2644,6 +2847,30 @@ def recommend_sideboard(
                     {k: f"{v:.3f}" for k, v in sorted(overrides.items())},
                 )
 
+    # --- Step 3f: Opponent linchpins + composition (feature-sb-field-weighted-scorer-wiring,
+    # Unit B3) ---
+    # Computed ONCE here (objective-search-split) and threaded into _build_coverage_model so
+    # its impact-modulated element weights stay a pure/DB-free computation. Gated: stays None
+    # (byte-identical element weights) unless at least one field archetype yields real linchpin
+    # data — derived from in-regime corpus composition, or a curated LINCHPIN_OVERRIDES entry
+    # (checked even when the corpus has no decks for that archetype) — mirrors the
+    # any_gate_cleared gating already used for matchup_pressure above.
+    opponent_linchpins: "dict[str, list[Linchpin]] | None" = None
+    opponent_cards: "dict[str, dict[str, int]] | None" = None
+    try:
+        _linchpins_by_arch, _cards_by_arch = _field_opponent_linchpins(
+            con, field, since=eff_since, until=eff_until
+        )
+        if any(_linchpins_by_arch.values()):
+            opponent_linchpins = _linchpins_by_arch
+            opponent_cards = _cards_by_arch
+            log.debug(
+                "recommend_sideboard: opponent linchpin data for %d/%d field archetypes",
+                sum(1 for lps in _linchpins_by_arch.values() if lps), len(_linchpins_by_arch),
+            )
+    except Exception as exc:
+        log.debug("recommend_sideboard: _field_opponent_linchpins failed: %s", exc)
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -2656,6 +2883,8 @@ def recommend_sideboard(
         empirical_pool=empirical_pool,
         promoted_candidates=promoted_candidates,
         card_swing_overrides=card_swing_overrides,
+        opponent_linchpins=opponent_linchpins,
+        opponent_cards=opponent_cards,
     )
     warnings.extend(model.warnings)
 
