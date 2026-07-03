@@ -303,7 +303,7 @@
     {
       "name": "Null Rod",
       "attacks": ["ramp", "greedy-manabase"],
-      "colors": ["G"],
+      "colors": [],
       "max_copies": 4,
       "swing": "soft",
       "symmetry": "symmetric",

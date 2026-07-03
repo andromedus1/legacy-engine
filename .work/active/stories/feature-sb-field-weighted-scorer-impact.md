@@ -1,7 +1,7 @@
 ---
 id: feature-sb-field-weighted-scorer-impact
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-sb-field-weighted-scorer
 depends_on: []
