@@ -1,7 +1,7 @@
 ---
 id: feature-archetype-sweep-backtest-ilp-determinism
 kind: story
-stage: implementing
+stage: done
 tags: [advisory, sideboard]
 parent: feature-archetype-sweep-backtest
 depends_on: []
