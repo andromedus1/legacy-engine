@@ -64,26 +64,18 @@ from legacy_engine.advisory.sideboard import (
     _PUNT_REASON_CANT_CROSS_HALF,
     _PUNT_REASON_BETTER_ROI_ELSEWHERE,
 )
-from legacy_engine.analytics.matchup import build_cell, build_adaptive_matrix, MatchupMatrix, AdaptiveMatrix
+from legacy_engine.analytics.matchup import build_cell, MatchupMatrix, AdaptiveMatrix
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
+
+# gate-cruft-test-helper-duplication: _con/_make_field are shared conftest helpers now
+# (were byte-identical local copies here and in test_whattoplay.py).
+from tests.conftest import _con, _make_field
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _con():
-    """In-memory DuckDB connection with schema."""
-    con = store.connect(":memory:")
-    store.init_schema(con)
-    return con
-
-
-def _make_field(shares: dict[str, float]) -> FieldDistribution:
-    """Build a FieldDistribution from raw shares (normalizes automatically)."""
-    return build_custom_field(shares)
-
 
 def _make_model(
     element_weight: dict[str, float],
@@ -267,6 +259,47 @@ class TestHoserCatalog:
     def test_ramp_hosers_have_max_copies_at_least_one(self):
         for name in ("Harbinger of the Seas", "Damping Sphere", "Pithing Needle", "Null Rod"):
             assert HOSER_CATALOG[name].max_copies >= 1
+
+    # --- Blast cycle catalog literals (feature-sb-effect-tagging-model, Unit 3) ---
+    # gate-tests-catalog-blast-rows: the AC (blasts attack plays-<color>; the two functionally
+    # identical color-hate pairs share a functional_group) was previously only covered
+    # indirectly (e.g. via test_red_heavy_field_surfaces_hydroblast_as_plays_red_coverage's
+    # model-level assertions) — a catalog edit regressing one of the four rows directly could
+    # pass every indirect test. Assert the shipped literals themselves.
+
+    def test_pyroblast_attacks_plays_blue(self):
+        h = HOSER_CATALOG["Pyroblast"]
+        assert "plays-blue" in h.attacks
+        assert h.functional_group == "blue-blast"
+
+    def test_red_elemental_blast_attacks_plays_blue(self):
+        h = HOSER_CATALOG["Red Elemental Blast"]
+        assert "plays-blue" in h.attacks
+        assert h.functional_group == "blue-blast"
+
+    def test_hydroblast_attacks_plays_red(self):
+        h = HOSER_CATALOG["Hydroblast"]
+        assert "plays-red" in h.attacks
+        assert h.functional_group == "red-blast"
+
+    def test_blue_elemental_blast_attacks_plays_red(self):
+        h = HOSER_CATALOG["Blue Elemental Blast"]
+        assert "plays-red" in h.attacks
+        assert h.functional_group == "red-blast"
+
+    def test_blast_pairs_share_functional_group(self):
+        """Hydroblast <-> Blue Elemental Blast and Pyroblast <-> Red Elemental Blast are each
+        functionally-identical color-hate pairs — the AC's 'share functional_group' claim."""
+        assert (
+            HOSER_CATALOG["Hydroblast"].functional_group
+            == HOSER_CATALOG["Blue Elemental Blast"].functional_group
+            == "red-blast"
+        )
+        assert (
+            HOSER_CATALOG["Pyroblast"].functional_group
+            == HOSER_CATALOG["Red Elemental Blast"].functional_group
+            == "blue-blast"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +873,7 @@ class TestGreedy:
         smaller marginal gain, so it IS picked (filling the budget) but the trace shows
         descending marginal gains.
         """
-        from legacy_engine.advisory.sideboard import _COVERAGE_P, _g
+        from legacy_engine.advisory.sideboard import _g
         # Single-element field: one element, one hoser.
         hoser = _minimal_hoser("GY-Hoser", frozenset({"Reanimator"}), max_copies=4)
         model = _make_model(
@@ -1960,9 +1993,7 @@ from legacy_engine.advisory.sideboard import (
     MatchupPlan,
     _field_matchup_values,
     _plan_matchups,
-    _build_coverage_model,
     _MAX_PRESSURE,
-    _VALUE_GATE,
 )
 
 
@@ -3001,7 +3032,6 @@ class TestAdaptiveWindowSideboard:
     def test_per_window_cache_called_once_per_distinct_window(self, make_rounds_corpus, monkeypatch):
         """_field_matchup_values with adaptive_windows calls compute_card_winrates once per
         distinct window, not once per opponent (scan-count bound)."""
-        import legacy_engine.advisory.sideboard as _sb_mod
         from legacy_engine.advisory.sideboard import _field_matchup_values
         from legacy_engine.advisory.field import build_custom_field
 
@@ -3043,7 +3073,6 @@ class TestAdaptiveWindowSideboard:
 
     def test_two_distinct_windows_two_scans(self, make_rounds_corpus, monkeypatch):
         """Two opponents with DIFFERENT windows → 2 compute_card_winrates calls."""
-        import legacy_engine.advisory.sideboard as _sb_mod
         from legacy_engine.advisory.sideboard import _field_matchup_values
         from legacy_engine.advisory.field import build_custom_field
 
@@ -3082,7 +3111,6 @@ class TestAdaptiveWindowSideboard:
         """When an opponent is thin even after pooling, the degraded MatchupPlan note
         names the pooled valid_since, not a bare 'speculative, n>=0'."""
         import legacy_engine.advisory.sideboard as _sb_mod
-        from legacy_engine.analytics.affectedness import archetype_valid_since as _avs_real
 
         def _patched_fvt(con_arg, field_arg):
             return {arch: frozenset({"combo"}) for arch in field_arg.shares}
@@ -5321,7 +5349,6 @@ class TestHoserCatalogExpansion:
 
     def test_load_hoser_catalog_swing_alias_dedicated(self):
         """'dedicated' swing alias resolves to _SWING_DEDICATED (0.20)."""
-        from pathlib import Path
         import json, tempfile, os
         from legacy_engine.advisory.sideboard import load_hoser_catalog
 
@@ -5346,7 +5373,6 @@ class TestHoserCatalogExpansion:
 
     def test_load_hoser_catalog_swing_alias_soft(self):
         """'soft' swing alias resolves to _SWING_SOFT (0.10)."""
-        from pathlib import Path
         import json, tempfile, os
         from legacy_engine.advisory.sideboard import load_hoser_catalog
 
@@ -5709,7 +5735,6 @@ class TestHoserCatalogExpansion:
 
     def test_dimir_tempo_field_surfaces_gy_hate(self):
         """Dimir Tempo (UB) field with a Reanimator-heavy metagame surfaces graveyard hate."""
-        con = _con()
         field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.2, "Elves": 0.2})
         archetype_tags = {
             "Reanimator": frozenset({"graveyard-recursion"}),
@@ -5744,7 +5769,6 @@ class TestHoserCatalogExpansion:
         Consign to Memory (U) and Flusterstorm (U) must be in the candidate set for a
         UB deck facing a combo-heavy field — both are now catalog entries.
         """
-        con = _con()
         field = _make_field({"ANT Storm": 0.5, "Reanimator": 0.3, "Elves": 0.2})
         archetype_tags = {
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
@@ -5809,7 +5833,6 @@ class TestHoserCatalogExpansion:
         Sheoldred's Edict (B) and Toxic Deluge (B) must be in the candidate set for a
         UB deck facing an Elves-heavy field.
         """
-        con = _con()
         field = _make_field({"Elves": 0.6, "Reanimator": 0.2, "ANT Storm": 0.2})
         archetype_tags = {
             "Elves": frozenset({"creature-based"}),
@@ -6423,7 +6446,9 @@ class TestConsideringPool:
         final_cards = {"H_AB": 1}
         pool = _rank_considering_pool(model, final_cards)
         pool_names = {cc.card for cc in pool}
-        # H_A and H_B were not selected and have residual coverage value
+        # H_A and H_B were not selected and have residual coverage value — the test's own
+        # name promises this; restore the assertion the earlier `len(pool) > 0` alone doesn't cover.
+        assert {"H_A", "H_B"} <= pool_names, f"expected H_A and H_B in the pool: {pool_names}"
         assert len(pool) > 0, "Expecting at least one bubble candidate"
         # All pool entries must NOT be in the chosen 15 at max_copies
         for cc in pool:
@@ -6777,11 +6802,17 @@ class TestNaturalBudgetTau:
         assert cards.get("Top", 0) == 2, f"expected 2 dedicated Top copies at τ=0.15: {cards}"
 
     def test_ilp_stops_at_tau(self):
+        # gate-tests-ilp-firstcopy-and-tau-exact: previously only asserted sum<4 (a strictly
+        # weaker partition than greedy's `test_greedy_stops_at_tau`, which pins the exact
+        # count). Mirror greedy's exact-stop assertion on the ILP solver: Top's marginals are
+        # Δg: 0.5, 0.25, 0.125, ...; τ=0.15 stops after the 2nd copy (3rd copy's 0.125 ≤ τ),
+        # and Alt (0.05) never clears τ.
         try:
             cards = _ilp_solve(self._dominant_model(), budget=4, tau=0.15)
         except _ILPFailed:
             pytest.skip("CBC unavailable")
         assert sum(cards.values()) < 4, f"τ=0.15 ILP must stop before the budget: {cards}"
+        assert cards.get("Top", 0) == 2, f"expected exactly 2 dedicated Top copies at τ=0.15: {cards}"
 
     def test_ilp_tau_zero_identical(self):
         try:
@@ -6845,13 +6876,40 @@ class TestOutputContract:
         pkg = self._pkg(redundancy_strength=0.10)
         assert pkg.natural_budget_count is not None
 
-    def test_covered_element_not_in_uncovered_tail(self):
-        # The single graveyard hoser covers Reanimator's element, so it must NOT appear in
-        # the uncovered tail. (A richer field would surface real tail entries.)
+    def test_covered_element_not_in_uncovered_tail(self, monkeypatch):
+        """gate-tests-uncovered-tail-content: the previous version of this test only checked
+        isinstance(tuple) + a vacuous all() over what turns out to be an EMPTY tail on the
+        1-element `_gy_field_corpus` model — it never actually exercised a real uncovered
+        element. Monkeypatch `_build_coverage_model` to a fixed 2-element model (mirrors the
+        `_make_model` hand-built-model house style) so one tag ('BigMana|ramp') has NO
+        candidate covering it at all, while the other ('Reanimator|graveyard-recursion') is
+        covered by the sole catalog card — then assert the uncovered one surfaces in the tail
+        WITH its real weight, and the covered one does not appear there."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        fixed_model = _make_model(
+            element_weight={"Reanimator|graveyard-recursion": 0.30, "BigMana|ramp": 0.20},
+            candidate_covers={"Surgical Extraction": frozenset({"Reanimator|graveyard-recursion"})},
+            candidate_meta={
+                "Surgical Extraction": _minimal_hoser(
+                    "Surgical Extraction", frozenset({"graveyard-recursion"}), max_copies=4,
+                ),
+            },
+        )
+        monkeypatch.setattr(sb_mod, "_build_coverage_model", lambda *a, **k: fixed_model)
+
         pkg = self._pkg(tau=0.10)
-        assert isinstance(pkg.uncovered_tail, tuple)
-        # Weights are non-negative; the covered graveyard element is not double-counted here.
-        assert all(w >= 0.0 for _, w in pkg.uncovered_tail)
+
+        # The card that covers Reanimator's element clears tau (0.30*Δg(1)=0.15 > 0.10) → picked.
+        assert pkg.cards.get("Surgical Extraction", 0) >= 1, f"expected a pick: {dict(pkg.cards)}"
+
+        tail = dict(pkg.uncovered_tail)
+        assert tail.get("BigMana|ramp") == pytest.approx(0.20), (
+            f"uncovered element missing or wrong weight: {pkg.uncovered_tail}"
+        )
+        assert "Reanimator|graveyard-recursion" not in tail, (
+            f"the covered element must not appear in the tail: {pkg.uncovered_tail}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -8063,6 +8121,97 @@ class TestOptionValueSolverWiring:
             pytest.skip("CBC unavailable")
         assert greedy_picks == ilp_picks == {"B": 1}
 
+    def test_ilp_first_copy_only_bonus_credited_once_not_per_copy(self):
+        """gate-tests-ilp-firstcopy-and-tau-exact: the p_c presence-indicator encoding
+        (`p_c <= x_c`, credited once) was only verified against greedy/the considering pool;
+        the ILP's own p_c LP encoding was never independently pinned. Card A (max_copies=2)
+        has a bonus; Card B (max_copies=1, no bonus) is a strict alternative. The numbers are
+        chosen so crediting the bonus ONCE (correct) picks A+B, while crediting it PER-COPY
+        (the encoding bug this guards against) would instead pick AA:
+          AA  (once-only):  Δg(1)*w_A + bonus + Δg(2)*w_A = 0.05 + 0.05 + 0.025 = 0.125
+          AA  (per-copy bug):                                0.05 + 0.05 + 0.025 + 0.05 = 0.175
+          A+B (either way):                                  (0.05 + 0.05) + 0.045 = 0.145
+        0.125 < 0.145 < 0.175 → correct encoding picks A+B; the buggy one would pick AA.
+        """
+        model = _make_model(
+            element_weight={"eA": 0.10, "eB": 0.09},
+            candidate_covers={"A": frozenset({"eA"}), "B": frozenset({"eB"})},
+            candidate_meta={
+                "A": _minimal_hoser("A", frozenset({"tA"}), max_copies=2),
+                "B": _minimal_hoser("B", frozenset({"tB"}), max_copies=1),
+            },
+        )
+        bonus = {"A": 0.05}
+        greedy_picks, _ = _greedy_solve(model, budget=2, option_value_bonus=bonus)
+        assert greedy_picks == {"A": 1, "B": 1}, f"greedy sanity check failed: {greedy_picks}"
+        try:
+            ilp_picks = _ilp_solve(model, budget=2, option_value_bonus=bonus)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert ilp_picks == {"A": 1, "B": 1}, (
+            f"expected the bonus credited once (A+B); got {ilp_picks} — a per-copy-credited "
+            f"bonus would incorrectly prefer stacking AA"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestTauOptionValueComposition — gate-tests-tau-optionvalue-composition
+# ---------------------------------------------------------------------------
+
+class TestTauOptionValueComposition:
+    """DECISION (pinned by this test class): bonus-resurrection past τ is INTENDED — option
+    value is insurance-like and deliberately additive, matching the accepted 6->9 board-growth
+    behavior documented in `_build_option_value_bonuses`'s docstring. In both `_greedy_solve`
+    and `_ilp_solve` the bonus is added to a card's gain BEFORE the τ natural-budget comparison,
+    so a card whose base coverage marginal alone would NOT clear τ, but whose bonus pushes the
+    combined gain above τ, IS selected (resurrected) rather than triggering the natural-budget
+    stop. See the added sentences in `_greedy_solve`'s τ-stop comment and its option_value_bonus
+    docstring paragraph."""
+
+    def _single_card_model(self) -> CoverageModel:
+        # One element (weight 0.10) covered by one card → base first-copy gain =
+        # 0.10 * Δg(1) = 0.10 * 0.5 = 0.05.
+        return _make_model(
+            element_weight={"e1": 0.10},
+            candidate_covers={"A": frozenset({"e1"})},
+            candidate_meta={"A": _minimal_hoser("A", frozenset({"t1"}), max_copies=1)},
+        )
+
+    # τ=0.06 is strictly above the base gain (0.05) — the base marginal alone does NOT
+    # clear τ, so the natural-budget stop must fire pre-bonus. Bonus=0.02 lifts the combined
+    # gain to 0.07, strictly above τ, so the resurrection is decisive either way.
+
+    def test_greedy_without_bonus_natural_stop_excludes_card(self):
+        """Baseline: with no bonus, the sub-tau card is correctly excluded (confirms τ=0.06
+        really does exceed the card's base gain, so the bonus test below is non-vacuous)."""
+        cards, _ = _greedy_solve(self._single_card_model(), budget=1, tau=0.06)
+        assert cards == {}, f"expected the natural-budget stop with no bonus: {cards}"
+
+    def test_greedy_bonus_resurrects_card_past_tau(self):
+        cards, trace = _greedy_solve(
+            self._single_card_model(), budget=1, tau=0.06, option_value_bonus={"A": 0.02},
+        )
+        assert cards == {"A": 1}, f"expected the bonus to resurrect A past τ: {cards}"
+        assert trace[0].marginal_gain == pytest.approx(0.07)
+
+    def test_ilp_without_bonus_natural_stop_excludes_card(self):
+        try:
+            cards = _ilp_solve(self._single_card_model(), budget=1, tau=0.06)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert cards == {}, f"expected the natural-budget stop with no bonus: {cards}"
+
+    def test_ilp_bonus_resurrects_card_past_tau(self):
+        """Mirror expectation for the ILP: the same τ/bonus composition must resurrect the
+        card via the ILP's p_c presence-bonus term, not just the greedy path."""
+        try:
+            cards = _ilp_solve(
+                self._single_card_model(), budget=1, tau=0.06, option_value_bonus={"A": 0.02},
+            )
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert cards == {"A": 1}, f"expected the bonus to resurrect A past τ (ILP): {cards}"
+
 
 class TestOptionValueRecommendSideboardIntegration:
     """End-to-end: `option_value_bonus` is computed once inside `recommend_sideboard` and
@@ -8111,3 +8260,49 @@ class TestOptionValueRecommendSideboardIntegration:
             con.close()
 
         assert captured["option_value_bonus"] == sentinel
+
+    def test_option_value_active_e2e_with_counts_backed_field(self):
+        """gate-tests-optionvalue-e2e-active: every existing recommend_sideboard integration
+        test above uses a counts-LESS field (`_make_field`/share-only `build_custom_field`),
+        so `_build_option_value_bonuses` returns `{}` every time (its documented no-op path)
+        and the bonus never actually reaches a solver end-to-end. Use a counts-backed field
+        (via `build_custom_field(..., counts=...)`) with smart=True and hedge="expected"
+        through the real HOSER_CATALOG, and assert the full acceptance shape: the bonus
+        changes solver behavior relative to alpha=1.0 (the documented no-op alpha), the core
+        size is unaffected by the hedge, insurance stays inside the package, and the package
+        never exceeds budget."""
+        con = TestHedgeIntegrationNonVacuous._two_tag_corpus()
+        try:
+            field = build_custom_field(
+                {"Reanimator": 0.85, "BigMana": 0.15}, counts={"Reanimator": 85, "BigMana": 15},
+            )
+            default = recommend_sideboard(
+                con, field, {}, solver="greedy", smart=True, hedge="expected",
+            )
+            alpha_one = recommend_sideboard(
+                con, field, {}, solver="greedy", smart=True, hedge="expected",
+                option_value_alpha=1.0,
+            )
+            pre_hedge = recommend_sideboard(
+                con, field, {}, solver="greedy", smart=True, hedge="off",
+            )
+        finally:
+            con.close()
+
+        # The bonus is active (alpha != 1.0's no-op) and visibly changes solver behavior: the
+        # greedy trace's marginal gains include the bonus, so they differ from the alpha=1.0
+        # run even where the final picks happen to coincide.
+        default_gains = [t.marginal_gain for t in default.trace]
+        alpha_one_gains = [t.marginal_gain for t in alpha_one.trace]
+        assert default_gains != alpha_one_gains, (
+            f"expected the option-value bonus to change the trace: default={default_gains} "
+            f"alpha=1.0={alpha_one_gains}"
+        )
+
+        # natural_budget_count reflects the CORE only (excludes hedge/insurance) — it must
+        # equal an independently-computed hedge="off" run's total under the same inputs.
+        assert default.natural_budget_count == sum(pre_hedge.cards.values())
+
+        # insurance is a subset of the final package, and the package never exceeds budget.
+        assert default.insurance_cards <= set(default.cards)
+        assert sum(default.cards.values()) <= default.budget

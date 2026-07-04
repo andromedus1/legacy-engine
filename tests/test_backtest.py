@@ -6,6 +6,8 @@ connection builds its own tmp DB (never the default DB — the green-local/red-C
 
 from __future__ import annotations
 
+import math
+
 import duckdb
 import pytest
 
@@ -236,7 +238,10 @@ class TestBacktestBoardClassification:
         assert isinstance(result, BoardBacktest)
         assert result.archetype == "the local meta"
 
-        # Exactly 4 qualifying top-finisher the local meta decks (alice, bob, erin, frank).
+        # Exactly 4 qualifying top-finisher the local meta decks (alice, bob, erin, frank): the fixture's
+        # threshold math is ceil(_TOP_FINISHER_QUANTILE * 8) = 2 qualifiers per 8-player tournament,
+        # across T1+T2 = 4. Pin the constant so a retune doesn't silently invalidate this fixture.
+        assert math.ceil(_TOP_FINISHER_QUANTILE * 8) == 2
         assert result.n_winning_decks == 4
 
         # Observed frequency: exact fractions from the 4 qualifying decks only —

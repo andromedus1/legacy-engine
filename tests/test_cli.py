@@ -265,7 +265,6 @@ class TestVizGroup:
             "--db", db_path_rounds,
         ])
         assert result.exit_code == 0, result.output
-        import os
         with open(out_path, "rb") as f:
             header = f.read(4)
         assert header == b"\x89PNG"
@@ -289,7 +288,6 @@ class TestVizGroup:
             "--db", db_path_rounds,
         ])
         assert result.exit_code == 0, result.output
-        import os
         with open(out_path, "rb") as f:
             header = f.read(4)
         assert header == b"\x89PNG"
@@ -812,6 +810,31 @@ class TestReportCardsContrast:
         assert "Sideboard-slot contrast" not in result.output
         assert "Card Win-Rates" in result.output
 
+    def test_contrast_thin_cohort_renders_thin_banner(self, runner, contrast_db):
+        """A cohort under the n<30 speculative floor renders the labeled thin-n honesty banner
+        (contrast_db's n_repeats=5 seeds the WITH cohort at n=10 — thin by construction)."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--card", "Surgical Extraction", "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// thin: cohorts with n<30 are speculative — diffs indicative only, CIs wide." in result.output
+
+    def test_contrast_custom_window_single_section(self, runner, contrast_db):
+        """Explicit --since/--until yields exactly ONE labeled custom-window report — the
+        adaptive ban-aware and full-corpus windows are not also computed."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--contrast", "--archetype", "Control", "--vs", "Combo",
+             "--since", "2026-01-01", "--until", "2026-12-31", "--db", contrast_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert result.output.count("// window:") == 1
+        assert "custom (" in result.output
+        assert "adaptive ban-aware" not in result.output
+        assert "full-corpus (all-time)" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # advise compare — config/transform comparator
@@ -844,6 +867,60 @@ class TestAdviseCompare:
         f.write_text("0.5 Control\n0.5 Combo\n")
         return str(f)
 
+    @pytest.fixture
+    def transform_split_db(self, tmp_path):
+        """Hermetic DB where "Combo" crushes opponent X but folds to Y, and "Control" does
+        the exact opposite — a transform config (max over Combo/Control) must pick a
+        DIFFERENT chosen mode per matchup row, not the same mode everywhere."""
+        from legacy_engine.ingestion import store as _store
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        db_path = tmp_path / "transform_split.duckdb"
+        con = _store.connect(str(db_path))
+
+        # (hero_archetype, opponent_archetype, wins, losses) — n=20 per cell, 80/20 split.
+        cells = [
+            ("Combo", "X", 16, 4),
+            ("Control", "X", 4, 16),
+            ("Combo", "Y", 4, 16),
+            ("Control", "Y", 16, 4),
+        ]
+        counter = 0
+        for hero_arch, opp_arch, wins, losses in cells:
+            decks, rounds, labels = [], [], {}
+            for outcome, count in (("win", wins), ("loss", losses)):
+                for _ in range(count):
+                    counter += 1
+                    h, o = f"h{counter}", f"o{counter}"
+                    decks.append({"Player": h, "Result": "1st",
+                                  "Mainboard": [{"Count": 1, "CardName": "Filler"}], "Sideboard": []})
+                    decks.append({"Player": o, "Result": "2nd",
+                                  "Mainboard": [{"Count": 1, "CardName": "Filler"}], "Sideboard": []})
+                    rounds.append({"Player1": h, "Player2": o, "Result": "2-0" if outcome == "win" else "0-2"})
+                    labels[h] = hero_arch
+                    labels[o] = opp_arch
+            raw = {
+                "Tournament": {
+                    "Name": f"Split {hero_arch}-{opp_arch}", "Date": "2026-02-01",
+                    "Uri": f"https://www.mtgo.com/decklist/split-{hero_arch}-{opp_arch}".lower(),
+                    "Formats": "Legacy",
+                },
+                "Decks": decks, "Rounds": rounds, "Standings": [],
+            }
+            tid = _store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            for player, arch in labels.items():
+                con.execute(
+                    "UPDATE decks SET archetype=? WHERE tournament_id=? AND player=?", [arch, tid, player]
+                )
+        con.close()
+        return str(db_path)
+
+    @pytest.fixture
+    def xy_field_file(self, tmp_path):
+        f = tmp_path / "xy_field.txt"
+        f.write_text("0.5 X\n0.5 Y\n")
+        return str(f)
+
     def test_requires_a_and_b(self, runner, compare_db, field_file):
         result = runner.invoke(main, ["advise", "compare", "--field", field_file, "--a", "Control", "--db", compare_db])
         assert result.exit_code != 0
@@ -861,15 +938,55 @@ class TestAdviseCompare:
         assert "break-even" in result.output
         assert "coverage" in result.output
 
-    def test_transform_mode_shown(self, runner, compare_db, field_file):
+    def test_honesty_banners_always_print(self, runner, compare_db, field_file):
+        """The lift-overlay + transform-optimistic-ceiling honesty banners are mandatory —
+        they must print on a bare comparison AND survive --a-lift / --b-transform together."""
+        lift_banner = "// lifts are presence-correlational assumptions (point overlay), NOT in the MC base."
+        transform_banner = (
+            "// transform = max-over-modes per matchup — the optimistic ceiling "
+            "(assumes you reach the better mode post-board)."
+        )
+
+        basic = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert basic.exit_code == 0, basic.output
+        assert lift_banner in basic.output
+        assert transform_banner in basic.output
+
+        decorated = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--a-lift", "Combo=+0.1", "--b-transform", "Control",
+             "--seed", "1", "--all-time", "--db", compare_db],
+        )
+        assert decorated.exit_code == 0, decorated.output
+        assert lift_banner in decorated.output
+        assert transform_banner in decorated.output
+
+    def test_transform_mode_shown(self, runner, transform_split_db, xy_field_file):
+        """--b-transform must show the chosen mode per matchup row, and that mode must DIFFER
+        between rows where the transform mode wins vs where it loses (not a static field label
+        printed regardless of the flag)."""
         result = runner.invoke(
             main,
-            ["advise", "compare", "--field", field_file, "--a", "Combo", "--b", "Combo",
-             "--b-transform", "Control", "--seed", "1", "--all-time", "--db", compare_db],
+            # Config A is an unrelated third archetype (imputed, no data vs X/Y) so its
+            # rendered mode label can't collide with B's "Combo"/"Control" mode text.
+            ["advise", "compare", "--field", xy_field_file, "--a", "ThirdDeck", "--b", "Combo",
+             "--b-transform", "Control", "--seed", "1", "--all-time", "--db", transform_split_db],
         )
         assert result.exit_code == 0, result.output
-        # B = max(Combo, Control) — Control wins the max where it's better, so it appears as a mode.
-        assert "Control" in result.output
+        lines = result.output.splitlines()
+        x_line = next(ln for ln in lines if ln.startswith("X "))
+        y_line = next(ln for ln in lines if ln.startswith("Y "))
+        # vs X: Combo (80%) beats Control (20%) → B's chosen mode is "Combo".
+        assert "(Combo" in x_line
+        assert "(Control" not in x_line
+        # vs Y: Control (80%) beats Combo (20%) → B's chosen mode is "Control".
+        assert "(Control" in y_line
+        assert "(Combo" not in y_line
 
     def test_a_lift_parsed(self, runner, compare_db, field_file):
         result = runner.invoke(
@@ -880,14 +997,67 @@ class TestAdviseCompare:
         assert result.exit_code == 0, result.output
         assert "adjusted field EV" in result.output
 
-    def test_a_lift_slot_folds_measured_diff(self, runner, compare_db, field_file):
+    @pytest.fixture
+    def slot_split_db(self, tmp_path):
+        """Control's 'Hate Card' has a genuinely computable WITH-vs-WITHOUT split vs Combo
+        (one owner who wins, one non-owner who loses) — unlike compare_db, where EVERY Control
+        deck owns 'Surgical Extraction' and the WITHOUT cohort is always empty."""
+        from legacy_engine.ingestion import store as _store
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        db_path = tmp_path / "slot_split.duckdb"
+        con = _store.connect(str(db_path))
+        raw = {
+            "Tournament": {"Name": "Slot Split", "Date": "2026-02-01",
+                           "Uri": "https://www.mtgo.com/decklist/slot-split-1", "Formats": "Legacy"},
+            "Decks": [
+                {"Player": "c1", "Result": "1st",
+                 "Mainboard": [{"Count": 1, "CardName": "Filler"}],
+                 "Sideboard": [{"Count": 1, "CardName": "Hate Card"}]},
+                {"Player": "c2", "Result": "2nd",
+                 "Mainboard": [{"Count": 1, "CardName": "Filler"}], "Sideboard": []},
+                {"Player": "b1", "Result": "3rd",
+                 "Mainboard": [{"Count": 1, "CardName": "Filler"}], "Sideboard": []},
+                {"Player": "b2", "Result": "4th",
+                 "Mainboard": [{"Count": 1, "CardName": "Filler"}], "Sideboard": []},
+            ],
+            "Rounds": [
+                {"Player1": "c1", "Player2": "b1", "Result": "2-0"},   # c1 (owns Hate Card) wins
+                {"Player1": "c2", "Player2": "b2", "Result": "0-2"},   # c2 (no Hate Card) loses
+            ],
+            "Standings": [],
+        }
+        tid = _store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        for p, arch in {"c1": "Control", "c2": "Control", "b1": "Combo", "b2": "Combo"}.items():
+            con.execute("UPDATE decks SET archetype=? WHERE tournament_id=? AND player=?", [arch, tid, p])
+        con.close()
+        return str(db_path)
+
+    def test_a_lift_slot_folds_measured_diff(self, runner, slot_split_db, field_file):
+        """A slot with a real WITH-vs-WITHOUT split folds its measured diff into the lift and
+        shifts the adjusted EV — the 'folded' branch, distinct from the 'skipped' branch below."""
+        result = runner.invoke(
+            main,
+            ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
+             "--a-lift-slot", "Hate Card@Combo", "--seed", "1", "--all-time", "--db", slot_split_db],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// lift-slot: 'Hate Card' vs 'Combo' → measured lift +1.000." in result.output
+        assert "no computable diff" not in result.output
+        assert "adjusted field EV" in result.output   # the fold actually moved the overlay
+
+    def test_a_lift_slot_skipped_when_no_computable_diff(self, runner, compare_db, field_file):
+        """compare_db's 'Surgical Extraction' is owned by EVERY Control deck — the WITHOUT
+        cohort is always empty, so the slot pull has no computable diff and is skipped
+        (negative case for the folded branch above; both share the 'lift-slot:' prefix)."""
         result = runner.invoke(
             main,
             ["advise", "compare", "--field", field_file, "--a", "Control", "--b", "Combo",
              "--a-lift-slot", "Surgical Extraction@Combo", "--seed", "1", "--all-time", "--db", compare_db],
         )
         assert result.exit_code == 0, result.output
-        assert "lift-slot:" in result.output
+        assert "// lift-slot: no computable diff for 'Surgical Extraction' vs 'Combo' — skipped." in result.output
+        assert "→ measured lift" not in result.output
 
     def test_lift_opponent_not_in_field_fails(self, runner, compare_db, field_file):
         result = runner.invoke(

@@ -2086,7 +2086,9 @@ def _greedy_solve(
     bonus (see ``_build_option_value_bonuses``), credited ONLY on a card's first copy — the
     option value is "having access to this answer at all", not a per-copy dimension, strictly
     separate from the redundancy/draw-probability taper below. ``None``/empty → byte-identical
-    to the pre-feature objective.
+    to the pre-feature objective. The bonus is added to a card's gain BEFORE the τ natural-budget
+    comparison below runs, so it can deliberately resurrect a card past the τ stop that its base
+    coverage marginal alone would not have cleared (see the natural-budget-stop comment).
 
     Returns (card→copies, ordered_trace).
     """
@@ -2135,6 +2137,9 @@ def _greedy_solve(
             # marginal (coverage − redundancy penalty) ≤ τ, stop rather than padding the
             # budget. τ == 0.0 (default) reproduces the prior "stop only at zero gain"
             # behavior exactly (gains are ≥0 by the argmax floor → == 0.0 and ≤ 0.0 coincide).
+            # A card resurrected past this stop purely by its option-value bonus (base marginal
+            # ≤ τ, base+bonus > τ) is intended, not a bug — the bonus is insurance-like and is
+            # allowed to buy a dedicated slot the mean-field coverage marginal alone could not.
             break
 
         picks[best_card] = picks.get(best_card, 0) + 1

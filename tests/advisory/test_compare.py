@@ -7,6 +7,8 @@ overlay + break-even (ahead / feasible / infeasible), coverage/imputation, and t
 
 from __future__ import annotations
 
+import math
+
 from legacy_engine.advisory.compare import (
     ConfigMode,
     DeckConfig,
@@ -74,6 +76,18 @@ class TestPointEngine:
         r = compare_configs(m, f, a, b, n_draws=1000, seed=1)
         wr_x = next(row.wr_a_adj for row in r.rows if row.opponent == "X")
         assert wr_x == 1.0
+
+    def test_lift_clamped_to_zero(self):
+        # A negative lift larger than the base WR must floor at 0.0, not go negative.
+        m = _matrix(WR)
+        f = build_custom_field(FIELD)
+        a = DeckConfig("A", [ConfigMode("TempoA", {"X": -0.95})])  # 0.6 - 0.95 → clamp 0.0
+        b = DeckConfig("B", [ConfigMode("ComboB")])
+        r = compare_configs(m, f, a, b, n_draws=1000, seed=1)
+        wr_x = next(row.wr_a_adj for row in r.rows if row.opponent == "X")
+        assert wr_x == 0.0
+        assert math.isfinite(r.ev_a_adj)
+        assert 0.0 <= r.ev_a_adj <= 1.0
 
 
 class TestBaseDecoupledFromAdjWinner:
@@ -193,10 +207,28 @@ class TestMonteCarlo:
         width = lambda ci: ci[1] - ci[0]
         assert width(r_thin.ev_a_base_ci) > width(r_thick.ev_a_base_ci)
 
+    def test_mc_base_invariant_to_lifts(self):
+        """Lifts only ever touch the point-estimate overlay — the MC base layer must be
+        byte-identical with or without a large lift (a regression that folded lifts into the
+        MC base would pass silently otherwise, defeating the honesty design)."""
+        m = _matrix(WR)
+        f = build_custom_field(FIELD)
+        a_no_lift = DeckConfig("TempoA", [ConfigMode("TempoA")])
+        a_lifted = DeckConfig("TempoA+hate", [ConfigMode("TempoA", {"Y": 0.45})])
+        b = DeckConfig("ComboB", [ConfigMode("ComboB")])
+        r_no_lift = compare_configs(m, f, a_no_lift, b, n_draws=3000, seed=99)
+        r_lifted = compare_configs(m, f, a_lifted, b, n_draws=3000, seed=99)
+        assert r_no_lift.p_a_beats_b_base == r_lifted.p_a_beats_b_base
+        assert r_no_lift.ev_a_base_ci == r_lifted.ev_a_base_ci
+        assert r_no_lift.ev_b_base_ci == r_lifted.ev_b_base_ci
+        assert r_no_lift.ev_a_base == r_lifted.ev_a_base
+        # Sanity: the lift DID move the point-estimate overlay — this isn't a vacuous
+        # "nothing changed" check, it's isolating which layer the lift is allowed to touch.
+        assert r_lifted.ev_a_adj != r_lifted.ev_a_base
+
 
 class TestSlotLift:
     def test_slot_lift_returns_diff_and_none(self):
-        import duckdb
         from legacy_engine.advisory.compare import slot_lift
         from legacy_engine.ingestion import store
         from legacy_engine.ingestion.cache import parse_cache_item
