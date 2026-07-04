@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "_comment": "Hand-curated per-archetype linchpin overrides (feature-sb-effect-tagging-model, Unit 4). Curated entries win over anything advisory.linchpins.derive_linchpins would compute for the same card name (case-insensitive). centrality in (0,1]: 1.0 = the deck's plan does not function without this card at all; lower values are strong-but-not-absolute pieces. neutralized_by uses the linchpin capability vocabulary documented in advisory/linchpins.py (module docstring) -- NOT the hoser 'attacks' tag space. Inclusion percentages and oracle text verified against data/legacy.duckdb (cards.oracle_text, generation.consensus.card_frequencies) at authoring time.",
+  "linchpins": {
+    "Painter": [
+      {
+        "name": "Grindstone",
+        "role": "combo-engine",
+        "centrality": 1.0,
+        "neutralized_by": ["artifact-ability-lock", "artifact-bounce"],
+        "_comment": "Inclusion 1.00 (2 modal copies) in the corpus. '{3}, {T}: Target player mills two cards. If two cards that share a color were milled this way, repeat this process.' -- the mill engine itself; without it there is no kill, only a Painter's Servant doing nothing."
+      },
+      {
+        "name": "Painter's Servant",
+        "role": "combo-engine",
+        "centrality": 1.0,
+        "neutralized_by": ["creature-removal", "artifact-removal", "board-sweep"],
+        "_comment": "Inclusion 1.00 (4 copies) in the corpus. 'As this creature enters, choose a color. All cards ... are the chosen color in addition to their other colors.' -- makes every card in the mill share a color, turning Grindstone's conditional repeat into a guaranteed full-deck mill. Equally load-bearing as Grindstone (the combo is a two-card unit); an Artifact Creature with no activated ability of its own, so it is answered by creature/artifact removal or a sweeper, not a lock/bounce effect."
+      }
+    ],
+    "Show and Tell": [
+      {
+        "name": "Show and Tell",
+        "role": "combo-engine",
+        "centrality": 1.0,
+        "neutralized_by": ["counter-on-cast"],
+        "_comment": "Inclusion 1.00 (4 copies) in the corpus. 'Each player may put an artifact, creature, enchantment, or land card from their hand onto the battlefield.' -- the entire cheat-a-fatty-into-play plan is this one Sorcery resolving; a one-shot spell, so the only window to stop it is on the stack (Force of Will / Flusterstorm-style answers), not after it resolves."
+      }
+    ],
+    "Eldrazi": [
+      {
+        "name": "Chalice of the Void",
+        "role": "lock-piece",
+        "centrality": 0.75,
+        "neutralized_by": ["artifact-removal"],
+        "_comment": "Inclusion 1.00 (4 copies) in the corpus. 'This artifact enters with X charge counters ... Whenever a player casts a spell with mana value equal to the number of charge counters on this artifact, counter that spell.' A central stax piece for the archetype's plan, but not an absolute 1.0 -- Eldrazi has redundant disruption (Thought-Knot Seer, Cavern of Souls-backed threats) and can still function, just less consistently, without it. Triggered (not activated) ability, so it is answered by removing the permanent outright, not by a lock/bounce effect."
+      }
+    ]
+  }
+}

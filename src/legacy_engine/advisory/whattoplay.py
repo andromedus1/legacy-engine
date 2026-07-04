@@ -33,8 +33,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 Role = str  # "counter" | "removal" | "stax" | "card_advantage" | "protection"
-            # | "fast_mana" | "ritual" | "tutor" | "graveyard_recursion" | "storm"
-            # | "threat"
+            # | "fast_mana" | "ritual" | "tutor" | "graveyard_recursion" | "graveyard_fuel"
+            # | "storm" | "threat"
             # (compact_combo is deck-level, not single-card)
 
 # ---------------------------------------------------------------------------
@@ -92,6 +92,13 @@ _RE_GRAVEYARD = re.compile(
     r"|put .+? from (?:a|any|your) graveyard (?:onto the battlefield|into your hand)",
     re.IGNORECASE,
 )
+# graveyard_fuel: the graveyard is consumed as a QUANTITY resource (delve, delirium,
+# threshold) rather than recurred piece-by-piece.  *goyf-suffixed cards (Tarmogoyf,
+# Nethergoyf, Barrowgoyf) size themselves off graveyard card-type count — same "more
+# cards in the yard is strictly better" shape — so they're matched by name suffix.
+_RE_DELVE = re.compile(r"\bdelve\b", re.IGNORECASE)
+_RE_DELIRIUM = re.compile(r"\bdelirium\b", re.IGNORECASE)
+_RE_THRESHOLD = re.compile(r"\bthreshold\b", re.IGNORECASE)
 _RE_PROTECTION = re.compile(
     r"hexproof|protection from|can't be countered",
     re.IGNORECASE,
@@ -172,6 +179,16 @@ def _card_roles(card: Card) -> set[str]:
     # --- graveyard_recursion ---
     if _RE_GRAVEYARD.search(text):
         roles.add("graveyard_recursion")
+
+    # --- graveyard_fuel (graveyard as a QUANTITY resource: delve, delirium, threshold,
+    # *goyf sizing) — distinct from graveyard_recursion (recurring specific cards) ---
+    if (
+        _RE_DELVE.search(text)
+        or _RE_DELIRIUM.search(text)
+        or _RE_THRESHOLD.search(text)
+        or card.name.lower().endswith("goyf")
+    ):
+        roles.add("graveyard_fuel")
 
     # --- protection ---
     if _RE_PROTECTION.search(text):
@@ -393,11 +410,27 @@ def proactivity_score(
 # Unit 3 — Vulnerability tags
 # ---------------------------------------------------------------------------
 
-VulnerabilityTag = str  # graveyard-reliant | combo | low-curve | greedy-manabase
+VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
+                        # | plays-red | plays-blue | plays-white | plays-black | plays-green
+                        # | combo | low-curve | greedy-manabase
                         # | creature-based | low-interaction | storm-reliant | ramp
+                        #
+                        # graveyard-recursion: deck recurs/casts cards FROM its graveyard
+                        #   (reanimate, escape, flashback, regrowth-effects)
+                        # graveyard-fuel: deck uses the graveyard as a QUANTITY resource
+                        #   (delve, delirium, threshold, *goyf sizing) — NOT recursion
+                        # plays-<color>: deck runs a blast-worthy density of that color's
+                        #   nonland spells (drives color-contingent hate matching, e.g.
+                        #   Hydroblast → plays-red)
+                        #
+                        # NOTE: the prior single graveyard vulnerability tag has been split
+                        # into graveyard-recursion / graveyard-fuel (feature-sb-effect-tagging-model);
+                        # the old monolithic tag no longer appears anywhere in this vocabulary.
 
 # Thresholds for vulnerability classification (documented, module constants)
-_GY_RECURSION_DENSITY = 0.08   # graveyard_recursion slots / total maindeck >= threshold → gy-reliant
+_GY_RECURSION_DENSITY = 0.08   # graveyard_recursion slots / total maindeck >= threshold → graveyard-recursion
+_GY_FUEL_DENSITY = 0.10        # graveyard_fuel slots / total maindeck >= threshold → graveyard-fuel
+_COLOR_SPELL_MIN = 6           # nonland spell copies of a color >= threshold → plays-<color>
 _CREATURE_DENSITY = 0.25       # creature slots / total maindeck >= threshold → creature-based
 _LOW_INTERACTION_MAX = 0.08    # (counter + removal) / total <= threshold → low-interaction
 _COMBO_AVG_MV_MAX = 2.5        # avg nonland MV must be below this for combo tag
@@ -408,6 +441,30 @@ _STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → st
                                # (density gate kills false positives from stray storm cards in aggregates)
 _RAMP_BIGMANA_LAND_MIN = 4     # big-mana land copies >= threshold → ramp tag
                                # (Urzatron: 12 pieces; Cloudpost: 4+; Eldrazi: 4+)
+
+_COLOR_NAMES: dict[str, str] = {"W": "white", "U": "blue", "B": "black", "R": "red", "G": "green"}
+
+
+def _color_contingent_tags(cards_with_counts: list[tuple[Card, int]]) -> set[str]:
+    """Emit ``plays-<color>`` for each color the deck runs at >= ``_COLOR_SPELL_MIN``
+    nonland spell copies (color from ``card.colors``, WUBRG; lands excluded).
+
+    This is the substrate for color-contingent hate matching: a deck with enough red
+    spells to justify sideboarding around it (Hydroblast, Blue Elemental Blast) emits
+    ``plays-red`` rather than color hate being shoehorned into archetype tags.
+    """
+    color_counts: dict[str, int] = dict.fromkeys(_COLOR_NAMES, 0)
+    for card, count in cards_with_counts:
+        if card.is_land:
+            continue
+        for color in card.colors or []:
+            if color in color_counts:
+                color_counts[color] += count
+    return {
+        f"plays-{_COLOR_NAMES[color]}"
+        for color, total in color_counts.items()
+        if total >= _COLOR_SPELL_MIN
+    }
 
 # Named lands that are diagnostic of colorless big-mana / ramp strategies.
 # Urzatron pieces, Cloudpost/Glimmerpost, Eldrazi accelerants.
@@ -478,12 +535,17 @@ def _vulnerability_from_composition(
 ) -> frozenset[str]:
     """Derive vulnerability tags from a name→count composition aggregate.
 
-    Tag rules (advisory-methods §4, updated):
-    - graveyard-reliant: graveyard_recursion density ≥ threshold
+    Tag rules (advisory-methods §4, updated by feature-sb-effect-tagging-model):
+    - graveyard-recursion: graveyard_recursion role density ≥ threshold (deck recurs/casts
+      cards FROM its graveyard — reanimate, escape, flashback, regrowth)
+    - graveyard-fuel: graveyard_fuel role density ≥ threshold (deck uses the graveyard as a
+      QUANTITY resource — delve, delirium, threshold, *goyf sizing)
+    - plays-<color>: color-contingent, derived by ``_color_contingent_tags`` over the same
+      (Card, count) pairs collected while walking the composition
     - storm-reliant: storm slots / total nonland ≥ _STORM_DENSITY threshold
       (density gate — presence alone caused false positives on aggregated compositions
        where a stray storm card appeared in an otherwise non-storm archetype aggregate)
-    - combo: low avg MV + tutors + storm-or-graveyard signal
+    - combo: low avg MV + tutors + storm-or-graveyard-recursion signal
     - low-curve: avg nonland MV < 2.0 (same computation as proactivity low_curve_score)
     - creature-based: creature slot density ≥ threshold
     - greedy-manabase: high fast/dual lands + nonbasic heavy
@@ -493,7 +555,8 @@ def _vulnerability_from_composition(
         return frozenset()
 
     total_cards = sum(composition.values())
-    gy_slots = 0
+    gy_recursion_slots = 0
+    gy_fuel_slots = 0
     storm_slots = 0
     tutor_slots = 0
     counter_removal_slots = 0
@@ -503,6 +566,7 @@ def _vulnerability_from_composition(
     bigmana_land_count = 0   # copies of diagnostic big-mana / ramp lands
     total_nonland = 0
     total_nonland_mv = 0.0
+    cards_with_counts: list[tuple[Card, int]] = []
 
     for name, count in composition.items():
         row = fetch_card(con, name)
@@ -514,6 +578,7 @@ def _vulnerability_from_composition(
         row["produced_mana"] = list(produced_raw)
         card = Card.model_validate(row)
         roles = _card_roles(card)
+        cards_with_counts.append((card, count))
 
         if card.is_land:
             mb_tags = mana_base_tags(card)
@@ -538,7 +603,9 @@ def _vulnerability_from_composition(
 
         # Role tallies (apply to all cards)
         if "graveyard_recursion" in roles:
-            gy_slots += count
+            gy_recursion_slots += count
+        if "graveyard_fuel" in roles:
+            gy_fuel_slots += count
         if "storm" in roles:
             storm_slots += count
         if "tutor" in roles:
@@ -552,17 +619,19 @@ def _vulnerability_from_composition(
     avg_mv = total_nonland_mv / total_nonland if total_nonland > 0 else 3.0
     tags: set[str] = set()
 
-    # graveyard-reliant
-    if total_cards > 0 and gy_slots / total_cards >= _GY_RECURSION_DENSITY:
-        tags.add("graveyard-reliant")
+    # graveyard-recursion / graveyard-fuel (replaces the former monolithic graveyard-reliant)
+    if total_cards > 0 and gy_recursion_slots / total_cards >= _GY_RECURSION_DENSITY:
+        tags.add("graveyard-recursion")
+    if total_cards > 0 and gy_fuel_slots / total_cards >= _GY_FUEL_DENSITY:
+        tags.add("graveyard-fuel")
 
     # storm-reliant: density gate (not mere presence) to avoid false positives on aggregates
     if total_nonland > 0 and storm_slots / total_nonland >= _STORM_DENSITY:
         tags.add("storm-reliant")
 
-    # combo: low avg MV + tutors + some broken signal (storm/gy/fast mana)
+    # combo: low avg MV + tutors + some broken signal (storm/graveyard-recursion/fast mana)
     has_broken_signal = storm_slots > 0 or (
-        total_cards > 0 and gy_slots / total_cards >= _GY_RECURSION_DENSITY
+        total_cards > 0 and gy_recursion_slots / total_cards >= _GY_RECURSION_DENSITY
     ) or fast_mana_cards >= _GREEDY_MANABASE_MIN_FAST
     if (
         avg_mv < _COMBO_AVG_MV_MAX
@@ -592,6 +661,9 @@ def _vulnerability_from_composition(
     # Gated-additive: fires only when bigmana_land_count clears the threshold; no other tag is affected.
     if bigmana_land_count >= _RAMP_BIGMANA_LAND_MIN:
         tags.add("ramp")
+
+    # plays-<color>: color-contingent tags, unioned in from the same walked composition.
+    tags |= _color_contingent_tags(cards_with_counts)
 
     return frozenset(tags)
 

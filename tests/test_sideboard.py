@@ -48,9 +48,21 @@ from legacy_engine.advisory.sideboard import (
     _derive_attacks_for_promoted,
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
+    _maindeck_answer_coverage,
+    _MAINDECK_DISCOUNT,
+    _MAINDECK_SATURATION,
     empirical_swing_proxy,
     recommend_sideboard,
+    MatchupROI,
+    _slot_roi_table,
+    _matchup_max_equity_gain,
+    _MAX_DEDICATED_SLOTS,
+    _MAX_REALISTIC_EQUITY_GAIN,
+    _REALLOCATION_MARGIN,
+    _PUNT_REASON_CANT_CROSS_HALF,
+    _PUNT_REASON_BETTER_ROI_ELSEWHERE,
 )
+from legacy_engine.analytics.matchup import build_cell, build_adaptive_matrix, MatchupMatrix, AdaptiveMatrix
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
 
@@ -91,6 +103,7 @@ def _minimal_hoser(
     max_copies: int = 4,
     swing: float = 0.20,
     colors: frozenset[str] | None = None,
+    functional_group: "str | None" = None,
 ) -> HoserCard:
     """Build a minimal HoserCard for test models."""
     return HoserCard(
@@ -99,6 +112,7 @@ def _minimal_hoser(
         colors=colors or frozenset(),
         max_copies=max_copies,
         swing=swing,
+        functional_group=functional_group,
     )
 
 
@@ -111,30 +125,30 @@ class TestHoserCatalog:
         assert len(HOSER_CATALOG) >= 10
 
     def test_surgical_extraction_present(self):
-        """Surgical Extraction → graveyard-reliant (§6 seed)."""
+        """Surgical Extraction → graveyard-recursion (§6 seed)."""
         assert "Surgical Extraction" in HOSER_CATALOG
         h = HOSER_CATALOG["Surgical Extraction"]
-        assert "graveyard-reliant" in h.attacks
+        assert "graveyard-recursion" in h.attacks
 
     def test_faerie_macabre_present(self):
-        """Faerie Macabre → graveyard-reliant (§6 seed)."""
+        """Faerie Macabre → graveyard-recursion (§6 seed)."""
         assert "Faerie Macabre" in HOSER_CATALOG
 
     def test_leyline_of_the_void_present(self):
         assert "Leyline of the Void" in HOSER_CATALOG
-        assert "graveyard-reliant" in HOSER_CATALOG["Leyline of the Void"].attacks
+        assert "graveyard-recursion" in HOSER_CATALOG["Leyline of the Void"].attacks
 
     def test_endurance_present(self):
         assert "Endurance" in HOSER_CATALOG
-        assert "graveyard-reliant" in HOSER_CATALOG["Endurance"].attacks
+        assert "graveyard-recursion" in HOSER_CATALOG["Endurance"].attacks
 
     def test_containment_priest_present(self):
         assert "Containment Priest" in HOSER_CATALOG
-        assert "graveyard-reliant" in HOSER_CATALOG["Containment Priest"].attacks
+        assert "graveyard-recursion" in HOSER_CATALOG["Containment Priest"].attacks
 
     def test_grafdiggers_cage_present(self):
         assert "Grafdigger's Cage" in HOSER_CATALOG
-        assert "graveyard-reliant" in HOSER_CATALOG["Grafdigger's Cage"].attacks
+        assert "graveyard-recursion" in HOSER_CATALOG["Grafdigger's Cage"].attacks
 
     def test_force_of_will_present_attacks_combo(self):
         """Force of Will → combo (§6 seed)."""
@@ -264,13 +278,13 @@ class TestCoverageModel:
         """Field: Reanimator 60%, Combo 40%.  Mini-catalog: Surgical only."""
         field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Combo": frozenset({"combo"}),
         }
         catalog = {
             "Surgical Extraction": _minimal_hoser(
                 "Surgical Extraction",
-                frozenset({"graveyard-reliant"}),
+                frozenset({"graveyard-recursion"}),
                 max_copies=2,
                 swing=_SWING_DEDICATED,
                 colors=frozenset({"B"}),
@@ -279,9 +293,9 @@ class TestCoverageModel:
         return field, archetype_tags, catalog
 
     def test_graveyard_archetype_weight_is_share_times_swing(self):
-        """Reanimator (0.6) with graveyard-reliant + Surgical (swing=0.20) → weight=0.12.
+        """Reanimator (0.6) with graveyard-recursion + Surgical (swing=0.20) → weight=0.12.
 
-        Elements are now (archetype, tag) keyed as "Reanimator|graveyard-reliant".
+        Elements are now (archetype, tag) keyed as "Reanimator|graveyard-recursion".
         """
         field, archetype_tags, catalog = self._gy_field_and_catalog()
         model = _build_coverage_model(
@@ -295,14 +309,14 @@ class TestCoverageModel:
         reanimator_share = field.shares["Reanimator"]
         expected_weight = reanimator_share * _SWING_DEDICATED
         # Elements are now (archetype, tag) pairs
-        elem_key = "Reanimator|graveyard-reliant"
+        elem_key = "Reanimator|graveyard-recursion"
         assert elem_key in model.element_weight, (
             f"Expected element key {elem_key!r} in element_weight; got {list(model.element_weight)}"
         )
         assert pytest.approx(model.element_weight[elem_key], abs=1e-6) == expected_weight
 
     def test_graveyard_archetype_covered_by_surgical(self):
-        """Surgical Extraction covers the Reanimator|graveyard-reliant element."""
+        """Surgical Extraction covers the Reanimator|graveyard-recursion element."""
         field, archetype_tags, catalog = self._gy_field_and_catalog()
         model = _build_coverage_model(
             field,
@@ -312,8 +326,8 @@ class TestCoverageModel:
             catalog=catalog,
         )
         assert "Surgical Extraction" in model.candidate_covers
-        # Elements are now (archetype, tag) keyed as "Reanimator|graveyard-reliant"
-        assert "Reanimator|graveyard-reliant" in model.candidate_covers["Surgical Extraction"]
+        # Elements are now (archetype, tag) keyed as "Reanimator|graveyard-recursion"
+        assert "Reanimator|graveyard-recursion" in model.candidate_covers["Surgical Extraction"]
 
     def test_combo_archetype_not_covered_by_graveyard_hoser(self):
         """Surgical Extraction does NOT cover Combo (different tag)."""
@@ -357,11 +371,11 @@ class TestCoverageModel:
     def test_colorless_hoser_always_included(self):
         """Grafdigger's Cage (colorless) is included regardless of deck colors."""
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
         catalog = {
             "Grafdigger's Cage": _minimal_hoser(
                 "Grafdigger's Cage",
-                frozenset({"graveyard-reliant"}),
+                frozenset({"graveyard-recursion"}),
                 colors=frozenset(),  # colorless
             ),
         }
@@ -378,7 +392,7 @@ class TestCoverageModel:
         """A deck carrying 'combo' vulnerability → '_hate:combo' pseudo-element in model."""
         field = _make_field({"Reanimator": 0.5, "Storm": 0.5})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Storm": frozenset({"storm-reliant"}),
         }
         catalog = {
@@ -402,7 +416,7 @@ class TestCoverageModel:
         """Veil of Summer (attacks=_hate) covers the _hate:combo pseudo-element."""
         field = _make_field({"Reanimator": 0.5, "Storm": 0.5})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Storm": frozenset({"storm-reliant"}),
         }
         catalog = {
@@ -431,12 +445,12 @@ class TestCoverageModel:
         field = _make_field({"UniqueArchetype": 0.5, "Reanimator": 0.5})
         archetype_tags = {
             "UniqueArchetype": frozenset({"some-unknown-tag"}),
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
         }
         catalog = {
             "Surgical Extraction": _minimal_hoser(
                 "Surgical Extraction",
-                frozenset({"graveyard-reliant"}),
+                frozenset({"graveyard-recursion"}),
                 colors=frozenset({"B"}),
             ),
         }
@@ -458,12 +472,12 @@ class TestCoverageModel:
         field = _make_field({"NoTags": 0.4, "Reanimator": 0.6})
         archetype_tags = {
             "NoTags": frozenset(),
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
         }
         catalog = {
             "Surgical Extraction": _minimal_hoser(
                 "Surgical Extraction",
-                frozenset({"graveyard-reliant"}),
+                frozenset({"graveyard-recursion"}),
                 colors=frozenset({"B"}),
             ),
         }
@@ -485,12 +499,12 @@ class TestCoverageModel:
         """
         field = _make_field({"A": 0.5, "B": 0.3, "C": 0.2})
         archetype_tags = {
-            "A": frozenset({"graveyard-reliant"}),
+            "A": frozenset({"graveyard-recursion"}),
             "B": frozenset(),
             "C": frozenset({"combo"}),
         }
         catalog = {
-            "Surgical": _minimal_hoser("Surgical", frozenset({"graveyard-reliant"})),
+            "Surgical": _minimal_hoser("Surgical", frozenset({"graveyard-recursion"})),
             "Force": _minimal_hoser("Force", frozenset({"combo"})),
         }
         model = _build_coverage_model(
@@ -500,11 +514,133 @@ class TestCoverageModel:
             catalog=catalog,
         )
         # A and C have known-swing tags → present as (archetype, tag) keys
-        assert "A|graveyard-reliant" in model.element_weight
+        assert "A|graveyard-recursion" in model.element_weight
         assert "C|combo" in model.element_weight
         # B has no tags → no keys, but a warning
         assert not any(k.startswith("B|") for k in model.element_weight)
         assert any("B" in w for w in model.warnings)
+
+
+# ---------------------------------------------------------------------------
+# TestFunctionalGroupDedup — at most one card per functional_group contributes
+# coverage (feature-sb-effect-tagging-model, Unit 5).
+# ---------------------------------------------------------------------------
+
+class TestFunctionalGroupDedup:
+    def _red_blast_field_and_tags(self):
+        field = _make_field({"Izzet Delver": 1.0})
+        archetype_tags = {"Izzet Delver": frozenset({"plays-red"})}
+        return field, archetype_tags
+
+    def test_same_group_two_cards_yields_one_coverage_contribution(self):
+        """Hydroblast + Blue Elemental Blast (both functional_group='red-blast') → only
+        one of the two remains a candidate; they don't stack as distinct coverage."""
+        field, archetype_tags = self._red_blast_field_and_tags()
+        catalog = {
+            "Hydroblast": _minimal_hoser(
+                "Hydroblast", frozenset({"plays-red"}), colors=frozenset({"U"}),
+                swing=_SWING_SOFT, functional_group="red-blast",
+            ),
+            "Blue Elemental Blast": _minimal_hoser(
+                "Blue Elemental Blast", frozenset({"plays-red"}), colors=frozenset({"U"}),
+                swing=_SWING_SOFT, functional_group="red-blast",
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        survivors = [n for n in ("Hydroblast", "Blue Elemental Blast") if n in model.candidate_covers]
+        assert len(survivors) == 1, (
+            f"Expected exactly one red-blast survivor, got {survivors}"
+        )
+
+    def test_higher_swing_card_wins_the_group(self):
+        """When swings differ, the higher-swing card in the group survives de-dup."""
+        field, archetype_tags = self._red_blast_field_and_tags()
+        catalog = {
+            "Hydroblast": _minimal_hoser(
+                "Hydroblast", frozenset({"plays-red"}), colors=frozenset({"U"}),
+                swing=_SWING_SOFT, functional_group="red-blast",
+            ),
+            "Blue Elemental Blast": _minimal_hoser(
+                "Blue Elemental Blast", frozenset({"plays-red"}), colors=frozenset({"U"}),
+                swing=_SWING_DEDICATED, functional_group="red-blast",
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        assert "Blue Elemental Blast" in model.candidate_covers
+        assert "Hydroblast" not in model.candidate_covers
+
+    def test_distinct_groups_both_survive(self):
+        """Cards in different functional_groups are unaffected by the de-dup."""
+        field = _make_field({"Izzet Delver": 0.5, "Storm": 0.5})
+        archetype_tags = {
+            "Izzet Delver": frozenset({"plays-red"}),
+            "Storm": frozenset({"plays-blue"}),
+        }
+        catalog = {
+            "Hydroblast": _minimal_hoser(
+                "Hydroblast", frozenset({"plays-red"}), colors=frozenset({"U"}),
+                swing=_SWING_SOFT, functional_group="red-blast",
+            ),
+            "Pyroblast": _minimal_hoser(
+                "Pyroblast", frozenset({"plays-blue"}), colors=frozenset({"R"}),
+                swing=_SWING_SOFT, functional_group="blue-blast",
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "R"}),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        assert "Hydroblast" in model.candidate_covers
+        assert "Pyroblast" in model.candidate_covers
+
+    def test_no_functional_group_never_deduped(self):
+        """Cards with functional_group=None (the vast majority) are never de-duped."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        catalog = {
+            "Surgical Extraction": _minimal_hoser(
+                "Surgical Extraction", frozenset({"graveyard-recursion"}), colors=frozenset({"B"}),
+            ),
+            "Leyline of the Void": _minimal_hoser(
+                "Leyline of the Void", frozenset({"graveyard-recursion"}), colors=frozenset({"B"}),
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"B"}),
+            deck_tags=frozenset(),
+            catalog=catalog,
+        )
+        assert "Surgical Extraction" in model.candidate_covers
+        assert "Leyline of the Void" in model.candidate_covers
+
+    def test_real_catalog_hydroblast_and_beb_dedup_to_one(self):
+        """Against the real shipped HOSER_CATALOG, Hydroblast + Blue Elemental Blast
+        (both 'red-blast') yield exactly one coverage contribution."""
+        field = _make_field({"Izzet Delver": 1.0})
+        archetype_tags = {"Izzet Delver": frozenset({"plays-red"})}
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        survivors = [
+            n for n in ("Hydroblast", "Blue Elemental Blast") if n in model.candidate_covers
+        ]
+        assert len(survivors) == 1, f"Expected exactly one red-blast survivor, got {survivors}"
 
 
 # ---------------------------------------------------------------------------
@@ -914,14 +1050,14 @@ class TestRecommendSideboard:
         mini_catalog = {
             "Grafdigger's Cage": HoserCard(
                 name="Grafdigger's Cage",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=_SWING_DEDICATED,
             ),
             "Faerie Macabre": HoserCard(
                 name="Faerie Macabre",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset({"B"}),
                 max_copies=2,
                 swing=_SWING_DEDICATED,
@@ -952,7 +1088,7 @@ class TestRecommendSideboard:
         single_hoser_catalog = {
             "Grafdigger's Cage": HoserCard(
                 name="Grafdigger's Cage",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=0.20,
@@ -995,14 +1131,14 @@ class TestRecommendSideboard:
         catalog = {
             "Surgical Extraction": HoserCard(
                 name="Surgical Extraction",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset({"B"}),
                 max_copies=2,
                 swing=_SWING_DEDICATED,
             ),
             "Grafdigger's Cage": HoserCard(
                 name="Grafdigger's Cage",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=_SWING_DEDICATED,
@@ -1121,15 +1257,15 @@ class TestRegressionPeerReviewFixes:
         came from dedicated tag Y).
         Fix: elements are (archetype, tag) pairs; each hoser covers only the tags it attacks.
         """
-        # Archetype "Alpha" has two tags: "graveyard-reliant" (dedicated swing=0.20)
+        # Archetype "Alpha" has two tags: "graveyard-recursion" (dedicated swing=0.20)
         # and "low-interaction" (soft swing=0.10).
         # Soft hoser: attacks only "low-interaction".
-        # It should NOT see the weight for "graveyard-reliant".
+        # It should NOT see the weight for "graveyard-recursion".
         field = _make_field({"Alpha": 1.0})
-        archetype_tags = {"Alpha": frozenset({"graveyard-reliant", "low-interaction"})}
+        archetype_tags = {"Alpha": frozenset({"graveyard-recursion", "low-interaction"})}
         dedicated_hoser = _minimal_hoser(
             "DedicatedHater",
-            frozenset({"graveyard-reliant"}),
+            frozenset({"graveyard-recursion"}),
             swing=_SWING_DEDICATED,
         )
         soft_hoser = _minimal_hoser(
@@ -1147,15 +1283,15 @@ class TestRegressionPeerReviewFixes:
             catalog=catalog,
         )
 
-        # SoftHater must NOT cover the "graveyard-reliant" element of Alpha
+        # SoftHater must NOT cover the "graveyard-recursion" element of Alpha
         soft_covered = model.candidate_covers.get("SoftHater", frozenset())
-        assert "Alpha|graveyard-reliant" not in soft_covered, (
-            "Soft hoser (attacks=low-interaction) must NOT cover the graveyard-reliant element"
+        assert "Alpha|graveyard-recursion" not in soft_covered, (
+            "Soft hoser (attacks=low-interaction) must NOT cover the graveyard-recursion element"
         )
 
         # DedicatedHater DOES cover it
         dedicated_covered = model.candidate_covers.get("DedicatedHater", frozenset())
-        assert "Alpha|graveyard-reliant" in dedicated_covered
+        assert "Alpha|graveyard-recursion" in dedicated_covered
 
     # --- Fix 5: counter-hoser covers only hate categories with appropriate weight ---
 
@@ -1207,7 +1343,7 @@ class TestRegressionPeerReviewFixes:
         Fix: castable_any_color=True so the color pre-filter is bypassed.
         """
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
         catalog = {
             "Surgical Extraction": HOSER_CATALOG["Surgical Extraction"],
             "Faerie Macabre": HOSER_CATALOG["Faerie Macabre"],
@@ -1457,7 +1593,7 @@ class TestSaturatingFill:
         mini_catalog = {
             "Grafdigger's Cage": HoserCard(
                 name="Grafdigger's Cage",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=_SWING_DEDICATED,
@@ -1657,7 +1793,7 @@ class TestRegressionRoundsless:
         to a direct _build_coverage_model call without matchup_pressure."""
         field = _make_field({"Reanimator": 0.7, "Combo": 0.3})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Combo": frozenset({"combo"}),
         }
         # Direct call without matchup_pressure (the old behavior)
@@ -1756,7 +1892,7 @@ class TestValueAwareWeighting:
         """matchup_pressure=None → weights byte-identical to no-pressure call."""
         field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Combo": frozenset({"combo"}),
         }
         baseline = _build_coverage_model(
@@ -1772,7 +1908,7 @@ class TestValueAwareWeighting:
         """matchup_pressure > 1.0 for an archetype upweights its elements."""
         field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Combo": frozenset({"combo"}),
         }
         baseline = _build_coverage_model(
@@ -1784,14 +1920,14 @@ class TestValueAwareWeighting:
             field, archetype_tags, frozenset({"U", "B"}), frozenset(),
             matchup_pressure=pressure,
         )
-        reanimator_key = "Reanimator|graveyard-reliant"
+        reanimator_key = "Reanimator|graveyard-recursion"
         assert reanimator_key in pressured.element_weight
         assert pressured.element_weight[reanimator_key] > baseline.element_weight[reanimator_key]
 
     def test_matchup_pressure_capped_by_max_pressure(self):
         """Even extreme pressure is bounded by 1 + MAX_PRESSURE."""
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
         baseline = _build_coverage_model(
             field, archetype_tags, frozenset({"U", "B"}), frozenset()
         )
@@ -1801,7 +1937,7 @@ class TestValueAwareWeighting:
             field, archetype_tags, frozenset({"U", "B"}), frozenset(),
             matchup_pressure=pressure,
         )
-        reanimator_key = "Reanimator|graveyard-reliant"
+        reanimator_key = "Reanimator|graveyard-recursion"
         baseline_w = baseline.element_weight[reanimator_key]
         pressured_w = pressured.element_weight[reanimator_key]
         assert pytest.approx(pressured_w) == baseline_w * (1.0 + _MAX_PRESSURE)
@@ -1809,19 +1945,267 @@ class TestValueAwareWeighting:
     def test_pressure_identity_on_non_archetype_elements(self):
         """Pressure does not alter anti-hate pseudo-elements (no '|' key)."""
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
-        # Deck has graveyard-reliant vulnerability → anti-hate elements created
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        # Deck has graveyard-recursion vulnerability → anti-hate elements created
         baseline = _build_coverage_model(
-            field, archetype_tags, frozenset({"G"}), frozenset({"graveyard-reliant"})
+            field, archetype_tags, frozenset({"G"}), frozenset({"graveyard-recursion"})
         )
         pressure = {"Reanimator": 1.0 + _MAX_PRESSURE}
         pressured = _build_coverage_model(
-            field, archetype_tags, frozenset({"G"}), frozenset({"graveyard-reliant"}),
+            field, archetype_tags, frozenset({"G"}), frozenset({"graveyard-recursion"}),
             matchup_pressure=pressure,
         )
         for key in baseline.element_weight:
             if "|" not in key:  # anti-hate pseudo-element
                 assert pytest.approx(baseline.element_weight[key]) == pressured.element_weight.get(key, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# TestImpactModulatedWeighting — feature-sb-field-weighted-scorer-wiring, Unit B3
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _archetype_linchpins_and_cards,
+    _field_opponent_linchpins,
+    _draw_prob_redundancy_curve,
+)
+from legacy_engine.advisory.impact import (
+    _CENTRALITY_BASELINE,
+    _SYMMETRY_FLOOR,
+    draw_probability as _draw_probability,
+)
+
+
+class TestImpactModulatedWeighting:
+    """Unit B3: (archetype, tag) element weight = field_share × swing × impact(...).score().
+
+    Mirrors TestValueAwareWeighting's house style (hand-built field + archetype_tags, no DB).
+    """
+
+    def test_opponent_linchpins_none_identical_to_baseline(self):
+        """opponent_linchpins=None (the default) -> byte-identical to omitting it entirely."""
+        field = _make_field({"Reanimator": 0.6, "Combo": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Combo": frozenset({"combo"}),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset()
+        )
+        with_none = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            opponent_linchpins=None,
+            opponent_cards=None,
+        )
+        assert baseline.element_weight == with_none.element_weight
+        assert baseline.candidate_covers == with_none.candidate_covers
+
+    def test_linchpin_hit_outweighs_no_linchpin_data(self, make_hoser, make_linchpin):
+        """A hoser that neutralizes a confirmed opponent linchpin outweighs the SAME hoser
+        when no linchpin data is available for that opponent (baseline centrality)."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        catalog = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),  # colorless -> always castable
+            ),
+        }
+        key = "Reanimator|graveyard-recursion"
+
+        no_data = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        linchpin_hit = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={
+                "Reanimator": [
+                    make_linchpin(
+                        archetype="Reanimator",
+                        name="Entomb",
+                        centrality=1.0,
+                        neutralized_by=frozenset({"exile-graveyard"}),  # Surgical's capability
+                    )
+                ]
+            },
+        )
+        # No data -> centrality floors at _CENTRALITY_BASELINE; a confirmed hit -> full 1.0.
+        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless, draw_prob(copies=1)
+        # is the same fixed factor on both sides, so it cancels in the ratio but must still
+        # be included in the absolute expected value.)
+        draw_prob_1 = _draw_probability(1)
+        assert pytest.approx(no_data.element_weight[key]) == (
+            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE * draw_prob_1
+        )
+        assert pytest.approx(linchpin_hit.element_weight[key]) == (
+            1.0 * _SWING_DEDICATED * 1.0 * draw_prob_1
+        )
+        assert linchpin_hit.element_weight[key] > no_data.element_weight[key]
+        assert pytest.approx(linchpin_hit.element_weight[key] / no_data.element_weight[key]) == (
+            1.0 / _CENTRALITY_BASELINE
+        )
+
+    def test_symmetric_self_hosing_hoser_weight_drops_to_floor(self, make_hoser):
+        """A symmetric hoser whose axis the deck itself carries drops to _SYMMETRY_FLOOR;
+        the identical hoser against a deck NOT exposed on that axis keeps full weight."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        catalog = {
+            "Grafdigger's Cage": make_hoser(
+                name="Grafdigger's Cage",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),
+                symmetry="symmetric",
+            ),
+        }
+        key = "Reanimator|graveyard-recursion"
+
+        not_exposed = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset(),  # deck_tags empty
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        self_hosing = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B"}), frozenset({"graveyard-recursion"}),
+            catalog=catalog,
+            opponent_linchpins={"Reanimator": []},
+        )
+        assert pytest.approx(self_hosing.element_weight[key]) == pytest.approx(
+            not_exposed.element_weight[key] * _SYMMETRY_FLOOR
+        )
+
+    def test_cast_requires_unmet_gates_weight_to_zero(self, make_hoser):
+        """A cast_requires-conditioned hoser (Massacre-style) whose condition is unmet for
+        THIS specific opponent hard-gates its element weight to 0.0; met -> nonzero."""
+        field = _make_field({"WhiteWeenie": 1.0})
+        archetype_tags = {"WhiteWeenie": frozenset({"creature-based"})}
+        catalog = {
+            "Massacre": make_hoser(
+                name="Massacre",
+                attacks=frozenset({"creature-based"}),
+                colors=frozenset({"W"}),
+                cast_requires="opp_controls_plains",
+            ),
+        }
+        key = "WhiteWeenie|creature-based"
+
+        unmet = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards={"WhiteWeenie": {}},  # no Plains known
+        )
+        met = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards={"WhiteWeenie": {"Plains": 4}},
+        )
+        assert unmet.element_weight[key] == 0.0
+        assert met.element_weight[key] > 0.0
+
+    def test_opponent_cards_absent_defaults_to_unmet(self, make_hoser):
+        """opponent_cards=None (no composition data at all) is treated the same as 'unmet' —
+        conservative: a conditional-cast hoser is never credited without evidence."""
+        field = _make_field({"WhiteWeenie": 1.0})
+        archetype_tags = {"WhiteWeenie": frozenset({"creature-based"})}
+        catalog = {
+            "Massacre": make_hoser(
+                name="Massacre",
+                attacks=frozenset({"creature-based"}),
+                colors=frozenset({"W"}),
+                cast_requires="opp_controls_plains",
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags, frozenset({"W"}), frozenset(),
+            catalog=catalog,
+            opponent_linchpins={"WhiteWeenie": []},
+            opponent_cards=None,
+        )
+        assert model.element_weight["WhiteWeenie|creature-based"] == 0.0
+
+
+class TestArchetypeLinchpinsAndCards:
+    """_archetype_linchpins_and_cards / _field_opponent_linchpins (Unit B3 DB glue)."""
+
+    def test_no_corpus_no_curated_override_returns_empty(self):
+        con = _con()
+        try:
+            lps, cards = _archetype_linchpins_and_cards(con, "Some Made Up Archetype")
+        finally:
+            con.close()
+        assert lps == []
+        assert cards == {}
+
+    def test_curated_override_returned_even_without_corpus_decks(self):
+        """Painter has a curated LINCHPIN_OVERRIDES entry (Grindstone/Painter's Servant) —
+        it must surface even against a corpus with zero 'Painter' decks (Unit B3's docstring
+        contract: curated overrides don't require in-regime composition data)."""
+        con = _con()
+        try:
+            lps, cards = _archetype_linchpins_and_cards(con, "Painter")
+        finally:
+            con.close()
+        assert cards == {}  # no corpus decks -> no composition data
+        assert {lp.name for lp in lps} == {"Grindstone", "Painter's Servant"}
+
+    def test_field_opponent_linchpins_keys_every_archetype(self):
+        con = _con()
+        try:
+            field = _make_field({"Painter": 0.5, "Some Made Up Archetype": 0.5})
+            linchpins_by_arch, cards_by_arch = _field_opponent_linchpins(con, field)
+        finally:
+            con.close()
+        assert set(linchpins_by_arch) == {"Painter", "Some Made Up Archetype"}
+        assert set(cards_by_arch) == {"Painter", "Some Made Up Archetype"}
+        assert linchpins_by_arch["Some Made Up Archetype"] == []
+        assert len(linchpins_by_arch["Painter"]) == 2
+
+    def test_recommend_sideboard_gate_stays_off_without_linchpin_data(self):
+        """Integration smoke test: a real, non-vacuous corpus whose archetype name has no
+        curated override and whose composition doesn't qualify as a derived linchpin
+        (Reanimate's `graveyard_recursion` role isn't in derive_linchpins's tutor/storm/
+        ritual/fast_mana priority list) keeps the impact gate off — recommend_sideboard
+        behaves exactly as it did before Unit B3 (mirrors TestRedundancyDecay's corpus, which
+        stacks the sole graveyard hoser to its max_copies with redundancy_strength=0.0)."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+        finally:
+            con.close()
+        assert pkg.cards.get("Surgical Extraction", 0) == 4
+
+
+class TestDrawProbabilityRedundancyCurve:
+    """Unit B4: the per-copy utility curve is derived from impact.draw_probability's
+    hypergeometric marginal instead of a curated constant."""
+
+    def test_curve_matches_hand_computed_draw_probability_marginal(self):
+        m1 = _draw_probability(1) - _draw_probability(0)
+        expected = tuple(
+            (_draw_probability(k) - _draw_probability(k - 1)) / m1 for k in range(1, 5)
+        )
+        assert _U_REDUNDANCY_DEFAULT == pytest.approx(expected)
+
+    def test_first_copy_is_exactly_one(self):
+        assert _U_REDUNDANCY_DEFAULT[0] == 1.0
+
+    def test_curve_strictly_decreasing_and_concave(self):
+        c = _U_REDUNDANCY_DEFAULT
+        assert c[0] > c[1] > c[2] > c[3] > 0.0
+        # concave marginal: each successive drop is smaller than the last
+        drops = [c[i] - c[i + 1] for i in range(len(c) - 1)]
+        assert drops == sorted(drops, reverse=True)
+
+    def test_default_curve_is_the_draw_prob_curve(self):
+        assert _U_REDUNDANCY_DEFAULT == _draw_prob_redundancy_curve()
 
 
 class TestPlanMatchups:
@@ -1968,7 +2352,7 @@ class TestRecommendSideboardWithRoundsCorpus:
     def test_matchup_plans_nonempty_on_established_corpus(self, make_rounds_corpus):
         """n=100 → matchup_plans has entries when per-card data cleared gate + hosers found."""
         con, _facts = make_rounds_corpus(n_repeats=50)
-        # Field with graveyard-reliant archetype + colorless hoser (Grafdigger's Cage)
+        # Field with graveyard-recursion archetype + colorless hoser (Grafdigger's Cage)
         # so the solver always finds candidates regardless of deck color.
         field = _make_field({"Combo": 0.6, "Reanimator": 0.4})
         maindeck = {"Brainstorm": 4}  # Brainstorm has established data in corpus
@@ -2285,7 +2669,7 @@ class TestAdaptiveWindowSideboard:
         import legacy_engine.advisory.sideboard as _sb_mod
 
         def _patched_fvt(con_arg, field_arg):
-            return {arch: frozenset({"graveyard-reliant"}) for arch in field_arg.shares}
+            return {arch: frozenset({"graveyard-recursion"}) for arch in field_arg.shares}
         def _patched_dvt(con_arg, maindeck_arg):
             return frozenset()
         monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
@@ -2893,7 +3277,7 @@ class TestBuildCoverageModelAntiSynergy:
                 "Grafdigger's Cage",
                 HoserCard(
                     name="Grafdigger's Cage",
-                    attacks=frozenset({"graveyard-reliant"}),
+                    attacks=frozenset({"graveyard-recursion"}),
                     colors=frozenset(),
                     max_copies=4,
                     swing=_SWING_DEDICATED,
@@ -2905,7 +3289,7 @@ class TestBuildCoverageModelAntiSynergy:
         """anti_synergy_signals=None → no hosers filtered (gated-additive no-op)."""
         field = _make_field({"GY": 0.4, "Greedy": 0.3, "Combo": 0.3})
         archetype_tags = {
-            "GY": frozenset({"graveyard-reliant"}),
+            "GY": frozenset({"graveyard-recursion"}),
             "Greedy": frozenset({"greedy-manabase"}),
             "Combo": frozenset({"combo", "low-curve"}),
         }
@@ -2966,12 +3350,12 @@ class TestBuildCoverageModelAntiSynergy:
         """empirical_pool frozenset restricts candidates to only those in the pool."""
         field = _make_field({"GY": 0.6, "Combo": 0.4})
         archetype_tags = {
-            "GY": frozenset({"graveyard-reliant"}),
+            "GY": frozenset({"graveyard-recursion"}),
             "Combo": frozenset({"combo"}),
         }
         catalog = {
             "Grafdigger's Cage": HoserCard(
-                name="Grafdigger's Cage", attacks=frozenset({"graveyard-reliant"}),
+                name="Grafdigger's Cage", attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED,
             ),
             "Force of Will": HoserCard(
@@ -3200,7 +3584,7 @@ class TestAntiSynergyIntegration:
         archetype_tags = {
             "Storm": frozenset({"storm-reliant", "combo"}),
             "Combo": frozenset({"combo"}),
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
         }
         catalog = {
             "Back to Basics": HOSER_CATALOG["Back to Basics"],
@@ -3333,14 +3717,45 @@ class TestDeriveAttacksForPromoted:
         assert "combo" in attacks, f"Expected 'combo' in {attacks}"
         assert "storm-reliant" in attacks, f"Expected 'storm-reliant' in {attacks}"
 
-    def test_graveyard_exile_maps_to_graveyard_reliant(self):
-        """A card that exiles from graveyard → graveyard-reliant."""
+    def test_graveyard_exile_maps_to_graveyard_recursion(self):
+        """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
             "Some Graveyard Hater",
             "Exile target card from a graveyard.",
             "Instant",
         )
-        assert "graveyard-reliant" in attacks, f"Expected 'graveyard-reliant' in {attacks}"
+        assert "graveyard-recursion" in attacks, f"Expected 'graveyard-recursion' in {attacks}"
+
+    def test_red_blast_oracle_text_maps_to_plays_red(self):
+        """Hydroblast-style 'if it's red' phrasing → plays-red, not manabase/combo."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Red Blast",
+            "Choose one — Counter target spell if it's red; or Destroy target permanent if it's red.",
+            "Instant",
+        )
+        assert "plays-red" in attacks, f"Expected 'plays-red' in {attacks}"
+        assert "greedy-manabase" not in attacks, f"Blast must not attack manabase; got {attacks}"
+        assert "creature-based" not in attacks, (
+            f"'destroy target permanent' must not false-positive creature-based; got {attacks}"
+        )
+
+    def test_blue_blast_oracle_text_maps_to_plays_blue(self):
+        """Blue Elemental Blast-style 'target blue spell/permanent' phrasing → plays-blue.
+
+        Note: this text also contains the generic "counter target" substring, so rule 1
+        (counter magic → combo/storm-reliant) legitimately fires too — multiple tags are
+        allowed. The blast-specific guarantee under test is plays-blue presence and that
+        the destroy-clause doesn't false-positive creature-based (see rule 4's carve-out).
+        """
+        attacks = _derive_attacks_for_promoted(
+            "Some Blue Blast",
+            "Choose one — Counter target blue spell; or Destroy target blue permanent.",
+            "Instant",
+        )
+        assert "plays-blue" in attacks, f"Expected 'plays-blue' in {attacks}"
+        assert "creature-based" not in attacks, (
+            f"'destroy target blue permanent' must not false-positive creature-based; got {attacks}"
+        )
 
     def test_creature_removal_maps_to_creature_based(self):
         """Destroy target creature → creature-based."""
@@ -3394,6 +3809,318 @@ class TestDeriveAttacksForPromoted:
         """Return type is always a frozenset."""
         attacks = _derive_attacks_for_promoted("X", "Counter target spell.", "Instant")
         assert isinstance(attacks, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# TestMaindeckAwareCoverageDiscount — Units C1 + C2 of
+# feature-sb-maindeck-aware-coverage (story …-discount): discount SB coverage-model
+# element weights by what the MAINDECK already answers.
+# ---------------------------------------------------------------------------
+
+class _FakeResolvedCard:
+    """Minimal stand-in for a resolved ``Card`` (only the two attrs C1 reads)."""
+
+    def __init__(self, oracle_text: str, type_line: str = "Instant"):
+        self.oracle_text = oracle_text
+        self.type_line = type_line
+
+
+class TestMaindeckAnswerCoverage:
+    """Unit C1: ``_maindeck_answer_coverage`` — pure, saturating [0,1] per-tag coverage
+    the maindeck already provides."""
+
+    def test_wasteland_maps_to_greedy_manabase_via_catalog_short_circuit(self):
+        """Wasteland is itself a curated HOSER_CATALOG entry (attacks={'greedy-manabase'});
+        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup
+        is used rather than the oracle->attacks derivation, which would mislabel
+        'Destroy target nonbasic land' as creature-based (it contains the bare substring
+        'destroy target' — see TestDeriveAttacksForPromoted's removal rule)."""
+        coverage = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
+        assert coverage == {"greedy-manabase": pytest.approx(1.0)}
+
+    def test_copy_count_saturates_at_four(self):
+        """Coverage scales linearly with copies up to _MAINDECK_SATURATION (4), then holds
+        at 1.0 — a 5th 'copy' (hand-built to isolate the curve) does not exceed 1.0."""
+        assert _MAINDECK_SATURATION == 4
+        at_two = _maindeck_answer_coverage({"Wasteland": 2}, lambda name: None)
+        at_four = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
+        at_five = _maindeck_answer_coverage({"Wasteland": 5}, lambda name: None)
+        assert at_two["greedy-manabase"] == pytest.approx(0.5)
+        assert at_four["greedy-manabase"] == pytest.approx(1.0)
+        assert at_five["greedy-manabase"] == pytest.approx(1.0)  # saturated, not > 1.0
+
+    def test_oracle_text_derivation_used_for_non_catalog_cards(self):
+        """A maindeck card NOT in the catalog falls back to the same oracle->attacks
+        derivation _build_promoted_candidates already uses for empirical SB promotions."""
+        cards = {"Some Counterspell": _FakeResolvedCard("Counter target spell.")}
+        coverage = _maindeck_answer_coverage(
+            {"Some Counterspell": 4}, cards.get, catalog={}
+        )
+        assert coverage["combo"] == pytest.approx(1.0)
+        assert coverage["storm-reliant"] == pytest.approx(1.0)
+
+    def test_fallback_attacks_excluded_not_credited_as_combo(self):
+        """A maindeck card whose oracle_text matches no derivation rule falls back to
+        _FALLBACK_ATTACKS ({'combo'}) inside _derive_attacks_for_promoted. Crediting that
+        indiscriminately would discount 'combo' for every deck regardless of contents
+        (most of a 60-card maindeck answers nothing) — the conservative fallback is
+        excluded entirely rather than treated as real signal."""
+        cards = {"Some Vanilla Bear": _FakeResolvedCard("", type_line="Creature")}
+        coverage = _maindeck_answer_coverage(
+            {"Some Vanilla Bear": 4}, cards.get, catalog={}
+        )
+        assert coverage == {}
+
+    def test_unresolved_card_contributes_no_coverage(self):
+        """get_card returning None (unresolved/unknown name) is skipped, not an error."""
+        coverage = _maindeck_answer_coverage(
+            {"Unknown Card": 4}, lambda name: None, catalog={}
+        )
+        assert coverage == {}
+
+    def test_hate_pseudo_attack_excluded_from_coverage(self, make_hoser):
+        """A maindeck card whose (catalog) attacks include the '_hate' counter-hoser
+        marker does not leak '_hate' into the per-tag coverage dict."""
+        catalog = {
+            "Test Hate Card": make_hoser(
+                name="Test Hate Card", attacks=frozenset({"_hate", "combo"}),
+                colors=frozenset(),
+            ),
+        }
+        coverage = _maindeck_answer_coverage(
+            {"Test Hate Card": 4}, lambda name: None, catalog=catalog
+        )
+        assert coverage == {"combo": pytest.approx(1.0)}
+        assert "_hate" not in coverage
+
+    def test_zero_copy_entries_ignored(self):
+        """A maindeck dict entry with count<=0 contributes nothing (defensive; real
+        deck_maindeck dicts shouldn't carry zero-count entries, but the loop must not
+        misbehave if one appears)."""
+        coverage = _maindeck_answer_coverage({"Wasteland": 0}, lambda name: None)
+        assert coverage == {}
+
+
+class TestBuildCoverageModelMaindeckDiscount:
+    """Unit C2: ``_build_coverage_model``'s ``maindeck_coverage`` discount."""
+
+    @staticmethod
+    def _tron_field_and_tags():
+        field = _make_field({"Tron": 1.0})
+        archetype_tags = {"Tron": frozenset({"greedy-manabase"})}
+        return field, archetype_tags
+
+    def test_maindeck_coverage_none_is_byte_identical(self, make_hoser):
+        """maindeck_coverage=None (the default) -> byte-identical to the pre-feature
+        call signature; an explicit {} is equally a no-op (mirrors the
+        opponent_linchpins/matchup_pressure gating precedents)."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        omitted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        explicit_none = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage=None,
+        )
+        empty_dict = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={},
+        )
+        assert omitted.element_weight == explicit_none.element_weight
+        assert omitted.element_weight == empty_dict.element_weight
+        assert omitted.candidate_covers == explicit_none.candidate_covers == empty_dict.candidate_covers
+        assert omitted.warnings == explicit_none.warnings == empty_dict.warnings == ()
+
+    def test_maindeck_coverage_discounts_matching_element(self, make_hoser):
+        """A fully-saturated maindeck answer (coverage=1.0) discounts the matching
+        (archetype, tag) element by exactly _MAINDECK_DISCOUNT, and fires the audit line."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        discounted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 1.0},
+        )
+        key = "Tron|greedy-manabase"
+        assert discounted.element_weight[key] == pytest.approx(
+            baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT)
+        )
+        assert discounted.warnings == (
+            "// maindeck-aware: discounted greedy-manabase by 60% (deck already answers it)",
+        )
+
+    def test_partial_coverage_scales_the_discount(self, make_hoser):
+        """A half-saturated maindeck axis (coverage=0.5) applies half the max discount —
+        the discount is proportional, never fully zeroing an axis the maindeck only
+        partly covers."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        half = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 0.5},
+        )
+        key = "Tron|greedy-manabase"
+        assert half.element_weight[key] == pytest.approx(
+            baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT * 0.5)
+        )
+        assert half.element_weight[key] > 0.0
+
+    def test_unrelated_tag_in_maindeck_coverage_is_a_no_op(self, make_hoser):
+        """A maindeck_coverage entry for a tag that isn't live in this model's elements
+        neither discounts anything nor emits an audit line."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        unrelated = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"storm-reliant": 1.0},
+        )
+        assert unrelated.element_weight == baseline.element_weight
+        assert unrelated.warnings == ()
+
+    def test_hate_pseudo_element_exempt_from_discount(self, make_hoser):
+        """`_hate:` pseudo-elements are NOT discounted even when maindeck_coverage names
+        the same tag — they model field-wide interactive pressure against the deck's own
+        vulnerabilities, not an archetype coverage axis a maindeck card substitutes for
+        (mirrors the "|" not in key skip in the matchup_pressure pass)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Carpet of Flowers": make_hoser(
+                name="Carpet of Flowers", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"combo"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset({"combo"}), catalog=catalog,
+        )
+        discounted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset({"combo"}), catalog=catalog,
+            maindeck_coverage={"combo": 1.0},
+        )
+        assert discounted.element_weight["_hate:combo"] == pytest.approx(
+            baseline.element_weight["_hate:combo"]
+        )
+        assert discounted.element_weight["Storm|combo"] < baseline.element_weight["Storm|combo"]
+
+
+class TestMaindeckAwareCoverageIntegration:
+    """Integration: the motivating dogfooding bug — a deck's maindeck already answers an
+    axis (e.g. 4 maindeck Wasteland -> greedy-manabase); the SB should stop padding a
+    redundant Ghost-Quarter-style candidate for that same axis."""
+
+    def test_ghost_quarter_style_pick_drops_when_maindeck_already_answers(self, make_hoser):
+        field = _make_field({"BigMana": 0.9, "Storm": 0.55})
+        archetype_tags = {
+            "BigMana": frozenset({"greedy-manabase"}),
+            "Storm": frozenset({"storm-reliant"}),
+        }
+        catalog = {
+            "Ghost Quarter": make_hoser(
+                name="Ghost Quarter", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset(), swing=0.20, max_copies=4,
+            ),
+            "Damping Sphere": make_hoser(
+                name="Damping Sphere", attacks=frozenset({"storm-reliant"}),
+                colors=frozenset(), swing=0.20, max_copies=4,
+            ),
+        }
+        no_answers = _build_coverage_model(
+            field, archetype_tags, frozenset(), frozenset(), catalog=catalog,
+        )
+        with_wasteland = _build_coverage_model(
+            field, archetype_tags, frozenset(), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 1.0},
+        )
+
+        # At a 1-slot budget, BigMana's higher pre-discount weight wins Ghost Quarter the
+        # only slot; once the maindeck already answers greedy-manabase, that same slot
+        # goes to the still-undiscounted storm-reliant axis instead.
+        no_answers_picks, _ = _greedy_solve(no_answers, budget=1)
+        with_wasteland_picks, _ = _greedy_solve(with_wasteland, budget=1)
+
+        assert no_answers_picks == {"Ghost Quarter": 1}, (
+            f"sanity: BigMana's higher share should win the lone slot pre-discount: {no_answers_picks}"
+        )
+        assert with_wasteland_picks.get("Ghost Quarter", 0) == 0, (
+            f"Ghost Quarter must no longer be padded once the maindeck already answers "
+            f"greedy-manabase: {with_wasteland_picks}"
+        )
+        assert with_wasteland_picks == {"Damping Sphere": 1}
+
+    def test_recommend_sideboard_wires_maindeck_coverage_end_to_end(self):
+        """recommend_sideboard resolves the caller's OWN maindeck (via _load_deck_cards),
+        computes maindeck_coverage (Unit C1), and threads it into _build_coverage_model
+        (Unit C2) through the real, non-mocked pipeline — not just the pure helpers.
+        Both catalog entries are castable_any_color to hold the color-filtered candidate
+        set identical between the two calls, isolating the discount's effect."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            catalog = {
+                "Surgical Extraction": HoserCard(
+                    name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+                # Retagged purely as a wiring stand-in for "a maindeck card the deck
+                # already runs that answers the same axis" (mirrors the Null-Rod-retag
+                # precedent in TestRecommendSideboardOutputFieldsIntegration) — NOT a claim
+                # that Reanimate is a real sideboard hoser.
+                "Reanimate": HoserCard(
+                    name="Reanimate", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_SOFT,
+                    castable_any_color=True,
+                ),
+            }
+            baseline = recommend_sideboard(
+                con, field, {"Swamp": 14}, solver="greedy", catalog=catalog,
+            )
+            with_answers = recommend_sideboard(
+                con, field, {"Reanimate": 4, "Swamp": 10}, solver="greedy", catalog=catalog,
+            )
+        finally:
+            con.close()
+
+        assert any(
+            w.startswith("// maindeck-aware: discounted graveyard-recursion")
+            for w in with_answers.warnings
+        ), f"expected maindeck-aware audit line: {with_answers.warnings}"
+        assert not any(w.startswith("// maindeck-aware:") for w in baseline.warnings)
+        assert with_answers.covered_weight == pytest.approx(
+            baseline.covered_weight * (1.0 - _MAINDECK_DISCOUNT)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3463,7 +4190,7 @@ def _build_fon_corpus():
             cmc=0.0,
             produced_mana=["U", "B"],
         ),
-        # --- Reanimator archetype cards (graveyard-reliant) ---
+        # --- Reanimator archetype cards (graveyard-recursion) ---
         Card(
             name="Reanimate",
             type_line="Sorcery",
@@ -3535,7 +4262,7 @@ def _build_fon_corpus():
                         [tid, idx, "side", card_name, count])
         idx += 1
 
-    # 5 Reanimator decks (graveyard-reliant: Reanimate + Entomb + Swamp)
+    # 5 Reanimator decks (graveyard-recursion: Reanimate + Entomb + Swamp)
     for i in range(5):
         con.execute(
             "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
@@ -3820,7 +4547,7 @@ class TestEmpiricalPromotion:
         # A purely Red deck can't cast Force of Negation (Blue)
         field = _make_field({"Reanimator": 0.5, "ANT Storm": 0.5})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
         }
         # Simulate the post-3d state by calling _build_coverage_model directly
@@ -3884,7 +4611,7 @@ class TestEmpiricalPromotion:
         """
         field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.4})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
         }
         deck_colors = frozenset({"U", "B"})
@@ -4200,6 +4927,9 @@ class TestHoserCatalogExpansion:
             assert hc.max_copies >= 1
             assert isinstance(hc.swing, float)
             assert 0.0 < hc.swing < 1.0
+            assert hc.symmetry in ("asymmetric", "symmetric")
+            assert hc.cast_requires is None or isinstance(hc.cast_requires, str)
+            assert hc.functional_group is None or isinstance(hc.functional_group, str)
 
     def test_load_hoser_catalog_swing_alias_dedicated(self):
         """'dedicated' swing alias resolves to _SWING_DEDICATED (0.20)."""
@@ -4237,7 +4967,7 @@ class TestHoserCatalogExpansion:
             "hosers": [
                 {
                     "name": "TestCard2",
-                    "attacks": ["graveyard-reliant"],
+                    "attacks": ["graveyard-recursion"],
                     "colors": ["B"],
                     "max_copies": 2,
                     "swing": "soft",
@@ -4294,6 +5024,141 @@ class TestHoserCatalogExpansion:
         finally:
             os.unlink(fname)
 
+    # ── (a2) New HoserCard fields: symmetry / cast_requires / functional_group ─
+    # (feature-sb-effect-tagging-model, Unit 2)
+
+    def _write_catalog(self, hoser_entry: dict) -> str:
+        """Write a one-entry catalog JSON to a tmp file; caller must os.unlink it."""
+        import json, tempfile
+
+        data = {"version": "test", "hosers": [hoser_entry]}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            return f.name
+
+    def test_new_fields_default_when_omitted(self):
+        """Entries omitting symmetry/cast_requires/functional_group load with defaults."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {"name": "PlainCard", "attacks": ["combo"], "colors": [], "max_copies": 2, "swing": "soft"}
+        )
+        try:
+            catalog = load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+        hc = catalog["PlainCard"]
+        assert hc.symmetry == "asymmetric"
+        assert hc.cast_requires is None
+        assert hc.functional_group is None
+
+    def test_symmetric_flag_round_trips(self):
+        """symmetry: 'symmetric' loads onto HoserCard.symmetry unchanged."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "SymCard", "attacks": ["combo"], "colors": [], "max_copies": 2,
+                "swing": "soft", "symmetry": "symmetric",
+            }
+        )
+        try:
+            catalog = load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+        assert catalog["SymCard"].symmetry == "symmetric"
+
+    def test_bad_symmetry_raises_value_error_naming_card_and_field(self):
+        """An unrecognized symmetry value raises ValueError naming the card + field."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "BadSymCard", "attacks": ["combo"], "colors": [], "max_copies": 2,
+                "swing": "soft", "symmetry": "bogus",
+            }
+        )
+        try:
+            with pytest.raises(ValueError, match="BadSymCard") as exc_info:
+                load_hoser_catalog(fname)
+            assert "symmetry" in str(exc_info.value)
+        finally:
+            os.unlink(fname)
+
+    def test_known_cast_requires_token_round_trips(self):
+        """A known cast_requires token (opp_controls_plains) loads unchanged."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "FreeCastCard", "attacks": ["combo"], "colors": ["W"], "max_copies": 4,
+                "swing": "soft", "cast_requires": "opp_controls_plains",
+            }
+        )
+        try:
+            catalog = load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+        assert catalog["FreeCastCard"].cast_requires == "opp_controls_plains"
+
+    def test_unknown_cast_requires_token_raises_value_error(self):
+        """An unrecognized cast_requires token raises ValueError naming the card + field."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "BadCastCard", "attacks": ["combo"], "colors": [], "max_copies": 2,
+                "swing": "soft", "cast_requires": "opp_controls_unicorns",
+            }
+        )
+        try:
+            with pytest.raises(ValueError, match="BadCastCard") as exc_info:
+                load_hoser_catalog(fname)
+            assert "cast_requires" in str(exc_info.value)
+        finally:
+            os.unlink(fname)
+
+    def test_functional_group_string_round_trips(self):
+        """functional_group is stored verbatim as a string."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "GroupedCard", "attacks": ["plays-red"], "colors": ["U"], "max_copies": 2,
+                "swing": "soft", "functional_group": "red-blast",
+            }
+        )
+        try:
+            catalog = load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+        assert catalog["GroupedCard"].functional_group == "red-blast"
+
+    def test_non_string_functional_group_raises_value_error(self):
+        """A non-string, non-null functional_group raises ValueError naming the card + field."""
+        import os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        fname = self._write_catalog(
+            {
+                "name": "BadGroupCard", "attacks": ["combo"], "colors": [], "max_copies": 2,
+                "swing": "soft", "functional_group": 42,
+            }
+        )
+        try:
+            with pytest.raises(ValueError, match="BadGroupCard") as exc_info:
+                load_hoser_catalog(fname)
+            assert "functional_group" in str(exc_info.value)
+        finally:
+            os.unlink(fname)
+
     # ── (b) New staples present with correct tags ─────────────────────────────
 
     def test_consign_to_memory_attacks_combo_and_storm(self):
@@ -4328,10 +5193,10 @@ class TestHoserCatalogExpansion:
         assert "B" in h.colors
 
     def test_dauthi_voidwalker_attacks_graveyard(self):
-        """Dauthi Voidwalker → graveyard-reliant (exiles cards as they go to GY)."""
+        """Dauthi Voidwalker → graveyard-recursion (exiles cards as they go to GY)."""
         assert "Dauthi Voidwalker" in HOSER_CATALOG
         h = HOSER_CATALOG["Dauthi Voidwalker"]
-        assert "graveyard-reliant" in h.attacks
+        assert "graveyard-recursion" in h.attacks
         assert "B" in h.colors
 
     def test_all_new_staples_have_valid_swing(self):
@@ -4425,7 +5290,7 @@ class TestHoserCatalogExpansion:
         con = _con()
         field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.2, "Elves": 0.2})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
             "Elves": frozenset({"creature-based"}),
         }
@@ -4439,7 +5304,7 @@ class TestHoserCatalogExpansion:
         )
         # Graveyard hate that's UB-legal: Surgical, Faerie Macabre (castable_any_color),
         # Leyline of the Void (B), Dauthi Voidwalker (B), Nihil Spellbomb (B)
-        gy_hosers = {n for n, h in HOSER_CATALOG.items() if "graveyard-reliant" in h.attacks}
+        gy_hosers = {n for n, h in HOSER_CATALOG.items() if "graveyard-recursion" in h.attacks}
         ub_legal_gy = {
             n for n in gy_hosers
             if not HOSER_CATALOG[n].colors
@@ -4461,7 +5326,7 @@ class TestHoserCatalogExpansion:
         field = _make_field({"ANT Storm": 0.5, "Reanimator": 0.3, "Elves": 0.2})
         archetype_tags = {
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "Elves": frozenset({"creature-based"}),
         }
         model = _build_coverage_model(
@@ -4477,6 +5342,45 @@ class TestHoserCatalogExpansion:
             "Flusterstorm (U, combo+storm-reliant) must be in candidate set for UB deck"
         )
 
+    def test_red_heavy_field_surfaces_hydroblast_as_plays_red_coverage(self):
+        """A red-heavy field surfaces the red-blast group as plays-red coverage, not
+        manabase (feature-sb-effect-tagging-model, Unit 5 — the corrected mis-tag).
+
+        Hydroblast and Blue Elemental Blast share functional_group='red-blast', so the
+        Unit 5 de-dup keeps exactly one of the two (tie-broken deterministically) — the
+        contract under test is that the SURVIVOR covers plays-red, not a manabase/combo
+        element, regardless of which of the two names wins the tie.
+        """
+        field = _make_field({"Izzet Delver": 0.7, "Reanimator": 0.3})
+        archetype_tags = {
+            "Izzet Delver": frozenset({"plays-red"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Izzet Delver|plays-red" in model.element_weight, (
+            f"Expected plays-red element in {list(model.element_weight)}"
+        )
+        red_blast_survivors = [
+            n for n in ("Hydroblast", "Blue Elemental Blast") if n in model.candidate_covers
+        ]
+        assert len(red_blast_survivors) == 1, (
+            f"Expected exactly one red-blast survivor after functional_group de-dup, "
+            f"got {red_blast_survivors}"
+        )
+        survivor = red_blast_survivors[0]
+        assert "Izzet Delver|plays-red" in model.candidate_covers[survivor], (
+            f"{survivor} must cover plays-red, not a manabase/combo element"
+        )
+        assert not any(
+            "greedy-manabase" in key or "|combo" in key
+            for key in model.candidate_covers[survivor]
+        ), f"{survivor} must not cover manabase/combo elements post-retag"
+
     def test_dimir_tempo_field_surfaces_creature_removal(self):
         """Dimir Tempo (UB) field with creature-based metagame surfaces edict effects.
 
@@ -4487,7 +5391,7 @@ class TestHoserCatalogExpansion:
         field = _make_field({"Elves": 0.6, "Reanimator": 0.2, "ANT Storm": 0.2})
         archetype_tags = {
             "Elves": frozenset({"creature-based"}),
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
         }
         model = _build_coverage_model(
@@ -4613,12 +5517,12 @@ class TestEmpiricalSideboardSwings:
         """
         field = _make_field({"Reanimator": 0.6, "ANT Storm": 0.4})
         archetype_tags = {
-            "Reanimator": frozenset({"graveyard-reliant"}),
+            "Reanimator": frozenset({"graveyard-recursion"}),
             "ANT Storm": frozenset({"combo", "storm-reliant"}),
         }
         catalog = {
             "Surgical Extraction": _minimal_hoser(
-                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+                "Surgical Extraction", frozenset({"graveyard-recursion"}), swing=_SWING_DEDICATED
             ),
         }
 
@@ -4653,10 +5557,10 @@ class TestEmpiricalSideboardSwings:
         assert override_swing > catalog_swing, "Test setup: override must exceed catalog"
 
         field = _make_field({"Reanimator": share})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
         catalog = {
             "Surgical Extraction": _minimal_hoser(
-                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=catalog_swing
+                "Surgical Extraction", frozenset({"graveyard-recursion"}), swing=catalog_swing
             ),
         }
 
@@ -4674,7 +5578,7 @@ class TestEmpiricalSideboardSwings:
             card_swing_overrides={"Surgical Extraction": override_swing},
         )
 
-        key = "Reanimator|graveyard-reliant"
+        key = "Reanimator|graveyard-recursion"
         base_weight = model_base.element_weight.get(key, 0.0)
         override_weight = model_override.element_weight.get(key, 0.0)
 
@@ -4698,10 +5602,10 @@ class TestEmpiricalSideboardSwings:
         must not raise and must not affect element weights.
         """
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
         catalog = {
             "Surgical Extraction": _minimal_hoser(
-                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=_SWING_DEDICATED
+                "Surgical Extraction", frozenset({"graveyard-recursion"}), swing=_SWING_DEDICATED
             ),
         }
 
@@ -4731,17 +5635,17 @@ class TestEmpiricalSideboardSwings:
         catalog swing wins the max.
         """
         field = _make_field({"Reanimator": 1.0})
-        archetype_tags = {"Reanimator": frozenset({"graveyard-reliant"})}
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
 
         # Two cards cover the same tag:
         # - Leyline (dedicated, swing=0.20): catalog constant, no override.
         # - Surgical (soft, swing=0.10): override=0.05, LOWER than Leyline's catalog.
         catalog = {
             "Leyline of the Void": _minimal_hoser(
-                "Leyline of the Void", frozenset({"graveyard-reliant"}), swing=0.20
+                "Leyline of the Void", frozenset({"graveyard-recursion"}), swing=0.20
             ),
             "Surgical Extraction": _minimal_hoser(
-                "Surgical Extraction", frozenset({"graveyard-reliant"}), swing=0.10
+                "Surgical Extraction", frozenset({"graveyard-recursion"}), swing=0.10
             ),
         }
 
@@ -4754,7 +5658,7 @@ class TestEmpiricalSideboardSwings:
             card_swing_overrides={"Surgical Extraction": 0.05},
         )
 
-        key = "Reanimator|graveyard-reliant"
+        key = "Reanimator|graveyard-recursion"
         # best_swing_for_tag should be 0.20 (Leyline's catalog), not 0.05.
         expected_weight = 1.0 * 0.20
         assert abs(model.element_weight.get(key, 0.0) - expected_weight) < 1e-9, (
@@ -4852,7 +5756,7 @@ class TestEmpiricalSideboardSwings:
             catalog = {
                 "Surgical Extraction": HoserCard(
                     name="Surgical Extraction",
-                    attacks=frozenset({"graveyard-reliant"}),
+                    attacks=frozenset({"graveyard-recursion"}),
                     colors=frozenset(),
                     max_copies=2,
                     swing=0.05,                 # low curated constant → proxy wins
@@ -4902,7 +5806,7 @@ class TestEmpiricalSideboardSwings:
         field = _make_field({"ComboArch": 0.5, "GYArch": 0.5})
         archetype_tags = {
             "ComboArch": frozenset({"combo"}),
-            "GYArch": frozenset({"graveyard-reliant"}),
+            "GYArch": frozenset({"graveyard-recursion"}),
         }
         catalog_swing = 0.10
         override_swing = 0.22
@@ -4911,7 +5815,7 @@ class TestEmpiricalSideboardSwings:
         catalog = {
             "DualCard": _minimal_hoser(
                 "DualCard",
-                frozenset({"combo", "graveyard-reliant"}),
+                frozenset({"combo", "graveyard-recursion"}),
                 swing=catalog_swing,
             ),
         }
@@ -4931,7 +5835,7 @@ class TestEmpiricalSideboardSwings:
         )
 
         combo_key = "ComboArch|combo"
-        gy_key = "GYArch|graveyard-reliant"
+        gy_key = "GYArch|graveyard-recursion"
 
         for key in (combo_key, gy_key):
             base_w = model_base.element_weight.get(key, 0.0)
@@ -5090,7 +5994,7 @@ class TestConsideringPool:
         catalog = {
             "Grafdigger's Cage": HoserCard(
                 name="Grafdigger's Cage",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=_SWING_DEDICATED,
@@ -5104,7 +6008,7 @@ class TestConsideringPool:
             ),
             "Leyline of the Void": HoserCard(
                 name="Leyline of the Void",
-                attacks=frozenset({"graveyard-reliant"}),
+                attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(),
                 max_copies=4,
                 swing=_SWING_DEDICATED,
@@ -5250,7 +6154,7 @@ class TestRedundancyDecay:
 
     @staticmethod
     def _gy_field_corpus():
-        """A corpus where 'Reanimator' has real graveyard-reliant vulnerability tags (decks
+        """A corpus where 'Reanimator' has real graveyard-recursion vulnerability tags (decks
         loaded so vulnerability_tags is non-empty), so the model is NON-vacuous and the solver
         actually picks the graveyard hoser. Mirrors TestRecommendSideboard._build_gy_corpus."""
         import uuid
@@ -5279,7 +6183,7 @@ class TestRedundancyDecay:
         # so decay-off stacks it to 4 and decay-on must cap it (a non-vacuous spread test).
         return {
             "Surgical Extraction": HoserCard(
-                name="Surgical Extraction", attacks=frozenset({"graveyard-reliant"}),
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}),
                 colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED, castable_any_color=True,
             ),
         }
@@ -5578,7 +6482,7 @@ class TestHedgeIntegrationNonVacuous:
         con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
                     [tid, "Two-Tag", "2026-01-01", None, "Legacy", "test", "test"])
         idx = 0
-        for _ in range(3):  # Reanimator decks → graveyard-reliant
+        for _ in range(3):  # Reanimator decks → graveyard-recursion
             con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, idx, f"r{idx}", "1st", "Reanimator"])
             con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", "Reanimate", 4])
             idx += 1
@@ -5607,3 +6511,651 @@ class TestHedgeIntegrationNonVacuous:
         # The dedicated core covers the DOMINANT archetype's answer; insurance is disjoint from it.
         core_cards = set(pkg.cards) - pkg.insurance_cards
         assert core_cards and core_cards.isdisjoint(pkg.insurance_cards)
+
+
+# ---------------------------------------------------------------------------
+# Unit B5 (feature-sb-field-weighted-scorer-output): explainable per-card breakdown +
+# coverage% diagnostic + Dirichlet field-share uncertainty.
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _board_coverage_pct,
+    _build_impact_annotations,
+    _card_coverage_pct,
+    _dirichlet_share_lower_bound,
+    _relevant_field_archetypes,
+)
+
+
+class TestRelevantFieldArchetypesAndCoveragePct:
+    """_relevant_field_archetypes / _card_coverage_pct / _board_coverage_pct — the
+    field-coverage% DIAGNOSTIC axis (locked decision: never the optimization objective)."""
+
+    def test_relevant_archetypes_is_tag_overlap(self, make_hoser):
+        field = _make_field({"Reanimator": 0.4, "Storm": 0.35, "WhiteWeenie": 0.25})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo", "storm-reliant"}),
+            "WhiteWeenie": frozenset({"creature-based"}),
+        }
+        hoser = make_hoser(attacks=frozenset({"graveyard-recursion", "combo"}))
+        assert _relevant_field_archetypes(hoser, field, archetype_tags) == frozenset(
+            {"Reanimator", "Storm"}
+        )
+
+    def test_card_coverage_pct_sums_relevant_shares(self, make_hoser):
+        field = _make_field({"Reanimator": 0.4, "Storm": 0.35, "WhiteWeenie": 0.25})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+            "WhiteWeenie": frozenset({"creature-based"}),
+        }
+        hoser = make_hoser(attacks=frozenset({"graveyard-recursion", "combo"}))
+        assert _card_coverage_pct(hoser, field, archetype_tags) == pytest.approx(0.75)
+
+    def test_counter_hoser_has_zero_coverage_pct(self, make_hoser):
+        """A '_hate' counter-hoser matches no archetype's tags (no archetype carries the
+        pseudo-tag '_hate') -> 0% field coverage by this measure; its value is
+        deck-protection, out of scope for this diagnostic."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        hoser = make_hoser(attacks=frozenset({"_hate"}))
+        assert _card_coverage_pct(hoser, field, archetype_tags) == 0.0
+
+    def test_board_coverage_pct_is_union_not_sum(self, make_hoser):
+        """Two cards covering the SAME archetype must not double-count its share."""
+        field = _make_field({"Reanimator": 0.6, "Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+        }
+        candidate_meta = {
+            "A": make_hoser(name="A", attacks=frozenset({"graveyard-recursion"})),
+            "B": make_hoser(name="B", attacks=frozenset({"graveyard-recursion"})),
+        }
+        final_cards = {"A": 2, "B": 1}
+        assert _board_coverage_pct(
+            final_cards, candidate_meta, field, archetype_tags
+        ) == pytest.approx(0.6)
+
+    def test_board_coverage_pct_unions_across_distinct_archetypes(self, make_hoser):
+        field = _make_field({"Reanimator": 0.6, "Storm": 0.4})
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"combo"}),
+        }
+        candidate_meta = {
+            "A": make_hoser(name="A", attacks=frozenset({"graveyard-recursion"})),
+            "B": make_hoser(name="B", attacks=frozenset({"combo"})),
+        }
+        final_cards = {"A": 2, "B": 1}
+        assert _board_coverage_pct(
+            final_cards, candidate_meta, field, archetype_tags
+        ) == pytest.approx(1.0)
+
+
+class TestDirichletShareLowerBound:
+    """_dirichlet_share_lower_bound — reuses `advise positioning`'s Dirichlet field-share
+    uncertainty model (verbatim constants) via the exact independent-marginal Beta shortcut."""
+
+    def test_none_when_counts_absent(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4})  # share-only, no counts
+        assert _dirichlet_share_lower_bound(field) is None
+
+    def test_thin_count_share_shrinks_well_below_point_estimate(self):
+        field = build_custom_field(
+            {"Big": 0.5, "Established": 0.47, "Thin": 0.03},
+            counts={"Big": 200, "Established": 188, "Thin": 3},
+        )
+        bounds = _dirichlet_share_lower_bound(field)
+        assert bounds["Thin"] / field.shares["Thin"] < 0.5
+        # Well-sampled archetypes stay close to their point estimate (light-touch shrink).
+        assert bounds["Big"] / field.shares["Big"] > 0.9
+        assert bounds["Established"] / field.shares["Established"] > 0.9
+
+    def test_bounds_are_monotonic_in_quantile(self):
+        field = build_custom_field({"A": 0.5, "B": 0.5}, counts={"A": 10, "B": 10})
+        low = _dirichlet_share_lower_bound(field, quantile=0.05)
+        high = _dirichlet_share_lower_bound(field, quantile=0.45)
+        for arch in field.shares:
+            assert low[arch] < high[arch]
+
+    def test_single_archetype_field_degenerates_to_point_share(self):
+        field = build_custom_field({"Solo": 1.0}, counts={"Solo": 5})
+        bounds = _dirichlet_share_lower_bound(field)
+        assert bounds["Solo"] == pytest.approx(1.0)
+
+
+class TestBuildImpactAnnotations:
+    """_build_impact_annotations — the explainable per-card breakdown + confidence/brittle
+    honest-uncertainty annotation, computed from the ALREADY-SOLVED final_cards."""
+
+    def test_none_opponent_linchpins_returns_empty(self, make_hoser):
+        """The no-impact-data path: nothing fabricated when opponent_linchpins is None."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction",
+                attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(),
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins=None, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        assert annotations == {}
+
+    def test_populates_breakdown_reference_archetype_and_confidence(self, make_hoser, make_linchpin):
+        field = build_custom_field(
+            {"Reanimator": 0.7, "Storm": 0.3}, counts={"Reanimator": 150, "Storm": 60}
+        )
+        archetype_tags = {
+            "Reanimator": frozenset({"graveyard-recursion"}),
+            "Storm": frozenset({"graveyard-recursion"}),
+        }
+        hoser = make_hoser(
+            name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+        )
+        candidate_meta = {"Surgical Extraction": hoser}
+        opp_lps = {
+            "Reanimator": [
+                make_linchpin(
+                    archetype="Reanimator", name="Entomb", centrality=1.0,
+                    neutralized_by=frozenset({"exile-graveyard"}),
+                )
+            ],
+            "Storm": [],
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 3}, candidate_meta, field, archetype_tags,
+            opponent_linchpins=opp_lps, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        # Reanimator (0.7) outranks Storm (0.3) as the anchor matchup.
+        assert ann.reference_archetype == "Reanimator"
+        assert ann.reference_share == pytest.approx(0.7)
+        assert ann.breakdown.centrality == 1.0  # confirmed Entomb hit via exile-graveyard
+        assert ann.breakdown.draw_prob == pytest.approx(_draw_probability(3))  # actual copy count
+        assert ann.confidence == "established"  # tier_for_sample(150)
+        assert ann.brittle is False  # 150 backing decks is not thin
+
+    def test_hate_counter_hoser_skipped(self, make_hoser):
+        """Counter-hosers have no single coherent opponent to anchor a breakdown to."""
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Defense Grid": make_hoser(name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset())
+        }
+        annotations = _build_impact_annotations(
+            {"Defense Grid": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+        )
+        assert annotations == {}
+
+    def test_card_with_no_relevant_archetype_skipped(self, make_hoser):
+        field = _make_field({"Reanimator": 1.0})
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Off Topic": make_hoser(name="Off Topic", attacks=frozenset({"ramp"}), colors=frozenset())
+        }
+        annotations = _build_impact_annotations(
+            {"Off Topic": 2}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset(),
+        )
+        assert annotations == {}
+
+    def test_brittle_flag_fires_on_thin_reference_archetype(self, make_hoser):
+        field = build_custom_field(
+            {"Reanimator": 0.03, "Storm": 0.97}, counts={"Reanimator": 2, "Storm": 300},
+        )
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}  # Storm not relevant
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 1}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        assert ann.reference_archetype == "Reanimator"
+        assert ann.confidence == "speculative"  # tier_for_sample(2)
+        assert ann.brittle is True
+
+    def test_no_counts_never_fabricates_confidence_or_brittle(self, make_hoser):
+        """Share-only field (no backing counts) -> confidence stays None, brittle stays False
+        (never guessed) — honest-degrade convention: absence of data is never silently
+        upgraded to a graded tier."""
+        field = _make_field({"Reanimator": 1.0})  # no counts
+        archetype_tags = {"Reanimator": frozenset({"graveyard-recursion"})}
+        candidate_meta = {
+            "Surgical Extraction": make_hoser(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}), colors=frozenset()
+            )
+        }
+        annotations = _build_impact_annotations(
+            {"Surgical Extraction": 1}, candidate_meta, field, archetype_tags,
+            opponent_linchpins={"Reanimator": []}, opponent_cards=None,
+            deck_colors=frozenset({"U", "B"}), deck_tags=frozenset(),
+        )
+        ann = annotations["Surgical Extraction"]
+        assert ann.confidence is None
+        assert ann.brittle is False
+
+
+class TestRecommendSideboardOutputFieldsIntegration:
+    """End-to-end: recommend_sideboard populates the new B5 fields through the real,
+    non-mocked pipeline (objective-search-split's DB-glue seam), not just the pure helpers."""
+
+    @staticmethod
+    def _painter_corpus():
+        """Real decks labeled 'Painter' running a graveyard-recursion card, so
+        field_vulnerability_tags derives a real (archetype, tag) AND _field_opponent_linchpins
+        picks up Painter's CURATED LINCHPIN_OVERRIDES entry (Grindstone / Painter's Servant) —
+        curated overrides are composition-independent (see TestArchetypeLinchpinsAndCards),
+        so this corpus doesn't need to actually run Grindstone. Mirrors
+        TestRedundancyDecay._gy_field_corpus, relabeled to 'Painter' specifically to piggyback
+        on real, non-mocked linchpin data for this integration test."""
+        import uuid
+        con = _con()
+        store.load_cards(con, [
+            Card(name="Reanimate", type_line="Sorcery",
+                 oracle_text="Put target creature card from a graveyard onto the battlefield "
+                             "under your control. You lose life equal to its mana value.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Swamp", type_line="Basic Land — Swamp", oracle_text="{T}: Add {B}.",
+                 cmc=0.0, produced_mana=["B"]),
+        ])
+        tid = str(uuid.uuid4())
+        con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"])
+        for idx in range(3):
+            con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)",
+                        [tid, idx, f"player{idx}", "1st", "Painter"])
+            for cn, ct in [("Reanimate", 4), ("Swamp", 10)]:
+                con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, idx, "main", cn, ct])
+        return con
+
+    def test_impact_annotations_and_coverage_populate_via_curated_override(self):
+        """Null Rod (curated capability: artifact-ability-lock, see impact._CAPABILITY_BY_NAME)
+        is retagged here to attack 'graveyard-recursion' so it covers Painter's derived tag;
+        its NAME still resolves via hoser_capabilities to the capability that neutralizes
+        Painter's curated Grindstone linchpin (neutralized_by includes artifact-ability-lock)."""
+        con = self._painter_corpus()
+        try:
+            field = _make_field({"Painter": 1.0})
+            catalog = {
+                "Null Rod": HoserCard(
+                    name="Null Rod", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+            }
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=catalog)
+        finally:
+            con.close()
+
+        assert pkg.cards.get("Null Rod", 0) > 0, f"expected Null Rod recommended: {dict(pkg.cards)}"
+        assert "Null Rod" in pkg.impact_annotations
+        ann = pkg.impact_annotations["Null Rod"]
+        assert ann.reference_archetype == "Painter"
+        assert ann.breakdown.centrality == 1.0  # confirmed Grindstone hit
+        assert ann.confidence is None  # share-only custom field -> no backing counts
+        assert ann.brittle is False  # no counts -> never fabricated
+        assert pkg.board_coverage_pct == pytest.approx(1.0)
+        assert pkg.card_coverage_pct["Null Rod"] == pytest.approx(1.0)
+
+    def test_no_linchpin_data_leaves_impact_annotations_empty_but_coverage_populates(self):
+        """Regression guard for the documented independence (item 2 vs item 3): the
+        coverage% diagnostic needs only tags and populates even when impact_annotations is
+        the empty no-data dict (Reanimator here has no curated override and the corpus
+        composition doesn't derive one — mirrors the existing Unit B3 gate-off precedent)."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            cat = TestRedundancyDecay._gy_catalog()
+            pkg = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+        finally:
+            con.close()
+        assert pkg.impact_annotations == {}
+        assert pkg.card_coverage_pct.get("Surgical Extraction", 0.0) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# TestMatchupMaxEquityGain / TestSlotROITable — Units D1+D2 (feature-sb-slot-roi-punt)
+# ---------------------------------------------------------------------------
+# House style: hand-built FieldDistribution + CoverageModel + MatchupMatrix (via build_cell)
+# for deterministic ROI arithmetic — no DB needed, mirroring TestCoverageModel/TestGreedy.
+
+
+def _make_matrix(
+    cells: "dict[tuple[str, str], object]", archetypes: "list[str]"
+) -> MatchupMatrix:
+    """Hand-built MatchupMatrix for _slot_roi_table tests (no DB / corpus needed)."""
+    return MatchupMatrix(cells=cells, provenance=None, total_matches=0, archetypes=archetypes, caveat="test")
+
+
+class TestMatchupMaxEquityGain:
+    """_matchup_max_equity_gain — the concave swing × _u_redundancy realistic ceiling."""
+
+    def test_zero_share_returns_zero(self):
+        model = _make_model({"Delver|plays-blue": 0.08}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", 0.0, model)
+        assert gain == 0.0
+        assert first == 0.0
+
+    def test_no_coverage_for_opponent_returns_zero(self):
+        """A field opponent no catalog candidate answers at all: honest 0.0, not fabricated."""
+        model = _make_model({"Lands|greedy-manabase": 0.07}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", 0.4, model)
+        assert gain == 0.0
+        assert first == 0.0
+
+    def test_recovers_per_copy_swing_and_shapes_with_u_redundancy(self):
+        """weight = share × swing; dividing back out share recovers the per-copy swing exactly
+        as the first-slot gain (u_redundancy(1) == 1.0), and multi-copy dedication is shaped
+        by the SAME concave curve — more than the first slot alone, less than a naive flat
+        extrapolation across all dedicated slots."""
+        share = 0.4
+        swing = 0.10  # soft — below the realistic-ceiling cap so the shape is observable
+        model = _make_model({"Delver|plays-blue": share * swing}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", share, model)
+        assert first == pytest.approx(swing)
+        assert first < gain < swing * _MAX_DEDICATED_SLOTS
+
+    def test_capped_at_max_realistic_equity_gain(self):
+        """A high dedicated-swing element's cumulative gain is capped, not left to explode."""
+        share = 1.0
+        model = _make_model({"Delver|plays-blue": share * _SWING_DEDICATED}, {}, {})
+        gain, _first = _matchup_max_equity_gain("Delver", share, model)
+        assert gain == pytest.approx(_MAX_REALISTIC_EQUITY_GAIN)
+
+    def test_best_tag_wins_when_opponent_has_multiple_elements(self):
+        """When an opponent has several (archetype, tag) elements, the ceiling anchors on the
+        BEST-covered one — the tag the first dedicated slot would actually attack."""
+        share = 0.5
+        model = _make_model(
+            {"Delver|plays-blue": share * 0.05, "Delver|creature-based": share * 0.20},
+            {}, {},
+        )
+        _gain, first = _matchup_max_equity_gain("Delver", share, model)
+        assert first == pytest.approx(0.20)
+
+
+class TestSlotROITable:
+    """_slot_roi_table — Units D1+D2: per-matchup ROI ranking + punt detection."""
+
+    def test_empty_field_or_no_archetype_returns_empty(self):
+        model = _make_model({}, {}, {})
+        assert _slot_roi_table(None, _make_field({"Delver": 1.0}), None, model) == []
+        empty_field = FieldDistribution(
+            shares={}, field_source="custom", counts=None,
+            no_data=frozenset(), warnings=(),
+        )
+        assert _slot_roi_table("MyDeck", empty_field, None, model) == []
+
+    def test_mirror_matchup_excluded(self):
+        model = _make_model({}, {}, {})
+        field = _make_field({"MyDeck": 1.0})
+        assert _slot_roi_table("MyDeck", field, None, model) == []
+
+    def test_absent_matrix_honest_degrades_every_row(self):
+        """matchup_matrix=None → every matchup gets base_equity=0.5 + confidence=speculative,
+        and the hard rule keeps punt False regardless."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 0.6, "Lands": 0.4})
+        rows = _slot_roi_table("MyDeck", field, None, model)
+        assert {r.opponent for r in rows} == {"Delver", "Lands"}
+        for r in rows:
+            assert r.base_equity == 0.5
+            assert r.confidence == "speculative"
+            assert r.punt is False
+
+    def test_thin_cell_honest_degrades_to_half_not_shrunk_estimate(self):
+        """A present-but-thin cell (n<30) is NOT rendered at its beta-shrunk value (e.g. ~0.58
+        for a 3-0 record) — the ROI layer honest-degrades it flat to 0.5 + speculative, same
+        as an absent cell."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=3, n=3)  # n<30 → speculative tier
+        assert cell.p_shrunk is not None and cell.p_shrunk != 0.5  # sanity: NOT already 0.5
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].base_equity == 0.5
+        assert rows[0].confidence == "speculative"
+
+    def test_established_cell_uses_p_shrunk_directly(self):
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=40, n=120)  # established tier
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].base_equity == pytest.approx(cell.p_shrunk)
+        assert rows[0].confidence == "established"
+
+    def test_adaptive_matrix_wrapper_is_unwrapped(self):
+        """A real AdaptiveMatrix (the ``.matrix`` wrapper build_adaptive_matrix returns) works
+        identically to a plain MatchupMatrix — _slot_roi_table unwraps ``.matrix``."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=40, n=120)
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        wrapped = AdaptiveMatrix(matrix=matrix, valid_since={}, cell_windows={})
+        rows = _slot_roi_table("MyDeck", field, wrapped, model)
+        assert rows[0].base_equity == pytest.approx(cell.p_shrunk)
+
+    def test_ranked_descending_by_roi_per_slot(self):
+        field = _make_field({"Delver": 0.6, "Lands": 0.4})
+        model = _make_model(
+            {"Delver|plays-blue": 0.6 * 0.10, "Lands|greedy-manabase": 0.4 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=40, n=120),
+            ("MyDeck", "Lands"): build_cell("MyDeck", "Lands", wins=40, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert [r.roi_per_slot for r in rows] == sorted(
+            (r.roi_per_slot for r in rows), reverse=True
+        )
+        # Same per-copy swing on both sides → the larger field share (Delver) wins the ranking.
+        assert rows[0].opponent == "Delver"
+
+    def test_punt_a_when_cant_cross_half_even_at_max_dedication(self):
+        """base_equity so low that even the capped max_equity_gain can't reach 0.5."""
+        field = _make_field({"Lands": 1.0})
+        model = _make_model({"Lands|greedy-manabase": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Lands", wins=12, n=120)  # established, badly losing
+        matrix = _make_matrix({("MyDeck", "Lands"): cell}, ["MyDeck", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].crosses_half is False
+        assert rows[0].punt is True
+        assert rows[0].punt_reason == _PUNT_REASON_CANT_CROSS_HALF
+
+    def test_no_punt_when_max_dedication_crosses_half(self):
+        field = _make_field({"Delver": 1.0})
+        model = _make_model({"Delver|plays-blue": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Delver", wins=50, n=120)  # ~43% shrunk, +ceiling clears 0.5
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].crosses_half is True
+        assert rows[0].punt is False
+
+    def test_reallocation_punt_when_lower_roi_loses_to_higher_roi(self):
+        """Both matchups clear crosses_half; Delver's much larger field share dwarfs Combo's
+        ROI/slot for the SAME per-copy swing → Combo is flagged for reallocation, Delver isn't."""
+        field = _make_field({"Delver": 0.9, "Combo": 0.1})
+        model = _make_model(
+            {"Delver|plays-blue": 0.9 * 0.10, "Combo|storm-reliant": 0.1 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),
+            ("MyDeck", "Combo"): build_cell("MyDeck", "Combo", wins=50, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Combo"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        by_opp = {r.opponent: r for r in rows}
+        assert by_opp["Delver"].crosses_half is True
+        assert by_opp["Combo"].crosses_half is True
+        assert by_opp["Delver"].roi_per_slot > by_opp["Combo"].roi_per_slot
+        assert by_opp["Delver"].punt is False
+        assert by_opp["Combo"].punt is True
+        assert by_opp["Combo"].punt_reason == _PUNT_REASON_BETTER_ROI_ELSEWHERE
+
+    def test_no_reallocation_punt_when_roi_gap_is_modest(self):
+        """A modest ROI gap (well above the reallocation margin) is not a punt — real boards
+        legitimately hedge across several worthwhile matchups."""
+        field = _make_field({"Delver": 0.55, "Lands": 0.45})
+        model = _make_model(
+            {"Delver|plays-blue": 0.55 * 0.10, "Lands|greedy-manabase": 0.45 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),
+            ("MyDeck", "Lands"): build_cell("MyDeck", "Lands", wins=50, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert all(r.crosses_half for r in rows)
+        assert all(not r.punt for r in rows)
+
+    def test_no_reallocation_punt_when_only_one_viable_matchup(self):
+        """A single matchup in the field has no 'elsewhere' to be outclassed by."""
+        field = _make_field({"Delver": 1.0})
+        model = _make_model({"Delver|plays-blue": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Delver", wins=50, n=120)
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].punt is False
+
+    def test_never_punts_speculative_tier_despite_dwarfed_roi(self):
+        """HARD RULE: without the guard, Combo's roi_per_slot here would be dwarfed by Delver's
+        (a genuine, crosses_half alternative) and trip condition (b) — but Combo's cell is
+        speculative (n<30), so it must never be punted; it is labeled low-confidence instead."""
+        field = _make_field({"Delver": 0.9, "Combo": 0.1})
+        model = _make_model(
+            {"Delver|plays-blue": 0.9 * 0.10, "Combo|storm-reliant": 0.1 * 0.05},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),  # established
+            ("MyDeck", "Combo"): build_cell("MyDeck", "Combo", wins=1, n=3),       # speculative
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Combo"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        by_opp = {r.opponent: r for r in rows}
+        assert by_opp["Combo"].confidence == "speculative"
+        # Confirm the ROI gap really is dwarfing (the scenario the hard rule guards against).
+        assert by_opp["Combo"].roi_per_slot < by_opp["Delver"].roi_per_slot * _REALLOCATION_MARGIN
+        assert by_opp["Combo"].punt is False
+        assert by_opp["Combo"].punt_reason == ""
+
+
+class TestMatchupROIDataclass:
+    """MatchupROI is a frozen dataclass with the expected fields (mirrors
+    TestMatchupPlanDataclass's smoke-test convention)."""
+
+    def test_frozen_fields(self):
+        roi = MatchupROI(
+            opponent="Combo", field_share=0.3, base_equity=0.4, max_equity_gain=0.1,
+            roi_per_slot=0.015, crosses_half=False, punt=True,
+            confidence="evolving", punt_reason="max dedication still <50%",
+        )
+        assert roi.opponent == "Combo"
+        assert roi.punt is True
+        assert roi.confidence == "evolving"
+        with pytest.raises(Exception):
+            roi.punt = False  # frozen — cannot mutate
+
+
+class TestSlotROIRecommendSideboardIntegration:
+    """recommend_sideboard wiring — Unit D3: populates pkg.slot_roi through the real,
+    non-mocked pipeline; the layer never feeds back into card selection."""
+
+    _SINCE = "2026-01-01"
+
+    def test_slot_roi_populates_from_real_matchup_corpus(self, make_rounds_corpus):
+        """n_repeats=50 → 100 decisive Control-vs-Combo matches, Control always wins →
+        established-tier cell with base_equity well above 0.5."""
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        try:
+            field = _make_field({"Combo": 1.0})
+            pkg = recommend_sideboard(
+                con, field, {"Brainstorm": 4}, solver="greedy",
+                archetype="Control", since=self._SINCE,
+            )
+        finally:
+            con.close()
+        assert pkg.slot_roi, f"expected a populated slot-ROI table; warnings={pkg.warnings}"
+        row = pkg.slot_roi[0]
+        assert row.opponent == "Combo"
+        assert row.confidence == "established"
+        assert row.base_equity > 0.5  # Control always beats Combo in this corpus
+
+    def test_slot_roi_absent_without_archetype(self, make_rounds_corpus):
+        """archetype=None (unclassified deck) → slot_roi stays empty (gated, not fabricated —
+        there is no 'my side' to look up matchup cells for)."""
+        con, _facts = make_rounds_corpus(n_repeats=5)
+        try:
+            field = _make_field({"Combo": 1.0})
+            pkg = recommend_sideboard(con, field, {}, solver="greedy")
+        finally:
+            con.close()
+        assert pkg.slot_roi == ()
+
+    def test_slot_roi_layer_does_not_change_card_selection(self, monkeypatch, make_rounds_corpus):
+        """Card selection (final_cards) is identical whether the slot-ROI table computes its
+        real values or something wildly different — proves this is a pure decision-support
+        annotation attached to the package, never fed back into the solver."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        try:
+            field = _make_field({"Combo": 1.0})
+            catalog = {
+                "Surgical Extraction": HoserCard(
+                    name="Surgical Extraction",
+                    attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(),
+                    max_copies=4,
+                    swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+            }
+            kwargs = dict(
+                con=con, field=field, deck_maindeck={"Brainstorm": 4},
+                solver="greedy", catalog=catalog, archetype="Control", since=self._SINCE,
+            )
+            baseline = recommend_sideboard(**kwargs)
+
+            def _bogus_roi_table(*_a, **_k):
+                return [
+                    MatchupROI(
+                        opponent="Combo", field_share=1.0, base_equity=0.01,
+                        max_equity_gain=0.0, roi_per_slot=-999.0, crosses_half=False,
+                        punt=True, confidence="established",
+                        punt_reason="bogus — test perturbation",
+                    )
+                ]
+
+            monkeypatch.setattr(sb_mod, "_slot_roi_table", _bogus_roi_table)
+            perturbed = recommend_sideboard(**kwargs)
+        finally:
+            con.close()
+
+        assert perturbed.cards == baseline.cards
+        assert perturbed.covered_weight == baseline.covered_weight
+        assert perturbed.solver_used == baseline.solver_used
+        # Sanity: the monkeypatch actually took effect — proves the comparison is meaningful,
+        # not vacuously true because both packages happened to compute the same table anyway.
+        assert perturbed.slot_roi != baseline.slot_roi

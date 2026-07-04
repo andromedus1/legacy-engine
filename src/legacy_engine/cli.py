@@ -2916,6 +2916,50 @@ def advise_sideboard(
         if owned_only and suppressed_count > 0:
             click.echo(f"  [--owned-only: {suppressed_count} acquire-card(s) suppressed]")
 
+        # --- Coverage% diagnostic (feature-sb-field-weighted-scorer-output, Unit B5) ---
+        # Locked decision (parent feature § "Design decisions"): coverage% is a DIAGNOSTIC —
+        # the share of the field a card/board is meaningfully relevant against — never the
+        # optimization objective (that's Σ field_share × Δequity, computed elsewhere). Always
+        # rendered when cards were recommended; independent of whether impact data is present.
+        if display_cards and pkg.card_coverage_pct:
+            click.echo(
+                "  // coverage diagnostic — NOT the optimization objective "
+                "(field-share relevance, not a measured win-rate lift):"
+            )
+            for card, _copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                cov = pkg.card_coverage_pct.get(card)
+                if cov is not None:
+                    click.echo(f"    // {card}: ~{cov:.0%} of field")
+            click.echo(
+                f"  // board coverage diagnostic: ~{pkg.board_coverage_pct:.0%} of field "
+                "addressed by this board (union across cards, not additive)"
+            )
+
+        # --- Explainable per-card impact breakdown + field-share uncertainty (Unit B5) ---
+        # Empty pkg.impact_annotations = no-impact-data path (opponent_linchpins was None) —
+        # nothing rendered, never a fabricated breakdown. confidence/brittle reuse `advise
+        # positioning`'s Dirichlet field-share machinery (honest-degrade: a thin/uncovered
+        # matchup is labeled, never silently treated as solid).
+        if display_cards and pkg.impact_annotations:
+            click.echo("  // impact breakdown (auditable factors — see advisory/impact.py):")
+            for card, _copies in sorted(display_cards.items(), key=lambda kv: kv[1], reverse=True):
+                ann = pkg.impact_annotations.get(card)
+                if ann is None:
+                    continue
+                b = ann.breakdown
+                confidence_label = ann.confidence if ann.confidence is not None else "no-data"
+                brittle_note = (
+                    "  [BRITTLE — thin-sample matchup, don't over-commit a silver bullet]"
+                    if ann.brittle
+                    else ""
+                )
+                click.echo(
+                    f"    // {card} vs {ann.reference_archetype} ({ann.reference_share:.1%} share): "
+                    f"centrality={b.centrality:.2f} symmetry={b.symmetry:.2f} "
+                    f"castability={b.castability:.2f} draw={b.draw_prob:.2f} "
+                    f"→ impact={b.score():.3f}  [confidence={confidence_label}]{brittle_note}"
+                )
+
         click.echo(f"  Note: {pkg.heuristic_note}")
         for w in pkg.warnings:
             click.echo(f"  [warn] {w}")
@@ -2949,6 +2993,138 @@ def advise_sideboard(
                     )
             from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
             click.echo(f"\n  [disclaimer] {_VALUE_DISCLAIMER}")
+
+        # --- Slot-ROI + punt table (feature-sb-slot-roi-punt, Units D1+D2+D3) ---
+        # DECISION SUPPORT ONLY: ranks field matchups by expected match-win per dedicated
+        # slot (marginal equity gain × field share) and flags matchups where investment
+        # doesn't pay — either because max realistic dedication still can't cross 50%, or
+        # because the same slot buys more expected wins elsewhere. Does NOT change which
+        # cards were picked above (see `_slot_roi_table`'s module docstring); a hard rule
+        # never punts a speculative-tier (thin/absent-data) matchup — it is labeled
+        # low-confidence instead.
+        if pkg.slot_roi:
+            click.echo(
+                "\n  // slot-ROI (decision support — expected match-win per dedicated slot):"
+            )
+            for roi in pkg.slot_roi:
+                confidence_label = roi.confidence if roi.confidence is not None else "no-data"
+                punt_marker = f"  [PUNT — {roi.punt_reason}]" if roi.punt else ""
+                click.echo(
+                    f"    // vs {roi.opponent} ({roi.field_share:.1%} share): "
+                    f"{roi.base_equity:.1%} → {roi.base_equity + roi.max_equity_gain:.1%} equity  "
+                    f"ROI/slot={roi.roi_per_slot:.4f}  [confidence={confidence_label}]{punt_marker}"
+                )
+    finally:
+        con.close()
+
+
+@advise.command("backtest")
+@click.option(
+    "--archetype",
+    required=True,
+    help="Archetype to backtest: the scorer's recommendation vs top-finisher boards.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a field file (<share> <archetype> lines) — the field to score "
+         "the recommended board against.",
+)
+@click.option("--since", default=None, help="Window start (ISO date, inclusive).")
+@click.option("--until", default=None, help="Window end (ISO date, exclusive).")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def advise_backtest(
+    archetype: str,
+    field_file: str,
+    since: str | None,
+    until: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Backtest the scorer's recommended sideboard against what top-finishers actually ran.
+
+    The empirical anchor for the sideboard scoring model: compares `recommend_sideboard`'s
+    output for ARCHETYPE + FIELD against the sideboards top-finishing ARCHETYPE decks
+    actually ran in the window. Never a pass/fail verdict — see the caveat line below.
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.backtest import _OBSERVED_THRESHOLD, backtest_board
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.ingestion import store
+
+    field_text = Path(field_file).read_text()
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+        result = backtest_board(con, archetype, field, since=since, until=until)
+
+        click.echo(f"// backtest: {result.archetype}")
+        click.echo(f"// window: since={since or 'earliest'} until={until or 'latest'}")
+        click.echo(f"// top-finisher decks sampled: {result.n_winning_decks}")
+
+        if result.confidence is None:
+            click.echo(
+                "// HONEST DEGRADE: no top-finisher decks found for this archetype/window — "
+                "insufficient data, no comparison possible."
+            )
+        else:
+            click.echo(f"// confidence: {result.confidence}")
+            if result.confidence == "speculative":
+                click.echo(
+                    f"// HONEST DEGRADE: thin winner sample (n={result.n_winning_decks}) — "
+                    "treat findings below as low-confidence."
+                )
+
+        def _render_group(title: str, cards: tuple[str, ...]) -> None:
+            click.echo(f"\n{title} ({len(cards)}):")
+            if not cards:
+                click.echo("  (none)")
+                return
+            for card in cards:
+                pct = result.observed_frequency.get(card, 0.0)
+                click.echo(f"  {card:<32} observed {pct * 100:5.1f}%")
+
+        click.echo(f"\nRecommended board ({len(result.recommended)} cards):")
+        if not result.recommended:
+            click.echo("  (none — scorer produced no recommendation for this archetype/field)")
+        for card in result.recommended:
+            pct = result.observed_frequency.get(card, 0.0)
+            click.echo(f"  {card:<32} observed {pct * 100:5.1f}%")
+
+        _render_group(
+            f"Overlap — recommended AND commonly played (>= {_OBSERVED_THRESHOLD:.0%})",
+            result.overlap,
+        )
+        _render_group(
+            "Scorer-only — recommended but rarely/never played (candidate false positives)",
+            result.scorer_only,
+        )
+        _render_group(
+            "Winners-only — commonly played but not recommended (candidate blind spots)",
+            result.winners_only,
+        )
+
+        n_rec = len(result.recommended)
+        agreement_pct = (len(result.overlap) / n_rec * 100.0) if n_rec else 0.0
+        click.echo(
+            f"\n// agreement: {len(result.overlap)}/{n_rec} recommended cards "
+            f"({agreement_pct:.0f}%) match observed top-finisher boards"
+        )
+        click.echo(
+            "// divergence is a signal to investigate, not proof of error "
+            "(winning boards are self-selected + metagame-lagged)"
+        )
     finally:
         con.close()
 
