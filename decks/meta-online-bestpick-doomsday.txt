@@ -1,0 +1,50 @@
+# DOOMSDAY — online best-pick list (engine-generated, 2026-07-04)
+# Engine's top-ranked archetype for the online field (S*=0.580 — matchup coverage cov≈0 flags
+# thin per-cell data; treat as a lean). Consensus 60: current regime, provenance=online (n=112).
+# Board: engine-optimized vs the online field; natural budget 8/15; includes the UB grind package
+# (Barrowgoyf refill .0029) + Veil/Duress/Flusterstorm protection shell.
+# Overridden out: 1 Defense Grid. Stage-3 (Doomsday Tempo subarchetype) refines this list.
+4 Brainstorm
+1 Cavern of Souls
+1 Consider
+4 Dark Ritual
+2 Daze
+4 Doomsday
+1 Edge of Autumn
+1 Flooded Strand
+4 Flow State
+4 Force of Will
+1 Island
+1 Lion's Eye Diamond
+2 Lotus Petal
+1 Marsh Flats
+1 Misty Rainforest
+1 Murktide Regent
+4 Polluted Delta
+4 Ponder
+1 Scalding Tarn
+2 Street Wraith
+1 Swamp
+4 Tamiyo, Inquisitive Student
+2 Thassa's Oracle
+3 Thoughtseize
+1 Undercity Sewers
+4 Underground Sea
+1 Verdant Catacombs
+
+Sideboard
+1 Abrupt Decay
+1 Barrowgoyf
+1 Bitter Triumph
+1 Carpet of Flowers
+1 Consign to Memory
+1 Dauthi Voidwalker
+1 Duress
+1 Fatal Push
+1 Flusterstorm
+1 Force of Negation
+1 Hydroblast
+1 Long Goodbye
+1 Nihil Spellbomb
+1 Thoughtseize
+1 Veil of Summer
