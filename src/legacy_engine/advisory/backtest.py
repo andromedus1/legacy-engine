@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dc_field
 
 import duckdb
 
@@ -105,6 +105,16 @@ class BoardBacktest:
     field_scope: bool = True                # whether the tournament-level field-overlap filter ran
     n_tournaments_considered: int = 0       # distinct candidate tournaments, post window / pre field filter
     n_tournaments_excluded: int = 0         # of those, how many were dropped as off-field
+    # --- Additive fields (feature-archetype-sweep-backtest, copy-count surfaces) ---
+    # recommended_counts: the scorer's card → copies (the copy dimension ``recommended``
+    #   flattens away). Empty dict when the scorer failed — same degrade as ``recommended``.
+    # observed_copy_distribution: card → {per-deck copies: n_decks} among the same
+    #   top-finisher sample ``observed_frequency`` uses (dupe deck_cards rows summed per
+    #   deck). The 0-copy bucket is derivable as ``n_winning_decks − Σ n_decks`` and is
+    #   deliberately not stored (absence is not a row). Gated-additive: defaults keep every
+    #   existing caller byte-identical.
+    recommended_counts: dict[str, int] = dc_field(default_factory=dict)
+    observed_copy_distribution: dict[str, dict[int, int]] = dc_field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +317,49 @@ def _observed_sideboard_frequency(
     return {name: count / n for name, count in card_deck_count.items()}
 
 
+def _observed_copy_distribution(
+    con: duckdb.DuckDBPyConnection,
+    deck_keys: list[tuple[str, int]],
+) -> dict[str, dict[int, int]]:
+    """Per-card copy-count histogram across ``deck_keys``: card → {copies: n_decks}.
+
+    ``copies`` is the per-deck SUM of ``deck_cards.count`` (dupe rows for one (deck, card)
+    are summed, mirroring how a decklist is actually read). Only decks running the card
+    appear — the 0-copy bucket is ``len(deck_keys) − Σ n_decks``, derivable by the caller.
+    Returns ``{}`` for empty ``deck_keys`` and degrades to ``{}`` on any query failure
+    rather than raising (same contract as ``_observed_sideboard_frequency``).
+    """
+    if not deck_keys:
+        return {}
+    try:
+        values_sql = ", ".join(["(?, ?)"] * len(deck_keys))
+        params: list = [v for pair in deck_keys for v in pair]
+        rows = con.execute(
+            f"""
+            SELECT name, per_deck_copies, count(*) AS n_decks
+            FROM (
+                SELECT dc.tournament_id, dc.deck_idx, dc.name,
+                       SUM(dc.count) AS per_deck_copies
+                FROM deck_cards dc
+                JOIN (VALUES {values_sql}) AS qd(tournament_id, deck_idx)
+                  ON dc.tournament_id = qd.tournament_id AND dc.deck_idx = qd.deck_idx
+                WHERE dc.board = 'side'
+                GROUP BY dc.tournament_id, dc.deck_idx, dc.name
+            )
+            GROUP BY name, per_deck_copies
+            """,
+            params,
+        ).fetchall()
+    except Exception as exc:
+        log.debug("_observed_copy_distribution: query failed: %s", exc)
+        return {}
+
+    out: dict[str, dict[int, int]] = {}
+    for name, copies, n_decks in rows:
+        out.setdefault(name, {})[int(copies)] = int(n_decks)
+    return out
+
+
 def backtest_board(
     con: duckdb.DuckDBPyConnection,
     archetype: str,
@@ -315,6 +368,7 @@ def backtest_board(
     since: str | None = None,
     until: str | None = None,
     field_scope: bool = True,
+    solver: str = "ilp",
 ) -> BoardBacktest:
     """Backtest the scorer's recommended board against top-finisher boards.
 
@@ -332,6 +386,11 @@ def backtest_board(
     archetype set by ``_FIELD_OVERLAP_MIN`` are dropped before computing
     ``observed_frequency`` — see the module docstring's FIELD SCOPING section. Pass
     ``False`` to reproduce the prior (global, unscoped) sample for comparison/debugging.
+
+    ``solver`` (feature-archetype-sweep-backtest) is passed through to
+    ``recommend_sideboard`` unchanged — ``"ilp"`` (default) or ``"greedy"`` (deterministic
+    by name tie-break; the sweep's documented fallback, and useful for greedy-vs-ILP
+    copy-distribution comparison).
 
     Honest-degrade: never raises. A thin or absent top-finisher sample (whether thin from
     the start or thinned BY field-scoping) degrades to a low/absent confidence label
@@ -353,8 +412,10 @@ def backtest_board(
 
     n_winning_decks = len(deck_keys)
     observed_frequency = _observed_sideboard_frequency(con, deck_keys)
+    observed_copy_distribution = _observed_copy_distribution(con, deck_keys)
 
     recommended: tuple[str, ...] = ()
+    recommended_counts: dict[str, int] = {}
     try:
         main_freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
         modal_maindeck = {cf.name: cf.modal_count for cf in main_freqs}
@@ -363,11 +424,14 @@ def backtest_board(
             archetype=archetype,
             since=since,
             until=until,
+            solver=solver,
         )
+        recommended_counts = dict(pkg.cards)
         recommended = tuple(sorted(pkg.cards.keys()))
     except Exception as exc:
         log.debug("backtest_board: recommend_sideboard failed for %r: %s", archetype, exc)
         recommended = ()
+        recommended_counts = {}
 
     overlap = tuple(
         sorted(c for c in recommended if observed_frequency.get(c, 0.0) >= _OBSERVED_THRESHOLD)
@@ -400,4 +464,6 @@ def backtest_board(
         field_scope=field_scope,
         n_tournaments_considered=n_tournaments_considered,
         n_tournaments_excluded=n_tournaments_excluded,
+        recommended_counts=recommended_counts,
+        observed_copy_distribution=observed_copy_distribution,
     )

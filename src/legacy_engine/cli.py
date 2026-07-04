@@ -3161,6 +3161,266 @@ def advise_backtest(
         con.close()
 
 
+@advise.command("sweep")
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a field file (<share> <archetype> lines). Default: the global field "
+         "over the sweep window.",
+)
+@click.option("--since", default=None, help="Window start (ISO date, inclusive).")
+@click.option("--until", default=None, help="Window end (ISO date, exclusive).")
+@click.option(
+    "--min-decks",
+    type=int,
+    default=20,
+    show_default=True,
+    help="Minimum in-window deck count for an archetype to be swept (smaller ones are "
+         "listed as skipped, not silently dropped).",
+)
+@click.option(
+    "--field-scope/--no-field-scope",
+    "field_scope",
+    default=True,
+    help="Restrict each archetype's top-finisher sample to tournaments whose own metagame "
+         "overlaps the field (same filter as `advise backtest`). On by default.",
+)
+@click.option(
+    "--solver",
+    type=click.Choice(["ilp", "greedy"]),
+    default="ilp",
+    show_default=True,
+    help="Sideboard solver to backtest. `greedy` is the deterministic fallback and useful "
+         "for solver-vs-solver copy-distribution comparison.",
+)
+@click.option(
+    "--json",
+    "json_path",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Also write the full machine-readable payload (per-archetype groups, frequencies, "
+         "copy-count histograms, solver copies, clusters) to this path.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def advise_sweep(
+    field_file: str | None,
+    since: str | None,
+    until: str | None,
+    min_decks: int,
+    field_scope: bool,
+    solver: str,
+    json_path: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Backtest EVERY archetype's recommended board and mine divergences, ranked + clustered.
+
+    Batch driver over `advise backtest`: for each archetype with enough in-window corpus,
+    compare the scorer's recommendation against that archetype's top-finisher boards, then
+    aggregate divergences across archetypes into root-cause clusters (by the vulnerability
+    tag a card answers). A card that is winners-only across MANY archetypes is a systematic
+    scorer gap; per-deck noise stays per-deck. Divergence is a diagnostic to investigate,
+    never proof of error and never auto-calibration into scores.
+    """
+    _setup_logging(verbose)
+    import json as json_mod
+    from pathlib import Path
+
+    from legacy_engine.advisory.backtest import _OBSERVED_THRESHOLD
+    from legacy_engine.advisory.field import build_global_field
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.advisory.sweep import (
+        ArchetypeSweepEntry,
+        run_sweep,
+    )
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        # Window: explicit flags win; both-unset resolves to the current ban regime
+        # (echoed below) — the sweep is a current-meta diagnostic by default, unlike the
+        # deliberately unwindowed single-archetype backtest.
+        eff_since, eff_until = since, until
+        window_label = "explicit"
+        if eff_since is None and eff_until is None:
+            from legacy_engine.generation.consensus import _latest_regime_window
+            eff_since, eff_until = _latest_regime_window()
+            window_label = "current regime (default)"
+
+        if field_file is not None:
+            field = _load_field(con, field_text=Path(field_file).read_text())
+        else:
+            field = build_global_field(con, since=eff_since, until=eff_until)
+
+        click.echo("// sweep: archetype-sweep backtest (batch divergence mining)")
+        click.echo(
+            f"// window: since={eff_since or 'earliest'} until={eff_until or 'latest'} "
+            f"[{window_label}]"
+        )
+        click.echo(
+            f"// field: {field.field_source} ({len(field.shares)} archetypes) — "
+            f"field-scope {'ON' if field_scope else 'OFF'}, solver={solver}, "
+            f"min-decks={min_decks}"
+        )
+
+        def _progress(i: int, total: int, entry: ArchetypeSweepEntry) -> None:
+            if entry.backtest is None:
+                click.echo(
+                    f"// [{i}/{total}] {entry.archetype}: SKIPPED — {entry.skipped_reason}"
+                )
+                return
+            bt = entry.backtest
+            tier = bt.confidence if bt.confidence is not None else "no winner sample"
+            click.echo(
+                f"// [{i}/{total}] {entry.archetype}: winners n={bt.n_winning_decks} "
+                f"({tier}) — {len(bt.scorer_only)} scorer-only, "
+                f"{len(bt.winners_only)} winners-only"
+            )
+
+        result = run_sweep(
+            con, field,
+            since=eff_since, until=eff_until,
+            min_decks=min_decks, field_scope=field_scope, solver=solver,
+            progress=_progress,
+        )
+
+        swept = [e for e in result.entries if e.backtest is not None]
+        skipped = [e for e in result.entries if e.backtest is None]
+        click.echo(
+            f"// swept {len(swept)} archetypes ({len(skipped)} skipped); "
+            f"{len(result.clusters)} divergence clusters"
+        )
+        for w in result.warnings:
+            click.echo(f"// WARNING: {w}")
+
+        def _render_clusters(direction: str, title: str) -> None:
+            group = [c for c in result.clusters if c.direction == direction]
+            click.echo(f"\n{title} ({len(group)} clusters):")
+            if not group:
+                click.echo("  (none)")
+                return
+            for rank, c in enumerate(group, start=1):
+                tiers = ", ".join(f"{n} {t}" for t, n in sorted(c.tier_breakdown.items()))
+                thin = "" if c.n_archetypes_nonspeculative > 0 else "  [THIN: speculative-tier support only]"
+                click.echo(
+                    f"  {rank}. {c.tag} — {c.n_archetypes} archetype(s) ({tiers}), "
+                    f"Σ adoption {c.total_adoption * 100:.0f}%{thin}"
+                )
+                by_card: dict[str, list] = {}
+                for m in c.members:
+                    by_card.setdefault(m.card, []).append(m)
+                for card, ms in sorted(
+                    by_card.items(), key=lambda kv: -sum(m.adoption_pct for m in kv[1])
+                ):
+                    archs = ", ".join(
+                        f"{m.archetype} {m.adoption_pct * 100:.0f}%" if m.adoption_pct
+                        else m.archetype
+                        for m in ms
+                    )
+                    click.echo(f"       {card:<28} {len(ms)} archetype(s): {archs}")
+
+        _render_clusters(
+            "winners_only",
+            f"Winners-only clusters — commonly played (>= {_OBSERVED_THRESHOLD:.0%}) but "
+            "not recommended (candidate blind spots)",
+        )
+        _render_clusters(
+            "scorer_only",
+            "Scorer-only clusters — recommended but rarely/never played "
+            "(candidate false positives)",
+        )
+
+        substrate_candidates = [
+            c for c in result.clusters if c.n_archetypes_nonspeculative > 0
+        ][:6]
+        click.echo("\nSubstrate-ready findings (top clusters with non-thin support):")
+        if not substrate_candidates:
+            click.echo("  (none — every cluster is speculative-tier only)")
+        for c in substrate_candidates:
+            cards_preview = ", ".join(sorted({m.card for m in c.members})[:5])
+            click.echo(
+                f"  - [{c.direction}] {c.tag}: {c.n_archetypes} archetype(s), "
+                f"{c.n_archetypes_nonspeculative} non-speculative — e.g. {cards_preview}"
+            )
+
+        click.echo(
+            "\n// divergence is a signal to investigate, not proof of error "
+            "(winning boards are self-selected + metagame-lagged)"
+        )
+
+        if json_path is not None:
+            payload = {
+                "window": {"since": result.window[0], "until": result.window[1]},
+                "field_source": result.field_source,
+                "field_scope": result.field_scope,
+                "solver": result.solver,
+                "min_decks": result.min_decks,
+                "observed_threshold": _OBSERVED_THRESHOLD,
+                "archetypes": [
+                    {
+                        "archetype": e.archetype,
+                        "n_decks_in_window": e.n_decks_in_window,
+                        "skipped_reason": e.skipped_reason,
+                        **(
+                            {
+                                "n_winning_decks": e.backtest.n_winning_decks,
+                                "confidence": e.backtest.confidence,
+                                "n_tournaments_considered": e.backtest.n_tournaments_considered,
+                                "n_tournaments_excluded": e.backtest.n_tournaments_excluded,
+                                "recommended_counts": e.backtest.recommended_counts,
+                                "observed_frequency": e.backtest.observed_frequency,
+                                "observed_copy_distribution": {
+                                    card: {str(k): v for k, v in hist.items()}
+                                    for card, hist in e.backtest.observed_copy_distribution.items()
+                                },
+                                "overlap": list(e.backtest.overlap),
+                                "scorer_only": list(e.backtest.scorer_only),
+                                "winners_only": list(e.backtest.winners_only),
+                            }
+                            if e.backtest is not None
+                            else {}
+                        ),
+                    }
+                    for e in result.entries
+                ],
+                "clusters": [
+                    {
+                        "tag": c.tag,
+                        "direction": c.direction,
+                        "n_archetypes": c.n_archetypes,
+                        "n_archetypes_nonspeculative": c.n_archetypes_nonspeculative,
+                        "total_adoption": c.total_adoption,
+                        "tier_breakdown": c.tier_breakdown,
+                        "members": [
+                            {
+                                "card": m.card,
+                                "archetype": m.archetype,
+                                "adoption_pct": m.adoption_pct,
+                                "confidence": m.confidence,
+                            }
+                            for m in c.members
+                        ],
+                    }
+                    for c in result.clusters
+                ],
+                "warnings": list(result.warnings),
+            }
+            Path(json_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(json_path, "w") as fh:
+                json_mod.dump(payload, fh, indent=2, sort_keys=True)
+            click.echo(f"// json payload written: {json_path}")
+    finally:
+        con.close()
+
+
 @advise.command("whattoplay")
 @click.option(
     "--deck",
