@@ -131,7 +131,9 @@ sign the mechanics are modeling something real:
 
 Do **not** fold winning-board inclusion% into the score. It is tempting (it would "fix" FoN
 instantly) but it regresses the engine to consensus and forfeits the ability to surface mispriced
-cards — the project's reason to exist. All of §1–§3 value flexibility from mechanics (marginal
+cards — the project's reason to exist. (Precision: this guardrail is specifically about
+winning-board inclusion%; the scorer's pre-existing, separately-labeled empirical components — the
+adoption pool filter and presence-correlational swing proxies — are out of this brief's scope.) All of §1–§3 value flexibility from mechanics (marginal
 coverage + Dirichlet tail-robustness), never from observed popularity. The empirical backtest
 (`advisory/backtest.py`) stays a **divergence diagnostic + acceptance gate**: where the model and
 winning boards disagree, that is a flag for a human — *missing mechanic* (fix it) or *genuine edge*

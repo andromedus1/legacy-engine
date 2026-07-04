@@ -41,7 +41,10 @@ This epic fixes the valuation model, using the backtest as the empirical anchor.
   hasn't found. The backtest's role is **diagnostic + acceptance gate only**: model-vs-winning-boards
   divergence is a *flag to investigate* (missing mechanic **or** a genuine edge the engine sees first — a
   human decides which), never an auto-calibration. This preserves the "transparency substitutes for
-  proof" ethos and the ambition to see further than the field.
+  proof" ethos and the ambition to see further than the field. *Scope precision (2026-07-03 review):*
+  the guardrail enforced is specifically **no winning-board inclusion% in scores** (backtest.py never
+  feeds scoring); pre-existing empirical components from earlier epics (the ≥5% adoption pool filter,
+  presence-correlational swing proxies, empirical promotion) remain and are a separate, labeled concern.
 - **Research depth — brief first (DONE).** Blocking brief written:
   [`docs/briefs/scorer-flexibility-valuation.md`](../../docs/briefs/scorer-flexibility-valuation.md).
   Key result: the coverage objective is **already monotone submodular**, so marginal-gain maximization
