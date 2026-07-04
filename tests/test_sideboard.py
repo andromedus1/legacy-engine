@@ -29,10 +29,12 @@ from legacy_engine.advisory.sideboard import (
     _CONSIDERING_CAP,
     _SWING_DEDICATED,
     _SWING_SOFT,
+    _HATE_UNCOVERED_WEIGHT_CAP_RATIO,
     _EMPIRICAL_SWING_CAP,
     _EMPIRICAL_SWING_MIN_LIFT,
     _build_coverage_model,
     _g,
+    _element_sum_marginal_gain,
     _greedy_solve,
     _ilp_solve,
     _ILPFailed,
@@ -413,7 +415,14 @@ class TestCoverageModel:
         assert len(hate_elements) >= 1, "Expected at least one anti-hate pseudo-element"
 
     def test_veil_of_summer_covers_anti_hate_element(self):
-        """Veil of Summer (attacks=_hate) covers the _hate:combo pseudo-element."""
+        """Veil of Summer (attacks=_hate) covers the _hate:combo pseudo-element.
+
+        RE-BASELINED (feature-sfv-weights): this used to be a weak conditional assertion
+        (``if ... in ... : assert ...``) that silently passed if the coverage never happened
+        to materialize — it never actually LOCKED IN the coverability claim. Veil of Summer IS
+        a valid candidate here (colors={G} ⊆ deck_colors={U,G}, no anti-synergy signals
+        supplied) so both preconditions are guaranteed; assert them directly (unconditional)
+        so a real regression in the hate-coverage mechanism can no longer pass silently."""
         field = _make_field({"Reanimator": 0.5, "Storm": 0.5})
         archetype_tags = {
             "Reanimator": frozenset({"graveyard-recursion"}),
@@ -433,8 +442,14 @@ class TestCoverageModel:
             deck_tags=frozenset({"combo"}),
             catalog=catalog,
         )
-        if "_hate:combo" in model.element_weight and "Veil of Summer" in model.candidate_covers:
-            assert "_hate:combo" in model.candidate_covers["Veil of Summer"]
+        assert "_hate:combo" in model.element_weight
+        assert "Veil of Summer" in model.candidate_covers
+        assert "_hate:combo" in model.candidate_covers["Veil of Summer"]
+        # Covered -> full natural weight, NOT the Step 4c uncovered-weight cap.
+        interactive_share = 1.0  # neither Reanimator nor Storm is low-interaction
+        assert model.element_weight["_hate:combo"] == pytest.approx(
+            interactive_share * _SWING_SOFT
+        )
 
     def test_archetype_with_no_catalog_answer_gets_warning(self):
         """An archetype no catalog hoser covers gets no element keys and a warning.
@@ -644,8 +659,113 @@ class TestFunctionalGroupDedup:
 
 
 # ---------------------------------------------------------------------------
-# TestGreedy — marginal-gain ordering, budget, copy bounds
+# TestElementSumMarginalGain — feature-sfv-breadth-objective: the canonical
+# submodular marginal-gain aggregation (Σ over ALL elements a card covers).
 # ---------------------------------------------------------------------------
+
+class TestElementSumMarginalGain:
+    """`_element_sum_marginal_gain` is the one canonical form of the objective's
+    marginal-value quantity, now shared by the greedy solver, the hedge fill, and the
+    considering-pool ranker. These tests lock in the worked arithmetic and the breadth
+    credit it produces, independent of any single consumer."""
+
+    def test_worked_small_case(self):
+        """Hand-worked case: a card covering two elements at different coverage states.
+
+        p = _COVERAGE_P = 0.5 → g(1) = 0.5, g(2) = 0.75.
+        Element "a": weight 0.1, already covered once (cov_e=1) → marginal = g(2)-g(1) = 0.25.
+        Element "b": weight 0.2, uncovered (cov_e=0) → marginal = g(1)-g(0) = 0.5.
+        Expected total = 0.1*0.25 + 0.2*0.5 = 0.025 + 0.10 = 0.125.
+        """
+        hoser = _minimal_hoser("Broad", frozenset({"a", "b"}))
+        model = _make_model(
+            element_weight={"a": 0.1, "b": 0.2},
+            candidate_covers={"Broad": frozenset({"a", "b"})},
+            candidate_meta={"Broad": hoser},
+        )
+        gain = _element_sum_marginal_gain(model, "Broad", {"a": 1, "b": 0})
+        assert gain == pytest.approx(0.125, abs=1e-9)
+        # Cross-check against the primitives directly (not just a hardcoded constant).
+        expected = 0.1 * (_g(2) - _g(1)) + 0.2 * (_g(1) - _g(0))
+        assert gain == pytest.approx(expected, abs=1e-9)
+
+    def test_breadth_credit_flexible_beats_equal_weight_narrow_card(self):
+        """A card covering N elements of weight w each out-scores a card covering only
+        ONE of those same elements — the breadth thesis the epic's locked decision exists
+        to guarantee: total marginal coverage aggregates across every element a card
+        answers, so more genuine breadth (at equal per-element weight) always wins the
+        first pick.
+        """
+        broad = _minimal_hoser("Broad", frozenset({"e1", "e2", "e3", "e4"}))
+        narrow = _minimal_hoser("Narrow", frozenset({"e1"}))
+        model = _make_model(
+            element_weight={"e1": 0.05, "e2": 0.05, "e3": 0.05, "e4": 0.05},
+            candidate_covers={
+                "Broad": frozenset({"e1", "e2", "e3", "e4"}),
+                "Narrow": frozenset({"e1"}),
+            },
+            candidate_meta={"Broad": broad, "Narrow": narrow},
+        )
+        cov_counts: dict[str, int] = {}
+        broad_gain = _element_sum_marginal_gain(model, "Broad", cov_counts)
+        narrow_gain = _element_sum_marginal_gain(model, "Narrow", cov_counts)
+        assert broad_gain == pytest.approx(4 * narrow_gain, abs=1e-9)
+        assert broad_gain > narrow_gain
+        # And the greedy solver actually picks the breadth card first as a result.
+        picks, trace = _greedy_solve(model, budget=1)
+        assert trace[0].card == "Broad"
+        assert trace[0].marginal_gain == pytest.approx(broad_gain, abs=1e-9)
+
+    def test_excludes_nonpositive_and_missing_weight_elements(self):
+        """Elements with weight ≤ 0 or absent from the weight map contribute nothing —
+        matching every existing call site's `if w > 0.0` filter."""
+        hoser = _minimal_hoser("Card", frozenset({"zero", "missing", "real"}))
+        model = _make_model(
+            element_weight={"zero": 0.0, "real": 0.1},  # "missing" absent entirely
+            candidate_covers={"Card": frozenset({"zero", "missing", "real"})},
+            candidate_meta={"Card": hoser},
+        )
+        gain = _element_sum_marginal_gain(model, "Card", {})
+        assert gain == pytest.approx(0.1 * _g(1), abs=1e-9)
+
+    def test_unknown_card_returns_zero(self):
+        """A card name absent from candidate_covers returns 0.0 rather than raising —
+        callers don't need to pre-check membership."""
+        model = _make_model(element_weight={}, candidate_covers={}, candidate_meta={})
+        assert _element_sum_marginal_gain(model, "Nobody", {}) == 0.0
+
+    def test_weights_override_used_instead_of_model_weights(self):
+        """The `weights=` override (used by `_hedge_fill`'s uniform-widened field) replaces
+        `model.element_weight` entirely, rather than merging with it."""
+        hoser = _minimal_hoser("Card", frozenset({"e1"}))
+        model = _make_model(
+            element_weight={"e1": 0.9},  # would dominate if NOT overridden
+            candidate_covers={"Card": frozenset({"e1"})},
+            candidate_meta={"Card": hoser},
+        )
+        overridden = _element_sum_marginal_gain(model, "Card", {}, weights={"e1": 0.2})
+        assert overridden == pytest.approx(0.2 * _g(1), abs=1e-9)
+
+    def test_consistent_with_greedy_across_a_multi_step_run(self):
+        """The greedy solver's per-step `marginal_gain` must equal a fresh, independent
+        call to `_element_sum_marginal_gain` at that exact coverage state — proving the
+        solver's internal loop and the canonical function have not drifted apart."""
+        h_a = _minimal_hoser("A", frozenset({"e1", "e2"}), max_copies=2)
+        h_b = _minimal_hoser("B", frozenset({"e2"}), max_copies=2)
+        model = _make_model(
+            element_weight={"e1": 0.05, "e2": 0.30},
+            candidate_covers={"A": frozenset({"e1", "e2"}), "B": frozenset({"e2"})},
+            candidate_meta={"A": h_a, "B": h_b},
+        )
+        picks, trace = _greedy_solve(model, budget=4)
+        cov_counts: dict[str, int] = {}
+        for pt in trace:
+            # Recompute independently BEFORE applying this pick's coverage delta.
+            recomputed = _element_sum_marginal_gain(model, pt.card, cov_counts)
+            assert pt.marginal_gain == pytest.approx(recomputed, abs=1e-9)
+            for e in model.candidate_covers[pt.card]:
+                cov_counts[e] = cov_counts.get(e, 0) + 1
+
 
 class TestGreedy:
     """Tests use hand-built CoverageModel instances for exact arithmetic."""
@@ -1373,6 +1493,159 @@ class TestRegressionPeerReviewFixes:
 
 
 # ---------------------------------------------------------------------------
+# TestHateCoverability — feature-sfv-weights: make `_hate:` self-protection coverable,
+# and cap it when it genuinely isn't.
+# ---------------------------------------------------------------------------
+
+
+class TestHateCoverability:
+    """A `_hate:` pseudo-element that IS covered by a surviving candidate keeps its full
+    natural weight (real self-protection = real coverage); one that ends up with ZERO
+    covering candidate (color/anti-synergy exclusion) is capped relative to the model's own
+    real coverage scale so it can't crowd out every actual opponent need (brief §2, D2)."""
+
+    # A field split so the real "Storm|combo" element (weighted by Storm's OWN, small share)
+    # is much smaller than the hate weight (weighted by the WHOLE interactive field share) —
+    # the shape that actually needs capping.  "Aggro" carries a tag no catalog hoser attacks
+    # (so it contributes no real element) but is NOT low-interaction, so it still counts
+    # toward interactive_share the way any non-low-interaction archetype would.
+    _FIELD = {"Storm": 0.2, "Aggro": 0.8}
+    _ARCHETYPE_TAGS = {"Storm": frozenset({"combo"}), "Aggro": frozenset({"creature-based"})}
+
+    def test_covered_hate_element_keeps_full_weight_alongside_real_coverage(self, make_hoser):
+        """A deck with BOTH real opponent coverage AND a castable, non-self-hosing protective
+        card: the hate element is covered -> NOT capped, even though its natural weight
+        exceeds the single real element's weight."""
+        field = _make_field(self._FIELD)
+        catalog = {
+            # Real opponent coverage: Storm's own (small) field share limits this weight.
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}),
+                colors=frozenset({"U"}), swing=_SWING_SOFT,
+            ),
+            # Colorless, non-self-hosing counter-hoser: always a valid candidate here.
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        model = _build_coverage_model(
+            field, self._ARCHETYPE_TAGS,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            # No anti_synergy_signals -> Defense Grid is NOT filtered (not marked reactive).
+        )
+        hate_key = "_hate:combo"
+        assert hate_key in model.element_weight
+        assert "Defense Grid" in model.candidate_covers
+        assert hate_key in model.candidate_covers["Defense Grid"]
+        # Full natural weight — interactive_share(Storm+Aggro)=1.0 × _SWING_SOFT — NOT capped
+        # down to the (smaller) real "Storm|combo" element weight (0.2 × _SWING_SOFT).
+        assert model.element_weight[hate_key] == pytest.approx(1.0 * _SWING_SOFT)
+        assert model.element_weight[hate_key] > model.element_weight["Storm|combo"]
+        assert not any(w.startswith("// hate-uncovered:") for w in model.warnings)
+
+    def test_uncovered_hate_element_is_capped_to_real_coverage_scale(self, make_hoser):
+        """The the maintainer's-Dimir-Tempo shape: a reactive UB deck where the only catalog `_hate`
+        card (Defense Grid) is anti-synergy-filtered (self-hoses a reactive deck), so the
+        `_hate:combo` pseudo-element ends up with ZERO covering candidate. Its natural weight
+        (which would otherwise dwarf real opponent coverage) is capped at
+        `_HATE_UNCOVERED_WEIGHT_CAP_RATIO` × the largest real element weight."""
+        field = _make_field(self._FIELD)
+        catalog = {
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}),
+                colors=frozenset({"U"}), swing=_SWING_SOFT,
+            ),
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        signals = DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=True)
+        model = _build_coverage_model(
+            field, self._ARCHETYPE_TAGS,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            anti_synergy_signals=signals,
+        )
+        hate_key = "_hate:combo"
+        assert "Defense Grid" not in model.candidate_covers, "anti-synergy must still filter it"
+        assert not any(
+            hate_key in covers for covers in model.candidate_covers.values()
+        ), "no candidate should cover _hate:combo in this scenario"
+
+        real_weight = model.element_weight["Storm|combo"]
+        natural_weight = 1.0 * _SWING_SOFT  # what it would be, uncapped
+        assert natural_weight > real_weight, "the scenario must actually need capping"
+        assert model.element_weight[hate_key] == pytest.approx(
+            _HATE_UNCOVERED_WEIGHT_CAP_RATIO * real_weight
+        )
+        assert model.element_weight[hate_key] < natural_weight
+        assert any(w.startswith(f"// hate-uncovered: capped {hate_key}") for w in model.warnings)
+
+    def test_no_real_elements_leaves_uncovered_hate_weight_uncapped(self, make_hoser):
+        """When the model has NO real (archetype, tag) elements at all, there is nothing to
+        size a cap against — the natural hate weight is left as-is (not zeroed)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"storm-reliant"})}  # no hoser attacks this tag
+        catalog = {
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        signals = DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=True)
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            anti_synergy_signals=signals,
+        )
+        assert not any(k for k in model.element_weight if "|" in k), "no real elements exist"
+        assert model.element_weight["_hate:combo"] == pytest.approx(1.0 * _SWING_SOFT)
+        assert not any(w.startswith("// hate-uncovered:") for w in model.warnings)
+
+    def test_hate_counter_hoser_exempt_from_empirical_pool_filter(self, make_hoser):
+        """A counter-hoser NOT in the empirical pool still covers `_hate:` elements — self-
+        protection castability doesn't need corpus-adoption validation the way an opponent-
+        facing hoser does (mirrors the maindeck-discount exemption for `_hate:` elements)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        # Empirical pool excludes Defense Grid entirely (0% real-world adoption).
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            empirical_pool=frozenset(),  # nothing is in the pool
+        )
+        assert "Defense Grid" in model.candidate_covers, (
+            "empirical_pool must not filter out a _hate counter-hoser"
+        )
+        assert "_hate:combo" in model.candidate_covers["Defense Grid"]
+
+    def test_non_hate_card_still_filtered_by_empirical_pool(self, make_hoser):
+        """The empirical-pool exemption is scoped to `_hate` cards only — an ordinary
+        opponent-facing hoser is still dropped when it's not in the pool."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}), colors=frozenset({"U"}),
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset(),
+            catalog=catalog,
+            empirical_pool=frozenset(),  # Flusterstorm not in the (empty) pool
+        )
+        assert "Flusterstorm" not in model.candidate_covers
+
+
+# ---------------------------------------------------------------------------
 # TestSaturatingCoverage — new tests for the g(n) = 1-(1-p)^n objective
 # ---------------------------------------------------------------------------
 
@@ -2034,15 +2307,20 @@ class TestImpactModulatedWeighting:
             },
         )
         # No data -> centrality floors at _CENTRALITY_BASELINE; a confirmed hit -> full 1.0.
-        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless, draw_prob(copies=1)
-        # is the same fixed factor on both sides, so it cancels in the ratio but must still
-        # be included in the absolute expected value.)
-        draw_prob_1 = _draw_probability(1)
+        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless.)
+        #
+        # RE-BASELINED (feature-sfv-weights): the element weight no longer carries the
+        # draw_prob(copies=1)≈0.4 factor — it used centrality × symmetry × castability ×
+        # draw_prob (``.score()``) before this feature and now uses ``.score_without_draw_prob()``
+        # (centrality × symmetry × castability only). The draw_prob factor was uniform across
+        # both sides of this comparison so it never affected the RATIO assertion below, but the
+        # ABSOLUTE expected values here must drop it to match the new (un-deflated) magnitude —
+        # this is the deflation fix itself, not a loosened assertion.
         assert pytest.approx(no_data.element_weight[key]) == (
-            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE * draw_prob_1
+            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE
         )
         assert pytest.approx(linchpin_hit.element_weight[key]) == (
-            1.0 * _SWING_DEDICATED * 1.0 * draw_prob_1
+            1.0 * _SWING_DEDICATED * 1.0
         )
         assert linchpin_hit.element_weight[key] > no_data.element_weight[key]
         assert pytest.approx(linchpin_hit.element_weight[key] / no_data.element_weight[key]) == (
@@ -3717,6 +3995,75 @@ class TestDeriveAttacksForPromoted:
         assert "combo" in attacks, f"Expected 'combo' in {attacks}"
         assert "storm-reliant" in attacks, f"Expected 'storm-reliant' in {attacks}"
 
+    def test_broad_anti_noncreature_maps_to_noncreature_reliant(self):
+        """Spell Pierce-style 'counter target noncreature spell' → noncreature-reliant,
+        the feature-sfv-attachments broad-interaction axis — distinct from (additive to)
+        the narrower combo/storm-reliant tags rule 1 already adds for any counter."""
+        attacks = _derive_attacks_for_promoted(
+            "Spell Pierce",
+            "Counter target noncreature spell unless its controller pays {2}.",
+            "Instant",
+        )
+        assert "noncreature-reliant" in attacks, f"Expected 'noncreature-reliant' in {attacks}"
+        assert "combo" in attacks and "storm-reliant" in attacks, (
+            f"Generic counter-magic rule (1) should still fire alongside it; got {attacks}"
+        )
+
+    def test_generic_counter_without_noncreature_restriction_is_not_tagged(self):
+        """A counter that does NOT restrict to noncreature spells ('counter target spell')
+        does not get the specific noncreature-reliant tag — only the narrower phrase
+        template ('counter target noncreature spell') does."""
+        attacks = _derive_attacks_for_promoted(
+            "Generic Counter", "Counter target spell.", "Instant",
+        )
+        assert "noncreature-reliant" not in attacks, f"Unexpected 'noncreature-reliant' in {attacks}"
+
+    def test_consign_to_memory_real_oracle_text_maps_to_colorless_reliant(self):
+        """Consign to Memory's real oracle text ('Counter target triggered ability or
+        colorless spell.') → colorless-reliant, additive on top of rule 1's combo/
+        storm-reliant (feature-sfv-colorless-axis)."""
+        attacks = _derive_attacks_for_promoted(
+            "Consign to Memory",
+            "Replicate {1} (When you cast this spell, copy it for each time you paid its "
+            "replicate cost. You may choose new targets for the copies.) Counter target "
+            "triggered ability or colorless spell.",
+            "Instant",
+        )
+        assert "colorless-reliant" in attacks, f"Expected 'colorless-reliant' in {attacks}"
+        assert "combo" in attacks and "storm-reliant" in attacks, (
+            f"Generic counter-magic rule (1) should still fire alongside it; got {attacks}"
+        )
+        assert "noncreature-reliant" not in attacks, (
+            f"Consign's restriction is colorless/triggered-ability, not noncreature; "
+            f"got {attacks}"
+        )
+
+    def test_ceremonious_rejection_style_maps_to_colorless_reliant(self):
+        """A pure colorless-counter template ('Counter target colorless spell.') →
+        colorless-reliant (feature-sfv-colorless-axis)."""
+        attacks = _derive_attacks_for_promoted(
+            "Ceremonious Rejection", "Counter target colorless spell.", "Instant",
+        )
+        assert "colorless-reliant" in attacks, f"Expected 'colorless-reliant' in {attacks}"
+
+    def test_generic_counter_without_colorless_restriction_is_not_tagged(self):
+        """A counter that does NOT restrict to colorless spells ('counter target spell')
+        does not get colorless-reliant — only the narrower colorless-spell phrase does."""
+        attacks = _derive_attacks_for_promoted(
+            "Generic Counter", "Counter target spell.", "Instant",
+        )
+        assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
+
+    def test_noncreature_counter_does_not_get_colorless_reliant(self):
+        """Force of Negation / Spell Pierce's noncreature restriction is orthogonal to
+        colorless — 'counter target noncreature spell' must not also fire colorless-reliant."""
+        attacks = _derive_attacks_for_promoted(
+            "Spell Pierce",
+            "Counter target noncreature spell unless its controller pays {2}.",
+            "Instant",
+        )
+        assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
+
     def test_graveyard_exile_maps_to_graveyard_recursion(self):
         """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
@@ -4128,8 +4475,17 @@ class TestMaindeckAwareCoverageIntegration:
 # ---------------------------------------------------------------------------
 
 def _build_fon_corpus():
-    """Corpus: Dimir Tempo archetype with Force of Negation + Consign to Memory
-    in >5% of sideboards.  Both cards are absent from HOSER_CATALOG.
+    """Corpus: Dimir Tempo archetype with Force of Negation + Consign to Memory + Daze
+    in >5% of sideboards.
+
+    NOTE (feature-sfv-attachments): Force of Negation and Consign to Memory are now
+    curated HOSER_CATALOG entries (added in this feature and feature-hoser-catalog-
+    expansion respectively) — they surface via the catalog path, not promotion.  ``Daze``
+    (also free_interaction, also absent from HOSER_CATALOG) is the promotion-mechanism
+    example card for tests that specifically exercise the "absent from catalog → promoted
+    from the empirical pool" boundary; FoN/Consign remain in the corpus for tests that only
+    check they're surfaced by ``recommend_sideboard`` (true regardless of catalog vs
+    promoted path).
 
     Also seeds Reanimator and ANT Storm decks with appropriate cards so
     ``field_vulnerability_tags`` can classify them (needed for the recommend_sideboard
@@ -4160,6 +4516,16 @@ def _build_fon_corpus():
             type_line="Instant",
             oracle_text="Counter target spell. If you control no permanents, draw a card.",
             cmc=1.0,
+            colors=["U"],
+        ),
+        Card(
+            name="Daze",
+            type_line="Instant",
+            oracle_text=(
+                "You may return an Island you control to its owner's hand rather than pay "
+                "this spell's mana cost. Counter target spell unless its controller pays {1}."
+            ),
+            cmc=2.0,
             colors=["U"],
         ),
         # --- Catalog card also run by Dimir Tempo ---
@@ -4257,7 +4623,9 @@ def _build_fon_corpus():
         for card_name, count in [("Brainstorm", 4), ("Underground Sea", 4)]:
             con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
                         [tid, idx, "main", card_name, count])
-        for card_name, count in [("Force of Negation", 2), ("Consign to Memory", 1), ("Surgical Extraction", 2)]:
+        for card_name, count in [
+            ("Force of Negation", 2), ("Consign to Memory", 1), ("Daze", 2), ("Surgical Extraction", 2),
+        ]:
             con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
                         [tid, idx, "side", card_name, count])
         idx += 1
@@ -4302,14 +4670,20 @@ class TestBuildPromotedCandidates:
         con.close()
 
     def test_promotes_fon_not_in_catalog_consign_in_catalog(self):
-        """Force of Negation (absent from catalog) is promoted; Consign to Memory is now a catalog
-        card (added in feature-hoser-catalog-expansion) so it is NOT promoted."""
+        """Daze (absent from catalog) is promoted; Consign to Memory AND Force of Negation
+        are now catalog cards (feature-hoser-catalog-expansion / feature-sfv-attachments)
+        so neither is promoted."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation", "Consign to Memory", "Surgical Extraction"})
-        freq_map = {"Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
+        pool = frozenset({"Daze", "Force of Negation", "Consign to Memory", "Surgical Extraction"})
+        freq_map = {"Daze": 2, "Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
         promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        assert "Force of Negation" in promoted, (
-            "Force of Negation (absent from catalog) must be promoted"
+        assert "Daze" in promoted, "Daze (absent from catalog) must be promoted"
+        # Force of Negation is now in HOSER_CATALOG (feature-sfv-attachments) → NOT promoted
+        assert "Force of Negation" not in promoted, (
+            "Force of Negation (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be in HOSER_CATALOG as a catalog entry"
         )
         # Consign to Memory is now in HOSER_CATALOG → NOT promoted (catalog card)
         assert "Consign to Memory" not in promoted, (
@@ -4325,46 +4699,48 @@ class TestBuildPromotedCandidates:
         con.close()
 
     def test_promoted_fon_attacks_combo_and_storm(self):
-        """Promoted Force of Negation has attacks ⊇ {combo, storm-reliant}."""
+        """Promoted Daze (free_interaction, absent from catalog) has attacks ⊇
+        {combo, storm-reliant} — the promotion-mechanism example card since Force of
+        Negation is now a curated catalog entry (feature-sfv-attachments)."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 2}
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 2}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        assert "Force of Negation" in promoted
-        fon = promoted["Force of Negation"]
-        assert "combo" in fon.attacks, f"Expected 'combo' in FoN attacks; got {fon.attacks}"
-        assert "storm-reliant" in fon.attacks, f"Expected 'storm-reliant' in FoN attacks; got {fon.attacks}"
+        assert "Daze" in promoted
+        daze = promoted["Daze"]
+        assert "combo" in daze.attacks, f"Expected 'combo' in Daze attacks; got {daze.attacks}"
+        assert "storm-reliant" in daze.attacks, f"Expected 'storm-reliant' in Daze attacks; got {daze.attacks}"
         con.close()
 
     def test_promoted_fon_is_blue(self):
-        """Promoted Force of Negation has colors={'U'}."""
+        """Promoted Daze has colors={'U'}."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 2}
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 2}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.colors == frozenset({"U"}), f"Expected colors={{'U'}}; got {fon.colors}"
+        daze = promoted["Daze"]
+        assert daze.colors == frozenset({"U"}), f"Expected colors={{'U'}}; got {daze.colors}"
         con.close()
 
     def test_promoted_max_copies_from_freq_map(self):
         """Promoted card's max_copies comes from freq_map (modal count), capped at 4."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
+        pool = frozenset({"Daze"})
         # modal_count=3
-        freq_map = {"Force of Negation": 3}
+        freq_map = {"Daze": 3}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.max_copies == 3, f"Expected max_copies=3 from freq_map; got {fon.max_copies}"
+        daze = promoted["Daze"]
+        assert daze.max_copies == 3, f"Expected max_copies=3 from freq_map; got {daze.max_copies}"
         con.close()
 
     def test_promoted_max_copies_capped_at_4(self):
         """modal_count > 4 is capped at 4."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 10}  # unrealistically large
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 10}  # unrealistically large
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.max_copies <= 4, f"max_copies must be capped at 4; got {fon.max_copies}"
+        daze = promoted["Daze"]
+        assert daze.max_copies <= 4, f"max_copies must be capped at 4; got {daze.max_copies}"
         con.close()
 
     def test_promoted_card_not_in_db_uses_fallback(self):
@@ -4434,12 +4810,12 @@ class TestEmpiricalPromotion:
         con.close()
 
     def test_fon_or_consign_in_candidate_universe(self):
-        """FoN/Consign are accessible in the candidate universe.
+        """Daze/Consign are accessible in the candidate universe.
 
-        Consign to Memory was added to HOSER_CATALOG in feature-hoser-catalog-expansion,
-        so it is now a catalog card (not a promoted card).  FoN remains absent from the
-        catalog and is promoted from the empirical pool.  Both must appear in the empirical
-        pool.
+        Consign to Memory (feature-hoser-catalog-expansion) and Force of Negation
+        (feature-sfv-attachments) are now catalog cards (not promoted cards).  Daze
+        remains absent from the catalog and is promoted from the empirical pool.  All
+        three must appear in the empirical pool.
         """
         con, archetype = _build_fon_corpus()
         from legacy_engine.advisory.sideboard import (
@@ -4452,13 +4828,20 @@ class TestEmpiricalPromotion:
         freq_map = {f.name: f.modal_count for f in freqs}
         pool = frozenset(f.name for f in freqs if f.inclusion_pct >= _EMPIRICAL_POOL_MIN_ADOPTION)
 
+        assert "Daze" in pool, "Daze must appear in empirical pool"
         assert "Force of Negation" in pool, "FoN must appear in empirical pool"
         assert "Consign to Memory" in pool, "Consign must appear in empirical pool"
 
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        # FoN is absent from HOSER_CATALOG → promoted from empirical pool
-        assert "Force of Negation" in promoted, "FoN must be promoted (not in catalog)"
-        # Consign is now in HOSER_CATALOG → NOT promoted (catalog card); verify catalog membership
+        # Daze is absent from HOSER_CATALOG → promoted from empirical pool
+        assert "Daze" in promoted, "Daze must be promoted (not in catalog)"
+        # FoN and Consign are now in HOSER_CATALOG → NOT promoted (catalog cards)
+        assert "Force of Negation" not in promoted, (
+            "Force of Negation (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be present in HOSER_CATALOG as a catalog entry"
+        )
         assert "Consign to Memory" not in promoted, (
             "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
         )
@@ -4496,13 +4879,18 @@ class TestEmpiricalPromotion:
         assert set(pkg_no_arch.cards.keys()) == set(pkg_catalog.cards.keys()), (
             "archetype=None must produce catalog-only output (no promotion)"
         )
-        # FoN must NOT appear (not in catalog; no promotion without archetype)
-        assert "Force of Negation" not in pkg_no_arch.cards, (
-            "FoN must NOT appear when archetype=None (gated-additive no-op)"
+        # Daze must NOT appear (not in catalog; no promotion without archetype) — the
+        # gated-additive no-op example card now that Force of Negation is a catalog entry.
+        assert "Daze" not in pkg_no_arch.cards, (
+            "Daze must NOT appear when archetype=None (gated-additive no-op)"
         )
-        # Consign to Memory is now in HOSER_CATALOG — it CAN appear via the catalog path
-        # even without archetype (not gated by the promotion mechanism).
-        # The gated-additive no-op only applies to empirically-promoted cards like FoN.
+        # Force of Negation / Consign to Memory are now in HOSER_CATALOG — they CAN appear
+        # via the catalog path even without archetype (not gated by the promotion
+        # mechanism).  The gated-additive no-op only applies to empirically-promoted
+        # cards like Daze.
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be a catalog card (not gated by empirical promotion)"
+        )
         assert "Consign to Memory" in HOSER_CATALOG, (
             "Consign to Memory must be a catalog card (not gated by empirical promotion)"
         )
@@ -5162,12 +5550,46 @@ class TestHoserCatalogExpansion:
     # ── (b) New staples present with correct tags ─────────────────────────────
 
     def test_consign_to_memory_attacks_combo_and_storm(self):
-        """Consign to Memory → combo + storm-reliant (new catalog entry)."""
+        """Consign to Memory → combo + storm-reliant + colorless-reliant (feature-sfv-
+        colorless-axis added colorless-reliant on top of the pre-existing combo/storm-reliant
+        catalog entry — the colorless-spell half of its oracle text is now attached)."""
         assert "Consign to Memory" in HOSER_CATALOG
         h = HOSER_CATALOG["Consign to Memory"]
         assert "combo" in h.attacks
         assert "storm-reliant" in h.attacks
+        assert "colorless-reliant" in h.attacks
         assert frozenset({"U"}) == h.colors
+
+    def test_consign_vs_fon_complement_on_colorless_axis(self):
+        """Consign and Force of Negation attack genuinely different axes, not a subset
+        relationship (feature-sfv-colorless-axis closes the tag-subset-dominance gap the
+        epic's acceptance oracle named).
+
+        FoN's oracle text ("Counter target noncreature spell.") answers noncreature spells
+        of ANY color, including colorless ones — but it does not specifically call out
+        "colorless spell", so it does NOT carry colorless-reliant. Consign's oracle text
+        ("Counter target triggered ability or colorless spell.") specifically answers
+        colorless spells AND triggered abilities (Saga chapters, storm-count triggers,
+        Chalice triggers) — noncreature-restriction is irrelevant to it, so it does not
+        carry noncreature-reliant. Neither card's attack set is a subset of the other's.
+        """
+        consign = HOSER_CATALOG["Consign to Memory"]
+        fon = HOSER_CATALOG["Force of Negation"]
+        assert "colorless-reliant" in consign.attacks
+        assert "colorless-reliant" not in fon.attacks, (
+            "FoN answers noncreature spells of any color, but its oracle text does not "
+            "specifically restrict to colorless spells — it must not carry colorless-reliant"
+        )
+        assert "noncreature-reliant" in fon.attacks
+        assert "noncreature-reliant" not in consign.attacks, (
+            "Consign's colorless/triggered-ability restriction is orthogonal to creature "
+            "type — it must not carry noncreature-reliant"
+        )
+        assert not consign.attacks <= fon.attacks, (
+            "Consign must no longer be a strict tag subset of FoN (the tag-subset-dominance "
+            "mechanism the epic's acceptance oracle identified)"
+        )
+        assert not fon.attacks <= consign.attacks
 
     def test_engineered_explosives_attacks_combo_and_greedy_manabase(self):
         """Engineered Explosives → combo + greedy-manabase + creature-based; colorless."""
@@ -5405,6 +5827,108 @@ class TestHoserCatalogExpansion:
         )
         assert "Toxic Deluge" in model.candidate_covers, (
             "Toxic Deluge (B, creature-based) must be in candidate set for UB deck"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestAttachmentsFeature — feature-sfv-attachments: the 3 new catalog entries
+# (Force of Negation, Spell Pierce, Mystical Dispute) load with correct attribution,
+# and a flexible counter's broad-interaction attachment reaches multiple archetypes.
+# ---------------------------------------------------------------------------
+
+class TestAttachmentsFeature:
+    """Spec-derived — new catalog entries + multi-archetype broad-interaction attachment."""
+
+    # ── New catalog entries load with correct attribution ──────────────────────
+
+    def test_force_of_negation_catalog_entry(self):
+        assert "Force of Negation" in HOSER_CATALOG, "Force of Negation missing from catalog"
+        h = HOSER_CATALOG["Force of Negation"]
+        assert h.attacks == frozenset({"combo", "storm-reliant", "noncreature-reliant"}), (
+            f"Unexpected attacks for Force of Negation: {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_DEDICATED)
+        assert h.max_copies == 4
+        assert h.symmetry == "asymmetric"
+
+    def test_spell_pierce_catalog_entry(self):
+        assert "Spell Pierce" in HOSER_CATALOG, "Spell Pierce missing from catalog"
+        h = HOSER_CATALOG["Spell Pierce"]
+        assert h.attacks == frozenset({"combo", "storm-reliant", "noncreature-reliant"}), (
+            f"Unexpected attacks for Spell Pierce: {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_SOFT)
+        assert h.symmetry == "asymmetric"
+
+    def test_mystical_dispute_catalog_entry(self):
+        assert "Mystical Dispute" in HOSER_CATALOG, "Mystical Dispute missing from catalog"
+        h = HOSER_CATALOG["Mystical Dispute"]
+        assert h.attacks == frozenset({"plays-blue"}), (
+            f"Mystical Dispute must be plays-blue-contingent only; got {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_SOFT)
+        assert h.symmetry == "asymmetric"
+
+    # ── Broad-interaction attribution reaches multiple, previously-unreachable archetypes ──
+
+    def test_force_of_negation_attaches_to_combo_and_control_plurality(self):
+        """A flexible free counter must attach to BOTH a combo archetype (via combo/
+        storm-reliant) AND a control archetype that carries no combo/storm-reliant/
+        plays-blue tag at all (via noncreature-reliant) — the exact D3 gap this feature
+        closes: previously a control archetype was invisible to Force of Negation."""
+        field = _make_field({"ANT Storm": 0.4, "Azorius Control": 0.4, "Elves": 0.2})
+        archetype_tags = {
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Azorius Control": frozenset({"noncreature-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Force of Negation" in model.candidate_covers, (
+            "Force of Negation must be a UB-legal candidate"
+        )
+        covered = model.candidate_covers["Force of Negation"]
+        covered_archetypes = {key.split("|", 1)[0] for key in covered if "|" in key}
+        assert "ANT Storm" in covered_archetypes, (
+            f"Force of Negation must attach to the combo archetype; covered={covered}"
+        )
+        assert "Azorius Control" in covered_archetypes, (
+            f"Force of Negation must attach to the control archetype via noncreature-reliant "
+            f"even though it carries no combo/storm-reliant tag; covered={covered}"
+        )
+        assert "Elves" not in covered_archetypes, (
+            f"Force of Negation must not attach to the creature-based archetype; covered={covered}"
+        )
+
+    def test_mystical_dispute_attaches_only_to_plays_blue_archetypes(self):
+        """Mystical Dispute (plays-blue-contingent) attaches to a blue-heavy opponent and
+        NOT to a combo archetype that carries no plays-blue tag — narrower, single-axis
+        attribution, distinct from Force of Negation's broad attachment."""
+        field = _make_field({"Azorius Miracles": 0.5, "ANT Storm": 0.5})
+        archetype_tags = {
+            "Azorius Miracles": frozenset({"plays-blue", "noncreature-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        covered = model.candidate_covers.get("Mystical Dispute", frozenset())
+        covered_archetypes = {key.split("|", 1)[0] for key in covered if "|" in key}
+        assert "Azorius Miracles" in covered_archetypes, (
+            f"Mystical Dispute must attach to the plays-blue archetype; covered={covered}"
+        )
+        assert "ANT Storm" not in covered_archetypes, (
+            f"Mystical Dispute must not attach to a non-blue combo archetype; covered={covered}"
         )
 
 
@@ -6432,6 +6956,29 @@ class TestHedgeAllocator:
         ins = _hedge_fill(self._three_element_model(), {"Top": 4, "Alt": 1}, budget=5)
         assert ins == {}
 
+    def test_hedge_credits_breadth_via_canonical_gain(self):
+        """feature-sfv-breadth-objective: the hedge fill's insurance pick also aggregates a
+        card's marginal gain across every element it covers (via `_element_sum_marginal_gain`,
+        weights=widened-toward-uniform) — a card covering two uncovered elements outranks one
+        covering only a single uncovered element of the same per-element weight."""
+        broad = _minimal_hoser("Broad", frozenset({"e2", "e3"}))
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.5, "e3": 0.5},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Broad": frozenset({"e2", "e3"}),
+                "Alt": frozenset({"e2"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Broad": broad,
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+            },
+        )
+        # Core commits Top only; one flex slot left — the hedge must choose between
+        # Broad (covers both e2 and e3) and Alt (covers only e2).
+        ins = _hedge_fill(model, {"Top": 1}, budget=2)
+        assert ins == {"Broad": 1}, f"breadth-aggregating pick should win the single flex slot: {ins}"
+
     def test_recommend_sideboard_hedge_off_no_insurance(self):
         con = TestRedundancyDecay._gy_field_corpus()
         try:
@@ -7159,3 +7706,408 @@ class TestSlotROIRecommendSideboardIntegration:
         # Sanity: the monkeypatch actually took effect — proves the comparison is meaningful,
         # not vacuously true because both packages happened to compute the same table anyway.
         assert perturbed.slot_roi != baseline.slot_roi
+
+
+# ---------------------------------------------------------------------------
+# feature-sfv-option-value: CVaR-style tail-robustness option value over the Dirichlet
+# field. Reuses `_dirichlet_share_lower_bound`'s closed-form Beta-marginal machinery
+# (Unit B5 above), extended to a GROUP of archetypes via the Dirichlet aggregation property.
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _DEFAULT_OPTION_VALUE_ALPHA,
+    _OPTION_VALUE_SCALE,
+    _dirichlet_group_lower_bound,
+    _card_covered_archetypes,
+    _build_option_value_bonuses,
+)
+
+
+class TestDirichletGroupLowerBound:
+    """_dirichlet_group_lower_bound — closed-form Dirichlet AGGREGATE lower-quantile share
+    for a GROUP of archetypes, extending `_dirichlet_share_lower_bound`'s single-archetype
+    identity via the standard Dirichlet aggregation property (a subset sum of a Dirichlet's
+    components is itself Beta-distributed)."""
+
+    def test_none_when_counts_absent(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4})
+        assert _dirichlet_group_lower_bound(field, {"A", "B"}) is None
+
+    def test_none_when_archetypes_empty(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 10, "B": 10})
+        assert _dirichlet_group_lower_bound(field, frozenset()) is None
+
+    def test_singleton_group_matches_dirichlet_share_lower_bound(self):
+        """A one-archetype group must reproduce the single-archetype identity
+        `_dirichlet_share_lower_bound` already computes — the aggregation property
+        collapses to the marginal identity at |R|=1."""
+        field = build_custom_field(
+            {"A": 0.5, "B": 0.3, "C": 0.2}, counts={"A": 20, "B": 12, "C": 8},
+        )
+        singleton = _dirichlet_group_lower_bound(field, {"A"})
+        marginal = _dirichlet_share_lower_bound(field)["A"]
+        assert singleton == pytest.approx(marginal)
+
+    def test_group_exceeds_sum_of_individual_tails(self):
+        """CVaR subadditivity (brief §3, 'diversification never increases risk'): pooling
+        several archetypes into one aggregate group retains MORE share in the tail than
+        summing each archetype's OWN individually-computed tail share."""
+        field = build_custom_field(
+            {"A": 0.05, "B": 0.05, "C": 0.05, "D": 0.20, "E": 0.65},
+            counts={"A": 5, "B": 5, "C": 5, "D": 40, "E": 130},
+        )
+        group_tail = _dirichlet_group_lower_bound(field, {"A", "B", "C"})
+        sum_of_individual_tails = sum(
+            _dirichlet_group_lower_bound(field, {a}) for a in ("A", "B", "C")
+        )
+        assert group_tail > sum_of_individual_tails
+
+    def test_degenerate_whole_field_group_returns_share_sum(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 10, "B": 10})
+        assert _dirichlet_group_lower_bound(field, {"A", "B"}) == pytest.approx(1.0)
+
+    def test_monotonic_in_quantile(self):
+        field = build_custom_field(
+            {"A": 0.3, "B": 0.3, "C": 0.4}, counts={"A": 10, "B": 10, "C": 15},
+        )
+        low = _dirichlet_group_lower_bound(field, {"A", "B"}, quantile=0.05)
+        high = _dirichlet_group_lower_bound(field, {"A", "B"}, quantile=0.45)
+        assert low < high
+
+
+class TestCardCoveredArchetypes:
+    """_card_covered_archetypes — derives a card's REAL covered-archetype set from the
+    model's OWN attachment (candidate_covers/element_weight), deliberately NOT from the
+    looser tag-overlap test `_relevant_field_archetypes` uses for the coverage% diagnostic
+    (which can be True for an archetype with no actual weighted element at all)."""
+
+    def test_extracts_archetype_from_element_keys(self):
+        model = _make_model(
+            element_weight={"A|combo": 0.05, "B|combo": 0.03},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"A", "B"})
+
+    def test_excludes_hate_pseudo_elements(self):
+        model = _make_model(
+            element_weight={"A|combo": 0.05, "_hate:mana": 0.10},
+            candidate_covers={"Card": frozenset({"A|combo", "_hate:mana"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo", "_hate"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"A"})
+
+    def test_excludes_zero_weight_elements(self):
+        """An element key present in candidate_covers but discounted to exactly zero weight
+        contributes no archetype — matches `_element_sum_marginal_gain`'s own `w > 0.0` filter."""
+        model = _make_model(
+            element_weight={"A|combo": 0.0, "B|combo": 0.05},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"B"})
+
+    def test_unknown_card_returns_empty(self):
+        model = _make_model(element_weight={}, candidate_covers={}, candidate_meta={})
+        assert _card_covered_archetypes(model, "Nobody") == frozenset()
+
+
+class TestBuildOptionValueBonuses:
+    """_build_option_value_bonuses — pure-mechanics CVaR tail-robustness bonus, additive on
+    top of the mean-field coverage objective. Acceptance-critical: a flexible (multi-archetype)
+    card earns MORE option value than a narrow (single-archetype) card of equal per-archetype
+    share, super-additively; the term never manufactures a pick from a card with zero real
+    coverage; alpha dials the mean/tail tradeoff; disabled paths are exact no-ops."""
+
+    def _uncertain_field(self):
+        # Three thin, equally-sized archetypes + one well-sampled + one dominant filler.
+        return build_custom_field(
+            {"A": 0.05, "B": 0.05, "C": 0.05, "D": 0.20, "E": 0.65},
+            counts={"A": 5, "B": 5, "C": 5, "D": 40, "E": 130},
+        )
+
+    def test_disabled_at_alpha_one(self):
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.01},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field, alpha=1.0) == {}
+
+    def test_empty_when_field_has_no_counts(self):
+        field = build_custom_field({"A": 1.0})  # share-only, no counts
+        model = _make_model(
+            element_weight={"A|combo": 0.01},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_hate_counter_hosers_excluded(self):
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"_hate:mana": 0.10},
+            candidate_covers={"Veil": frozenset({"_hate:mana"})},
+            candidate_meta={"Veil": _minimal_hoser("Veil", frozenset({"_hate"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_zero_real_coverage_never_manufactures_a_bonus(self):
+        """A card that covers NOTHING with positive weight gets no bonus — this term can
+        never promote a card into the board on option value alone."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={},
+            candidate_covers={"Ghost": frozenset()},
+            candidate_meta={"Ghost": _minimal_hoser("Ghost", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_flexible_card_earns_superadditively_more_than_narrow(self):
+        """Narrow covers only A (mean share 0.05); Broad covers A, B, C (each mean share
+        0.05 — same as Narrow's single archetype). Broad's bonus exceeds 3x Narrow's —
+        strictly MORE than the naive linear (breadth-count) scaling would predict — the
+        closed-form expression of CVaR subadditivity (brief §3)."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={
+                "A|narrow": 0.05 * 0.2, "A|combo": 0.05 * 0.2,
+                "B|combo": 0.05 * 0.2, "C|combo": 0.05 * 0.2,
+            },
+            candidate_covers={
+                "Narrow": frozenset({"A|narrow"}),
+                "Broad": frozenset({"A|combo", "B|combo", "C|combo"}),
+            },
+            candidate_meta={
+                "Narrow": _minimal_hoser("Narrow", frozenset({"narrow"})),
+                "Broad": _minimal_hoser("Broad", frozenset({"combo"})),
+            },
+        )
+        bonuses = _build_option_value_bonuses(model, field)
+        assert bonuses["Narrow"] > 0.0
+        assert bonuses["Broad"] > 3.0 * bonuses["Narrow"]
+
+    def test_alpha_dials_mean_to_tail_tradeoff(self):
+        """Lower alpha (more weight on the tail) monotonically increases the bonus;
+        alpha=1.0 is the zero-bonus floor."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.05 * 0.2, "B|combo": 0.05 * 0.2},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        b_09 = _build_option_value_bonuses(model, field, alpha=0.9)["Card"]
+        b_07 = _build_option_value_bonuses(model, field, alpha=0.7)["Card"]
+        b_03 = _build_option_value_bonuses(model, field, alpha=0.3)["Card"]
+        assert 0.0 < b_09 < b_07 < b_03
+        assert _build_option_value_bonuses(model, field, alpha=1.0) == {}
+
+    def test_default_alpha_and_scale_are_the_module_constants(self):
+        """Sanity: the function's defaults track the documented module constants (so a
+        future constant retune doesn't silently drift from what callers assume)."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.05 * 0.2},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        default = _build_option_value_bonuses(model, field)["Card"]
+        explicit = _build_option_value_bonuses(
+            model, field, alpha=_DEFAULT_OPTION_VALUE_ALPHA, scale=_OPTION_VALUE_SCALE,
+        )["Card"]
+        assert default == pytest.approx(explicit)
+
+
+class TestOptionValueSolverWiring:
+    """The four consumers (_greedy_solve, _hedge_fill, _rank_considering_pool, _ilp_solve)
+    all look up a precomputed `option_value_bonus` dict rather than recomputing it — mirrors
+    the single-canonical-function pattern feature-sfv-breadth-objective set for
+    `_element_sum_marginal_gain`. None/empty is byte-identical to the pre-feature objective;
+    a real bonus can flip an otherwise-tied pick; the bonus is credited on a card's FIRST
+    copy only, strictly separate from the per-copy redundancy/draw-probability taper."""
+
+    def _tied_model(self) -> CoverageModel:
+        """Two cards with EXACTLY equal base marginal gain (same weight, disjoint single
+        elements) — a clean, deterministic (Python-level, not solver-level) tie."""
+        return _make_model(
+            element_weight={"e1": 0.10, "e2": 0.10},
+            candidate_covers={"A": frozenset({"e1"}), "B": frozenset({"e2"})},
+            candidate_meta={
+                "A": _minimal_hoser("A", frozenset({"t1"})),
+                "B": _minimal_hoser("B", frozenset({"t2"})),
+            },
+        )
+
+    def _bias_model(self) -> CoverageModel:
+        """A's base gain is strictly higher than B's (not tied) — used for the ILP tests so
+        they never depend on CBC's own tie-break behavior (a real, documented risk on
+        genuinely-tied models); only a large-enough bonus should flip the optimal pick."""
+        return _make_model(
+            element_weight={"e1": 0.11, "e2": 0.10},
+            candidate_covers={"A": frozenset({"e1"}), "B": frozenset({"e2"})},
+            candidate_meta={
+                "A": _minimal_hoser("A", frozenset({"t1"})),
+                "B": _minimal_hoser("B", frozenset({"t2"})),
+            },
+        )
+
+    # ---- _greedy_solve ----
+
+    def test_greedy_none_bonus_is_byte_identical(self):
+        model = self._tied_model()
+        picks_a, trace_a = _greedy_solve(model, budget=2)
+        picks_b, trace_b = _greedy_solve(model, budget=2, option_value_bonus=None)
+        assert picks_a == picks_b
+        assert [t.marginal_gain for t in trace_a] == [t.marginal_gain for t in trace_b]
+
+    def test_greedy_bonus_breaks_tie_toward_bonused_card(self):
+        model = self._tied_model()
+        # No bonus: deterministic name tie-break ("A" < "B") picks A for the sole slot.
+        picks_default, _ = _greedy_solve(model, budget=1)
+        assert picks_default == {"A": 1}
+        # A decisive bonus on B flips the pick.
+        picks_boosted, _ = _greedy_solve(model, budget=1, option_value_bonus={"B": 0.05})
+        assert picks_boosted == {"B": 1}
+
+    def test_greedy_bonus_applies_first_copy_only(self):
+        model = _make_model(
+            element_weight={"e1": 0.10},
+            candidate_covers={"A": frozenset({"e1"})},
+            candidate_meta={"A": _minimal_hoser("A", frozenset({"t1"}), max_copies=4)},
+        )
+        _picks, trace = _greedy_solve(model, budget=2, option_value_bonus={"A": 0.05})
+        assert len(trace) == 2
+        # Pick 1: weight(0.10)*Δg(1)(0.5) + bonus(0.05) = 0.10; pick 2: weight*Δg(2)(0.25),
+        # no bonus (already has 1 copy) = 0.025.
+        assert trace[0].marginal_gain == pytest.approx(0.10)
+        assert trace[1].marginal_gain == pytest.approx(0.025)
+
+    # ---- _hedge_fill ----
+
+    def test_hedge_fill_none_bonus_is_byte_identical(self):
+        model = TestHedgeAllocator()._three_element_model()
+        a = _hedge_fill(model, {"Top": 2}, budget=5)
+        b = _hedge_fill(model, {"Top": 2}, budget=5, option_value_bonus=None)
+        assert a == b
+
+    def test_hedge_fill_bonus_can_flip_the_insurance_pick(self):
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.10, "e3": 0.10},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Alt": frozenset({"e2"}), "Gamma": frozenset({"e3"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+                "Gamma": _minimal_hoser("Gamma", frozenset({"t3"})),
+            },
+        )
+        default = _hedge_fill(model, {"Top": 1}, budget=2)
+        assert default == {"Alt": 1}  # Alt/Gamma tie; alphabetic tie-break picks Alt
+        boosted = _hedge_fill(model, {"Top": 1}, budget=2, option_value_bonus={"Gamma": 0.5})
+        assert boosted == {"Gamma": 1}
+
+    # ---- _rank_considering_pool ----
+
+    def test_considering_pool_none_bonus_is_byte_identical(self):
+        model = self._tied_model()
+        a = _rank_considering_pool(model, {})
+        b = _rank_considering_pool(model, {}, option_value_bonus=None)
+        assert [(c.card, c.marginal_gain) for c in a] == [(c.card, c.marginal_gain) for c in b]
+
+    def test_considering_pool_bonus_reorders_by_boosted_gain(self):
+        model = self._tied_model()
+        boosted = _rank_considering_pool(model, {}, option_value_bonus={"B": 0.5})
+        assert boosted[0].card == "B"
+        assert boosted[0].marginal_gain > boosted[1].marginal_gain
+
+    def test_considering_pool_bonus_not_applied_to_already_placed_copy(self):
+        """A card already in final_cards at some copies is being evaluated for its NEXT
+        copy — the first-copy-only option-value bonus must not apply."""
+        model = _make_model(
+            element_weight={"e1": 0.10},
+            candidate_covers={"A": frozenset({"e1"})},
+            candidate_meta={"A": _minimal_hoser("A", frozenset({"t1"}), max_copies=4)},
+        )
+        with_bonus = _rank_considering_pool(model, {"A": 1}, option_value_bonus={"A": 0.05})
+        without_bonus = _rank_considering_pool(model, {"A": 1}, option_value_bonus=None)
+        assert with_bonus[0].marginal_gain == pytest.approx(without_bonus[0].marginal_gain)
+
+    # ---- _ilp_solve ----
+
+    def test_ilp_none_bonus_is_byte_identical(self):
+        model = self._bias_model()
+        try:
+            a = _ilp_solve(model, budget=1)
+            b = _ilp_solve(model, budget=1, option_value_bonus=None)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert a == b == {"A": 1}
+
+    def test_ilp_bonus_can_flip_the_pick(self):
+        model = self._bias_model()
+        try:
+            boosted = _ilp_solve(model, budget=1, option_value_bonus={"B": 0.10})
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert boosted == {"B": 1}
+
+    def test_greedy_and_ilp_agree_with_option_value_active(self):
+        model = self._bias_model()
+        bonus = {"B": 0.10}
+        greedy_picks, _ = _greedy_solve(model, budget=1, option_value_bonus=bonus)
+        try:
+            ilp_picks = _ilp_solve(model, budget=1, option_value_bonus=bonus)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert greedy_picks == ilp_picks == {"B": 1}
+
+
+class TestOptionValueRecommendSideboardIntegration:
+    """End-to-end: `option_value_bonus` is computed once inside `recommend_sideboard` and
+    threaded through to whichever solver runs. A share-only field (no counts) is byte-identical
+    across alpha (the documented no-op path); a spy on `_greedy_solve` proves the EXACT dict
+    `_build_option_value_bonuses` returns reaches the solver call."""
+
+    def test_share_only_field_byte_identical_across_alpha(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})  # share-only, no counts
+            cat = TestRedundancyDecay._gy_catalog()
+            default = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+            other_alpha = recommend_sideboard(
+                con, field, {}, solver="greedy", catalog=cat, option_value_alpha=0.1,
+            )
+        finally:
+            con.close()
+        assert default.cards == other_alpha.cards
+
+    def test_option_value_bonus_dict_reaches_greedy_solver(self, monkeypatch):
+        """Spy on `_greedy_solve` to confirm `recommend_sideboard` passes through the EXACT
+        dict `_build_option_value_bonuses` returns — proves the computed bonus reaches the
+        solver call, not just the model-build step."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        sentinel = {"Surgical Extraction": 0.1234}
+        monkeypatch.setattr(sb_mod, "_build_option_value_bonuses", lambda *a, **k: sentinel)
+
+        captured: dict = {}
+        real_greedy = sb_mod._greedy_solve
+
+        def _spy_greedy(*args, **kwargs):
+            captured["option_value_bonus"] = kwargs.get("option_value_bonus")
+            return real_greedy(*args, **kwargs)
+
+        monkeypatch.setattr(sb_mod, "_greedy_solve", _spy_greedy)
+
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(),
+            )
+        finally:
+            con.close()
+
+        assert captured["option_value_bonus"] == sentinel

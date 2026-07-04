@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-04T01:55:10Z'
+generated_at: '2026-07-04T03:12:15Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -1075,6 +1075,63 @@ documents:
     - The universally-agreed format constant: dedicated graveyard hate + free counters
         belong in every sideboard (Reanimator + Oops + Sneak&Show + Painter are all
         GY/combo-adjacent).
+  docs/briefs/scorer-flexibility-valuation.md:
+    summary: 'The sideboard scorer undervalues broad, flexible interaction: a card
+      that answers many matchups
+
+      (Force of Negation) has its value fragmented across tiny per-(archetype,tag)
+      elements and scores
+
+      ~0, though it is near-universal in winning boards. This brief shows the fix
+      is NOT a "flexibility
+
+      bonus" or an empirical prior — the coverage objective is already submodular,
+      and submodular
+
+      maximization credits breadth correctly via marginal gain. The gap is that three
+      distortions starve
+
+      the breadth signal (misapplied concavity, deflated/uncoverable element weights,
+      missing
+
+      attachments). It recommends: repair the objective so a card is credited by its
+      TOTAL marginal
+
+      coverage across all elements it answers; add a pure-mechanics option-value term
+      (tail-robustness
+
+      over the Dirichlet field) so flexibility is valued under uncertainty; keep empirical
+      winning-board
+
+      frequency as a divergence diagnostic only.
+
+      '
+    key_findings:
+    - Coverage maximization is monotone submodular; the greedy/ILP solver ALREADY
+      credits breadth via marginal gain (a card covering many needs has large marginal
+      value) — the model is the right shape, so the fix repairs distortions rather
+      than adding a flexibility heuristic.
+    - The breadth signal is starved by three distortions, not by the model's form
+      - (1) the concave saturation g() is applied per-element (diminishing returns
+      on stacking copies for ONE matchup) instead of across the card's breadth; (2)
+      opponent elements are deflated (uniform draw_prob≈0.4 factor) and the biggest
+      weights are uncoverable `_hate` self-protection pseudo-elements that crowd out
+      real coverage; (3) broad cards fail to ATTACH to the elements they answer (plays-blue
+      never fires as an opponent vulnerability; no broad-interaction attribution).
+    - Flexibility has first-principles OPTION VALUE under field uncertainty - a card
+      that answers many archetypes has lower-variance value across draws of an uncertain
+      (Dirichlet) field; a tail-aware / CVaR objective term rewards this hedge WITHOUT
+      any empirical inclusion signal, letting the engine value breadth from mechanics
+      alone.
+    - MTG-domain expertise agrees - broad overlapping answers earn slots and "stretch"
+      a 15-card board; over-dedicating to narrow hate is a known failure mode; if
+      a matchup needs the whole board, change decks, don't spend the board (validates
+      the punt/slot-ROI logic).
+    - ? Keep the pure-mechanics guardrail - do NOT fold winning-board inclusion% into
+        the score (regresses to consensus). The backtest stays a divergence diagnostic
+        + acceptance gate
+      : model≠consensus is a flag to investigate (missing mechanic OR a real edge),
+        not an error to calibrate away.
   docs/briefs/sideboard-core-and-hedge.md:
     summary: 'Curated context for reworking the sideboard recommender into a two-stage
       core+hedge solver.

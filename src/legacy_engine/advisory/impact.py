@@ -96,6 +96,28 @@ class ImpactBreakdown:
         """Multiplicative combination — hard gates. Any factor at 0 zeroes the whole score."""
         return self.centrality * self.symmetry * self.castability * self.draw_prob
 
+    def score_without_draw_prob(self) -> float:
+        """Multiplicative combination EXCLUDING ``draw_prob`` (feature-sfv-weights).
+
+        ``centrality × symmetry × castability`` only — "is there a good, castable,
+        non-self-hosing answer for this matchup", with NO draw-probability factor.
+
+        Used by the sideboard coverage model's (archetype, tag) ELEMENT-WEIGHT computation
+        (``advisory.sideboard._build_coverage_model``, Unit B3), which calls ``impact(...,
+        copies=1)`` purely to answer that castability/centrality/symmetry question — not to
+        ask "how likely am I to draw this card". Folding ``draw_probability(1)≈0.4`` into the
+        element weight there was a bug with two faces: (1) it double-counted the draw
+        dimension, which the PER-COPY taper (``sideboard._u_redundancy``, itself derived from
+        this module's ``draw_probability``) already owns exclusively; and (2) because it's a
+        near-uniform ~0.4× factor across every impact-modulated element, it silently deflated
+        the element-weight SCALE the natural-budget τ stop reads, without changing relative
+        ranking. ``score()`` (unchanged) still folds in ``draw_prob`` for the per-card,
+        actual-recommended-copy-count EXPLAINABILITY breakdown
+        (``sideboard._build_impact_annotations`` / ``advise sideboard``'s CLI render) — showing
+        the real draw probability at the recommended copy count is exactly the point there.
+        """
+        return self.centrality * self.symmetry * self.castability
+
 
 def _clamp01(value: float) -> float:
     """Clamp to [0, 1]. Inputs are already contractually in range (Linchpin.centrality is
