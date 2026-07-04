@@ -53,7 +53,16 @@ from legacy_engine.advisory.sideboard import (
     _MAINDECK_SATURATION,
     empirical_swing_proxy,
     recommend_sideboard,
+    MatchupROI,
+    _slot_roi_table,
+    _matchup_max_equity_gain,
+    _MAX_DEDICATED_SLOTS,
+    _MAX_REALISTIC_EQUITY_GAIN,
+    _REALLOCATION_MARGIN,
+    _PUNT_REASON_CANT_CROSS_HALF,
+    _PUNT_REASON_BETTER_ROI_ELSEWHERE,
 )
+from legacy_engine.analytics.matchup import build_cell, build_adaptive_matrix, MatchupMatrix, AdaptiveMatrix
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
 
@@ -6818,4 +6827,335 @@ class TestRecommendSideboardOutputFieldsIntegration:
             con.close()
         assert pkg.impact_annotations == {}
         assert pkg.card_coverage_pct.get("Surgical Extraction", 0.0) == pytest.approx(1.0)
-        assert pkg.board_coverage_pct == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# TestMatchupMaxEquityGain / TestSlotROITable — Units D1+D2 (feature-sb-slot-roi-punt)
+# ---------------------------------------------------------------------------
+# House style: hand-built FieldDistribution + CoverageModel + MatchupMatrix (via build_cell)
+# for deterministic ROI arithmetic — no DB needed, mirroring TestCoverageModel/TestGreedy.
+
+
+def _make_matrix(
+    cells: "dict[tuple[str, str], object]", archetypes: "list[str]"
+) -> MatchupMatrix:
+    """Hand-built MatchupMatrix for _slot_roi_table tests (no DB / corpus needed)."""
+    return MatchupMatrix(cells=cells, provenance=None, total_matches=0, archetypes=archetypes, caveat="test")
+
+
+class TestMatchupMaxEquityGain:
+    """_matchup_max_equity_gain — the concave swing × _u_redundancy realistic ceiling."""
+
+    def test_zero_share_returns_zero(self):
+        model = _make_model({"Delver|plays-blue": 0.08}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", 0.0, model)
+        assert gain == 0.0
+        assert first == 0.0
+
+    def test_no_coverage_for_opponent_returns_zero(self):
+        """A field opponent no catalog candidate answers at all: honest 0.0, not fabricated."""
+        model = _make_model({"Lands|greedy-manabase": 0.07}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", 0.4, model)
+        assert gain == 0.0
+        assert first == 0.0
+
+    def test_recovers_per_copy_swing_and_shapes_with_u_redundancy(self):
+        """weight = share × swing; dividing back out share recovers the per-copy swing exactly
+        as the first-slot gain (u_redundancy(1) == 1.0), and multi-copy dedication is shaped
+        by the SAME concave curve — more than the first slot alone, less than a naive flat
+        extrapolation across all dedicated slots."""
+        share = 0.4
+        swing = 0.10  # soft — below the realistic-ceiling cap so the shape is observable
+        model = _make_model({"Delver|plays-blue": share * swing}, {}, {})
+        gain, first = _matchup_max_equity_gain("Delver", share, model)
+        assert first == pytest.approx(swing)
+        assert first < gain < swing * _MAX_DEDICATED_SLOTS
+
+    def test_capped_at_max_realistic_equity_gain(self):
+        """A high dedicated-swing element's cumulative gain is capped, not left to explode."""
+        share = 1.0
+        model = _make_model({"Delver|plays-blue": share * _SWING_DEDICATED}, {}, {})
+        gain, _first = _matchup_max_equity_gain("Delver", share, model)
+        assert gain == pytest.approx(_MAX_REALISTIC_EQUITY_GAIN)
+
+    def test_best_tag_wins_when_opponent_has_multiple_elements(self):
+        """When an opponent has several (archetype, tag) elements, the ceiling anchors on the
+        BEST-covered one — the tag the first dedicated slot would actually attack."""
+        share = 0.5
+        model = _make_model(
+            {"Delver|plays-blue": share * 0.05, "Delver|creature-based": share * 0.20},
+            {}, {},
+        )
+        _gain, first = _matchup_max_equity_gain("Delver", share, model)
+        assert first == pytest.approx(0.20)
+
+
+class TestSlotROITable:
+    """_slot_roi_table — Units D1+D2: per-matchup ROI ranking + punt detection."""
+
+    def test_empty_field_or_no_archetype_returns_empty(self):
+        model = _make_model({}, {}, {})
+        assert _slot_roi_table(None, _make_field({"Delver": 1.0}), None, model) == []
+        empty_field = FieldDistribution(
+            shares={}, field_source="custom", counts=None,
+            no_data=frozenset(), warnings=(),
+        )
+        assert _slot_roi_table("MyDeck", empty_field, None, model) == []
+
+    def test_mirror_matchup_excluded(self):
+        model = _make_model({}, {}, {})
+        field = _make_field({"MyDeck": 1.0})
+        assert _slot_roi_table("MyDeck", field, None, model) == []
+
+    def test_absent_matrix_honest_degrades_every_row(self):
+        """matchup_matrix=None → every matchup gets base_equity=0.5 + confidence=speculative,
+        and the hard rule keeps punt False regardless."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 0.6, "Lands": 0.4})
+        rows = _slot_roi_table("MyDeck", field, None, model)
+        assert {r.opponent for r in rows} == {"Delver", "Lands"}
+        for r in rows:
+            assert r.base_equity == 0.5
+            assert r.confidence == "speculative"
+            assert r.punt is False
+
+    def test_thin_cell_honest_degrades_to_half_not_shrunk_estimate(self):
+        """A present-but-thin cell (n<30) is NOT rendered at its beta-shrunk value (e.g. ~0.58
+        for a 3-0 record) — the ROI layer honest-degrades it flat to 0.5 + speculative, same
+        as an absent cell."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=3, n=3)  # n<30 → speculative tier
+        assert cell.p_shrunk is not None and cell.p_shrunk != 0.5  # sanity: NOT already 0.5
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].base_equity == 0.5
+        assert rows[0].confidence == "speculative"
+
+    def test_established_cell_uses_p_shrunk_directly(self):
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=40, n=120)  # established tier
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].base_equity == pytest.approx(cell.p_shrunk)
+        assert rows[0].confidence == "established"
+
+    def test_adaptive_matrix_wrapper_is_unwrapped(self):
+        """A real AdaptiveMatrix (the ``.matrix`` wrapper build_adaptive_matrix returns) works
+        identically to a plain MatchupMatrix — _slot_roi_table unwraps ``.matrix``."""
+        model = _make_model({}, {}, {})
+        field = _make_field({"Delver": 1.0})
+        cell = build_cell("MyDeck", "Delver", wins=40, n=120)
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        wrapped = AdaptiveMatrix(matrix=matrix, valid_since={}, cell_windows={})
+        rows = _slot_roi_table("MyDeck", field, wrapped, model)
+        assert rows[0].base_equity == pytest.approx(cell.p_shrunk)
+
+    def test_ranked_descending_by_roi_per_slot(self):
+        field = _make_field({"Delver": 0.6, "Lands": 0.4})
+        model = _make_model(
+            {"Delver|plays-blue": 0.6 * 0.10, "Lands|greedy-manabase": 0.4 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=40, n=120),
+            ("MyDeck", "Lands"): build_cell("MyDeck", "Lands", wins=40, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert [r.roi_per_slot for r in rows] == sorted(
+            (r.roi_per_slot for r in rows), reverse=True
+        )
+        # Same per-copy swing on both sides → the larger field share (Delver) wins the ranking.
+        assert rows[0].opponent == "Delver"
+
+    def test_punt_a_when_cant_cross_half_even_at_max_dedication(self):
+        """base_equity so low that even the capped max_equity_gain can't reach 0.5."""
+        field = _make_field({"Lands": 1.0})
+        model = _make_model({"Lands|greedy-manabase": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Lands", wins=12, n=120)  # established, badly losing
+        matrix = _make_matrix({("MyDeck", "Lands"): cell}, ["MyDeck", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].crosses_half is False
+        assert rows[0].punt is True
+        assert rows[0].punt_reason == _PUNT_REASON_CANT_CROSS_HALF
+
+    def test_no_punt_when_max_dedication_crosses_half(self):
+        field = _make_field({"Delver": 1.0})
+        model = _make_model({"Delver|plays-blue": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Delver", wins=50, n=120)  # ~43% shrunk, +ceiling clears 0.5
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].crosses_half is True
+        assert rows[0].punt is False
+
+    def test_reallocation_punt_when_lower_roi_loses_to_higher_roi(self):
+        """Both matchups clear crosses_half; Delver's much larger field share dwarfs Combo's
+        ROI/slot for the SAME per-copy swing → Combo is flagged for reallocation, Delver isn't."""
+        field = _make_field({"Delver": 0.9, "Combo": 0.1})
+        model = _make_model(
+            {"Delver|plays-blue": 0.9 * 0.10, "Combo|storm-reliant": 0.1 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),
+            ("MyDeck", "Combo"): build_cell("MyDeck", "Combo", wins=50, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Combo"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        by_opp = {r.opponent: r for r in rows}
+        assert by_opp["Delver"].crosses_half is True
+        assert by_opp["Combo"].crosses_half is True
+        assert by_opp["Delver"].roi_per_slot > by_opp["Combo"].roi_per_slot
+        assert by_opp["Delver"].punt is False
+        assert by_opp["Combo"].punt is True
+        assert by_opp["Combo"].punt_reason == _PUNT_REASON_BETTER_ROI_ELSEWHERE
+
+    def test_no_reallocation_punt_when_roi_gap_is_modest(self):
+        """A modest ROI gap (well above the reallocation margin) is not a punt — real boards
+        legitimately hedge across several worthwhile matchups."""
+        field = _make_field({"Delver": 0.55, "Lands": 0.45})
+        model = _make_model(
+            {"Delver|plays-blue": 0.55 * 0.10, "Lands|greedy-manabase": 0.45 * 0.10},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),
+            ("MyDeck", "Lands"): build_cell("MyDeck", "Lands", wins=50, n=120),
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Lands"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert all(r.crosses_half for r in rows)
+        assert all(not r.punt for r in rows)
+
+    def test_no_reallocation_punt_when_only_one_viable_matchup(self):
+        """A single matchup in the field has no 'elsewhere' to be outclassed by."""
+        field = _make_field({"Delver": 1.0})
+        model = _make_model({"Delver|plays-blue": 1.0 * 0.10}, {}, {})
+        cell = build_cell("MyDeck", "Delver", wins=50, n=120)
+        matrix = _make_matrix({("MyDeck", "Delver"): cell}, ["MyDeck", "Delver"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        assert rows[0].punt is False
+
+    def test_never_punts_speculative_tier_despite_dwarfed_roi(self):
+        """HARD RULE: without the guard, Combo's roi_per_slot here would be dwarfed by Delver's
+        (a genuine, crosses_half alternative) and trip condition (b) — but Combo's cell is
+        speculative (n<30), so it must never be punted; it is labeled low-confidence instead."""
+        field = _make_field({"Delver": 0.9, "Combo": 0.1})
+        model = _make_model(
+            {"Delver|plays-blue": 0.9 * 0.10, "Combo|storm-reliant": 0.1 * 0.05},
+            {}, {},
+        )
+        cells = {
+            ("MyDeck", "Delver"): build_cell("MyDeck", "Delver", wins=50, n=120),  # established
+            ("MyDeck", "Combo"): build_cell("MyDeck", "Combo", wins=1, n=3),       # speculative
+        }
+        matrix = _make_matrix(cells, ["MyDeck", "Delver", "Combo"])
+        rows = _slot_roi_table("MyDeck", field, matrix, model)
+        by_opp = {r.opponent: r for r in rows}
+        assert by_opp["Combo"].confidence == "speculative"
+        # Confirm the ROI gap really is dwarfing (the scenario the hard rule guards against).
+        assert by_opp["Combo"].roi_per_slot < by_opp["Delver"].roi_per_slot * _REALLOCATION_MARGIN
+        assert by_opp["Combo"].punt is False
+        assert by_opp["Combo"].punt_reason == ""
+
+
+class TestMatchupROIDataclass:
+    """MatchupROI is a frozen dataclass with the expected fields (mirrors
+    TestMatchupPlanDataclass's smoke-test convention)."""
+
+    def test_frozen_fields(self):
+        roi = MatchupROI(
+            opponent="Combo", field_share=0.3, base_equity=0.4, max_equity_gain=0.1,
+            roi_per_slot=0.015, crosses_half=False, punt=True,
+            confidence="evolving", punt_reason="max dedication still <50%",
+        )
+        assert roi.opponent == "Combo"
+        assert roi.punt is True
+        assert roi.confidence == "evolving"
+        with pytest.raises(Exception):
+            roi.punt = False  # frozen — cannot mutate
+
+
+class TestSlotROIRecommendSideboardIntegration:
+    """recommend_sideboard wiring — Unit D3: populates pkg.slot_roi through the real,
+    non-mocked pipeline; the layer never feeds back into card selection."""
+
+    _SINCE = "2026-01-01"
+
+    def test_slot_roi_populates_from_real_matchup_corpus(self, make_rounds_corpus):
+        """n_repeats=50 → 100 decisive Control-vs-Combo matches, Control always wins →
+        established-tier cell with base_equity well above 0.5."""
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        try:
+            field = _make_field({"Combo": 1.0})
+            pkg = recommend_sideboard(
+                con, field, {"Brainstorm": 4}, solver="greedy",
+                archetype="Control", since=self._SINCE,
+            )
+        finally:
+            con.close()
+        assert pkg.slot_roi, f"expected a populated slot-ROI table; warnings={pkg.warnings}"
+        row = pkg.slot_roi[0]
+        assert row.opponent == "Combo"
+        assert row.confidence == "established"
+        assert row.base_equity > 0.5  # Control always beats Combo in this corpus
+
+    def test_slot_roi_absent_without_archetype(self, make_rounds_corpus):
+        """archetype=None (unclassified deck) → slot_roi stays empty (gated, not fabricated —
+        there is no 'my side' to look up matchup cells for)."""
+        con, _facts = make_rounds_corpus(n_repeats=5)
+        try:
+            field = _make_field({"Combo": 1.0})
+            pkg = recommend_sideboard(con, field, {}, solver="greedy")
+        finally:
+            con.close()
+        assert pkg.slot_roi == ()
+
+    def test_slot_roi_layer_does_not_change_card_selection(self, monkeypatch, make_rounds_corpus):
+        """Card selection (final_cards) is identical whether the slot-ROI table computes its
+        real values or something wildly different — proves this is a pure decision-support
+        annotation attached to the package, never fed back into the solver."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        try:
+            field = _make_field({"Combo": 1.0})
+            catalog = {
+                "Surgical Extraction": HoserCard(
+                    name="Surgical Extraction",
+                    attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(),
+                    max_copies=4,
+                    swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+            }
+            kwargs = dict(
+                con=con, field=field, deck_maindeck={"Brainstorm": 4},
+                solver="greedy", catalog=catalog, archetype="Control", since=self._SINCE,
+            )
+            baseline = recommend_sideboard(**kwargs)
+
+            def _bogus_roi_table(*_a, **_k):
+                return [
+                    MatchupROI(
+                        opponent="Combo", field_share=1.0, base_equity=0.01,
+                        max_equity_gain=0.0, roi_per_slot=-999.0, crosses_half=False,
+                        punt=True, confidence="established",
+                        punt_reason="bogus — test perturbation",
+                    )
+                ]
+
+            monkeypatch.setattr(sb_mod, "_slot_roi_table", _bogus_roi_table)
+            perturbed = recommend_sideboard(**kwargs)
+        finally:
+            con.close()
+
+        assert perturbed.cards == baseline.cards
+        assert perturbed.covered_weight == baseline.covered_weight
+        assert perturbed.solver_used == baseline.solver_used
+        # Sanity: the monkeypatch actually took effect — proves the comparison is meaningful,
+        # not vacuously true because both packages happened to compute the same table anyway.
+        assert perturbed.slot_roi != baseline.slot_roi

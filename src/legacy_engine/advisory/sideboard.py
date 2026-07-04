@@ -135,7 +135,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass, field as dc_field, replace as _dc_replace
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -145,6 +145,7 @@ from scipy.stats import beta as _beta_dist
 import re
 
 from legacy_engine.advisory.field import FieldDistribution
+from legacy_engine.analytics.matchup import lookup_head_to_head
 from legacy_engine.advisory.impact import ImpactBreakdown
 from legacy_engine.advisory.impact import draw_probability as _draw_probability
 from legacy_engine.advisory.impact import impact as _compute_impact
@@ -2779,6 +2780,229 @@ def _build_impact_annotations(
 
 
 # ---------------------------------------------------------------------------
+# Units D1+D2: Slot-ROI table + punt detection (feature-sb-slot-roi-punt)
+# ---------------------------------------------------------------------------
+# ADDITIVE decision-support layer on top of the already-solved coverage model + field's
+# matchup matrix. Answers "is dedicating sideboard slots to matchup X worth it, or would
+# those slots buy more expected wins moved elsewhere?" — a slot-ALLOCATION question above
+# per-card scoring. Does NOT touch card selection: `_slot_roi_table` is a pure function of
+# already-resolved inputs (field, matchup matrix, coverage model) and never mutates or
+# re-derives `final_cards`.
+#
+# max_equity_gain deliberately REUSES the coverage model's own concave per-copy shaping
+# (`_u_redundancy`, Unit B4's draw-probability-derived curve) rather than a fresh curve, so
+# this layer's ROI numbers are consistent with what the solver can actually buy — the risk
+# called out in the parent feature's "Risks" section (a divergent curve would misinform).
+
+# Number of dedicated copies the realistic-ceiling projection sums over. Matches the length
+# of `_U_REDUNDANCY_DEFAULT` (copies beyond it clamp to the curve's last, near-zero entry via
+# `_u_redundancy`, so summing further would add negligible value anyway).
+_MAX_DEDICATED_SLOTS: int = len(_U_REDUNDANCY_DEFAULT)
+
+# Hard ceiling on any single matchup's projected max_equity_gain — mirrors
+# `_EMPIRICAL_SWING_CAP`'s role elsewhere as a sanity bound against an unrealistic swing
+# estimate dominating the advice (e.g. a single high-swing hoser stacked with a large field
+# share should not imply an implausible double-digit equity swing).
+_MAX_REALISTIC_EQUITY_GAIN: float = 0.35
+
+# Reallocation-punt margin (Unit D2, condition b). A matchup's first-slot ROI must fall
+# BELOW this fraction of the best viable (crosses_half) alternative's ROI elsewhere in the
+# field before it is flagged for reallocation. A literal "not strictly the top-ranked
+# matchup" test would flag every matchup but the single best one, which is not useful
+# decision support (real boards legitimately hedge across several matchups) — this requires
+# a MEANINGFUL gap: the slot here buys less than half the expected match-wins available
+# elsewhere.
+_REALLOCATION_MARGIN: float = 0.5
+
+# Punt reason labels (rendered verbatim by `advise sideboard`'s slot-ROI block).
+_PUNT_REASON_CANT_CROSS_HALF = "max dedication still <50%"
+_PUNT_REASON_BETTER_ROI_ELSEWHERE = "better ROI elsewhere"
+
+# Minimum field share for a matchup to earn a slot-ROI row at all. Mirrors the same 1%
+# noise-floor threshold `recommend_sideboard` already applies when scanning opponents for
+# data-informed swing overrides ("skip negligible-share opponents to avoid noise") — a
+# real field distribution can carry a long tail of hundreds of near-zero-share archetypes
+# (rounding error / one-off registrations), and a slot-allocation decision-support table is
+# not useful, and actively noisy, if it lists all of them.
+_MIN_FIELD_SHARE_FOR_ROI: float = 0.01
+
+
+@dataclass(frozen=True)
+class MatchupROI:
+    """Decision-support record: is dedicating sideboard slots to ``opponent`` worth it?
+
+    ``opponent``: field archetype.
+    ``field_share``: this opponent's share of the expected field.
+    ``base_equity``: matchup cell ``p_shrunk`` (pre-board) vs the deck's own archetype.
+        Honest-degrade: ``0.5`` when the cell is thin (``speculative`` tier) or absent
+        entirely (no matrix, archetype not in the matrix, or an unobserved pair) — see
+        ``confidence``.
+    ``max_equity_gain``: realistic ceiling on how far dedicating slots can move
+        ``base_equity``, reusing the coverage model's own concave swing × ``_u_redundancy``
+        per-copy shaping (Unit B4) so this number is consistent with what the solver can
+        actually buy. Capped at ``_MAX_REALISTIC_EQUITY_GAIN``. ``0.0`` when no catalog
+        candidate answers any tag of this opponent.
+    ``roi_per_slot``: the FIRST dedicated slot's marginal equity gain × ``field_share`` —
+        the expected-match-win unit this table ranks by (comparable across matchups).
+    ``crosses_half``: whether ``base_equity + max_equity_gain >= 0.5`` — whether max
+        realistic dedication is enough to flip this matchup favorable.
+    ``punt``: True when investment doesn't pay (Unit D2). HARD RULE: never True when
+        ``confidence == "speculative"`` — a thin/absent cell is labeled low-confidence
+        instead of used to recommend conceding a matchup on noise.
+    ``confidence``: tier sourced from the matchup cell (``tier_for_sample`` semantics via
+        ``MatchupCell.tier``); ``"speculative"`` for the honest-degrade branch.
+    ``punt_reason``: human-readable reason when ``punt`` is True; ``""`` otherwise.
+    """
+
+    opponent: str
+    field_share: float
+    base_equity: float
+    max_equity_gain: float
+    roi_per_slot: float
+    crosses_half: bool
+    punt: bool
+    confidence: "ConfidenceLevel | None"
+    punt_reason: str = ""
+
+
+def _matchup_max_equity_gain(
+    opponent: str,
+    field_share: float,
+    coverage_model: "CoverageModel",
+) -> "tuple[float, float]":
+    """Realistic ceiling + first-slot marginal gain for dedicating slots vs ``opponent``.
+
+    Recovers the per-copy equity swing the coverage model actually assigned to this
+    opponent's best-covered ``(archetype, tag)`` element: ``element_weight`` there is
+    already ``field_share × swing × impact_multiplier`` (Unit B3), so dividing back out
+    ``field_share`` yields the per-copy equity value the solver itself would realize for
+    the FIRST copy answering this opponent — not a re-derived heuristic. Multiple dedicated
+    copies are shaped by the SAME concave ``_u_redundancy`` curve the solver uses for
+    per-card-copy diminishing returns (Unit B4), summed over ``_MAX_DEDICATED_SLOTS``
+    copies and capped at ``_MAX_REALISTIC_EQUITY_GAIN``.
+
+    Returns ``(max_equity_gain, first_slot_gain)``. Both are ``0.0`` when
+    ``field_share <= 0`` (nothing to divide by; a zero-share matchup has no ROI) or when the
+    coverage model has no candidate covering any tag of ``opponent`` (an honest "we can't
+    do anything about this matchup" — distinct from, and a stronger signal than, a punt).
+    """
+    if field_share <= 0.0:
+        return 0.0, 0.0
+    prefix = f"{opponent}|"
+    opp_weights = [
+        w for key, w in coverage_model.element_weight.items() if key.startswith(prefix)
+    ]
+    if not opp_weights:
+        return 0.0, 0.0
+    per_copy_equity = max(opp_weights) / field_share
+    first_slot_gain = per_copy_equity * _u_redundancy(1)  # _u_redundancy(1) == 1.0 always
+    cumulative = sum(
+        per_copy_equity * _u_redundancy(k) for k in range(1, _MAX_DEDICATED_SLOTS + 1)
+    )
+    max_equity_gain = min(cumulative, _MAX_REALISTIC_EQUITY_GAIN)
+    return max_equity_gain, first_slot_gain
+
+
+def _slot_roi_table(
+    deck_archetype: "str | None",
+    field: FieldDistribution,
+    matchup_matrix: "object | None",
+    coverage_model: "CoverageModel",
+) -> "list[MatchupROI]":
+    """Per-field-matchup slot ROI + punt detection (Units D1+D2, feature-sb-slot-roi-punt).
+
+    Pure given resolved inputs — no DB access. Reads the ALREADY-BUILT ``coverage_model``
+    (so ``max_equity_gain`` matches what the solver can actually buy) and the field's own
+    matchup matrix for base equities; never touches card selection.
+
+    ``matchup_matrix`` accepts a plain ``MatchupMatrix``, the ``AdaptiveMatrix`` wrapper
+    returned by ``build_adaptive_matrix`` (its ``.matrix`` is unwrapped automatically), or
+    ``None`` — which degrades every matchup to the absent-cell honest-degrade branch
+    (``base_equity=0.5``, ``confidence="speculative"``).
+
+    Mirror matches (``opponent == deck_archetype``) and negligible-share field entries
+    (below ``_MIN_FIELD_SHARE_FOR_ROI``, 1%) are skipped — there is no meaningful "hose the
+    mirror" question for this layer, and a real field's long tail of near-zero-share
+    archetypes would otherwise make the table noise rather than decision support.
+
+    Unit D2 punt rules (evaluated only for non-``speculative`` rows — the hard rule below):
+      (a) ``not crosses_half`` — max realistic dedication still can't reach 50%.
+      (b) this matchup's ``roi_per_slot`` is below ``_REALLOCATION_MARGIN`` of the best
+          OTHER matchup's ``roi_per_slot`` among matchups that themselves ``crosses_half``
+          (a genuinely investable alternative, not just a theoretically higher number).
+
+    HARD RULE: ``confidence == "speculative"`` (thin/absent cell) never punts — it is
+    labeled low-confidence instead, per the parent feature's explicit risk mitigation
+    against conceding a matchup on noise.
+
+    Returns rows sorted by ``roi_per_slot`` descending; ``[]`` when ``deck_archetype`` is
+    ``None`` or the field is empty.
+    """
+    if deck_archetype is None or not field.shares:
+        return []
+
+    # Unwrap AdaptiveMatrix (.matrix) without importing the type — avoids a hard dependency
+    # on analytics.matchup's wrapper class for callers that pass a plain MatchupMatrix.
+    matrix = getattr(matchup_matrix, "matrix", matchup_matrix)
+
+    rows: list[MatchupROI] = []
+    for opponent, share in field.shares.items():
+        if opponent == deck_archetype or share < _MIN_FIELD_SHARE_FOR_ROI:
+            continue
+
+        cell = lookup_head_to_head(matrix, deck_archetype, opponent) if matrix is not None else None
+        confidence: "ConfidenceLevel | None"
+        if cell is None or cell.tier == "speculative":
+            base_equity = 0.5
+            confidence = "speculative"
+        else:
+            base_equity = cell.p_shrunk if cell.p_shrunk is not None else 0.5
+            confidence = cell.tier
+
+        max_gain, first_slot_gain = _matchup_max_equity_gain(opponent, share, coverage_model)
+        crosses_half = (base_equity + max_gain) >= 0.5
+
+        rows.append(
+            MatchupROI(
+                opponent=opponent,
+                field_share=share,
+                base_equity=base_equity,
+                max_equity_gain=max_gain,
+                roi_per_slot=first_slot_gain * share,
+                crosses_half=crosses_half,
+                punt=False,  # resolved below, once every row's crosses_half is known
+                confidence=confidence,
+            )
+        )
+
+    # --- Unit D2: punt detection (needs the full ranked set for condition (b)) ---
+    resolved: list[MatchupROI] = []
+    for row in rows:
+        punt = False
+        reason = ""
+        if row.confidence != "speculative":  # hard rule: never punt on thin/absent data
+            if not row.crosses_half:
+                punt = True
+                reason = _PUNT_REASON_CANT_CROSS_HALF
+            else:
+                best_other = max(
+                    (
+                        r.roi_per_slot
+                        for r in rows
+                        if r.opponent != row.opponent and r.crosses_half
+                    ),
+                    default=0.0,
+                )
+                if best_other > 0.0 and row.roi_per_slot < best_other * _REALLOCATION_MARGIN:
+                    punt = True
+                    reason = _PUNT_REASON_BETTER_ROI_ELSEWHERE
+        resolved.append(_dc_replace(row, punt=punt, punt_reason=reason))
+
+    resolved.sort(key=lambda r: r.roi_per_slot, reverse=True)
+    return resolved
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -2872,6 +3096,14 @@ class SideboardPackage:
     impact_annotations: "dict[str, CardImpactAnnotation]" = dc_field(default_factory=dict)
     board_coverage_pct: float = 0.0
     card_coverage_pct: "dict[str, float]" = dc_field(default_factory=dict)
+    # --- Additive field (feature-sb-slot-roi-punt, Units D1+D2+D3) ---
+    # slot_roi: per-field-matchup decision-support table (see `_slot_roi_table`) — ranked by
+    # roi_per_slot desc, with punt flags for matchups where dedicating slots doesn't pay.
+    # DECISION SUPPORT ONLY: computed from the field + matchup matrix + the already-built
+    # coverage model; never fed back into card selection. Empty tuple when `archetype` was
+    # not supplied to `recommend_sideboard` or matrix/model construction failed — an honest
+    # "not computed", never a fabricated table.
+    slot_roi: "tuple[MatchupROI, ...]" = dc_field(default_factory=tuple)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -3306,6 +3538,25 @@ def recommend_sideboard(
     )
     warnings.extend(model.warnings)
 
+    # --- Step 4b: Slot-ROI + punt table (feature-sb-slot-roi-punt, Units D1+D2) ---
+    # ADDITIVE decision-support layer: consumes the coverage model just built above (so its
+    # max_equity_gain matches what the solver can actually buy) + a freshly-built adaptive
+    # matchup matrix for base equities. Computed here — before the solver runs — because it
+    # is a pure function of (archetype, field, matrix, model) and does NOT depend on, or
+    # feed back into, final_cards. Gated on `archetype` (need a "my side" to look up matchup
+    # cells for) and degrades to `[]` (never a fabricated table) on any matrix-build failure
+    # (e.g. a rounds-less corpus) — every row inside `_slot_roi_table` already honest-degrades
+    # per-cell, but the matrix build itself can raise on a schema-less/absent `rounds` table.
+    slot_roi: "tuple[MatchupROI, ...]" = ()
+    if archetype is not None:
+        try:
+            from legacy_engine.analytics.matchup import build_adaptive_matrix
+            _adaptive_matrix = build_adaptive_matrix(con)
+            slot_roi = tuple(_slot_roi_table(archetype, field, _adaptive_matrix, model))
+        except Exception as exc:
+            log.debug("recommend_sideboard: slot-ROI table failed: %s", exc)
+            slot_roi = ()
+
     if not model.candidate_covers:
         warnings.append("no catalog hosers are castable in this deck's colors — returning empty sideboard")
         return SideboardPackage(
@@ -3326,6 +3577,7 @@ def recommend_sideboard(
             collection_aware=collection is not None,
             swing_data_informed=_swing_data_informed,
             swing_overrides_count=_swing_overrides_count,
+            slot_roi=slot_roi,
         )
 
     # --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
@@ -3494,6 +3746,7 @@ def recommend_sideboard(
         natural_budget_count=_natural_budget_count,
         marginal_curve=_marginal_curve,
         uncovered_tail=_uncovered_tail,
+        slot_roi=slot_roi,
         insurance_cards=frozenset(_insurance),  # hedge picks (commit = the rest)
         impact_annotations=_impact_annotations,
         board_coverage_pct=_board_coverage,

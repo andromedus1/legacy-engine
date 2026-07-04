@@ -2993,6 +2993,27 @@ def advise_sideboard(
                     )
             from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
             click.echo(f"\n  [disclaimer] {_VALUE_DISCLAIMER}")
+
+        # --- Slot-ROI + punt table (feature-sb-slot-roi-punt, Units D1+D2+D3) ---
+        # DECISION SUPPORT ONLY: ranks field matchups by expected match-win per dedicated
+        # slot (marginal equity gain × field share) and flags matchups where investment
+        # doesn't pay — either because max realistic dedication still can't cross 50%, or
+        # because the same slot buys more expected wins elsewhere. Does NOT change which
+        # cards were picked above (see `_slot_roi_table`'s module docstring); a hard rule
+        # never punts a speculative-tier (thin/absent-data) matchup — it is labeled
+        # low-confidence instead.
+        if pkg.slot_roi:
+            click.echo(
+                "\n  // slot-ROI (decision support — expected match-win per dedicated slot):"
+            )
+            for roi in pkg.slot_roi:
+                confidence_label = roi.confidence if roi.confidence is not None else "no-data"
+                punt_marker = f"  [PUNT — {roi.punt_reason}]" if roi.punt else ""
+                click.echo(
+                    f"    // vs {roi.opponent} ({roi.field_share:.1%} share): "
+                    f"{roi.base_equity:.1%} → {roi.base_equity + roi.max_equity_gain:.1%} equity  "
+                    f"ROI/slot={roi.roi_per_slot:.4f}  [confidence={confidence_label}]{punt_marker}"
+                )
     finally:
         con.close()
 

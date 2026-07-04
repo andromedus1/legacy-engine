@@ -1036,3 +1036,117 @@ class TestSideboardOutputDiagnostics:
         )
         assert result.exit_code == 0, result.output
         assert "// impact breakdown" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSlotROIPuntRender — feature-sb-slot-roi-punt, Unit D3
+# ---------------------------------------------------------------------------
+
+
+class TestSlotROIPuntRender:
+    """CLI render tests for `advise sideboard`'s slot-ROI + punt decision-support block."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """File-backed DuckDB for `advise sideboard --db <path>` (never the default DB —
+        file-backed-cli-test-db-builder pattern)."""
+        db_path = tmp_path / "test_sb_slot_roi.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_slot_roi_block_renders_ranked_rows_with_punt_markers(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A SideboardPackage carrying a populated slot_roi table renders the labeled
+        decision-support block, in order, with PUNT markers and confidence tiers."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            slot_roi=(
+                sb_mod.MatchupROI(
+                    opponent="Delver", field_share=0.6, base_equity=0.45,
+                    max_equity_gain=0.10, roi_per_slot=0.05, crosses_half=False,
+                    punt=True, confidence="established",
+                    punt_reason="max dedication still <50%",
+                ),
+                sb_mod.MatchupROI(
+                    opponent="Combo", field_share=0.1, base_equity=0.5,
+                    max_equity_gain=0.0, roi_per_slot=0.0, crosses_half=True,
+                    punt=False, confidence="speculative", punt_reason="",
+                ),
+            ),
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_roi.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "// slot-ROI (decision support — expected match-win per dedicated slot):"
+            in result.output
+        )
+        assert "vs Delver (60.0% share)" in result.output
+        assert "45.0% → 55.0% equity" in result.output
+        assert "ROI/slot=0.0500" in result.output
+        assert "confidence=established" in result.output
+        assert "[PUNT — max dedication still <50%]" in result.output
+        assert "vs Combo (10.0% share)" in result.output
+        assert "confidence=speculative" in result.output
+        # Delver (rank 1, punted) must render before Combo (rank 2) — table order preserved.
+        assert result.output.index("vs Delver") < result.output.index("vs Combo")
+        # The speculative Combo row is never punted (hard rule) — no PUNT marker on its line.
+        combo_line = next(ln for ln in result.output.splitlines() if "vs Combo" in ln)
+        assert "PUNT" not in combo_line
+
+    def test_no_slot_roi_omits_block(self, runner, db_with_corpus, tmp_path, monkeypatch):
+        """An empty slot_roi tuple (the gated default — e.g. `archetype=None` was passed to
+        `recommend_sideboard`, or the field itself is empty) renders no slot-ROI block."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            slot_roi=(),
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_no_roi.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// slot-ROI" not in result.output
