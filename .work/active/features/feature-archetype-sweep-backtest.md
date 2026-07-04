@@ -56,3 +56,11 @@ first or pin the greedy solver for reproducibility, a feature-design decision).
 Known session-1 seeds the sweep should rediscover (validation that the harness works): FoN/Consign
 (fixed), Defense Grid + Damping Sphere (tracked), the creature-interaction winners-only cluster,
 Surgical-in-graveyardless-fields.
+
+## Additional design input (2026-07-04)
+
+The sweep's divergence report should collect **copy-count histograms** (0x/1x/2x/3x/4x per card
+among top-finisher boards), not just presence% — required to test
+[[idea-copy-count-tipping-point]] (winners run fixers at 0 or 2+; our solver produces 1-ofs — a
+possible S-curve/minimum-viable-count gap in the per-copy value model). The backtest's
+`observed_frequency` is presence-only today; the sweep should surface the copy dimension.
