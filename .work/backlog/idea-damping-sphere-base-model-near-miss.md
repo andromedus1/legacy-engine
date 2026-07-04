@@ -18,3 +18,9 @@ ramp/storm coverage as competitive for this field while real pilots don't play i
 symmetric-self-cost representability gap as [[idea-hate-coverability-overvalues-defense-grid]]).
 Investigate with the divergence-as-diagnostic discipline; candidate systematic fix shared with the
 Defense Grid item (graded self-cost for symmetric cards). Never auto-calibrate it away.
+
+## Sweep confirmation (2026-07-04, validated harness)
+
+Archetype sweep: **Damping Sphere is scorer-only in 6 archetypes** (global field, `ramp`
+cluster) and scorer-only for Dimir Tempo vs the local field — session-1's finding is
+systematic, shares the symmetric-self-cost root cause with Defense Grid (18 archetypes).

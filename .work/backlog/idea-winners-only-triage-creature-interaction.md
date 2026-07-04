@@ -15,3 +15,12 @@ Barrowgoyf (83.7%), Feed the Cycle, Grafdigger's Cage, Harbinger (partially reco
 (graveyard-meta pollution candidate even field-scoped). Investigate cluster-by-cluster with the
 divergence-as-diagnostic discipline: each is either a missing mechanic (fix) or an engine edge
 (document why the engine dissents).
+
+## Sweep confirmation (2026-07-04, validated harness)
+
+The generalizing sweep (feature-archetype-sweep-backtest) reproduces this as a first-class
+cluster: winners-only `creature-based` across 7 archetypes — Sheoldred's Edict / Long
+Goodbye / Fatal Push (3 each: Dimir family + Doomsday), Toxic Deluge (Dimir Tempo 86%),
+Snuff Out — honestly labeled THIN (speculative winner samples). Copy-count note from the
+study: winners run reactive fixers ~60% as 1-ofs, so the gap is WHICH cards get credited,
+not their copy counts.
