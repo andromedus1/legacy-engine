@@ -146,6 +146,26 @@ class TestSymmetryFactor:
         hoser = make_hoser(symmetry="symmetric", attacks=frozenset({"ramp"}))
         assert symmetry_factor(hoser, frozenset()) == 1.0
 
+    def test_symmetric_shared_color_axis_hits_floor(self, make_hoser):
+        """gate-tests-symmetry-color-axis: the shared-axis floor was previously only ever
+        exercised via graveyard-recursion (Grafdigger's Cage-shaped case above). Pyroblast-shaped
+        case: a symmetric plays-<color> hoser boarded in by a deck that itself plays that same
+        color is self-hosing on the color axis, same as any other shared tag."""
+        hoser = make_hoser(
+            name="Pyroblast", symmetry="symmetric", attacks=frozenset({"plays-blue"}),
+        )
+        my_tags = frozenset({"plays-blue", "combo"})
+        assert symmetry_factor(hoser, my_tags) == _SYMMETRY_FLOOR
+
+    def test_symmetric_color_axis_not_shared_stays_full_value(self, make_hoser):
+        """Complement of the above: my deck isn't exposed on the SAME color axis this
+        symmetric hoser hits -> not self-hosing -> full value."""
+        hoser = make_hoser(
+            name="Pyroblast", symmetry="symmetric", attacks=frozenset({"plays-blue"}),
+        )
+        my_tags = frozenset({"plays-red", "combo"})
+        assert symmetry_factor(hoser, my_tags) == 1.0
+
 
 # ---------------------------------------------------------------------------
 # castability_factor

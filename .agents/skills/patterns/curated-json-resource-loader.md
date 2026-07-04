@@ -64,7 +64,7 @@ X_REGISTRY = _load_default_X()
 
 | Loader | File | Curated file / config path | Validation + failure | Default / degrade |
 |---|---|---|---|---|
-| `load_hoser_catalog` | `advisory/sideboard.py:469` | `data/hosers/legacy.json` / `HOSERS_REGISTRY_PATH` | per-hoser schema (swing alias, non-empty attacks, colors, `max_copies≥1`, dup names) → `ValueError`/`FileNotFoundError` | `_load_default_hoser_catalog()` @574 → `{}`; bound to `HOSER_CATALOG` |
+| `load_hoser_catalog` | `advisory/sideboard.py:912` | `data/hosers/legacy.json` / `HOSERS_REGISTRY_PATH` | per-hoser schema (swing alias, non-empty attacks, colors, `max_copies≥1`, dup names) → `ValueError`/`FileNotFoundError` | `_load_default_hoser_catalog()` @1044 → `{}`; bound to `HOSER_CATALOG` @1056 |
 | `load_variant_registry` | `archetype/variants.py:25` | `data/variants/legacy.json` / `VARIANTS_REGISTRY_PATH` | Pydantic `model_validate` + fail-fast on unknown `Condition.Type` → `UnknownConditionTypeError`/`ValueError` citing `parent/name` + source | resolved via config path; missing → empty registry behaviour |
 | `load_alias_map` | `analytics/players/identity.py:51` | `data/players/aliases.json` / `ALIASES_PATH` | normalizes each handle via `normalize_player`; tolerant | `path=ALIASES_PATH` default arg; absent file → `{}` (no-alias no-op) |
 

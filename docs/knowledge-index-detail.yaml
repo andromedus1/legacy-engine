@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-04T03:12:15Z'
+generated_at: '2026-07-04T19:31:09Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -321,9 +321,10 @@ documents:
       mass = counters+removal+stax+draw+protection; proactive mass = fast-mana+ritual+tutor+low-curve+compact-combo),
       tag archetypes with VULNERABILITY classes (graveyard-recursion, graveyard-fuel,
       plays-<color>, combo, low-curve, greedy-manabase, creature-based, low-interaction,
-      storm-reliant, ramp), compute hate-equity = field share each hate category attacks
-      (coverage, not naive sum), and classify best-deck (low matchup-spread, robust)
-      vs best-call (high-spread, field-specific gamble).'
+      storm-reliant, ramp, noncreature-reliant, colorless-reliant), compute hate-equity
+      = field share each hate category attacks (coverage, not naive sum), and classify
+      best-deck (low matchup-spread, robust) vs best-call (high-spread, field-specific
+      gamble).'
     - No published prior art formulates sideboard-as-optimization (one NIU thesis
       403-blocked, flagged for manual pull); the OR theory (max-coverage, NWF 1978
       submodular greedy) is load-bearing and the MTG community confirms the inputs

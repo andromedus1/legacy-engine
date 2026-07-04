@@ -113,6 +113,32 @@ class TestBuckets:
         assert report.n_matches == 0
         con.close()
 
+    def test_bye_and_unmatched_excluded(self):
+        """A bye (empty p2) and an unmatched-archetype (None) row must not leak into the
+        decisive count — exclusion parity with compute_match_results."""
+        con = _con()
+        decks = [
+            _deck("hero_tech", main=["Bolt"], side=["Tech"]),
+            _deck("foe1", main=["Rock"], side=[]),
+            _deck("ghost", main=["Rock"], side=[]),  # left unlabeled below → archetype stays None
+        ]
+        rounds = [
+            {"Player1": "hero_tech", "Player2": "foe1", "Result": "2-0"},   # decisive, counted
+            {"Player1": "hero_tech", "Player2": "", "Result": "2-0"},       # bye — excluded
+            {"Player1": "hero_tech", "Player2": "ghost", "Result": "2-0"},  # unmatched — excluded
+        ]
+        # "ghost" is intentionally NOT in labels → its archetype column stays NULL.
+        labels = {"hero_tech": "Tempo", "foe1": "Foe"}
+        _build(con, "bye-unmatched", decks, rounds, labels)
+
+        report = card_matchup_contrast(con, "Tempo", "Foe", board="side", cards=["Tech"])
+        assert not report.degraded
+        assert report.n_matches == 1
+        cell = report.cells[0]
+        assert (cell.w_with, cell.n_with) == (1, 1)
+        assert (cell.w_without, cell.n_without) == (0, 0)
+        con.close()
+
 
 # ---------------------------------------------------------------------------
 # Stats: significance + CIs + empty cohorts
@@ -146,28 +172,42 @@ class TestStats:
         assert cell.ci_with is not None and cell.ci_without is not None
         con.close()
 
-    def test_near_5050_not_significant(self):
+    def test_sizeable_nonzero_diff_not_significant(self):
+        """The 'Null Rod vs Blue Artifacts' cautionary case the module docstring warns about:
+        a sizeable, non-zero point-estimate diff (~-8pt, WITH 38% n=71 vs WITHOUT 46% n=67) that
+        is NOT significant. A degenerate 0.0-diff split (1/2 vs 1/2) would pass trivially and
+        not actually exercise Fisher's exact on a realistic near-miss — this does."""
         con = _con()
-        # WITH 1/2, WITHOUT 1/2 → no signal.
-        decks = [
-            _deck("hw", main=["Bolt"], side=["Tech"]), _deck("hw2", main=["Bolt"], side=["Tech"]),
-            _deck("hp", main=["Bolt"], side=["Filler"]), _deck("hp2", main=["Bolt"], side=["Filler"]),
-            _deck("f1", main=["Rock"], side=[]), _deck("f2", main=["Rock"], side=[]),
-            _deck("f3", main=["Rock"], side=[]), _deck("f4", main=["Rock"], side=[]),
-        ]
-        rounds = [
-            {"Player1": "hw", "Player2": "f1", "Result": "2-0"},   # with win
-            {"Player1": "f2", "Player2": "hw2", "Result": "2-0"},  # with loss
-            {"Player1": "hp", "Player2": "f3", "Result": "2-0"},   # without win
-            {"Player1": "f4", "Player2": "hp2", "Result": "2-0"},  # without loss
-        ]
-        labels = {"hw": "Tempo", "hw2": "Tempo", "hp": "Tempo", "hp2": "Tempo",
-                  "f1": "Foe", "f2": "Foe", "f3": "Foe", "f4": "Foe"}
-        _build(con, "even", decks, rounds, labels)
+        decks, rounds, labels = [], [], {}
+        counter = 0
+
+        def add(owns_card: bool, hero_wins: bool):
+            nonlocal counter
+            counter += 1
+            h, f = f"h{counter}", f"f{counter}"
+            side = ["Tech"] if owns_card else ["Filler"]
+            decks.append(_deck(h, main=["Bolt"], side=side))
+            decks.append(_deck(f, main=["Rock"], side=[]))
+            rounds.append({"Player1": h, "Player2": f, "Result": "2-0" if hero_wins else "0-2"})
+            labels[h] = "Tempo"
+            labels[f] = "Foe"
+
+        for _ in range(27):       # WITH cohort: 27/71 wins (38.0%)
+            add(True, True)
+        for _ in range(71 - 27):
+            add(True, False)
+        for _ in range(31):       # WITHOUT cohort: 31/67 wins (46.3%)
+            add(False, True)
+        for _ in range(67 - 31):
+            add(False, False)
+
+        _build(con, "realistic", decks, rounds, labels)
         report = card_matchup_contrast(con, "Tempo", "Foe", board="side", cards=["Tech"])
         cell = report.cells[0]
-        assert cell.diff == 0.0
-        assert cell.p_value is not None and cell.p_value > 0.05
+        assert (cell.w_with, cell.n_with) == (27, 71)
+        assert (cell.w_without, cell.n_without) == (31, 67)
+        assert cell.diff is not None and abs(cell.diff) > 0.05    # material, not the 0.0 degenerate case
+        assert cell.p_value is not None and 0.05 < cell.p_value < 0.6   # non-significant, sane band
         assert cell.significant is False
         con.close()
 
@@ -219,6 +259,56 @@ class TestWindowing:
         rounds = [{"Player1": "h1", "Player2": "f1", "Result": "2-0"}]
         _build(con, "adp", decks, rounds, {"h1": "Tempo", "f1": "Foe"})
         assert pair_adaptive_since(con, "Tempo", "Foe") is None
+        con.close()
+
+    def test_pair_adaptive_since_later_of_two(self):
+        """Both archetypes ban-affected on DIFFERENT dates → adaptive since is the LATER date
+        (mirrors build_adaptive_matrix; the ban-regime correctness core of the adaptive window)."""
+        con = _con()
+        # Hero ran Grief (banned 2024-08-26) in half its pre-ban decks → valid_since 2024-08-26.
+        hero_decks = [
+            _deck("h1", main=["Bolt", "Grief"], side=[]),
+            _deck("h2", main=["Bolt", "Grief"], side=[]),
+            _deck("h3", main=["Bolt"], side=[]),
+            _deck("h4", main=["Bolt"], side=[]),
+        ]
+        _build(con, "hero-pre", hero_decks, [],
+               {"h1": "Hero", "h2": "Hero", "h3": "Hero", "h4": "Hero"}, date="2024-06-01")
+
+        # Opp ran Entomb (banned 2025-11-10) in half its pre-ban decks → valid_since 2025-11-10.
+        opp_decks = [
+            _deck("o1", main=["Rock", "Entomb"], side=[]),
+            _deck("o2", main=["Rock", "Entomb"], side=[]),
+            _deck("o3", main=["Rock"], side=[]),
+            _deck("o4", main=["Rock"], side=[]),
+        ]
+        _build(con, "opp-pre", opp_decks, [],
+               {"o1": "Opp", "o2": "Opp", "o3": "Opp", "o4": "Opp"}, date="2025-10-01")
+
+        since = pair_adaptive_since(con, "Hero", "Opp")
+        assert since == "2025-11-10"   # later of Hero's 2024-08-26 and Opp's 2025-11-10
+        con.close()
+
+    def test_pair_adaptive_since_one_affected_one_not(self):
+        """Only one archetype in the pair is ban-affected → adaptive since equals that
+        archetype's valid_since (not None, not the unaffected archetype's absence of one)."""
+        con = _con()
+        opp_decks = [
+            _deck("o1", main=["Rock", "Entomb"], side=[]),
+            _deck("o2", main=["Rock", "Entomb"], side=[]),
+            _deck("o3", main=["Rock"], side=[]),
+            _deck("o4", main=["Rock"], side=[]),
+        ]
+        _build(con, "opp-only-pre", opp_decks, [],
+               {"o1": "Opp", "o2": "Opp", "o3": "Opp", "o4": "Opp"}, date="2025-10-01")
+
+        clean_decks = [
+            _deck("c1", main=["Bolt"], side=[]),
+            _deck("c2", main=["Bolt"], side=[]),
+        ]
+        _build(con, "clean", clean_decks, [], {"c1": "Clean", "c2": "Clean"}, date="2025-10-01")
+
+        assert pair_adaptive_since(con, "Clean", "Opp") == "2025-11-10"
         con.close()
 
 

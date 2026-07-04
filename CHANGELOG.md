@@ -1,3 +1,42 @@
+## v0.2.0 (2026-07-04)
+
+The sideboard-intelligence release: `advise sideboard` gains a decomposed, explainable,
+field-weighted scoring model, validated against real winning boards.
+
+### Features
+- **Decomposed impact scoring** — element weights are `field_share × swing × impact` where impact =
+  centrality × symmetry × castability (multiplicative hard gates; draw-probability lives in the
+  per-copy taper). New `advisory/impact.py` with per-card explainable breakdowns in CLI output.
+- **Archetype linchpin model** — `advisory/linchpins.py`: hybrid derived + curated registry of
+  per-archetype critical cards (`data/linchpins/legacy.json`), feeding the centrality factor.
+- **Board backtest** — new `advise backtest`: compares recommended boards against top-finisher
+  sideboards (overlap / scorer-only / winners-only), field/window-scopable via `--field-scope`.
+  Reports resemblance with confidence tiers — never a pass/fail verdict.
+- **Flexibility valuation** — submodular breadth aggregation consolidated into one canonical
+  marginal-gain form; CVaR option-value bonus over the Dirichlet field (risk-appetite dial α);
+  `_hate` self-protection made coverable; maindeck-aware coverage discount; slot-ROI/punt table.
+- **Vulnerability vocabulary** — `graveyard-reliant` split into `graveyard-recursion`/`graveyard-fuel`;
+  new `plays-<color>`, `noncreature-reliant`, `colorless-reliant` axes; hoser catalog grown to 37
+  entries (Force of Negation, Spell Pierce, Mystical Dispute added; Hydroblast/Pyroblast re-tagged).
+- **Config comparator + slot test** — `advise compare` (two-config / transform EV comparison, MC
+  P(A>B), break-even) and `report cards --contrast` (matchup-conditioned WITH/WITHOUT slot test).
+- **Sideboard core-and-hedge solver** — concave per-copy value, natural-budget τ stop, dedicated
+  core vs flexible insurance hedge allocation, `--smart` output contract.
+
+### Fixes
+- Null Rod catalog color corrected to colorless; Consign to Memory oracle-grounded re-attribution;
+  decklist parser comment handling; ingestion resilience follow-ups.
+
+### Documentation
+- Foundation docs + README rolled forward to the decomposed-scorer reality; new attested brief
+  `docs/briefs/scorer-flexibility-valuation.md`; three new pattern skills
+  (hybrid-derived-curated-registry, divergence-as-diagnostic-surface, closed-vocabulary-fail-fast-token).
+
+### Internal
+- Quality gates: 29 findings (tests/cruft/docs/patterns) drained pre-tag — comparator honesty-banner
+  coverage, τ×option-value composition pinned, 5 vacuous tests rewritten, test-file cruft removed,
+  helper builders consolidated into conftest. Suite: 2202 → **2578 passing** (+1 documented xfail).
+
 # Changelog
 
 ## v0.1.0

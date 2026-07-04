@@ -9,10 +9,50 @@ from __future__ import annotations
 
 import pytest
 
+from legacy_engine.advisory.field import FieldDistribution, build_custom_field
 from legacy_engine.advisory.linchpins import Linchpin
 from legacy_engine.advisory.sideboard import HoserCard
 from legacy_engine.confidence import ConfidenceMetadata
 from legacy_engine.config import VL_SCHEMA_URL
+from legacy_engine.models.card import Card
+
+
+# ---------------------------------------------------------------------------
+# Plain (non-fixture) shared helpers — gate-cruft-test-helper-duplication.
+#
+# `_con`, `_make_field`, and `_make_card` were byte-identical, independently
+# maintained copies in tests/test_sideboard.py, tests/test_whattoplay.py, and
+# tests/test_linchpins.py. Unlike the `make_X(**kwargs)` factory FIXTURES below
+# (which model discrete test DATA objects meant for per-test override via pytest's
+# DI), these three are plain zero/one-arg infra helpers also called from inside
+# non-test `@staticmethod` corpus builders (e.g. `TestRedundancyDecay._gy_field_corpus`)
+# that pytest never collects and so cannot receive injected fixtures. Converting them
+# to `@pytest.fixture`s would force rewriting every one of their 100+ call sites (and
+# restructuring those static builders) for no behavior change — out of scope for a
+# structural dedup. Kept as plain functions and imported via `from tests.conftest import
+# ...` (precedent: `assert_renders` below, already imported this way from
+# test_viz_render.py) — call-site signatures are untouched.
+# ---------------------------------------------------------------------------
+
+def _con():
+    """In-memory DuckDB connection with schema initialized."""
+    from legacy_engine.ingestion import store
+
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    return con
+
+
+def _make_field(shares: dict[str, float]) -> FieldDistribution:
+    """Build a FieldDistribution from raw shares (normalizes automatically)."""
+    return build_custom_field(shares)
+
+
+def _make_card(**kwargs) -> Card:
+    """Construct a Card with defaults for unspecified fields."""
+    defaults = dict(name="Test Card", type_line="Instant", oracle_text="", cmc=1.0)
+    defaults.update(kwargs)
+    return Card(**defaults)
 
 
 @pytest.fixture
