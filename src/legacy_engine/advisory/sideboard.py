@@ -2963,9 +2963,13 @@ feature's design notes) so the bonus nudges ranking toward robust, multi-archety
 without moving the already-validated recommendation off the overlap it earned."""
 
 _OPTION_VALUE_SCALE: float = 0.05
-"""Swing-unit scale for the option-value bonus — half of ``_SWING_SOFT`` (0.10), so even a
-fully tail-weighted bonus (``alpha=0.0``) can never outweigh a single soft-hoser element at
-its own full natural weight. Keeps this axis a ranking nudge, never a re-ranking hammer."""
+"""Swing-unit scale for the option-value bonus. NOTE the operating regime (2026-07-03 review):
+on the real model the positive opponent element weights run ~0.0006-0.0135 (median ~0.0035)
+after impact modulation, so a broad card's bonus (measured 0.0014-0.0125) is COMPARABLE to a
+whole element's weight and 27-68% of its entire base marginal gain — a substantial re-ranking
+force, not a small nudge relative to raw ``_SWING_SOFT``. The defaults (alpha=0.7, scale=0.05)
+are justified EMPIRICALLY by the field-scoped ``advise backtest`` acceptance run (overlap
+improved 5->6/7 with FoN held at 99.2%), not by an a-priori magnitude argument."""
 
 
 def _dirichlet_group_lower_bound(
@@ -3064,8 +3068,12 @@ def _build_option_value_bonuses(
     preserved intact; only the RELATIVE ranking among candidates shifts, toward cards whose
     EXISTING coverage is robust to field uncertainty. A card with zero real coverage
     (``_card_covered_archetypes`` empty) always gets bonus 0.0 — this term can never promote a
-    card into the board on option value alone; it can only make an already-covering card's
-    coverage rank higher when that coverage spans a field-uncertainty-robust set of matchups.
+    card with ZERO covered archetypes into the board (empty covered set -> bonus 0.0 — the
+    hard guardrail against manufacturing picks from field-relevance alone). It CAN, however,
+    add an already-covering card whose residual coverage gain is saturated to ~0 (redundant
+    coverage) purely on its static first-copy bonus — observed: the recommended board grows
+    6->9 cards when the term turns on. That is intended "flexible insurance" behavior
+    (brief §4's one-of insurance thesis), but it means the term adds cards, not just re-ranks.
 
     Zero-mechanics, no empirical winning-board input (epic guardrail): the only inputs are
     the field's own Dirichlet posterior (``field.counts``/``field.shares``) and the model's

@@ -1,7 +1,7 @@
 ---
 id: feature-sfv-option-value
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-scorer-flexibility-valuation
 depends_on: [feature-sfv-breadth-objective]
