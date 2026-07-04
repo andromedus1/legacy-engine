@@ -1,7 +1,7 @@
 ---
 id: feature-sb-slot-roi-punt-roi
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-sb-slot-roi-punt
 depends_on: []
