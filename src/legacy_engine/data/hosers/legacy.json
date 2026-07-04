@@ -107,7 +107,7 @@
       "max_copies": 4,
       "swing": "dedicated",
       "symmetry": "asymmetric",
-      "_comment": "Counters spells regardless of protection or hexproof; can counter multiple spells in a storm chain."
+      "_comment": "Oracle (DB-verified 2026-07-03): 'Replicate {1}' + 'Counter target triggered ability or colorless spell.' Counters COLORLESS spells and TRIGGERED ABILITIES only — not a general counterspell. Premier vs storm triggers (storm is a triggered ability), Saga chapter triggers, Chalice triggers, and colorless (Eldrazi/artifact) spells; replicate {1} scales to multiple triggers in one turn."
     },
     {
       "name": "Thoughtseize",

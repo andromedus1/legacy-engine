@@ -4,22 +4,36 @@ created: 2026-07-03
 tags: [advisory, sideboard]
 ---
 
-# `_hate` coverability over-values Defense Grid (0% of winners, recommended)
+# `_hate:` coverage applies no impact factor — Defense Grid false positive (CONFIRMED mechanism)
 
-Surfaced by the field-scoped `advise backtest` on Dimir Tempo + Boulder (2026-07-03), post
-`feature-sfv-weights`. Making `_hate:` self-protection coverable (correctly) turned Defense Grid
-into a live candidate that the solver now picks (for `_hate:combo` self-protection), but the
-backtest shows Defense Grid at **0% inclusion in 258 Boulder-relevant top-finisher boards** — a
-scorer-only false positive.
+Field-scoped backtest: Defense Grid recommended at 4 copies; **0%** of 258 Boulder-relevant
+top-finisher boards run it. Independent deep review (2026-07-03, pinned f53e6a4) confirmed the
+mechanism — stronger than first filed:
 
-The divergence is the backtest working as intended (a flag to investigate, not an auto-calibration).
-Likely causes to weigh: (a) the `_hate:` element weights are still too high relative to real
-opponent coverage even after the coverability fix (the self-protection need is over-stated for a
-proactive tempo deck); (b) Defense Grid's own value is over-credited (a symmetric tax that also hits
-the caster's instant-speed plays — its `symmetry: symmetric` flag exists but may not discount its
-`_hate` coverage); (c) genuinely a mispricing the field hasn't caught (least likely at 0%).
+1. **`_hate:` element weights are never impact-modulated** (sideboard.py ~1783: `weight =
+   interactive_share * _SWING_SOFT`, full stop) — the centrality×symmetry×castability modulation
+   runs only for `(archetype, tag)` opponent elements. Post-deflation-fix, real elements are
+   ~0.01-0.015 while each hate element is ~0.07-0.09 — and hate weight is identical for every deck
+   tag, unconditioned on whether the field actually attacks that axis.
+2. **Coverage is binary set-membership** (~1882-1886): any `"_hate"`-attacking card covers every
+   `_hate:<tag>` element at full weight; `_build_impact_annotations` skips `_hate` cards, so the
+   self-cost never even shows in explainability output.
+3. **The `symmetry: "symmetric"` flag is structurally inert for `_hate`-only cards**: the symmetry
+   gate fires on `hoser.attacks ∩ my_vulnerability_tags ≠ ∅`, and `"_hate"` is never a deck
+   vulnerability tag — empty by construction. Defense Grid's symmetric flag is dead data on every
+   code path.
+4. **The self-cost model is a binary cliff**: `_ANTI_SYNERGY_MAP` → reactive at fraction ≥0.40;
+   Dimir Tempo sits just under, so the tax on its OWN instant-speed FoW/Daze/Brainstorm is priced
+   at exactly zero. Domain reality: Defense Grid's protection is own-turn-scoped — right for a
+   proactive combo deck, wrong for a deck that operates at instant speed on both turns; the `_hate`
+   tag has no notion of protection *kind*.
+5. **The removed guard**: pre-`feature-sfv-weights`, the empirical-pool filter (0% adoption) was
+   the only thing blocking exactly this false-positive class; the exemption removed it on principled
+   grounds with no compensating mechanical discount. Also: the Step 4c cap applies only to
+   UNCOVERED hate elements — covered ones keep full weight (~5-10× the largest real element).
 
-Fix direction: re-examine `_hate:` element weighting + whether a symmetric protective card should
-have its `_hate` coverage discounted by its self-cost. Validate against the same field-scoped
-backtest (Defense Grid should drop out of the recommended board). Relates to
-[[idea-consign-to-memory-tag-differentiation]] (the other backtest-surfaced divergence).
+**Fix directions** (from the review): impact-modulate `_hate` coverage per covering card (requires a
+representable self-cost — e.g. a `protects` field with scope semantics: own-turn vs both-turns);
+and/or condition Step-3 hate weights on which tags the interactive field actually attacks; and/or a
+graded (not cliff) reactive self-cost. Validate: Defense Grid drops out of the recommended board on
+the field-scoped backtest. Relates to [[idea-card-semantics-rules-layer]] (protection-kind semantics).
