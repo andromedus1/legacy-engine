@@ -1,7 +1,7 @@
 ---
 id: feature-archetype-sweep-backtest-copy-surfaces
 kind: story
-stage: implementing
+stage: done
 tags: [advisory, analytics]
 parent: feature-archetype-sweep-backtest
 depends_on: []

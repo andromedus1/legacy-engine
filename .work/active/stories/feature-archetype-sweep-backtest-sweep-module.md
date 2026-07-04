@@ -1,7 +1,7 @@
 ---
 id: feature-archetype-sweep-backtest-sweep-module
 kind: story
-stage: implementing
+stage: done
 tags: [advisory, analytics]
 parent: feature-archetype-sweep-backtest
 depends_on: [feature-archetype-sweep-backtest-ilp-determinism, feature-archetype-sweep-backtest-copy-surfaces]
