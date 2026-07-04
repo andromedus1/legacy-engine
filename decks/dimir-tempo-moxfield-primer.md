@@ -1,215 +1,160 @@
-# Dimir Tempo — Barrowgoyf Grind
+# Dimir Tempo — Barrowgoyf Grind (Moxfield primer, the maintainer's list conventions)
 
-*Legacy · post–Undercity Informer regime · the build you've adopted, tuned for a wide, combo-and-creature local paper meta*
+Paste everything below the marker into the Moxfield deck description.
+Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped winners, established tier).
 
-A disruptive blue-black tempo deck: strip the opponent's plan (Thoughtseize, counters,
-Wasteland), land a resilient threat, and grind the long game with card advantage they
-can't match. This is the **Barrowgoyf grind** configuration — the higher-resilience half
-of Dimir Tempo, built for a format where pure low-curve tempo gets punished by prison,
-combo, and resilient creatures.
-
-**Why it's your deck:** unlike the Doomsday morph or a D&T pivot, this is the deck you
-*already own and know how to pilot*. It's a real Tier-B deck and a regime-sensitive
-coin-flip for the field — its case is familiarity and immediacy, not that it's the
-best-positioned choice (it isn't — see the gates).
+<!-- PASTE BELOW -->
 
 ---
-
-## Read the gates first
-
-Stated honestly, with the same discipline as the rest of the corpus:
-
-- **Positioning:** on the regime-clean field, Dimir Tempo sits at **S ≈ 0.483 — the
-  *lower* of your two options** (Doomsday ≈ 0.50), and **8th of 9** covered candidates.
-  The field's best-positioned decks (Death & Taxes, Lands) are exactly the ones you're
-  weak to.
-- **It's a lean, not a verdict:** ~54% field coverage, all CIs overlap, and the field is
-  regime-clean *global paper*, not local-field-specific (no geo; local data is MWP aggregates).
-- **Your matchup spread is lopsided** (established data): you *beat* blue tempo + combo —
-  Show and Tell **63%**, Izzet Delver **55%**, Doomsday **53%** — and you *lose* to
-  resilient permanents / fair creatures — Blue Artifacts **40%**, Death & Taxes **34%**,
-  Lands **34%**. The current field has been drifting toward that bad column, which is why
-  your positioning is middling.
-
-**The honest case for playing it anyway:** it's built, you have reps, and the matchups it's
-*good* at (Izzet is ~14% of your field, plus Show & Tell, Doomsday) are real. You're not
-playing the field's best deck — you're playing a deck you can pilot well that's favored
-against a big chunk of the room.
+---
+:::notes:::
+* board updated 2026-07-04 (engine refresh, n=263 winners, established tier):
+  * -1 fatal push (4th) -> +1 consign (3rd) // winners' copy-mode = 3; pitch-class valley-at-1
+* online-meta variant: -1 toxic deluge -> +1 surgical extraction // reanimator+doomsday ~12% online
+* engine overrides held: defense grid (0.0% of winners) & damping sphere (3.0%) stay OUT // systematic scorer false-positives, tracked
+* prev board (massacre/hurkyl's/flusterstorm era) retired — flusterstorm & echoing truth not in collection anyway
 
 ---
+**plan:**
+* strip -> stick -> ride: t1 discard/cantrip, t2-3 threat w/ prot open, then tax everything they do
+  * tamiyo is the engine: attack -> clue -> flip off 3rd draw -> free spells
+  * bowmasters on THEIR cantrip, not proactively // flash; punish brainstorm/ponder/flow state
+  * kaito via ninjutsu on unblocked tamiyo/dauthi -> surveil engine + hexproof on your turn
+* wasteland is a spell: cut the 2nd color / saga / tomb, esp. behind harbinger
+  * harbinger = SYMMETRIC (nonbasics -> islands, yours too; only basic swamp makes B after)
+    * deploy black FIRST, then harbinger -> mono-blue lock
+* murktide vs barrowgoyf: murktide = clock vs combo; barrowgoyf = attrition vs fair
+  * tension: delve eats the yard goyf counts — goyf first in grind matchups
+* spread honesty: 55-62% vs blue/combo, 36-46% vs fair-creature/prison — spend slots accordingly
 
-## Why this build (and not the Nethergoyf version)
-
-Dimir Tempo splits into two near-equal camps: the **Nethergoyf + Mishra's Bauble**
-low-curve tempo build, and this **Barrowgoyf grind** build (more card advantage, a
-recursive threat, more countermagic). Over a long sample they perform about the same —
-but in the *current* regime the field has shifted toward decks that punish raw tempo, and
-the grind build is the better-positioned half. The trade: a little early-game speed for a
-threat base that wins attrition wars and doesn't fold to a single sweeper.
-
-**The swap from the tempo build:** −3 Nethergoyf, −2 Mishra's Bauble → +2 Barrowgoyf,
-+1 Orcish Bowmasters (to 4), +1 Kaito (to 2), +1 Daze (to 3).
-
----
-
-## The game plan
-
-1. **Disrupt first.** Thoughtseize and flash Orcish Bowmasters tear up combo and card
-   engines; Force of Will, Daze, and Wasteland tax everything else.
-2. **Deploy a resilient threat.** Tamiyo flips into a card engine, Murktide ends games
-   fast, Barrowgoyf blocks-and-grinds with deathtouch + lifelink, Kaito is a hexproof
-   clock that buries the opponent in cards.
-3. **Win the long game.** Flow State, Bowmasters, Kaito, and Barrowgoyf give you more gas
-   than fair opponents. You're usually the deck still drawing live cards on turn 8.
+**mulligans:**
+* keep = 2 lands + threat + interaction, OR cantrip-dense (2+) w/ 2 lands
+* pitch: 1-landers w/o brainstorm; 4+ lands no-action; all-interaction-no-clock
+* count blue cards before keeping fow hands
+* vs combo: thoughtseize/fow + clock > value; vs fair: grind pieces > daze (ship daze-heavy hands)
 
 ---
-
-## The maindeck
-
-**Threats (10)** — 4 Tamiyo, Inquisitive Student · 4 Orcish Bowmasters · 2 Murktide
-Regent · 2 Barrowgoyf.
-**Planeswalker (2)** — 2 Kaito, Bane of Nightmares (hexproof clock + card advantage).
-**Card selection / advantage (11)** — 4 Brainstorm · 3 Ponder · 4 Flow State.
-**Disruption / interaction (18)** — 4 Thoughtseize · 4 Force of Will · 3 Daze · 3 Fatal
-Push · 1 Snuff Out · 1 Brazen Borrower · + the manabase's 4 Wasteland.
-**Manabase (19)** — 4 Underground Sea · 1 Undercity Sewers · 1 Island · 1 Swamp · 4
-Polluted Delta · 3 Scalding Tarn · 1 Bloodstained Mire · 4 Wasteland.
-
-> *Manabase note:* the 3 Scalding Tarn is slightly off the field's diversified fetch split
-> (most lists spread singletons). It works because all your duals carry the Island type,
-> but diversifying 1–2 into Misty Rainforest / Flooded Strand dodges a Pithing Needle and
-> keeps both colors live.
+---
+**interaction targets — what you save it for:**
+* fow/fon: their NAMED gameplan card only (s&t, doomsday, storm engine) — never value/cantrips unless lethal-adjacent
+* daze: t1-t2 tempo window; dead late + vs vial/tomb mana — first cut in slow matchups
+* consign ("counter target triggered ability or colorless spell"):
+  * oracle etb win trigger / emrakul cast trigger + emrakul itself / the storm trigger (copies die) / saga chapters / eldrazi casts / phlage trigger
+* thoughtseize: t1 vs combo (take the engine); mid-game vs fair (take sweeper/bomb)
+* push/snuff: murktide, DRC, thalia-on-sight, guide of souls — mana-efficient threats only
+* null rod: vial, jitte, grindstone, LED, saga constructs // NOTE: turns off OUR ee too — rod first, ee backup
 
 ---
+---
+**matchups & sideboard** // wr = adaptive matrix vs local field; imputed = no cell data
 
-## Sideboard (15) — your adopted, collection-and-locally tuned build
+**izzet delver — 11% of field, 55% wr (evolving n=71):**
+* their plan: cheap threats + burn/counter, murktide top; bolts your tamiyo/kaito
+* interaction: push/snuff = murktide/DRC; hydroblast counters ANY red spell or kills red permanent (bolt, pyroblast, price)
+* in: +2 hydroblast +1 snuff out +1 sheoldred's edict
+* out: -2 thoughtseize -1 daze -1 brazen borrower
+  * // engine also shows consign lift here (n=71) — swap for edict vs trigger-heavy builds
 
-| Cards | Targets |
-|---|---|
-| **2 Massacre** | Free −2/−2 vs Plains decks: D&T, Azorius, Stoneblade, BW, GW Energy |
-| **2 Toxic Deluge** | Scalable sweep (non-white creatures): Black Midrange, Eldrazi, Energy |
-| **2 Hurkyl's Recall** | Bounce all artifacts: Blue Artifacts, Izzet artifacts |
-| **2 Null Rod** | Painter's Grindstone, artifacts, Lands' Map |
-| **2 Flusterstorm** | Counter war: Jeskai/Esper control, Storm, combo |
-| **1 Force of Negation** | Combo (Show & Tell, Doomsday) |
-| **1 Surgical Extraction** | Doomsday, Reanimator, Dredge |
-| **1 Hydroblast** | Painter, Izzet's red |
-| **1 Echoing Truth** | Stiflenought's Dreadnought, token/artifact boards |
-| **1 Harbinger of the Seas** | Eldrazi, Lands, Cradle (greedy mana) |
+**show and tell — 10%, 62% wr (best matchup):**
+* their plan: s&t/sneak -> omniscience/emrakul/atraxa, counter prot
+* interaction point: the ENABLER cast (fow/fon/daze the s&t); thoughtseize it pre-cast
+  * consign: emrakul = colorless spell AND cast-trigger both; sneak ACTIVATION not consignable (activated, not triggered)
+* harbinger islands their sol lands; clock + hold prot
+* in: +3 consign +2 force of negation +1 harbinger
+* out: -3 fatal push -1 snuff out -2 barrowgoyf
+
+**white beanstalk — 7.5%, 55% wr:**
+* their plan: white value pile -> beanstalk card adv, binding/swords on threats
+* interaction: counters for beanstalk + their sweeper; grind w/ goyf+kaito; harbinger the greedy whites
+* in: +1 barrowgoyf +1 sheoldred's edict +1 harbinger
+* out: -2 daze -1 brazen borrower
+
+**mirror — 7.5%, 50%:**
+* edges: dauthi (voids their goyf/murktide fuel + shadow clock), 3rd goyf, bowmasters discipline
+* counter murktide on the stack; remove goyfs on board
+* in: +1 dauthi +1 barrowgoyf +1 snuff out
+* out: -2 daze -1 brazen borrower
+  * // engine mirror plan wanted hydroblast in — UB mirror, no red targets; rejected as correlational noise
+
+**jeskai midrange — 7.5%, ~50 (imputed):**
+* their plan: counters + swords + phlage/clique, pyroblast war postboard
+* interaction: hydroblast their pyroblast/bolt/phlage; consign the phlage trigger
+* in: +2 hydroblast +1 consign
+* out: -2 daze -1 thoughtseize
+
+**azorius midrange — 6.5%, ~50 (imputed):**
+* removal pile, few creatures, walkers + equipment
+* in: +1 barrowgoyf +1 sheoldred's edict (walker mode) +1 harbinger
+* out: -2 fatal push -1 snuff out
+
+**black midrange — 6.5%, ~50 (thin data):**
+* discard+goyf grind; whoever's threat sticks
+* in: +1 barrowgoyf +1 sheoldred's edict +1 toxic deluge
+* out: -2 daze -1 brazen borrower
+
+**black saga storm — 6.5%, ~50 (thin data):**
+* their plan: beseech storm on urza's saga mana; LED hands
+* CONSIGN IS THE CARD: counters the storm trigger itself + saga chapters; null rod = LED + constructs; dauthi voids their yard
+* fow the beseech; thoughtseize the engine t1
+* in: +3 consign +1 null rod +1 dauthi
+* out: -3 fatal push -1 snuff out -1 murktide
+
+**death & taxes — 5.6%, 36% wr (worst — slot-ROI says punt; board efficient, don't overboard):**
+* their plan: vial cheats taxers in; thalia/mother/revoker + swords + jitte
+* interaction: thalia ON SIGHT; null rod = vial AND jitte; toxic@2-3 sweeps wide
+* counters near-dead through vial — cut daze hard
+* in: +1 toxic deluge +1 sheoldred's edict +1 null rod +1 snuff out
+* out: -3 daze -1 thoughtseize
+
+**doomsday — 5.6%, 54% wr (evolving n=30):**
+* their plan: doomsday pile -> oracle; tempo camp = tamiyo/murktide shell
+* interaction ladder: thoughtseize the doomsday -> counter the doomsday cast -> consign the ORACLE ETB TRIGGER (win dies even if oracle resolves)
+* bowmasters on their cantrip chain = real damage + kills their tamiyo
+* in: +3 consign +2 force of negation +1 dauthi
+* out: -3 fatal push -1 snuff out -2 barrowgoyf
+  * // engine shows a hydroblast lift signal (n=30) — if you see red g1, 1 hydro over 1 consign
+
+**eldrazi — 5.6%, 46% wr:**
+* their plan: tomb/eye ramp -> chalice, TKS, smasher; all colorless
+* consign counters their WHOLE DECK (colorless spells + cast triggers); harbinger islands tomb/eye; toxic resets
+* chalice@1 is the trap — lead cantrips before their t2 when possible
+* in: +3 consign +1 harbinger +1 toxic deluge +1 sheoldred's edict
+* out: -3 daze -2 thoughtseize -1 brazen borrower
+
+**painter — 4.7%, 48% wr:**
+* their plan: painter's servant + grindstone, REB-heavy red shell
+* interaction: null rod stops grindstone; ee@1-2 hits both pieces; hydroblast kills painter / counters blasts
+* null rod + ee anti-synergy — rod first, ee backup
+* in: +1 null rod +1 engineered explosives +2 hydroblast
+* out: -2 daze -1 kaito -1 brazen borrower
+
+**blue artifacts — 3.7%, 41% wr (bad — race or lock):**
+* their plan: saga constructs + thought monitor card adv, mostly-colorless base
+* consign their colorless casts + saga chapters; null rod their activated base; wasteland every saga
+* in: +3 consign +1 null rod +1 engineered explosives
+* out: -2 thoughtseize -2 daze -1 fatal push
+
+**energy — 3.7%, ~50 (imputed):**
+* their plan: guide of souls/ajani WR energy, wide + lifegain
+* guide of souls on sight; toxic@2 sweeps; hydroblast = red threats/removal
+* in: +1 toxic deluge +1 engineered explosives +1 sheoldred's edict +2 hydroblast
+* out: -3 daze -2 thoughtseize
 
 ---
-
-## local sideboard vs. the consensus
-
-This is worth being honest about: **your adopted board is a heavy the local meta-and-collection
-departure from the consensus Dimir Tempo sideboard.** The pool consensus (15) is:
-
-> 3 Consign to Memory · 2 Force of Negation · 2 Hydroblast · 2 Barrowgoyf · 2 Sheoldred's
-> Edict · 2 Surgical Extraction · 1 Toxic Deluge · 1 Dauthi Voidwalker
-
-Where your build diverges:
-
-| | Consensus | Your build | Note |
-|---|---|---|---|
-| **Off-consensus adds** | — | +2 Massacre, +2 Hurkyl's Recall, +2 Null Rod, +2 Flusterstorm, +1 Echoing Truth, +1 Harbinger | Aimed at *your* worst matchups (white creatures, artifacts, control) — justified the local meta leans, but not standard tech |
-| **Consensus staples you've dropped** | 3 Consign to Memory, 2 Sheoldred's Edict, 1 Dauthi Voidwalker | 0 / 0 / 0 | **Consign (95% consensus) is a real omission** — it's strong vs Show & Tell's colorless fatties, Eldrazi, and Tron, all present in the local meta |
-| Barrowgoyf | 2 (SB) | maindecked instead | fine — Build B runs it main |
-| Force of Negation | 2 | 1 | a copy light vs a combo-heavy field |
-
-> **The honest read:** much of your board is well-reasoned for your field (Massacre/Toxic
-> vs the white-creature decks that beat you; Hurkyl's/Null Rod vs artifacts). But you've
-> traded away the consensus's anti-combo/colorless answers — **Consign to Memory in
-> particular is worth finding a slot for** in a field with Show & Tell (7%), Doomsday (9%),
-> and Eldrazi (5%). Treat the off-consensus cards as local hypotheses, and consider the
-> consensus toolbox as the reference if a matchup feels unanswered.
+---
+**board logic recap (why these 15):**
+* 3 consign: triggered abilities + colorless — most systematic card vs this field; winners run exactly 3 (67% of n=263)
+* 2 fon / 2 hydroblast: pitch-class, 2nd copy = fuel/redundancy where live (~44% / ~21% of field)
+* 1-of flex (dauthi/ee/edict/snuff/rod/harbinger/goyf/toxic): natural-budget insurance, all owned
+* NOT here: defense grid (0.0% of 263 winner boards) + damping sphere (3.0%) — engine wants both; overridden, mechanisms tracked
+* slot-by-slot + copy histograms: decks/dimir-tempo-optimized-analysis.md
 
 ---
-
-## Matchup & sideboard guide
-
-*Plans are starting points. "OUT" cards are ordered by how comfortable the cut is.*
-
-### Favored
-**Izzet Delver** — card quality + Bowmasters. IN: 1 Hydroblast, 2 Flusterstorm · OUT:
-1 Snuff Out, 1 Brazen Borrower, 1 Daze.
-**Show and Tell** — their removal-proof until they cheat a fatty. IN: 2 Flusterstorm,
-1 Force of Negation, 1 Echoing Truth · OUT: 3 Fatal Push, 1 Snuff Out.
-**Doomsday** — disruption + counters race their combo turn. IN: 2 Flusterstorm, 1 Force
-of Negation, 1 Surgical · OUT: 3 Fatal Push, 1 Snuff Out.
-
-### Roughly even
-**Painter** — Null Rod turns off Grindstone; Hydroblast mops the red. IN: 2 Null Rod,
-1 Hydroblast, 1 Echoing Truth · OUT: 3 Daze, 1 Brazen Borrower.
-**Eldrazi** — break colorless mana, then sweep. IN: 1 Harbinger, 2 Toxic Deluge,
-1 Echoing Truth · OUT: 3 Daze, 1 Brazen Borrower.
-
-### Unfavored — the board's focus
-**Death & Taxes** — sweepers are everything; Daze is dead into mana denial. IN: 2 Massacre,
-2 Toxic Deluge · OUT: 3 Daze, 1 Brazen Borrower.
-**Blue Artifacts** — Hurkyl's is a blowout; Null Rod neuters them. IN: 2 Hurkyl's Recall,
-2 Null Rod, 1 Echoing Truth · OUT: 3 Daze, 1 Snuff Out, 1 Brazen Borrower.
-**Lands** — hardest matchup. Wasteland + Harbinger attack the mana; race before Marit Lage.
-IN: 1 Harbinger, 1 Echoing Truth · OUT: 2 Fatal Push.
+---
+**references:**
+* engine analysis: decks/dimir-tempo-optimized-analysis.md
+* cross-meta verdict (stay dimir for local): decks/dimir-vs-doomsday-tempo-comparison.md
+* session study: https://claude.ai/code/artifact/b954ac08-4558-4303-8c36-9a9f536ed26f
 
 ---
-
-## Playing with Harbinger of the Seas out
-
-Harbinger (`{1}{U}{U}` 2/2 Merfolk) reads *"Nonbasic lands are Islands"* — and that's
-**symmetric**. It wrecks the opponent's greedy mana, but it also turns **your own**
-manabase nearly mono-blue. Misplay it and you lock *yourself* out. Know what it does to
-your side:
-
-| Your land | Under Harbinger |
-|---|---|
-| **Underground Sea / Undercity Sewers** | become Islands — tap for **{U} only** (no more black, no surveil) |
-| **Polluted Delta / Scalding Tarn / Bloodstained Mire** | become Islands — **can't be cracked** (lose the fetch ability); they just tap {U} |
-| **Wasteland** | becomes an Island — **no land destruction**, taps {U} |
-| **basic Swamp** | unaffected — **your only reliable black source under Harbinger** |
-| **basic Island** | unaffected |
-
-So once Harbinger is down, **almost all of your black spells become uncastable** unless
-you have the basic Swamp (or black already available): Thoughtseize, Fatal Push, Snuff Out
-(its free mode also needs a Swamp), Barrowgoyf, Orcish Bowmasters, and Kaito's `{2}{U}{B}`
-all want black your duals no longer make.
-
-**How to sequence it:**
-- **Get your black online *first*.** Crack fetches for a Swamp/dual and cast your black
-  spells (Thoughtseize, removal, deploy Barrowgoyf/Bowmasters/Kaito) **before** Harbinger
-  resolves — afterward your fetches are bricked and your duals make only blue.
-- **Hold Harbinger as a mid-game pivot,** not a turn-3 reflex. The ideal spot: you've
-  disrupted and deployed, and now you flip to a **mono-blue lock-and-clock** — turn off
-  their mana and ride the blue half.
-- **The blue half still works fully:** Tamiyo, Murktide (delve), Brazen Borrower, Flow
-  State, Brainstorm, Ponder, Daze, and Force of Will are all castable post-Harbinger. That
-  *is* your gameplan once it's out.
-- **Keep a basic Swamp around** if you'll still need black (more removal, a Kaito). Fetch
-  it before you play Harbinger.
-- **Use your own Wasteland *before* Harbinger** — it's just an Island afterward.
-- **Don't strand your hand.** If you're holding black-heavy cards and only have blue duals,
-  Harbinger can brick you harder than the opponent. When in doubt, deploy black first.
-
-Bottom line: bring Harbinger in against greedy/colorless manabases (Lands, Eldrazi, Cradle,
-Tron) where neutering their mana is worth going mono-blue — and treat it as a pivot you
-*sequence into*, not a card you slam on curve.
-
 ---
-
-## Mulligan & play tips
-
-- **Keep disruption + a way to find threats**, not just threats. T1 Thoughtseize into
-  Bowmasters backup beats two fatties and no interaction.
-- **Sequence cantrips around fetches** — Brainstorm is best when you can fetch right after.
-- **Bowmasters is interaction** — hold it up vs cantrip decks and ambush their draws.
-- **Don't over-Daze** — on the draw and against more-mana decks it's your weakest card;
-  first thing out in grindy matchups.
-- **Respect your bad column.** Against D&T, Lands, and artifact prison you're the underdog
-  game one — sideboard hard, mulligan for sweepers/Hurkyl's, don't durdle.
-
----
-
-*Build: Dimir Tempo (Barrowgoyf grind) — your adopted 75. Positions S ≈ 0.483 on the
-regime-clean field (the lower of your two options vs Doomsday's ≈0.50) — a lean, not a
-verdict. Favored vs blue tempo + combo, underdog vs resilient permanents / fair creatures.
-The sideboard is a heavy the local meta/collection tune; the consensus toolbox (esp. Consign to
-Memory) is the reference if a matchup feels unanswered.*
