@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc-comparison
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, analysis, dogfooding]
 parent: epic-deck-prep-arc
 depends_on: [epic-deck-prep-arc-dimir-boards, epic-deck-prep-arc-doomsday-tempo]
@@ -33,3 +33,14 @@ re-test with current data, not assume. Deliverable: comparison doc in `decks/` (
 
 - Compare across both metas (local field file + online provenance field); divergences
   between metas are first-class output (venue-divergence pattern), never blended.
+
+## Results (2026-07-04, single-stride)
+
+Venue divergence IS the finding: the local meta → Dimir (EV 50.9 vs 49.6, P(A>B)=0.56; blue-heavy
+room hits Dimir's best cells), online → Doomsday (50.4 vs 48.5, P=0.37; D&T/Lands/Tron mass
++ Doomsday #1 in online positioning). Reverses the 2026-06-27 lean on 3× corpus. Head-to-head:
+Dimir 54% (thin). Caveats: archetype-level cells (variant-conditioned cells parked as
+idea-variant-conditioned-matchup-cells), online imputation mass, ±10pt CIs. Practical:
+Dimir fully owned; Doomsday gated on a ~$1k main. Bottom line: stay Dimir for the local meta;
+Doomsday is the online/field-drift option with a concrete composition trigger.
+Deliverable: decks/dimir-vs-doomsday-tempo-comparison.md.
