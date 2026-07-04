@@ -34,6 +34,7 @@ from legacy_engine.advisory.sideboard import (
     _EMPIRICAL_SWING_MIN_LIFT,
     _build_coverage_model,
     _g,
+    _element_sum_marginal_gain,
     _greedy_solve,
     _ilp_solve,
     _ILPFailed,
@@ -658,8 +659,113 @@ class TestFunctionalGroupDedup:
 
 
 # ---------------------------------------------------------------------------
-# TestGreedy — marginal-gain ordering, budget, copy bounds
+# TestElementSumMarginalGain — feature-sfv-breadth-objective: the canonical
+# submodular marginal-gain aggregation (Σ over ALL elements a card covers).
 # ---------------------------------------------------------------------------
+
+class TestElementSumMarginalGain:
+    """`_element_sum_marginal_gain` is the one canonical form of the objective's
+    marginal-value quantity, now shared by the greedy solver, the hedge fill, and the
+    considering-pool ranker. These tests lock in the worked arithmetic and the breadth
+    credit it produces, independent of any single consumer."""
+
+    def test_worked_small_case(self):
+        """Hand-worked case: a card covering two elements at different coverage states.
+
+        p = _COVERAGE_P = 0.5 → g(1) = 0.5, g(2) = 0.75.
+        Element "a": weight 0.1, already covered once (cov_e=1) → marginal = g(2)-g(1) = 0.25.
+        Element "b": weight 0.2, uncovered (cov_e=0) → marginal = g(1)-g(0) = 0.5.
+        Expected total = 0.1*0.25 + 0.2*0.5 = 0.025 + 0.10 = 0.125.
+        """
+        hoser = _minimal_hoser("Broad", frozenset({"a", "b"}))
+        model = _make_model(
+            element_weight={"a": 0.1, "b": 0.2},
+            candidate_covers={"Broad": frozenset({"a", "b"})},
+            candidate_meta={"Broad": hoser},
+        )
+        gain = _element_sum_marginal_gain(model, "Broad", {"a": 1, "b": 0})
+        assert gain == pytest.approx(0.125, abs=1e-9)
+        # Cross-check against the primitives directly (not just a hardcoded constant).
+        expected = 0.1 * (_g(2) - _g(1)) + 0.2 * (_g(1) - _g(0))
+        assert gain == pytest.approx(expected, abs=1e-9)
+
+    def test_breadth_credit_flexible_beats_equal_weight_narrow_card(self):
+        """A card covering N elements of weight w each out-scores a card covering only
+        ONE of those same elements — the breadth thesis the epic's locked decision exists
+        to guarantee: total marginal coverage aggregates across every element a card
+        answers, so more genuine breadth (at equal per-element weight) always wins the
+        first pick.
+        """
+        broad = _minimal_hoser("Broad", frozenset({"e1", "e2", "e3", "e4"}))
+        narrow = _minimal_hoser("Narrow", frozenset({"e1"}))
+        model = _make_model(
+            element_weight={"e1": 0.05, "e2": 0.05, "e3": 0.05, "e4": 0.05},
+            candidate_covers={
+                "Broad": frozenset({"e1", "e2", "e3", "e4"}),
+                "Narrow": frozenset({"e1"}),
+            },
+            candidate_meta={"Broad": broad, "Narrow": narrow},
+        )
+        cov_counts: dict[str, int] = {}
+        broad_gain = _element_sum_marginal_gain(model, "Broad", cov_counts)
+        narrow_gain = _element_sum_marginal_gain(model, "Narrow", cov_counts)
+        assert broad_gain == pytest.approx(4 * narrow_gain, abs=1e-9)
+        assert broad_gain > narrow_gain
+        # And the greedy solver actually picks the breadth card first as a result.
+        picks, trace = _greedy_solve(model, budget=1)
+        assert trace[0].card == "Broad"
+        assert trace[0].marginal_gain == pytest.approx(broad_gain, abs=1e-9)
+
+    def test_excludes_nonpositive_and_missing_weight_elements(self):
+        """Elements with weight ≤ 0 or absent from the weight map contribute nothing —
+        matching every existing call site's `if w > 0.0` filter."""
+        hoser = _minimal_hoser("Card", frozenset({"zero", "missing", "real"}))
+        model = _make_model(
+            element_weight={"zero": 0.0, "real": 0.1},  # "missing" absent entirely
+            candidate_covers={"Card": frozenset({"zero", "missing", "real"})},
+            candidate_meta={"Card": hoser},
+        )
+        gain = _element_sum_marginal_gain(model, "Card", {})
+        assert gain == pytest.approx(0.1 * _g(1), abs=1e-9)
+
+    def test_unknown_card_returns_zero(self):
+        """A card name absent from candidate_covers returns 0.0 rather than raising —
+        callers don't need to pre-check membership."""
+        model = _make_model(element_weight={}, candidate_covers={}, candidate_meta={})
+        assert _element_sum_marginal_gain(model, "Nobody", {}) == 0.0
+
+    def test_weights_override_used_instead_of_model_weights(self):
+        """The `weights=` override (used by `_hedge_fill`'s uniform-widened field) replaces
+        `model.element_weight` entirely, rather than merging with it."""
+        hoser = _minimal_hoser("Card", frozenset({"e1"}))
+        model = _make_model(
+            element_weight={"e1": 0.9},  # would dominate if NOT overridden
+            candidate_covers={"Card": frozenset({"e1"})},
+            candidate_meta={"Card": hoser},
+        )
+        overridden = _element_sum_marginal_gain(model, "Card", {}, weights={"e1": 0.2})
+        assert overridden == pytest.approx(0.2 * _g(1), abs=1e-9)
+
+    def test_consistent_with_greedy_across_a_multi_step_run(self):
+        """The greedy solver's per-step `marginal_gain` must equal a fresh, independent
+        call to `_element_sum_marginal_gain` at that exact coverage state — proving the
+        solver's internal loop and the canonical function have not drifted apart."""
+        h_a = _minimal_hoser("A", frozenset({"e1", "e2"}), max_copies=2)
+        h_b = _minimal_hoser("B", frozenset({"e2"}), max_copies=2)
+        model = _make_model(
+            element_weight={"e1": 0.05, "e2": 0.30},
+            candidate_covers={"A": frozenset({"e1", "e2"}), "B": frozenset({"e2"})},
+            candidate_meta={"A": h_a, "B": h_b},
+        )
+        picks, trace = _greedy_solve(model, budget=4)
+        cov_counts: dict[str, int] = {}
+        for pt in trace:
+            # Recompute independently BEFORE applying this pick's coverage delta.
+            recomputed = _element_sum_marginal_gain(model, pt.card, cov_counts)
+            assert pt.marginal_gain == pytest.approx(recomputed, abs=1e-9)
+            for e in model.candidate_covers[pt.card]:
+                cov_counts[e] = cov_counts.get(e, 0) + 1
+
 
 class TestGreedy:
     """Tests use hand-built CoverageModel instances for exact arithmetic."""
@@ -6769,6 +6875,29 @@ class TestHedgeAllocator:
     def test_hedge_empty_when_core_fills_budget(self):
         ins = _hedge_fill(self._three_element_model(), {"Top": 4, "Alt": 1}, budget=5)
         assert ins == {}
+
+    def test_hedge_credits_breadth_via_canonical_gain(self):
+        """feature-sfv-breadth-objective: the hedge fill's insurance pick also aggregates a
+        card's marginal gain across every element it covers (via `_element_sum_marginal_gain`,
+        weights=widened-toward-uniform) — a card covering two uncovered elements outranks one
+        covering only a single uncovered element of the same per-element weight."""
+        broad = _minimal_hoser("Broad", frozenset({"e2", "e3"}))
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.5, "e3": 0.5},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Broad": frozenset({"e2", "e3"}),
+                "Alt": frozenset({"e2"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Broad": broad,
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+            },
+        )
+        # Core commits Top only; one flex slot left — the hedge must choose between
+        # Broad (covers both e2 and e3) and Alt (covers only e2).
+        ins = _hedge_fill(model, {"Top": 1}, budget=2)
+        assert ins == {"Broad": 1}, f"breadth-aggregating pick should win the single flex slot: {ins}"
 
     def test_recommend_sideboard_hedge_off_no_insurance(self):
         con = TestRedundancyDecay._gy_field_corpus()

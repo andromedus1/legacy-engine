@@ -23,6 +23,23 @@ Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
 Heuristic note: swing magnitudes are curated constants (_SWING_DEDICATED / _SWING_SOFT),
 NOT empirically derived.  Every SideboardPackage carries ``heuristic_note`` labeling this.
 
+Breadth = true submodular marginal-gain (feature-sfv-breadth-objective): F(S) = Σ_e
+weight_e·g(cov_e(S)) is a monotone submodular coverage function (g concave/non-decreasing
+composed with the modular per-element coverage count).  A card's marginal value is therefore
+the SUM of its marginal contribution to EVERY element it covers — F(S∪{c}) − F(S) = Σ_{e ∈
+covers(c)} weight_e·(g(cov_e(S)+1) − g(cov_e(S))) — not any single element viewed in
+isolation.  This is what credits a broad, flexible card (one answering many matchups at once,
+e.g. Force of Negation post-attachment) with large marginal value, and is exactly what gives
+greedy maximization its (1−1/e) approximation guarantee (docs/briefs/scorer-flexibility-
+valuation.md §1).  ``_element_sum_marginal_gain`` is the ONE canonical implementation of this
+sum; ``_greedy_solve``, ``_hedge_fill``, and ``_rank_considering_pool`` all call it so the
+aggregation cannot silently diverge between them, and ``_ilp_solve``'s y_a^t linearization
+encodes the identical per-element sum as a linear program (Σ_{a,t} weight_a·Δg(t)·y_a^t).  The
+concave saturation g() itself stays a PER-ELEMENT diminishing-returns curve (multiple answers
+to the same need still saturate — that axis is intentionally untouched); what changed is that
+a card's SCORE now has one, explicit, tested home for aggregating ACROSS the distinct elements
+it answers, rather than three independently-maintained inline copies of the same formula.
+
 Maindeck-aware extension (epic-deck-generation-sideboard-maindeck):
   When per-card×matchup data clears the confidence gate (≥evolving tier), the
   coverage model element weights are nudged by ``matchup_pressure`` (a multiplier
@@ -473,6 +490,66 @@ def _marginal_g(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Canonical submodular marginal-gain aggregation (feature-sfv-breadth-objective)
+# ---------------------------------------------------------------------------
+# The epic's locked decision: "reformulate the coverage objective to true submodular
+# marginal-gain — a card credited by its TOTAL marginal coverage across every element it
+# answers" (docs/briefs/scorer-flexibility-valuation.md §1, distortion D1). Audited against
+# the shipped code (post feature-sfv-attachments + feature-sfv-weights): the greedy solver,
+# the hedge fill, and the considering-pool ranker ALREADY compute this quantity correctly —
+# each independently summed weight_e·(g(cov_e+1)−g(cov_e)) over EVERY element a card covers,
+# not a single element in isolation. That sum, evaluated at a given coverage state, IS the
+# textbook submodular marginal gain of the objective F(S) = Σ_e weight_e·g(cov_e(S)); it is
+# exactly what the ILP's y_a^t linearization (`_ilp_solve`) also encodes (Σ_{a,t}
+# weight_a·Δg(t)·y_a^t sums the identical per-element marginal contributions), so greedy and
+# ILP already optimize the SAME aggregate-breadth objective and both inherit the (1−1/e)
+# greedy guarantee for it.
+#
+# What was missing was not the arithmetic but a single canonical, tested, documented home for
+# it: before this feature, three call sites (`_greedy_solve`, `_hedge_fill`,
+# `_rank_considering_pool`) each reimplemented the same "Σ over covered elements" loop inline.
+# They agreed today, but nothing enforced that a future edit to just one of them couldn't
+# silently re-fragment breadth credit (the D1 distortion, in latent/structural form — the risk
+# the epic is guarding against, not a live bug found in this feature's audit). This function is
+# now the ONE place that formula lives; every consumer that decides "how much is picking (or
+# considering) one more copy of this card worth right now" calls it, so the aggregation cannot
+# drift between them again.
+def _element_sum_marginal_gain(
+    model: "CoverageModel",
+    card_name: str,
+    cov_counts: "dict[str, int]",
+    *,
+    weights: "dict[str, float] | None" = None,
+) -> float:
+    """Submodular marginal gain of one more copy of ``card_name``: Σ over ALL elements it
+    covers of ``weight_e · (g(cov_e+1) − g(cov_e))``.
+
+    This is the whole-card aggregate, not a per-element score — a card covering many
+    elements is credited by the SUM of its marginal contribution to each one (breadth is
+    credited by construction, per submodular coverage theory; see the module docstring).
+
+    ``cov_counts``: element id → current coverage count in the caller's in-progress solution.
+    Read-only here; the caller applies the pick and increments coverage afterward.
+
+    ``weights``: override ``model.element_weight`` (the hedge fill widens weights toward
+    uniform before calling this — see ``_hedge_fill``). Defaults to the model's own weights.
+    Elements with weight ≤ 0 (or absent from ``weights``) contribute nothing, matching every
+    call site's existing filter.
+
+    Pure function — no mutation, no DB. ``card_name`` need not be in ``model.candidate_covers``
+    (returns 0.0), so callers don't need to pre-check membership.
+    """
+    active_weights = model.element_weight if weights is None else weights
+    total = 0.0
+    for element_id in model.candidate_covers.get(card_name, frozenset()):
+        w = active_weights.get(element_id, 0.0)
+        if w > 0.0:
+            cov_e = cov_counts.get(element_id, 0)
+            total += w * _marginal_g(cov_e + 1)
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value;
 # curve replaced by the draw-probability marginal in feature-sb-field-weighted-scorer-wiring,
 # Unit B4)
@@ -612,12 +689,13 @@ def _hedge_fill(
     for _ in range(slots):
         best_card: str | None = None
         best_gain = 0.0
-        for card, elems in model.candidate_covers.items():
+        for card in model.candidate_covers:
             if card in core_cards or card in insurance:
                 continue  # 1-of diversity; never touch a core commit
-            gain = sum(
-                wide[e] * _marginal_g(cov.get(e, 0) + 1) for e in elems if e in wide
-            )
+            # feature-sfv-breadth-objective: canonical Σ-over-elements marginal gain
+            # (weights=wide reproduces the prior inline `if e in wide` filter exactly,
+            # since `wide`'s keys are precisely the positive-weight elements).
+            gain = _element_sum_marginal_gain(model, card, cov, weights=wide)
             if gain > best_gain or (
                 gain == best_gain and gain > 0.0 and (best_card is None or card < best_card)
             ):
@@ -1990,14 +2068,12 @@ def _greedy_solve(
             if current_copies >= max_copies:
                 continue  # exhausted this card's copy limit
 
-            # Marginal gain = Σ_e weight_e × (g(cov_e+1) − g(cov_e)) for each covered element.
-            # With the saturating model this is always > 0, so redundant answers earn value.
-            gain = 0.0
-            for e in element_ids:
-                w = model.element_weight.get(e, 0.0)
-                if w > 0.0:
-                    cov_e = cov_counts.get(e, 0)
-                    gain += w * _marginal_g(cov_e + 1)
+            # feature-sfv-breadth-objective: canonical Σ-over-elements submodular marginal
+            # gain (see `_element_sum_marginal_gain`) — a card's value aggregates its
+            # marginal contribution across EVERY element it covers, not one in isolation.
+            # With the saturating model this per-element term is always > 0, so redundant
+            # answers earn value.
+            gain = _element_sum_marginal_gain(model, card_name, cov_counts)
 
             # Per-card-copy redundancy penalty: the (current_copies+1)-th copy of THIS card
             # is worth less (or net-negative) than its raw coverage marginal. No-op when
@@ -2139,6 +2215,12 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
             )
 
     # --- Objective: saturating coverage ---
+    # feature-sfv-breadth-objective: this sum over (element, level) pairs is the LP
+    # linearization of the SAME aggregate quantity `_element_sum_marginal_gain` computes for
+    # greedy — Σ_{a,t} weight_a·Δg(t)·y_a^t equals Σ_e weight_e·g(cov_e) at the optimum, so a
+    # card credited across many elements accumulates exactly as much objective value here as
+    # in the greedy trace. Kept as an explicit y_a^t LP (not a call into the greedy helper)
+    # because CBC needs a linear objective; the two are provably the same F(S).
     obj_terms = []
     for elem_id, weight in model.element_weight.items():
         t_cap = elem_t_cap.get(elem_id, 0)
@@ -2570,17 +2652,13 @@ def _rank_considering_pool(
         if current_copies >= max_copies:
             continue
 
-        # Compute residual marginal gain (as if we added one more copy).
-        gain = 0.0
-        residual_elements: set[str] = set()
-        for e in element_ids:
-            w = model.element_weight.get(e, 0.0)
-            if w > 0.0:
-                cov_e = cov_counts.get(e, 0)
-                mg = _marginal_g(cov_e + 1)
-                gain += w * mg
-                if mg > 0.0:
-                    residual_elements.add(e)
+        # feature-sfv-breadth-objective: canonical Σ-over-elements marginal gain (as if we
+        # added one more copy) — same formula the greedy solver and hedge fill use.
+        gain = _element_sum_marginal_gain(model, card_name, cov_counts)
+        # Elements this card would contribute residual value to. `_marginal_g(cov_e+1)` is
+        # always > 0 (see its docstring), so this reduces exactly to "positive weight" —
+        # matching the prior per-element `mg > 0.0` check without recomputing mg.
+        residual_elements = {e for e in element_ids if model.element_weight.get(e, 0.0) > 0.0}
 
         if gain <= 0.0:
             continue  # no residual coverage value → skip
