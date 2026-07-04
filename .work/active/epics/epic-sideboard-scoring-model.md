@@ -1,7 +1,7 @@
 ---
 id: epic-sideboard-scoring-model
 kind: epic
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []
@@ -80,3 +80,11 @@ coverage% against the Null Rod benchmark (~26%) surfaced Mystical Dispute (~43%)
 (~54%) as high-coverage anti-blue cards absent from his board — and exposed the coverage-vs-impact
 gap this epic exists to close. Respect `data/collection/inventory.json`, `advisory/sideboard.py`,
 `data/hosers/legacy.json`, `analytics/card_value.py`, and the adaptive ban-aware matchup matrix.
+
+## Completion (2026-07-03)
+
+All 5 features + 8 stories done; epic advanced review → done after a Phase-8 fresh-context completion review returned COMPLETE. Full suite green (2464 passed, +156 net from 2308 at epic start). Every feature passed an independent fresh-context deep review (A / B / C+D+E — all APPROVE, all "no gamed tests"); end-to-end verified on the real Dimir Tempo deck + Boulder field (maindeck discount, plays-red coverage, impact breakdown, coverage% diagnostic, slot-ROI + PUNT all render honestly).
+
+Three commitments delivered end-to-end: (a) objective = Σ(share×Δequity), coverage% diagnostic-only; (b) decomposed auditable impact (centrality×symmetry×castability×draw-prob, multiplicative gates) with per-card breakdown + Dirichlet confidence; (c) `advise backtest` validation surface.
+
+Tracked follow-ups (legitimate deferrals, not blockers): `idea-docs-align-sideboard-scoring-model` (foundation-doc drift → release docs gate), `idea-scorer-element-weight-drawprob` (draw-prob double-count nit), `idea-derive-attacks-land-destruction-mislabel` (latent, dormant). Not shipped: no `/release-deploy` run — items remain unbound (late-binding).
