@@ -1,7 +1,7 @@
 ---
 id: gate-docs-arch-score-without-drawprob
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
@@ -27,3 +27,6 @@ Element weights now use `.score_without_draw_prob()` (centrality × symmetry × 
 
 ## Required edit
 Replace .score() with .score_without_draw_prob() in that clause; state the weight is centrality × symmetry × castability with draw-probability only in the per-copy redundancy taper. Roll forward in place.
+
+## Resolution
+Verified against sideboard.py:1758-1764 (`weight *= breakdown.score_without_draw_prob()`, explicit "NOT .score()" comment) and impact.py:95-119 (`score()` = centrality×symmetry×castability×draw_prob; `score_without_draw_prob()` = centrality×symmetry×castability only, used by `_build_coverage_model`). Updated ARCHITECTURE.md:187's sideboard.py row to cite `.score_without_draw_prob()` and state draw-probability lives exclusively in the per-copy redundancy taper.

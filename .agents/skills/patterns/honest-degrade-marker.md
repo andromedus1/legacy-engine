@@ -46,15 +46,18 @@ if n_rounds < thin_floor:
 When per-card data is absent for a matchup opponent, the plan is degraded with an explicit note:
 
 ```python
-# advisory/sideboard.py:1451-1472
-# Build an honest degraded note: name the adaptive window if one was used
-return MatchupPlan(
-    ...
-    note="no per-card data — coverage from sideboard composition only",
-    degraded=True,
+# advisory/sideboard.py:2447-2470
+# Build an honest degraded note: name the adaptive window if one was used,
+# so the user knows the pooling was attempted and how thin the window still is.
+plans[opp] = MatchupPlan(
+    opponent=opp,
+    side_out={},
+    side_in={},
+    post_board=dict(deck_maindeck),
     n_basis=0,
     tier="speculative",
-    ...
+    degraded=True,
+    note=note,  # e.g. "thin data (n < gate threshold) for {opp} — no per-matchup plan; ..."
 )
 ```
 

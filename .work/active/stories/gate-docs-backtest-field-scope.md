@@ -1,7 +1,7 @@
 ---
 id: gate-docs-backtest-field-scope
 kind: story
-stage: drafting
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
@@ -27,3 +27,6 @@ backtest gained --field-scope/--no-field-scope (default ON): tournament-level fi
 
 ## Required edit
 Add field-scoping to the ARCHITECTURE backtest row + the :315 flag list; optionally the README example.
+
+## Resolution
+Verified against cli.py:3037-3043 (`--field-scope/--no-field-scope`, default True) and backtest.py:74 (`_FIELD_OVERLAP_MIN = 0.5`), :238-254 (`_apply_field_scope`), :317-350 (default-True wiring + honest-degrade path when field-scope excludes every candidate tournament). Added a field-scope clause to ARCHITECTURE.md's backtest.py row (:197) and to the `--provenance` flag-enumeration note (:315, which already called out backtest's flag exceptions). Also added an optional `--field-scope/--no-field-scope` note to the README `advise backtest` usage example.

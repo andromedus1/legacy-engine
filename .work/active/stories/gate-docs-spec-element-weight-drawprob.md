@@ -1,7 +1,7 @@
 ---
 id: gate-docs-spec-element-weight-drawprob
 kind: story
-stage: drafting
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
@@ -27,3 +27,6 @@ Element weight dropped the draw-probability factor (per-copy taper owns it). REA
 
 ## Required edit
 Drop '× draw-probability' from the element-weight formula or reword: 'the per-copy redundancy taper carries draw-probability separately.'
+
+## Resolution
+Verified against sideboard.py:1764 (element weight multiplies by `score_without_draw_prob()`, not `score()`). Updated SPEC.md:70's sideboard-recommender bullet to `centrality × symmetry × castability` (dropped `× draw-probability`) with an added clause: "the per-copy redundancy taper carries draw-probability separately." README:53's per-card breakdown wording (which correctly describes the `score()` factors including draw_prob for the CLI's explainability output) was left untouched per the story's note.

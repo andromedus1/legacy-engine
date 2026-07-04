@@ -1,7 +1,7 @@
 ---
 id: gate-docs-pattern-anchors
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
@@ -27,3 +27,8 @@ Docs: .agents/skills/patterns/curated-json-resource-loader.md:67 (cites sideboar
 
 ## Required edit
 Update the two sideboard.py anchors to current lines (verify at edit time). NOTE for the patterns gate: cli.py anchors in advisory-window-resolution-block.md are long-stale too (advise_refresh cited at cli.py:3053, now 3613) — sweep there.
+
+## Resolution
+Located current anchors directly: `load_hoser_catalog` now at sideboard.py:912, `_load_default_hoser_catalog` at :1044 (bound to `HOSER_CATALOG` at :1056) — updated curated-json-resource-loader.md's table row. The degraded-`MatchupPlan` construct (previously cited 1451-1472) is now at sideboard.py:2447-2470 — updated honest-degrade-marker.md's anchor and its quoted snippet to match the current field order and note-construction logic (two branches: pooled-adaptive-window note vs. plain thin-data note, both feeding the same `note` variable).
+
+Confirmed but NOT fixed (out of scope for batch C — `advisory-window-resolution-block.md` is not among this batch's owned files): `advise_refresh` in that pattern's anchors is indeed stale at cli.py:3053, now actually at cli.py:3613. Flagging for the patterns gate/next drain to pick up.

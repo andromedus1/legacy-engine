@@ -1,7 +1,7 @@
 ---
 id: gate-docs-vocab-12-tags
 kind: story
-stage: implementing
+stage: done
 tags: [documentation]
 parent: null
 depends_on: []
@@ -27,3 +27,6 @@ Epic-2 added noncreature-reliant (creature density < 0.15 — exposes control/co
 
 ## Required edit
 Add both tags to ARCHITECTURE:190's list; add seed-list entries at advisory-methods.md:23 and two tag-table rows (derivation + exposed-hate columns). If advisory-methods frontmatter key_findings changes, re-run scripts/gen_knowledge_index.py.
+
+## Resolution
+Verified against whattoplay.py:417 (VulnerabilityTag vocabulary comment), :628-632 (`_vulnerability_from_composition` docstring), :479 (`_NONCREATURE_RELIANT_MAX = 0.15`), :492 (`_COLORLESS_RELIANT_DENSITY = 0.15`), :745-755 (tag-add logic), and `data/hosers/legacy.json` (Force of Negation/Spell Pierce attack `noncreature-reliant`; Consign to Memory attacks `colorless-reliant`). Added both tags to ARCHITECTURE.md:190's whattoplay.py row with derivation + attachment-point notes. Added both to advisory-methods.md's key_findings seed list (frontmatter, line 23) and as two new tag-table rows with Derivation/Exposes columns. Frontmatter key_findings changed → re-ran `scripts/gen_knowledge_index.py`; regenerated `docs/knowledge-index.yaml`, `docs/knowledge-index-detail.yaml`, `docs/knowledge-index-nav.yaml` included in this commit.

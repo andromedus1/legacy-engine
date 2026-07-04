@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-07-04T03:12:15Z'
+generated_at: '2026-07-04T19:31:09Z'
 generated_from: frontmatter
 total_docs: 22
 by_kind:
@@ -10,11 +10,11 @@ recent:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   kind: planning
-  updated: '2026-07-03'
+  updated: '2026-07-04'
 - path: docs/SPEC.md
   title: 'Spec: legacy-engine'
   kind: planning
-  updated: '2026-07-03'
+  updated: '2026-07-04'
 - path: docs/PRINCIPLES.md
   title: 'Principles: legacy-engine'
   kind: planning
