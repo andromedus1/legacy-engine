@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc
 kind: epic
-stage: drafting
+stage: implementing
 tags: [advisory, analysis, dogfooding]
 parent: null
 depends_on: [feature-archetype-sweep-backtest]
@@ -35,21 +35,44 @@ determinism-fixed solver and inherit any scorer findings).
   part of the stage.
 - **Sequencing**: sweep arc first (validation gate + copy-count study), then this arc.
 
-## Planned decomposition (epic-design formalizes; chain is serial)
+## Design decisions (epic-design, 2026-07-04, autopilot)
 
-1. **Dimir Tempo sideboard refresh** — fresh optimized board for the maintainer's deck
-   (`decks/dimir-tempo-optimized.txt` is prior art): Board A (unconstrained + acquisition
-   targets) and Board B (owned-only).
-2. **Meta decks, 4 lists** — Dimir Tempo tuned for the local meta + online; `whattoplay` best-pick
-   deck generated + board-optimized for the local meta + online.
-3. **Doomsday Tempo per-meta** — consensus-based Doomsday Tempo subarchetype: generation,
-   two collection boards (A/B), the local meta + online versions
-   (`decks/doomsday-tempo-local.txt` is prior art).
-4. **Dimir vs Doomsday comparison** — optimized Dimir Tempo vs optimized Doomsday Tempo,
-   compared across BOTH metas (matchup matrix, positioning, divergence surfaces — honest
-   sample-tier gating throughout).
-5. **Reflection: the loop + simulation feed** — codify stages 1-4 as a repeatable loop to
-   process ALL meta decks (absorb/relate [[idea-dogfood-loop-as-autonomous-process]]), and
-   design the pattern for feeding the generated knowledge into the simulation engine /
-   synthetic data generator (relates to epic-goldfish-simulation, deferred + needs-brief —
-   this stage produces its input, not its implementation).
+- **"Online meta" definition**: `tournaments.provenance = 'online'` over the current-regime
+  window (corpus vocabulary is online/paper, verified; 58 online Doomsday regime decks).
+- **Best-pick collision rule**: if `whattoplay`'s top pick for a meta is Dimir Tempo, the
+  best-pick list uses the top NON-Dimir archetype, with the collision noted honestly.
+- **Doomsday subarchetype reality check** (verified 2026-07-04): `decks.variant` is NULL
+  for all 1849 Doomsday decks — the corpus does NOT label subarchetypes. Stage 3 therefore
+  identifies the tempo camp mechanically (co-occurrence split on tempo markers — the
+  with-Murktide/Tamiyo camp vs Personal Tutor/One Ring turbo) with honest split sample
+  sizes. A manual instance of [[idea-subarchetype-discovery]].
+- **Board B mechanism**: use the collection-aware engine surface; if no hard owned-only
+  solver mode exists, restrict the candidate pool to owned cards and label the constraint
+  (feature-design call).
+- Cross-model advisory pass skipped: strategic direction fully pinned by the maintainer's
+  only-questions answers; the epic is analysis-stride composition of shipped tools.
+
+## Decomposition
+
+Split by deliverable stride, serial chain (each stage consumes the previous stage's
+outputs and tooling; no parallelism intended — this is a dogfooding narrative arc, and
+the deliverables build on each other).
+
+### Child features
+
+- `epic-deck-prep-arc-dimir-boards` — Dimir Tempo SB refresh, Boards A/B — depends on: `[]`
+- `epic-deck-prep-arc-meta-decks` — 4 lists: Dimir + whattoplay best-pick × the local meta/online — depends on: `[dimir-boards]`
+- `epic-deck-prep-arc-doomsday-tempo` — consensus Doomsday Tempo subarchetype, same pattern — depends on: `[meta-decks]`
+- `epic-deck-prep-arc-comparison` — Dimir vs Doomsday Tempo across both metas — depends on: `[dimir-boards, doomsday-tempo]`
+- `epic-deck-prep-arc-loop-reflection` — codify the loop + simulation-feed pattern — depends on: `[comparison]`
+
+### Decomposition risks
+
+- **Doomsday tempo-camp split may be thin or ambiguous** (17 paper regime decks total;
+  co-occurrence split shrinks it further) — honest-degrade labeling is mandatory; if the
+  split is speculative-tier everywhere, say so rather than fabricating a "the local meta Doomsday
+  Tempo meta".
+- **Board B may be over-constrained** (owned pool could lack whole answer classes) — the
+  A-vs-B delta is itself a deliverable (what the collection is missing), not a failure.
+- **whattoplay best-pick is a lean, not a verdict** (P(best) has been ≤12.6% historically)
+  — present per [[analysis-statistical-context-gates]].
