@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc-loop-reflection
 kind: feature
-stage: drafting
+stage: done
 tags: [analysis, process]
 parent: epic-deck-prep-arc
 depends_on: [epic-deck-prep-arc-comparison]
@@ -38,3 +38,15 @@ artifact** for viewing (Claude Artifact; load artifact-design + dataviz skills b
 building; self-contained, theme-aware, copy histograms and matchup/positioning charts
 included). "I would be extremely appreciative" — treat presentation quality as a first-
 class acceptance criterion, not an afterthought.
+
+## Results (2026-07-04, single-stride)
+
+Loop codified: docs/analysis/meta-deck-analysis-loop.md (stages, surfaces, honesty gates,
+automation path, and the simulation-engine feed spec — six feed items, all already produced
+by the loop; the missing piece is only a versioned artifact manifest, deferred to the sim
+epic's design pass after its [needs-brief]). Cross-arc study written + HTML artifact
+delivered: https://claude.ai/code/artifact/b954ac08-4558-4303-8c36-9a9f536ed26f (charts:
+divergence mining, copy-count PMFs, venue-divergence dumbbell; validated palette, both
+themes). Backlog relations preserved: idea-dogfood-loop-as-autonomous-process +
+idea-study-loop-other-archetype-lenses remain the automation follow-ups, now grounded by
+the codified procedure.

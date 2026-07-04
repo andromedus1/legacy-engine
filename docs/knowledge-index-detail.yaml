@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-04T21:39:48Z'
+generated_at: '2026-07-04T22:22:42Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -87,6 +87,39 @@ documents:
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
+  docs/analysis/meta-deck-analysis-loop.md:
+    summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
+      + Doomsday Tempo
+
+      (2026-07-04) into a repeatable per-archetype procedure, and specifies the knowledge
+      feed
+
+      it produces for the simulation engine / synthetic data generator (epic-goldfish-simulation
+
+      input spec, not implementation).
+
+      '
+    decisions:
+    - 'The loop is per-archetype and composable: any meta archetype runs stages 1-4
+      with the same shipped surfaces (consensus → boards A/B → per-meta variants →
+      comparison); stage order is fixed, stages are skippable only with a stated reason.'
+    - 'Two boards always: A unconstrained (acquisition targets fall out for free),
+      B owned-constrained (catalog-filter + labeled repairs — never presented as a
+      native solver mode).'
+    - Sweep-confirmed overrides (Defense Grid, Damping Sphere) apply mechanically
+      to every board until the scorer mechanisms are fixed; every override and refill
+      is labeled in the deck file header.
+    - Venue divergence is first-class output — per-meta verdicts are never blended;
+      each verdict ships with its composition trigger (what field drift would flip
+      it).
+    - Subarchetype splits are conservative marker rules persisted to decks.variant;
+      neither/both residue stays unlabeled; camp n and tier are stated on every downstream
+      claim.
+    - Engine-raw reference lists keep known scorer biases VISIBLE (e.g. pitch-counter
+      1-ofs) so before/after remains measurable; only the pilot's personal board gets
+      judgment fills.
+    - 'The loop''s outputs are the simulation feed: nothing new is computed for the
+      sim engine — it consumes what the loop already produces.'
   docs/VISION.md:
     summary: 'legacy-engine is a Magic: The Gathering Legacy-format analytics platform
       — sibling to edh-engine
