@@ -29,11 +29,29 @@ players count as top" are resolved by rounding UP — ``ceil`` — so a quartile
 normalized player names (a handle that is non-unique within a tournament, in either
 ``decks`` or ``standings``) are excluded from the join rather than guessed at, mirroring
 the dup/uniq precedent in ``analytics.match_results``.
+
+FIELD SCOPING (feature-sfv-backtest-scoped): a global, all-time top-finisher sample mixes
+eras whose metagame looked nothing like the field being scored against — e.g. a
+graveyard-strategy-heavy period contributes Surgical Extraction / Grafdigger's Cage to
+``observed_frequency`` even when the caller's field (say, a current Boulder-dominated
+field) barely has a graveyard deck in it. ``field_scope`` (default on) filters OUT
+candidate tournaments whose own realized metagame does not overlap the caller's
+``field`` archetype set by at least ``_FIELD_OVERLAP_MIN`` — see
+``_tournament_archetype_counts`` (DB) + ``_apply_field_scope`` (pure filter) below. This
+is a cross-sectional filter (what archetypes were actually in that room), not a
+calendar-era heuristic, so it captures metagame drift more precisely than a ban-regime
+date window would; ``since``/``until`` remain available to layer an explicit calendar
+window on top when wanted, but neither is defaulted to a "current regime" window here —
+unlike ``generation.consensus.card_frequencies`` — because doing so would piggyback this
+diagnostic's behavior on an unrelated module's regime SSOT and risks silently emptying
+a deliberately-dated backtest; explicit ``None`` stays "full corpus", matching
+``analytics.match_results``' documented convention.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 
 import duckdb
@@ -51,6 +69,10 @@ _TOP_FINISHER_QUANTILE = 0.25
 # SB inclusion% among top-finisher decks required to count a card as "commonly played".
 _OBSERVED_THRESHOLD = 0.20
 
+# A candidate tournament counts as "in-field" only when at least this fraction of its
+# (labeled) decks belong to an archetype present in the caller's FieldDistribution.
+_FIELD_OVERLAP_MIN = 0.5
+
 
 @dataclass(frozen=True)
 class BoardBacktest:
@@ -64,6 +86,12 @@ class BoardBacktest:
     ``recommended``, ``overlap``, and ``scorer_only`` are sorted tuples of card names for
     deterministic output; ``overlap`` ∪ ``scorer_only`` == ``recommended`` (a partition).
     ``winners_only`` cards are NOT in ``recommended`` at all — candidate blind spots.
+
+    ``field_scope``/``n_tournaments_considered``/``n_tournaments_excluded`` (feature-
+    sfv-backtest-scoped) report the field-scoping decision honestly: how many candidate
+    tournaments (post window, pre field filter) were considered, and how many of those
+    were dropped for not resembling the caller's field. Both counts are 0 when
+    ``field_scope=False`` (no filtering applied) or when there were no candidates at all.
     """
 
     archetype: str
@@ -74,6 +102,9 @@ class BoardBacktest:
     overlap: tuple[str, ...]                # recommended AND commonly-played (>= _OBSERVED_THRESHOLD)
     scorer_only: tuple[str, ...]            # recommended but rarely/never played (candidate false positives)
     winners_only: tuple[str, ...]           # commonly played but not recommended (candidate blind spots)
+    field_scope: bool = True                # whether the tournament-level field-overlap filter ran
+    n_tournaments_considered: int = 0       # distinct candidate tournaments, post window / pre field filter
+    n_tournaments_excluded: int = 0         # of those, how many were dropped as off-field
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +189,89 @@ def _qualifying_top_finisher_decks(
     return [(tid, idx) for tid, idx in rows]
 
 
+# ---------------------------------------------------------------------------
+# Field scoping (feature-sfv-backtest-scoped)
+# ---------------------------------------------------------------------------
+# Objective-search-split shape (see .agents/skills/patterns/objective-search-split.md):
+# `_tournament_archetype_counts` does the one heavy, archetype-agnostic DB read; the
+# actual field-membership decision is a pure function (`_apply_field_scope`) over plain
+# dicts, so the filtering logic is unit-testable with hand-built inputs and no DB.
+
+
+def _tournament_archetype_counts(
+    con: duckdb.DuckDBPyConnection,
+    tournament_ids: list[str],
+) -> dict[str, dict[str, int]]:
+    """Return ``{tournament_id: {archetype: n_decks}}`` for every id in ``tournament_ids``.
+
+    Archetype-agnostic on purpose — this is the heavy DB half of the field-scoping split;
+    ``_apply_field_scope`` decides which archetypes "count" as in-field. Decks with a
+    ``NULL`` archetype are excluded from the counts entirely (an unlabeled deck is not
+    evidence either way, so it should not dilute the denominator). Never raises — a query
+    failure degrades to ``{}``, which ``_apply_field_scope`` treats as "no evidence" for
+    every affected tournament (conservatively excluded, never fabricated as in-field).
+    """
+    if not tournament_ids:
+        return {}
+    try:
+        placeholders = ", ".join(["?"] * len(tournament_ids))
+        rows = con.execute(
+            f"""
+            SELECT tournament_id, archetype, count(*) AS n
+            FROM decks
+            WHERE tournament_id IN ({placeholders})
+              AND archetype IS NOT NULL
+            GROUP BY tournament_id, archetype
+            """,
+            tournament_ids,
+        ).fetchall()
+    except Exception as exc:
+        log.debug("_tournament_archetype_counts: query failed: %s", exc)
+        return {}
+
+    out: dict[str, dict[str, int]] = {}
+    for tid, archetype, n in rows:
+        out.setdefault(tid, {})[archetype] = n
+    return out
+
+
+def _apply_field_scope(
+    deck_keys: list[tuple[str, int]],
+    archetype_counts: dict[str, dict[str, int]],
+    field_archetypes: Collection[str],
+    *,
+    min_overlap: float = _FIELD_OVERLAP_MIN,
+) -> tuple[list[tuple[str, int]], int, int]:
+    """Pure filter: keep only decks whose tournament's realized metagame overlaps ``field_archetypes``.
+
+    A tournament counts as "in-field" when at least ``min_overlap`` of its labeled decks
+    (per ``archetype_counts``) belong to an archetype in ``field_archetypes`` — e.g. a
+    tournament that was 6/8 Reanimator does not represent a Boulder field and is dropped
+    even though its top-finishing Boulder decks pass the rank cut on their own.
+
+    Returns ``(kept_deck_keys, n_tournaments_considered, n_tournaments_excluded)`` where
+    the counts are over the DISTINCT tournaments present in ``deck_keys`` (for the CLI's
+    honest field-scope banner). No DB access — hand-built dicts exercise this directly.
+    """
+    field_set = frozenset(field_archetypes)
+    considered_tids = {tid for tid, _ in deck_keys}
+
+    in_field_tids: set[str] = set()
+    for tid in considered_tids:
+        counts = archetype_counts.get(tid, {})
+        total = sum(counts.values())
+        if total == 0:
+            continue  # no labeled evidence -> conservatively excluded, not fabricated in-field
+        in_field = sum(n for a, n in counts.items() if a in field_set)
+        if (in_field / total) >= min_overlap:
+            in_field_tids.add(tid)
+
+    kept = [(tid, idx) for tid, idx in deck_keys if tid in in_field_tids]
+    n_considered = len(considered_tids)
+    n_excluded = n_considered - len(in_field_tids)
+    return kept, n_considered, n_excluded
+
+
 def _observed_sideboard_frequency(
     con: duckdb.DuckDBPyConnection,
     deck_keys: list[tuple[str, int]],
@@ -200,6 +314,7 @@ def backtest_board(
     *,
     since: str | None = None,
     until: str | None = None,
+    field_scope: bool = True,
 ) -> BoardBacktest:
     """Backtest the scorer's recommended board against top-finisher boards.
 
@@ -212,13 +327,30 @@ def backtest_board(
     ``advisory.sideboard._archetype_linchpins_and_cards`` — stands in), and classifies
     every card into overlap / scorer_only / winners_only using ``_OBSERVED_THRESHOLD``.
 
-    Honest-degrade: never raises. A thin or absent top-finisher sample degrades to a
-    low/absent confidence label (``None`` at n=0, else ``tier_for_sample``); a scorer
-    failure degrades ``recommended`` to an empty tuple (every observed card then reads
-    as ``winners_only``, which is the correct honest signal — "we have nothing to
-    compare the scorer against"). This function never emits a pass/fail verdict.
+    ``field_scope`` (default ``True``, feature-sfv-backtest-scoped): when set, candidate
+    top-finisher tournaments whose own realized metagame does not overlap ``field``'s
+    archetype set by ``_FIELD_OVERLAP_MIN`` are dropped before computing
+    ``observed_frequency`` — see the module docstring's FIELD SCOPING section. Pass
+    ``False`` to reproduce the prior (global, unscoped) sample for comparison/debugging.
+
+    Honest-degrade: never raises. A thin or absent top-finisher sample (whether thin from
+    the start or thinned BY field-scoping) degrades to a low/absent confidence label
+    (``None`` at n=0, else ``tier_for_sample``); a scorer failure degrades ``recommended``
+    to an empty tuple (every observed card then reads as ``winners_only``, which is the
+    correct honest signal — "we have nothing to compare the scorer against"). This
+    function never emits a pass/fail verdict.
     """
     deck_keys = _qualifying_top_finisher_decks(con, archetype, since=since, until=until)
+
+    n_tournaments_considered = len({tid for tid, _ in deck_keys})
+    n_tournaments_excluded = 0
+    if field_scope and deck_keys:
+        tournament_ids = sorted({tid for tid, _ in deck_keys})
+        archetype_counts = _tournament_archetype_counts(con, tournament_ids)
+        deck_keys, n_tournaments_considered, n_tournaments_excluded = _apply_field_scope(
+            deck_keys, archetype_counts, field.shares.keys(),
+        )
+
     n_winning_decks = len(deck_keys)
     observed_frequency = _observed_sideboard_frequency(con, deck_keys)
 
@@ -265,4 +397,7 @@ def backtest_board(
         overlap=overlap,
         scorer_only=scorer_only,
         winners_only=winners_only,
+        field_scope=field_scope,
+        n_tournaments_considered=n_tournaments_considered,
+        n_tournaments_excluded=n_tournaments_excluded,
     )

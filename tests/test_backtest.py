@@ -11,9 +11,11 @@ import pytest
 
 from legacy_engine.advisory import backtest as backtest_mod
 from legacy_engine.advisory.backtest import (
+    _FIELD_OVERLAP_MIN,
     _OBSERVED_THRESHOLD,
     _TOP_FINISHER_QUANTILE,
     BoardBacktest,
+    _apply_field_scope,
     backtest_board,
 )
 from legacy_engine.advisory.field import FieldDistribution
@@ -44,12 +46,12 @@ def _standing(rank: int, player: str) -> dict:
 
 
 def _build_backtest_db(tmp_path) -> str:
-    """A tmp DuckDB with two 8-player tournaments seeding a known Boulder top-finisher sample.
+    """A tmp DuckDB with three 8-player tournaments seeding a known Boulder top-finisher sample.
 
     Top-finisher threshold at `_TOP_FINISHER_QUANTILE=0.25` over an 8-player field is
     `ceil(0.25 * 8) = 2` — ranks 1-2 qualify in each tournament.
 
-    Qualifying (top-finisher) Boulder decks: alice (T1 rank1), bob (T1 rank2),
+    Qualifying (top-finisher) Boulder decks in T1+T2: alice (T1 rank1), bob (T1 rank2),
     erin (T2 rank1), frank (T2 rank2) — 4 decks total.
 
     Known sideboard signal across those 4 decks:
@@ -62,6 +64,14 @@ def _build_backtest_db(tmp_path) -> str:
     filtering is correct:
       dave  (T1 rank4, Boulder) -> Wear // Tear
       grace (T2 rank5, Boulder) -> Pyroblast
+
+    T3 is an OFF-FIELD tournament for feature-sfv-backtest-scoped's field-scoping tests:
+    6/8 decks are Reanimator (a graveyard strategy), only 2/8 are Boulder. Its qualifying
+    Boulder top-finishers (holly rank1, ivan rank2) run a DISTINCT card ("Grafdigger's
+    Cage") that must NOT appear in observed_frequency under the default field-scoped
+    backtest against a {Boulder, Doomsday} field (T3's Boulder-or-Doomsday share is
+    2/8=0.25, below `_FIELD_OVERLAP_MIN=0.5`) — but MUST appear when field-scoping is
+    disabled (`field_scope=False`), proving the toggle actually gates the filter.
     """
     db_path = str(tmp_path / "test_backtest.duckdb")
     con = store.connect(db_path)
@@ -127,6 +137,37 @@ def _build_backtest_db(tmp_path) -> str:
         _label_archetypes(con, tid2, {
             "erin": "Boulder", "frank": "Boulder", "q3": "Doomsday", "q4": "Doomsday",
             "grace": "Boulder", "q6": "Doomsday", "q7": "Doomsday", "q8": "Doomsday",
+        })
+
+        # --- Tournament 3 (8 players) — OFF-FIELD: 6/8 Reanimator, 2/8 Boulder ---
+        raw3 = {
+            "Tournament": {
+                "Name": "Backtest Corpus 3 (graveyard-heavy, off-field)",
+                "Date": "2026-01-15",
+                "Uri": "https://www.mtgo.com/decklist/backtest-corpus-3",
+                "Formats": "Legacy",
+            },
+            "Decks": [
+                _deck("holly", "Boulder", ["Brainstorm"], ["Grafdigger's Cage"], "1st"),
+                _deck("ivan", "Boulder", ["Brainstorm"], ["Grafdigger's Cage"], "2nd"),
+                _deck("r3", "Reanimator", ["Entomb"], [], "3rd"),
+                _deck("r4", "Reanimator", ["Entomb"], [], "4th"),
+                _deck("r5", "Reanimator", ["Entomb"], [], "5th"),
+                _deck("r6", "Reanimator", ["Entomb"], [], "6th"),
+                _deck("r7", "Reanimator", ["Entomb"], [], "7th"),
+                _deck("r8", "Reanimator", ["Entomb"], [], "8th"),
+            ],
+            "Rounds": [],
+            "Standings": [
+                _standing(1, "holly"), _standing(2, "ivan"), _standing(3, "r3"),
+                _standing(4, "r4"), _standing(5, "r5"), _standing(6, "r6"),
+                _standing(7, "r7"), _standing(8, "r8"),
+            ],
+        }
+        tid3 = store.load_tournament(con, parse_cache_item(raw3, "MTGO"))
+        _label_archetypes(con, tid3, {
+            "holly": "Boulder", "ivan": "Boulder", "r3": "Reanimator", "r4": "Reanimator",
+            "r5": "Reanimator", "r6": "Reanimator", "r7": "Reanimator", "r8": "Reanimator",
         })
     finally:
         con.close()
@@ -298,6 +339,202 @@ class TestBacktestBoardClassification:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests: _apply_field_scope — pure filter, no DB (feature-sfv-backtest-scoped)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyFieldScopePure:
+    """Exercises the pure half of the objective-search-split directly with hand-built
+    dicts — no DuckDB connection needed."""
+
+    def test_majority_in_field_tournament_is_kept(self):
+        deck_keys = [("t1", 0), ("t1", 1)]
+        archetype_counts = {"t1": {"Boulder": 6, "Doomsday": 2}}
+        kept, considered, excluded = _apply_field_scope(
+            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+        )
+        assert kept == deck_keys
+        assert considered == 1
+        assert excluded == 0
+
+    def test_minority_in_field_tournament_is_excluded(self):
+        """6/8 Reanimator, 2/8 Boulder: a {Boulder, Doomsday} field has only 25% overlap,
+        below _FIELD_OVERLAP_MIN — the tournament's decks are dropped even though they
+        pass the rank cut on their own."""
+        deck_keys = [("t3", 0), ("t3", 1)]
+        archetype_counts = {"t3": {"Boulder": 2, "Reanimator": 6}}
+        kept, considered, excluded = _apply_field_scope(
+            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+        )
+        assert kept == []
+        assert considered == 1
+        assert excluded == 1
+
+    def test_boundary_at_exactly_min_overlap_is_kept(self):
+        """Exactly _FIELD_OVERLAP_MIN (0.5) counts as in-field (>=, not >)."""
+        deck_keys = [("t4", 0)]
+        archetype_counts = {"t4": {"Boulder": 4, "Reanimator": 4}}
+        kept, considered, excluded = _apply_field_scope(
+            deck_keys, archetype_counts, {"Boulder"}, min_overlap=_FIELD_OVERLAP_MIN
+        )
+        assert kept == deck_keys
+        assert excluded == 0
+
+    def test_missing_or_all_null_tournament_is_conservatively_excluded(self):
+        """A tournament absent from archetype_counts (e.g. a query failure, or a
+        tournament with zero labeled decks) has zero evidence and is excluded — never
+        fabricated as in-field."""
+        deck_keys = [("t5", 0)]
+        kept, considered, excluded = _apply_field_scope(deck_keys, {}, {"Boulder"})
+        assert kept == []
+        assert considered == 1
+        assert excluded == 1
+
+    def test_multi_tournament_mix_partitions_correctly(self):
+        deck_keys = [("t1", 0), ("t2", 0), ("t3", 0), ("t3", 1)]
+        archetype_counts = {
+            "t1": {"Boulder": 8},                       # 100% in-field -> kept
+            "t2": {"Doomsday": 8},                       # 100% in-field -> kept
+            "t3": {"Boulder": 2, "Reanimator": 6},        # 25% in-field -> excluded
+        }
+        kept, considered, excluded = _apply_field_scope(
+            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+        )
+        assert set(kept) == {("t1", 0), ("t2", 0)}
+        assert considered == 3
+        assert excluded == 1
+
+    def test_empty_deck_keys_is_a_noop(self):
+        kept, considered, excluded = _apply_field_scope([], {}, {"Boulder"})
+        assert kept == []
+        assert considered == 0
+        assert excluded == 0
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: backtest_board field scoping + window (feature-sfv-backtest-scoped)
+# ---------------------------------------------------------------------------
+
+
+class TestBacktestBoardFieldScope:
+    def test_default_field_scope_excludes_off_field_tournament(self, tmp_path, monkeypatch):
+        """Default field_scope=True: T3 (6/8 Reanimator) is excluded from a {Boulder,
+        Doomsday} field backtest — its "Grafdigger's Cage" signal must not leak in, and
+        the pre-existing T1+T2 sample (n=4) is unaffected."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        try:
+            result = backtest_board(con, "Boulder", _fake_field())
+        finally:
+            con.close()
+
+        assert result.field_scope is True
+        assert result.n_winning_decks == 4  # T1+T2 only; T3 excluded
+        assert "Grafdigger's Cage" not in result.observed_frequency
+        assert result.observed_frequency["Surgical Extraction"] == pytest.approx(1.0)
+        assert result.n_tournaments_considered == 3  # T1, T2, T3 all had qualifying Boulder decks
+        assert result.n_tournaments_excluded == 1  # only T3
+
+    def test_no_field_scope_includes_off_field_tournament(self, tmp_path, monkeypatch):
+        """--no-field-scope (field_scope=False) reproduces the prior global sample:
+        T3's Grafdigger's Cage signal is now included, diluted across all 6 decks."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        try:
+            result = backtest_board(con, "Boulder", _fake_field(), field_scope=False)
+        finally:
+            con.close()
+
+        assert result.field_scope is False
+        assert result.n_winning_decks == 6  # T1+T2+T3
+        assert result.observed_frequency["Grafdigger's Cage"] == pytest.approx(2 / 6)
+        # field-scope did not run -> no exclusions counted, but "considered" still
+        # reports every candidate tournament seen (honest, not silently 0).
+        assert result.n_tournaments_considered == 3
+        assert result.n_tournaments_excluded == 0
+
+    def test_field_scope_thinning_sample_to_zero_is_honest_degrade_not_crash(
+        self, tmp_path, monkeypatch
+    ):
+        """A field wholly disjoint from every candidate tournament's metagame excludes
+        ALL candidates — degrades to n=0/confidence=None, never a crash, and the counts
+        say exactly why (considered=excluded=3, not silently absent)."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        disjoint_field = FieldDistribution(
+            shares={"Some Unrelated Archetype": 1.0},
+            field_source="custom",
+            counts=None,
+            no_data=frozenset(),
+            warnings=(),
+        )
+        try:
+            result = backtest_board(con, "Boulder", disjoint_field)
+        finally:
+            con.close()
+
+        assert result.n_winning_decks == 0
+        assert result.confidence is None
+        assert result.observed_frequency == {}
+        assert result.n_tournaments_considered == 3
+        assert result.n_tournaments_excluded == 3
+
+    def test_since_until_window_narrows_top_finisher_sample(self, tmp_path, monkeypatch):
+        """--since/--until (already-partial support) correctly narrows the top-finisher
+        sample to a sub-window — here, isolating T2 (2026-01-08) alone via a half-open
+        [since, until) cut that excludes T1 (2026-01-01) and T3 (2026-01-15)."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        try:
+            result = backtest_board(
+                con, "Boulder", _fake_field(), since="2026-01-08", until="2026-01-09"
+            )
+        finally:
+            con.close()
+
+        # Only T2's qualifying decks (erin, frank) survive the window cut.
+        assert result.n_winning_decks == 2
+        assert result.observed_frequency["Surgical Extraction"] == pytest.approx(1.0)
+        assert result.observed_frequency["Ravenous Trap"] == pytest.approx(0.5)
+        assert "Wear // Tear" not in result.observed_frequency
+        assert "Grafdigger's Cage" not in result.observed_frequency
+        assert result.n_tournaments_considered == 1
+
+    def test_field_scope_and_window_compose(self, tmp_path, monkeypatch):
+        """Field-scope and window filters compose: windowing to a range that includes
+        only T3 (off-field), with field-scope on, must degrade to an honest empty
+        result rather than silently falling back to some other tournament."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        try:
+            result = backtest_board(
+                con, "Boulder", _fake_field(), since="2026-01-15", until="2026-01-16"
+            )
+        finally:
+            con.close()
+
+        assert result.n_winning_decks == 0
+        assert result.confidence is None
+        assert result.n_tournaments_considered == 1
+        assert result.n_tournaments_excluded == 1
+
+
+# ---------------------------------------------------------------------------
 # CLI test: `advise backtest`
 # ---------------------------------------------------------------------------
 
@@ -377,4 +614,80 @@ class TestAdviseBacktestCLI:
         assert (
             "// divergence is a signal to investigate, not proof of error "
             "(winning boards are self-selected + metagame-lagged)" in result.output
+        )
+
+    def test_advise_backtest_field_scope_on_by_default_excludes_off_field_tournament(
+        self, tmp_path, runner, monkeypatch
+    ):
+        """End-to-end (real `backtest_board`, monkeypatched scorer only): the CLI's
+        default run excludes T3 (off-field) and prints the field-scope banner with the
+        correct considered/excluded counts."""
+        db_path = _build_backtest_db(tmp_path)
+        field_file = tmp_path / "field.txt"
+        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+
+        result = runner.invoke(
+            main,
+            ["advise", "backtest", "--archetype", "Boulder", "--field", str(field_file), "--db", db_path],
+        )
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert "// field-scope: ON" in out
+        assert "1/3 candidate tournaments excluded as off-field" in out
+        assert "// top-finisher decks sampled: 4" in out
+        assert "Grafdigger's Cage" not in out
+
+    def test_advise_backtest_no_field_scope_flag_includes_off_field_tournament(
+        self, tmp_path, runner, monkeypatch
+    ):
+        """`--no-field-scope` reproduces the prior global (unscoped) sample end-to-end."""
+        db_path = _build_backtest_db(tmp_path)
+        field_file = tmp_path / "field.txt"
+        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+
+        result = runner.invoke(
+            main,
+            [
+                "advise", "backtest", "--archetype", "Boulder", "--field", str(field_file),
+                "--db", db_path, "--no-field-scope",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert "// field-scope: OFF" in out
+        assert "// top-finisher decks sampled: 6" in out
+        assert "Grafdigger's Cage" in out
+
+    def test_advise_backtest_field_scope_exhausts_sample_shows_specific_degrade(
+        self, tmp_path, runner, monkeypatch
+    ):
+        """When field-scoping excludes every candidate tournament, the CLI names that
+        specific reason (not the generic "no top-finisher decks" message) and still
+        prints the unconditional caveat — never a crash, never a verdict."""
+        db_path = _build_backtest_db(tmp_path)
+        field_file = tmp_path / "field.txt"
+        field_file.write_text("1.0 Some Unrelated Archetype\n")
+
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+
+        result = runner.invoke(
+            main,
+            ["advise", "backtest", "--archetype", "Boulder", "--field", str(field_file), "--db", db_path],
+        )
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert "field-scope excluded all 3 candidate tournament(s) as off-field" in out
+        assert (
+            "// divergence is a signal to investigate, not proof of error "
+            "(winning boards are self-selected + metagame-lagged)" in out
         )

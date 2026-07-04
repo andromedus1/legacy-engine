@@ -3035,6 +3035,14 @@ def advise_sideboard(
 @click.option("--since", default=None, help="Window start (ISO date, inclusive).")
 @click.option("--until", default=None, help="Window end (ISO date, exclusive).")
 @click.option(
+    "--field-scope/--no-field-scope",
+    "field_scope",
+    default=True,
+    help="Restrict the top-finisher sample to tournaments whose own metagame overlaps "
+         "--field's archetypes (excludes off-meta events, e.g. graveyard-heavy tech vs a "
+         "Boulder field). On by default; --no-field-scope reproduces the prior global sample.",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -3046,6 +3054,7 @@ def advise_backtest(
     field_file: str,
     since: str | None,
     until: str | None,
+    field_scope: bool,
     db: str | None,
     verbose: bool,
 ) -> None:
@@ -3058,7 +3067,11 @@ def advise_backtest(
     _setup_logging(verbose)
     from pathlib import Path
 
-    from legacy_engine.advisory.backtest import _OBSERVED_THRESHOLD, backtest_board
+    from legacy_engine.advisory.backtest import (
+        _FIELD_OVERLAP_MIN,
+        _OBSERVED_THRESHOLD,
+        backtest_board,
+    )
     from legacy_engine.advisory.report import _load_field
     from legacy_engine.ingestion import store
 
@@ -3067,17 +3080,36 @@ def advise_backtest(
     con = store.connect(db) if db else store.connect()
     try:
         field = _load_field(con, field_text=field_text)
-        result = backtest_board(con, archetype, field, since=since, until=until)
+        result = backtest_board(con, archetype, field, since=since, until=until, field_scope=field_scope)
 
         click.echo(f"// backtest: {result.archetype}")
         click.echo(f"// window: since={since or 'earliest'} until={until or 'latest'}")
+        if result.field_scope:
+            click.echo(
+                f"// field-scope: ON (candidate tournaments must be >= {_FIELD_OVERLAP_MIN:.0%} "
+                f"archetypes present in --field) — {result.n_tournaments_excluded}/"
+                f"{result.n_tournaments_considered} candidate tournaments excluded as off-field"
+            )
+        else:
+            click.echo(
+                "// field-scope: OFF (--no-field-scope) — comparing against the full "
+                "global top-finisher sample, unfiltered by field composition"
+            )
         click.echo(f"// top-finisher decks sampled: {result.n_winning_decks}")
 
         if result.confidence is None:
-            click.echo(
-                "// HONEST DEGRADE: no top-finisher decks found for this archetype/window — "
-                "insufficient data, no comparison possible."
-            )
+            if result.field_scope and result.n_tournaments_considered > 0:
+                click.echo(
+                    "// HONEST DEGRADE: field-scope excluded all "
+                    f"{result.n_tournaments_considered} candidate tournament(s) as off-field — "
+                    "no top-finisher decks remain to compare against. Try --no-field-scope or a "
+                    "broader --field to diagnose."
+                )
+            else:
+                click.echo(
+                    "// HONEST DEGRADE: no top-finisher decks found for this archetype/window — "
+                    "insufficient data, no comparison possible."
+                )
         else:
             click.echo(f"// confidence: {result.confidence}")
             if result.confidence == "speculative":
