@@ -1,10 +1,37 @@
 ---
-id: idea-copy-count-tipping-point
+id: feature-min-viable-copy-count
+kind: feature
+stage: drafting
+tags: [advisory, sideboard]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-04
-tags: [advisory, sideboard, analytics]
+updated: 2026-07-04
 ---
 
-# Copy-count tipping point — winners run fixers at 0 or 2+, our solver produces 1-ofs
+# Mechanics-derived minimum-viable copy count for pitch/threshold sideboard cards
+
+## Brief (promotion, 2026-07-04 — study complete)
+
+The distribution-first study ran (docs/analysis/copy-count-distribution-study.md, on the
+archetype-sweep payloads) and RESOLVED the open question below. Verdict: the 0-or-2+ tipping
+point is card-mechanic-specific, NOT category-wide — reactive fixers are legitimately ~60%
+1-ofs among winners (the concave taper is empirically right for 3 of 4 categories), but
+pitch-fueled counters show a hard valley at 1 (Consign P(1)=.04 vs P(2)=.65; FoN/Mindbreak
+Trap mode-at-2) and opening-hand threshold cards are near-degenerate at 4 (Leyline .83).
+Solver divergence concentrates there: 42-45% of broad-counter recommendations are 1-ofs
+where winners' mode is 2+.
+
+**Design pin (from the study; pure-mechanics guardrail):** per-card minimum-viable-count
+x_c ∈ {0} ∪ [k_min, cap], with k_min derived from ORACLE MECHANICS, never winners'
+frequencies — pitch/alternate-cost cards k_min=2 (second copy is the fuel); "begin the game
+… opening hand" cards k_min≈4 (hypergeometric opening-hand math). Everything else keeps the
+existing concave taper. Oracle-text triggers make this a natural early consumer of the
+rules-engine arc ([[idea-card-semantics-rules-layer]]).
+
+## Original idea (2026-07-04, pre-study): winners run fixers at 0 or 2+, our solver produces 1-ofs
 
 Andrew's observation (2026-07-04, reviewing the optimized-board analysis): winners don't usually run
 **1-of "fixers"** (reactive answers like Dauthi Voidwalker, Engineered Explosives, Toxic Deluge).

@@ -37,3 +37,10 @@ representable self-cost — e.g. a `protects` field with scope semantics: own-tu
 and/or condition Step-3 hate weights on which tags the interactive field actually attacks; and/or a
 graded (not cliff) reactive self-cost. Validate: Defense Grid drops out of the recommended board on
 the field-scoped backtest. Relates to [[idea-card-semantics-rules-layer]] (protection-kind semantics).
+
+## Sweep confirmation (2026-07-04, validated harness)
+
+The archetype sweep confirms this at full scale: **Defense Grid is scorer-only in 18 of 26
+swept archetypes** (global current-regime field; also scorer-only for Dimir Tempo vs the
+Boulder field) — the single most systematic false positive in the engine. Top-ranked
+scorer_only `_hate` cluster; winners' adoption ≤12% everywhere it's recommended.

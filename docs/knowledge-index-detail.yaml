@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-04T19:31:09Z'
+generated_at: '2026-07-04T21:39:48Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -270,6 +270,42 @@ documents:
       relationship: parallel-to
     - slug: docs/briefs/ingestion-archetype-contracts/parent.md
       relationship: depends-on
+  docs/analysis/copy-count-distribution-study.md:
+    summary: 'Distribution-first study of per-card sideboard copy-count distributions
+      among top-finisher
+
+      boards (archetype-sweep payloads, 2026-07-04: 26 archetypes, 293 top-finisher
+      decks global /
+
+      153 Boulder-scoped). Tests idea-copy-count-tipping-point''s "winners run fixers
+      at 0 or 2+"
+
+      hypothesis against the solver''s pure-concave per-copy taper.
+
+      '
+    key_findings:
+    - 'The 0-or-2+ tipping point is CARD-MECHANIC-SPECIFIC, not category-wide: the
+      hypothesis as stated is NOT supported for reactive fixers as a class (winners
+      run them 53-60% as 1-ofs, concave-decreasing — engine 1-ofs are legitimate there).'
+    - Hard valley-at-1 exists for pitch-fueled counters — Consign to Memory P(1)=0.04-0.06
+      vs P(2)=0.59-0.65; Force of Negation & Mindbreak Trap mode-at-2 — cards whose
+      alternate cost pitches a copy mechanically want a second copy as fuel; derivable
+      from oracle text (pure-mechanics compliant).
+    - 'Threshold cards are near-degenerate at the top: Leyline of the Void P(4)=0.83
+      (''begin the game in play'' = opening-hand math wants 4); sideboard Show and
+      Tell 100% 4-of (plan cards, not answers).'
+    - 'Category PMFs conditional on inclusion (global): broad-counter mode-at-2plus
+      (P2=.54); color-blast, reactive-fixer, dedicated-hate concave-decreasing — the
+      current concave taper is empirically right for 3 of 4 classified categories.'
+    - 'Solver-vs-winners divergence concentrates where predicted: 42-45% of solver
+      broad-counter picks are 1-ofs where winners'' mode is 2+; only 17% for color-blasts.'
+    - 'Modeling implication: per-card minimum-viable-count derived from MECHANICS
+      (pitch-cost cards k_min=2; opening-hand threshold cards k_min≈4), not a category
+      S-curve and never copied from winners'' frequencies — feeds the rules-engine
+      arc (idea-card-semantics-rules-layer).'
+    - Shapes replicate across the global and Boulder-scoped payloads (robustness);
+      most archetype winner samples are speculative-tier (n<30), honestly labeled
+      — treat per-card PMFs with n>=20 as the reliable floor.
   docs/briefs/advisory-methods.md:
     summary: 'Methods brief for legacy-engine''s advisory/ module (the Legacy-specific
       differentiator). Pins down:
