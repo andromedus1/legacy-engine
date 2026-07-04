@@ -5,7 +5,7 @@ stage: done
 tags: [advisory, sideboard]
 parent: epic-sideboard-core-and-hedge
 depends_on: [epic-sideboard-core-and-hedge-dedicated-core, epic-sideboard-core-and-hedge-output-contract]
-release_binding: null
+release_binding: v0.2.0
 gate_origin: null
 created: 2026-06-15
 updated: 2026-06-15

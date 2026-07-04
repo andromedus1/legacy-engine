@@ -5,7 +5,7 @@ stage: done
 tags: [advisory]
 parent: epic-scorer-flexibility-valuation
 depends_on: [feature-sfv-breadth-objective]
-release_binding: null
+release_binding: v0.2.0
 gate_origin: null
 created: 2026-07-03
 updated: 2026-07-03
