@@ -1,7 +1,7 @@
 ---
 id: epic-scorer-flexibility-valuation
 kind: epic
-stage: implementing
+stage: review
 tags: [advisory, analytics]
 parent: null
 depends_on: []
