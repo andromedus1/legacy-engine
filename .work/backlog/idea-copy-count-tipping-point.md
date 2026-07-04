@@ -40,3 +40,18 @@ in live games), not from copying winners.
 **Home:** natural sub-question of [[feature-archetype-sweep-backtest]] (the sweep should collect
 copy-count histograms, not just presence) feeding the scorer as a follow-up fix. Related:
 idea-ilp-tiebreak-nondeterminism (determinism for reproducible sweeps).
+
+## Methodology addendum (Andrew, 2026-07-04): distribution-first modeling
+
+Before choosing HOW to model copy counts, **test the distribution of the observed data itself** and
+let the identified distribution inform the model form. Don't assume the answer — the bimodal
+(0-or-2+) hypothesis above is itself just a hypothesis to test, alongside alternatives: is the
+observed per-category copy-count distribution actually bimodal (dip test / mixture fit), zero-
+inflated, threshold-cliffed, or in fact smoothly concave for some categories? Fit candidate
+distribution families to the observed histograms, compare honestly (per-category — fixers vs broad
+counters vs dedicated hate may differ), and pick the model representation that best matches the
+empirical distribution. The point: **the model's form should represent the variable's real
+distribution as honestly as possible** — assumption-driven forms (like the current pure-concave
+taper, chosen a priori) are exactly what this exercise guards against. This generalizes: any
+engine variable we model (swings, shares, copy values) deserves the same
+observe-distribution-first discipline before a functional form is baked in.
