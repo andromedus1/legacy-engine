@@ -1,8 +1,16 @@
 ---
-id: idea-archetype-sweep-backtest-loop
+id: feature-archetype-sweep-backtest
+kind: feature
+stage: drafting
+tags: [advisory, analytics]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-03
-tags: [advisory, sideboard, analytics]
+updated: 2026-07-04
 ---
+
 
 # Archetype-sweep backtest loop — batch divergence mining for the sideboard advisor
 
@@ -31,3 +39,20 @@ Related: [[idea-winners-only-triage-creature-interaction]] (this generalizes it)
 [[idea-hate-coverability-overvalues-defense-grid]], [[idea-card-semantics-rules-layer]] (the sweep
 would feed its incident inventory), [[idea-ilp-tiebreak-nondeterminism]] (determinism matters for
 reproducible sweeps).
+
+## Scope notes (promotion, 2026-07-04)
+
+Promoted per Andrew's directive: run this arc BEFORE the rules-engine arc
+([[idea-card-semantics-rules-layer]] stays in backlog until this completes) so the sweep's
+divergence clusters give the rules arc a complete, prioritized error map ("types of errors that are
+common and need to be addressed" — his words). Sized as a single feature: composes shipped tools
+(`generate consensus` → `advise sideboard` → `advise backtest --field-scope`); the new work is the
+batch driver, the cross-archetype divergence report (rank by adoption% × archetype-count;
+winners-only across many archetypes = systematic), root-cause clustering, and substrate-ready
+finding output. Follows the now-codified `divergence-as-diagnostic-surface` pattern; determinism
+prerequisite is tracked (`idea-ilp-tiebreak-nondeterminism` — the sweep should either drain it
+first or pin the greedy solver for reproducibility, a feature-design decision).
+
+Known session-1 seeds the sweep should rediscover (validation that the harness works): FoN/Consign
+(fixed), Defense Grid + Damping Sphere (tracked), the creature-interaction winners-only cluster,
+Surgical-in-graveyardless-fields.
