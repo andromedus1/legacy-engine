@@ -55,3 +55,18 @@ distribution as honestly as possible** — assumption-driven forms (like the cur
 taper, chosen a priori) are exactly what this exercise guards against. This generalizes: any
 engine variable we model (swings, shares, copy values) deserves the same
 observe-distribution-first discipline before a functional form is baked in.
+
+## Prior art (the maintainer's pointer, 2026-07-04): ds-engine distribution-analysis inventory
+
+`~/dev/ds-engine/docs/techniques/eda/inventory-legacy.md` §2 "Distribution Analysis" is directly
+reusable prior art for the distribution-first step: the normality-test battery (Shapiro-Wilk,
+D'Agostino-Pearson, Anderson-Darling, KS) with skew/kurtosis interpretation thresholds and
+scipy.stats/statsmodels pointers — and, critically for THIS study, its documented caveats map 1:1:
+"normality tests don't detect mixture distributions," "summary stats alone miss bimodal or
+truncated distributions" (→ visualize histograms/KDE, don't trust p-values alone), and
+"over-relying on p-values — large samples reject normality for trivially small deviations." Its
+technique-selection routing (distribution shape determines downstream method) IS the
+distribution-first discipline as an operating procedure. Also potentially relevant:
+`docs/techniques/causal/inventory-legacy.md` if the study graduates from "what is the distribution"
+to "why do winners choose 2+" (selection vs causation). Read both before designing the sweep's
+histogram study.
