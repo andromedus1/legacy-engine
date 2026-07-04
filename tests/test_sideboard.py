@@ -7626,3 +7626,408 @@ class TestSlotROIRecommendSideboardIntegration:
         # Sanity: the monkeypatch actually took effect — proves the comparison is meaningful,
         # not vacuously true because both packages happened to compute the same table anyway.
         assert perturbed.slot_roi != baseline.slot_roi
+
+
+# ---------------------------------------------------------------------------
+# feature-sfv-option-value: CVaR-style tail-robustness option value over the Dirichlet
+# field. Reuses `_dirichlet_share_lower_bound`'s closed-form Beta-marginal machinery
+# (Unit B5 above), extended to a GROUP of archetypes via the Dirichlet aggregation property.
+# ---------------------------------------------------------------------------
+
+from legacy_engine.advisory.sideboard import (
+    _DEFAULT_OPTION_VALUE_ALPHA,
+    _OPTION_VALUE_SCALE,
+    _dirichlet_group_lower_bound,
+    _card_covered_archetypes,
+    _build_option_value_bonuses,
+)
+
+
+class TestDirichletGroupLowerBound:
+    """_dirichlet_group_lower_bound — closed-form Dirichlet AGGREGATE lower-quantile share
+    for a GROUP of archetypes, extending `_dirichlet_share_lower_bound`'s single-archetype
+    identity via the standard Dirichlet aggregation property (a subset sum of a Dirichlet's
+    components is itself Beta-distributed)."""
+
+    def test_none_when_counts_absent(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4})
+        assert _dirichlet_group_lower_bound(field, {"A", "B"}) is None
+
+    def test_none_when_archetypes_empty(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 10, "B": 10})
+        assert _dirichlet_group_lower_bound(field, frozenset()) is None
+
+    def test_singleton_group_matches_dirichlet_share_lower_bound(self):
+        """A one-archetype group must reproduce the single-archetype identity
+        `_dirichlet_share_lower_bound` already computes — the aggregation property
+        collapses to the marginal identity at |R|=1."""
+        field = build_custom_field(
+            {"A": 0.5, "B": 0.3, "C": 0.2}, counts={"A": 20, "B": 12, "C": 8},
+        )
+        singleton = _dirichlet_group_lower_bound(field, {"A"})
+        marginal = _dirichlet_share_lower_bound(field)["A"]
+        assert singleton == pytest.approx(marginal)
+
+    def test_group_exceeds_sum_of_individual_tails(self):
+        """CVaR subadditivity (brief §3, 'diversification never increases risk'): pooling
+        several archetypes into one aggregate group retains MORE share in the tail than
+        summing each archetype's OWN individually-computed tail share."""
+        field = build_custom_field(
+            {"A": 0.05, "B": 0.05, "C": 0.05, "D": 0.20, "E": 0.65},
+            counts={"A": 5, "B": 5, "C": 5, "D": 40, "E": 130},
+        )
+        group_tail = _dirichlet_group_lower_bound(field, {"A", "B", "C"})
+        sum_of_individual_tails = sum(
+            _dirichlet_group_lower_bound(field, {a}) for a in ("A", "B", "C")
+        )
+        assert group_tail > sum_of_individual_tails
+
+    def test_degenerate_whole_field_group_returns_share_sum(self):
+        field = build_custom_field({"A": 0.6, "B": 0.4}, counts={"A": 10, "B": 10})
+        assert _dirichlet_group_lower_bound(field, {"A", "B"}) == pytest.approx(1.0)
+
+    def test_monotonic_in_quantile(self):
+        field = build_custom_field(
+            {"A": 0.3, "B": 0.3, "C": 0.4}, counts={"A": 10, "B": 10, "C": 15},
+        )
+        low = _dirichlet_group_lower_bound(field, {"A", "B"}, quantile=0.05)
+        high = _dirichlet_group_lower_bound(field, {"A", "B"}, quantile=0.45)
+        assert low < high
+
+
+class TestCardCoveredArchetypes:
+    """_card_covered_archetypes — derives a card's REAL covered-archetype set from the
+    model's OWN attachment (candidate_covers/element_weight), deliberately NOT from the
+    looser tag-overlap test `_relevant_field_archetypes` uses for the coverage% diagnostic
+    (which can be True for an archetype with no actual weighted element at all)."""
+
+    def test_extracts_archetype_from_element_keys(self):
+        model = _make_model(
+            element_weight={"A|combo": 0.05, "B|combo": 0.03},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"A", "B"})
+
+    def test_excludes_hate_pseudo_elements(self):
+        model = _make_model(
+            element_weight={"A|combo": 0.05, "_hate:mana": 0.10},
+            candidate_covers={"Card": frozenset({"A|combo", "_hate:mana"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo", "_hate"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"A"})
+
+    def test_excludes_zero_weight_elements(self):
+        """An element key present in candidate_covers but discounted to exactly zero weight
+        contributes no archetype — matches `_element_sum_marginal_gain`'s own `w > 0.0` filter."""
+        model = _make_model(
+            element_weight={"A|combo": 0.0, "B|combo": 0.05},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _card_covered_archetypes(model, "Card") == frozenset({"B"})
+
+    def test_unknown_card_returns_empty(self):
+        model = _make_model(element_weight={}, candidate_covers={}, candidate_meta={})
+        assert _card_covered_archetypes(model, "Nobody") == frozenset()
+
+
+class TestBuildOptionValueBonuses:
+    """_build_option_value_bonuses — pure-mechanics CVaR tail-robustness bonus, additive on
+    top of the mean-field coverage objective. Acceptance-critical: a flexible (multi-archetype)
+    card earns MORE option value than a narrow (single-archetype) card of equal per-archetype
+    share, super-additively; the term never manufactures a pick from a card with zero real
+    coverage; alpha dials the mean/tail tradeoff; disabled paths are exact no-ops."""
+
+    def _uncertain_field(self):
+        # Three thin, equally-sized archetypes + one well-sampled + one dominant filler.
+        return build_custom_field(
+            {"A": 0.05, "B": 0.05, "C": 0.05, "D": 0.20, "E": 0.65},
+            counts={"A": 5, "B": 5, "C": 5, "D": 40, "E": 130},
+        )
+
+    def test_disabled_at_alpha_one(self):
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.01},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field, alpha=1.0) == {}
+
+    def test_empty_when_field_has_no_counts(self):
+        field = build_custom_field({"A": 1.0})  # share-only, no counts
+        model = _make_model(
+            element_weight={"A|combo": 0.01},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_hate_counter_hosers_excluded(self):
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"_hate:mana": 0.10},
+            candidate_covers={"Veil": frozenset({"_hate:mana"})},
+            candidate_meta={"Veil": _minimal_hoser("Veil", frozenset({"_hate"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_zero_real_coverage_never_manufactures_a_bonus(self):
+        """A card that covers NOTHING with positive weight gets no bonus — this term can
+        never promote a card into the board on option value alone."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={},
+            candidate_covers={"Ghost": frozenset()},
+            candidate_meta={"Ghost": _minimal_hoser("Ghost", frozenset({"combo"}))},
+        )
+        assert _build_option_value_bonuses(model, field) == {}
+
+    def test_flexible_card_earns_superadditively_more_than_narrow(self):
+        """Narrow covers only A (mean share 0.05); Broad covers A, B, C (each mean share
+        0.05 — same as Narrow's single archetype). Broad's bonus exceeds 3x Narrow's —
+        strictly MORE than the naive linear (breadth-count) scaling would predict — the
+        closed-form expression of CVaR subadditivity (brief §3)."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={
+                "A|narrow": 0.05 * 0.2, "A|combo": 0.05 * 0.2,
+                "B|combo": 0.05 * 0.2, "C|combo": 0.05 * 0.2,
+            },
+            candidate_covers={
+                "Narrow": frozenset({"A|narrow"}),
+                "Broad": frozenset({"A|combo", "B|combo", "C|combo"}),
+            },
+            candidate_meta={
+                "Narrow": _minimal_hoser("Narrow", frozenset({"narrow"})),
+                "Broad": _minimal_hoser("Broad", frozenset({"combo"})),
+            },
+        )
+        bonuses = _build_option_value_bonuses(model, field)
+        assert bonuses["Narrow"] > 0.0
+        assert bonuses["Broad"] > 3.0 * bonuses["Narrow"]
+
+    def test_alpha_dials_mean_to_tail_tradeoff(self):
+        """Lower alpha (more weight on the tail) monotonically increases the bonus;
+        alpha=1.0 is the zero-bonus floor."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.05 * 0.2, "B|combo": 0.05 * 0.2},
+            candidate_covers={"Card": frozenset({"A|combo", "B|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        b_09 = _build_option_value_bonuses(model, field, alpha=0.9)["Card"]
+        b_07 = _build_option_value_bonuses(model, field, alpha=0.7)["Card"]
+        b_03 = _build_option_value_bonuses(model, field, alpha=0.3)["Card"]
+        assert 0.0 < b_09 < b_07 < b_03
+        assert _build_option_value_bonuses(model, field, alpha=1.0) == {}
+
+    def test_default_alpha_and_scale_are_the_module_constants(self):
+        """Sanity: the function's defaults track the documented module constants (so a
+        future constant retune doesn't silently drift from what callers assume)."""
+        field = self._uncertain_field()
+        model = _make_model(
+            element_weight={"A|combo": 0.05 * 0.2},
+            candidate_covers={"Card": frozenset({"A|combo"})},
+            candidate_meta={"Card": _minimal_hoser("Card", frozenset({"combo"}))},
+        )
+        default = _build_option_value_bonuses(model, field)["Card"]
+        explicit = _build_option_value_bonuses(
+            model, field, alpha=_DEFAULT_OPTION_VALUE_ALPHA, scale=_OPTION_VALUE_SCALE,
+        )["Card"]
+        assert default == pytest.approx(explicit)
+
+
+class TestOptionValueSolverWiring:
+    """The four consumers (_greedy_solve, _hedge_fill, _rank_considering_pool, _ilp_solve)
+    all look up a precomputed `option_value_bonus` dict rather than recomputing it — mirrors
+    the single-canonical-function pattern feature-sfv-breadth-objective set for
+    `_element_sum_marginal_gain`. None/empty is byte-identical to the pre-feature objective;
+    a real bonus can flip an otherwise-tied pick; the bonus is credited on a card's FIRST
+    copy only, strictly separate from the per-copy redundancy/draw-probability taper."""
+
+    def _tied_model(self) -> CoverageModel:
+        """Two cards with EXACTLY equal base marginal gain (same weight, disjoint single
+        elements) — a clean, deterministic (Python-level, not solver-level) tie."""
+        return _make_model(
+            element_weight={"e1": 0.10, "e2": 0.10},
+            candidate_covers={"A": frozenset({"e1"}), "B": frozenset({"e2"})},
+            candidate_meta={
+                "A": _minimal_hoser("A", frozenset({"t1"})),
+                "B": _minimal_hoser("B", frozenset({"t2"})),
+            },
+        )
+
+    def _bias_model(self) -> CoverageModel:
+        """A's base gain is strictly higher than B's (not tied) — used for the ILP tests so
+        they never depend on CBC's own tie-break behavior (a real, documented risk on
+        genuinely-tied models); only a large-enough bonus should flip the optimal pick."""
+        return _make_model(
+            element_weight={"e1": 0.11, "e2": 0.10},
+            candidate_covers={"A": frozenset({"e1"}), "B": frozenset({"e2"})},
+            candidate_meta={
+                "A": _minimal_hoser("A", frozenset({"t1"})),
+                "B": _minimal_hoser("B", frozenset({"t2"})),
+            },
+        )
+
+    # ---- _greedy_solve ----
+
+    def test_greedy_none_bonus_is_byte_identical(self):
+        model = self._tied_model()
+        picks_a, trace_a = _greedy_solve(model, budget=2)
+        picks_b, trace_b = _greedy_solve(model, budget=2, option_value_bonus=None)
+        assert picks_a == picks_b
+        assert [t.marginal_gain for t in trace_a] == [t.marginal_gain for t in trace_b]
+
+    def test_greedy_bonus_breaks_tie_toward_bonused_card(self):
+        model = self._tied_model()
+        # No bonus: deterministic name tie-break ("A" < "B") picks A for the sole slot.
+        picks_default, _ = _greedy_solve(model, budget=1)
+        assert picks_default == {"A": 1}
+        # A decisive bonus on B flips the pick.
+        picks_boosted, _ = _greedy_solve(model, budget=1, option_value_bonus={"B": 0.05})
+        assert picks_boosted == {"B": 1}
+
+    def test_greedy_bonus_applies_first_copy_only(self):
+        model = _make_model(
+            element_weight={"e1": 0.10},
+            candidate_covers={"A": frozenset({"e1"})},
+            candidate_meta={"A": _minimal_hoser("A", frozenset({"t1"}), max_copies=4)},
+        )
+        _picks, trace = _greedy_solve(model, budget=2, option_value_bonus={"A": 0.05})
+        assert len(trace) == 2
+        # Pick 1: weight(0.10)*Δg(1)(0.5) + bonus(0.05) = 0.10; pick 2: weight*Δg(2)(0.25),
+        # no bonus (already has 1 copy) = 0.025.
+        assert trace[0].marginal_gain == pytest.approx(0.10)
+        assert trace[1].marginal_gain == pytest.approx(0.025)
+
+    # ---- _hedge_fill ----
+
+    def test_hedge_fill_none_bonus_is_byte_identical(self):
+        model = TestHedgeAllocator()._three_element_model()
+        a = _hedge_fill(model, {"Top": 2}, budget=5)
+        b = _hedge_fill(model, {"Top": 2}, budget=5, option_value_bonus=None)
+        assert a == b
+
+    def test_hedge_fill_bonus_can_flip_the_insurance_pick(self):
+        model = _make_model(
+            element_weight={"e1": 1.0, "e2": 0.10, "e3": 0.10},
+            candidate_covers={
+                "Top": frozenset({"e1"}), "Alt": frozenset({"e2"}), "Gamma": frozenset({"e3"}),
+            },
+            candidate_meta={
+                "Top": _minimal_hoser("Top", frozenset({"t1"})),
+                "Alt": _minimal_hoser("Alt", frozenset({"t2"})),
+                "Gamma": _minimal_hoser("Gamma", frozenset({"t3"})),
+            },
+        )
+        default = _hedge_fill(model, {"Top": 1}, budget=2)
+        assert default == {"Alt": 1}  # Alt/Gamma tie; alphabetic tie-break picks Alt
+        boosted = _hedge_fill(model, {"Top": 1}, budget=2, option_value_bonus={"Gamma": 0.5})
+        assert boosted == {"Gamma": 1}
+
+    # ---- _rank_considering_pool ----
+
+    def test_considering_pool_none_bonus_is_byte_identical(self):
+        model = self._tied_model()
+        a = _rank_considering_pool(model, {})
+        b = _rank_considering_pool(model, {}, option_value_bonus=None)
+        assert [(c.card, c.marginal_gain) for c in a] == [(c.card, c.marginal_gain) for c in b]
+
+    def test_considering_pool_bonus_reorders_by_boosted_gain(self):
+        model = self._tied_model()
+        boosted = _rank_considering_pool(model, {}, option_value_bonus={"B": 0.5})
+        assert boosted[0].card == "B"
+        assert boosted[0].marginal_gain > boosted[1].marginal_gain
+
+    def test_considering_pool_bonus_not_applied_to_already_placed_copy(self):
+        """A card already in final_cards at some copies is being evaluated for its NEXT
+        copy — the first-copy-only option-value bonus must not apply."""
+        model = _make_model(
+            element_weight={"e1": 0.10},
+            candidate_covers={"A": frozenset({"e1"})},
+            candidate_meta={"A": _minimal_hoser("A", frozenset({"t1"}), max_copies=4)},
+        )
+        with_bonus = _rank_considering_pool(model, {"A": 1}, option_value_bonus={"A": 0.05})
+        without_bonus = _rank_considering_pool(model, {"A": 1}, option_value_bonus=None)
+        assert with_bonus[0].marginal_gain == pytest.approx(without_bonus[0].marginal_gain)
+
+    # ---- _ilp_solve ----
+
+    def test_ilp_none_bonus_is_byte_identical(self):
+        model = self._bias_model()
+        try:
+            a = _ilp_solve(model, budget=1)
+            b = _ilp_solve(model, budget=1, option_value_bonus=None)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert a == b == {"A": 1}
+
+    def test_ilp_bonus_can_flip_the_pick(self):
+        model = self._bias_model()
+        try:
+            boosted = _ilp_solve(model, budget=1, option_value_bonus={"B": 0.10})
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert boosted == {"B": 1}
+
+    def test_greedy_and_ilp_agree_with_option_value_active(self):
+        model = self._bias_model()
+        bonus = {"B": 0.10}
+        greedy_picks, _ = _greedy_solve(model, budget=1, option_value_bonus=bonus)
+        try:
+            ilp_picks = _ilp_solve(model, budget=1, option_value_bonus=bonus)
+        except _ILPFailed:
+            pytest.skip("CBC unavailable")
+        assert greedy_picks == ilp_picks == {"B": 1}
+
+
+class TestOptionValueRecommendSideboardIntegration:
+    """End-to-end: `option_value_bonus` is computed once inside `recommend_sideboard` and
+    threaded through to whichever solver runs. A share-only field (no counts) is byte-identical
+    across alpha (the documented no-op path); a spy on `_greedy_solve` proves the EXACT dict
+    `_build_option_value_bonuses` returns reaches the solver call."""
+
+    def test_share_only_field_byte_identical_across_alpha(self):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})  # share-only, no counts
+            cat = TestRedundancyDecay._gy_catalog()
+            default = recommend_sideboard(con, field, {}, solver="greedy", catalog=cat)
+            other_alpha = recommend_sideboard(
+                con, field, {}, solver="greedy", catalog=cat, option_value_alpha=0.1,
+            )
+        finally:
+            con.close()
+        assert default.cards == other_alpha.cards
+
+    def test_option_value_bonus_dict_reaches_greedy_solver(self, monkeypatch):
+        """Spy on `_greedy_solve` to confirm `recommend_sideboard` passes through the EXACT
+        dict `_build_option_value_bonuses` returns — proves the computed bonus reaches the
+        solver call, not just the model-build step."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        sentinel = {"Surgical Extraction": 0.1234}
+        monkeypatch.setattr(sb_mod, "_build_option_value_bonuses", lambda *a, **k: sentinel)
+
+        captured: dict = {}
+        real_greedy = sb_mod._greedy_solve
+
+        def _spy_greedy(*args, **kwargs):
+            captured["option_value_bonus"] = kwargs.get("option_value_bonus")
+            return real_greedy(*args, **kwargs)
+
+        monkeypatch.setattr(sb_mod, "_greedy_solve", _spy_greedy)
+
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(),
+            )
+        finally:
+            con.close()
+
+        assert captured["option_value_bonus"] == sentinel
