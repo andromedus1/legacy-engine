@@ -74,6 +74,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * in: +1 dauthi +1 barrowgoyf +1 snuff out
 * out: -2 daze -1 brazen borrower
   * // engine mirror plan wanted hydroblast in — UB mirror, no red targets; rejected as correlational noise
+  * // online config: surgical is live here (their murktide/goyf fuel) — board it over the +1 snuff out
 
 **jeskai midrange — 7.5%, ~50 (imputed):**
 * their plan: counters + swords + phlage/clique, pyroblast war postboard
@@ -90,6 +91,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * discard+goyf grind; whoever's threat sticks
 * in: +1 barrowgoyf +1 sheoldred's edict +1 toxic deluge
 * out: -2 daze -1 brazen borrower
+  * // online config: no toxic — +1 snuff out instead
 
 **black saga storm — 6.5%, ~50 (thin data):**
 * their plan: beseech storm on urza's saga mana; LED hands
@@ -104,6 +106,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * counters near-dead through vial — cut daze hard
 * in: +1 toxic deluge +1 sheoldred's edict +1 null rod +1 snuff out
 * out: -3 daze -1 thoughtseize
+  * // online config: no toxic (surgical dead here) — board 3-for-3 (edict/rod/snuff; skip the -1 thoughtseize)
 
 **doomsday — 5.6%, 54% wr (evolving n=30):**
 * their plan: doomsday pile -> oracle; tempo camp = tamiyo/murktide shell
@@ -112,6 +115,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * in: +3 consign +2 force of negation +1 dauthi
 * out: -3 fatal push -1 snuff out -2 barrowgoyf
   * // engine shows a hydroblast lift signal (n=30) — if you see red g1, 1 hydro over 1 consign
+  * // online config: surgical does NOT come in (pile = library, not yard)
 
 **eldrazi — 5.6%, 46% wr:**
 * their plan: tomb/eye ramp -> chalice, TKS, smasher; all colorless
@@ -119,6 +123,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * chalice@1 is the trap — lead cantrips before their t2 when possible
 * in: +3 consign +1 harbinger +1 toxic deluge +1 sheoldred's edict
 * out: -3 daze -2 thoughtseize -1 brazen borrower
+  * // online config: -toxic -> +1 snuff out (tks/smasher are nonblack)
 
 **painter — 4.7%, 48% wr:**
 * their plan: painter's servant + grindstone, REB-heavy red shell
@@ -138,6 +143,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * guide of souls on sight; toxic@2 sweeps; hydroblast = red threats/removal
 * in: +1 toxic deluge +1 engineered explosives +1 sheoldred's edict +2 hydroblast
 * out: -3 daze -2 thoughtseize
+  * // online config: -toxic -> +1 snuff out (guide dies to it anyway)
 
 ---
 ---
@@ -152,9 +158,8 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * why: online field = grixis reanimator 6.4% + doomsday 5.1% (+dredge tail) vs local's near-zero yard share; fair-creature sweep targets thinner online
 * surgical targets: reanimator — exile the fatty in RESPONSE to entomb/reanimate (their yard, before it lands); dredge — exile the dredger; marginal: mirror murktide fuel
   * vs doomsday it does NOT hit the pile (library, not yard) — counters/consign stay the plan there
-* plan deltas vs the guide above (only where toxic appeared):
-  * d&t / black midrange / energy: toxic slot gone — board the edict/ee package as listed, +1 hydroblast (energy) or stay 1 lighter; don't stretch
-  * reanimator (online-only matchup): in: +1 surgical +1 dauthi +2 fon / out: -3 push -1 snuff // dauthi's replacement effect voids their yard from anywhere, surgical cleans what slips
+* per-matchup deltas are inline above (the "// online config" lines); one online-only matchup to add:
+  * reanimator: in: +1 surgical +1 dauthi +2 fon / out: -3 push -1 snuff // dauthi's replacement effect voids their yard from anywhere, surgical cleans what slips
 * everything else unchanged
 
 ---
