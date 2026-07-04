@@ -23,6 +23,23 @@ Solver   = PuLP/CBC with incremental y_a^t linearization (exact ILP primary);
 Heuristic note: swing magnitudes are curated constants (_SWING_DEDICATED / _SWING_SOFT),
 NOT empirically derived.  Every SideboardPackage carries ``heuristic_note`` labeling this.
 
+Breadth = true submodular marginal-gain (feature-sfv-breadth-objective): F(S) = Σ_e
+weight_e·g(cov_e(S)) is a monotone submodular coverage function (g concave/non-decreasing
+composed with the modular per-element coverage count).  A card's marginal value is therefore
+the SUM of its marginal contribution to EVERY element it covers — F(S∪{c}) − F(S) = Σ_{e ∈
+covers(c)} weight_e·(g(cov_e(S)+1) − g(cov_e(S))) — not any single element viewed in
+isolation.  This is what credits a broad, flexible card (one answering many matchups at once,
+e.g. Force of Negation post-attachment) with large marginal value, and is exactly what gives
+greedy maximization its (1−1/e) approximation guarantee (docs/briefs/scorer-flexibility-
+valuation.md §1).  ``_element_sum_marginal_gain`` is the ONE canonical implementation of this
+sum; ``_greedy_solve``, ``_hedge_fill``, and ``_rank_considering_pool`` all call it so the
+aggregation cannot silently diverge between them, and ``_ilp_solve``'s y_a^t linearization
+encodes the identical per-element sum as a linear program (Σ_{a,t} weight_a·Δg(t)·y_a^t).  The
+concave saturation g() itself stays a PER-ELEMENT diminishing-returns curve (multiple answers
+to the same need still saturate — that axis is intentionally untouched); what changed is that
+a card's SCORE now has one, explicit, tested home for aggregating ACROSS the distinct elements
+it answers, rather than three independently-maintained inline copies of the same formula.
+
 Maindeck-aware extension (epic-deck-generation-sideboard-maindeck):
   When per-card×matchup data clears the confidence gate (≥evolving tier), the
   coverage model element weights are nudged by ``matchup_pressure`` (a multiplier
@@ -66,6 +83,13 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
       Attribution rules (``_derive_attacks_for_promoted``):
         - "counter target" or "counter that spell" in oracle_text → ``{"combo", "storm-reliant"}``
+        - "counter target noncreature spell" (feature-sfv-attachments) additionally adds
+          ``{"noncreature-reliant"}`` — the broad-interaction attachment axis so a free/soft
+          anti-noncreature counter (Force of Negation, Spell Pierce) credits the WHOLE
+          combo/control plurality it answers, not just the narrower combo/storm-reliant slice.
+        - "counter target ... colorless spell" (feature-sfv-colorless-axis) additionally adds
+          ``{"colorless-reliant"}`` — Consign to Memory / Ceremonious Rejection; an axis
+          independent of the noncreature restriction above.
         - "target red/blue spell/permanent" or "if it's red/blue" (color-blast template
           shared by Pyroblast/Hydroblast/Blue|Red Elemental Blast) → ``{"plays-red"}`` /
           ``{"plays-blue"}``
@@ -99,12 +123,15 @@ Impact-modulated element weights + draw-probability copy-shaping
   stop, the hedge allocator) is untouched:
 
   (B3) Element weight for an (archetype, tag) pair becomes
-       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score()`` instead of
-       plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1 already
-       selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
-       *modulates* the weight computed from it).  The impact call uses ``copies=1`` (the value
-       of the FIRST copy being present); the copy-count taper itself is (B4)'s job, so applying
-       ``draw_probability`` a second time here at ``max_copies`` would double-count the taper.
+       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score_without_draw_prob()``
+       instead of plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1
+       already selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
+       *modulates* the weight computed from it).  The impact call uses ``copies=1`` but the
+       resulting ``draw_prob`` factor is DISCARDED (feature-sfv-weights) — the element weight
+       asks "is there a good, castable, non-self-hosing answer", never "how likely am I to draw
+       it"; draw-probability belongs exclusively to (B4)'s per-copy taper below, so applying it
+       here too would double-count that same draw dimension AND (being a near-uniform ~0.4×
+       factor) silently deflate the whole element-weight scale the natural-budget τ stop reads.
        Needs, per opponent archetype: that opponent's ``Linchpin`` list (``opp_linchpins``) and
        optionally its known maindeck composition (``opp_cards``, for ``cast_requires`` gating)
        — both precomputed ONCE by ``recommend_sideboard`` (objective-search-split:
@@ -466,6 +493,66 @@ def _marginal_g(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Canonical submodular marginal-gain aggregation (feature-sfv-breadth-objective)
+# ---------------------------------------------------------------------------
+# The epic's locked decision: "reformulate the coverage objective to true submodular
+# marginal-gain — a card credited by its TOTAL marginal coverage across every element it
+# answers" (docs/briefs/scorer-flexibility-valuation.md §1, distortion D1). Audited against
+# the shipped code (post feature-sfv-attachments + feature-sfv-weights): the greedy solver,
+# the hedge fill, and the considering-pool ranker ALREADY compute this quantity correctly —
+# each independently summed weight_e·(g(cov_e+1)−g(cov_e)) over EVERY element a card covers,
+# not a single element in isolation. That sum, evaluated at a given coverage state, IS the
+# textbook submodular marginal gain of the objective F(S) = Σ_e weight_e·g(cov_e(S)); it is
+# exactly what the ILP's y_a^t linearization (`_ilp_solve`) also encodes (Σ_{a,t}
+# weight_a·Δg(t)·y_a^t sums the identical per-element marginal contributions), so greedy and
+# ILP already optimize the SAME aggregate-breadth objective and both inherit the (1−1/e)
+# greedy guarantee for it.
+#
+# What was missing was not the arithmetic but a single canonical, tested, documented home for
+# it: before this feature, three call sites (`_greedy_solve`, `_hedge_fill`,
+# `_rank_considering_pool`) each reimplemented the same "Σ over covered elements" loop inline.
+# They agreed today, but nothing enforced that a future edit to just one of them couldn't
+# silently re-fragment breadth credit (the D1 distortion, in latent/structural form — the risk
+# the epic is guarding against, not a live bug found in this feature's audit). This function is
+# now the ONE place that formula lives; every consumer that decides "how much is picking (or
+# considering) one more copy of this card worth right now" calls it, so the aggregation cannot
+# drift between them again.
+def _element_sum_marginal_gain(
+    model: "CoverageModel",
+    card_name: str,
+    cov_counts: "dict[str, int]",
+    *,
+    weights: "dict[str, float] | None" = None,
+) -> float:
+    """Submodular marginal gain of one more copy of ``card_name``: Σ over ALL elements it
+    covers of ``weight_e · (g(cov_e+1) − g(cov_e))``.
+
+    This is the whole-card aggregate, not a per-element score — a card covering many
+    elements is credited by the SUM of its marginal contribution to each one (breadth is
+    credited by construction, per submodular coverage theory; see the module docstring).
+
+    ``cov_counts``: element id → current coverage count in the caller's in-progress solution.
+    Read-only here; the caller applies the pick and increments coverage afterward.
+
+    ``weights``: override ``model.element_weight`` (the hedge fill widens weights toward
+    uniform before calling this — see ``_hedge_fill``). Defaults to the model's own weights.
+    Elements with weight ≤ 0 (or absent from ``weights``) contribute nothing, matching every
+    call site's existing filter.
+
+    Pure function — no mutation, no DB. ``card_name`` need not be in ``model.candidate_covers``
+    (returns 0.0), so callers don't need to pre-check membership.
+    """
+    active_weights = model.element_weight if weights is None else weights
+    total = 0.0
+    for element_id in model.candidate_covers.get(card_name, frozenset()):
+        w = active_weights.get(element_id, 0.0)
+        if w > 0.0:
+            cov_e = cov_counts.get(element_id, 0)
+            total += w * _marginal_g(cov_e + 1)
+    return total
+
+
+# ---------------------------------------------------------------------------
 # Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value;
 # curve replaced by the draw-probability marginal in feature-sb-field-weighted-scorer-wiring,
 # Unit B4)
@@ -579,6 +666,7 @@ def _hedge_fill(
     *,
     budget: int,
     blend: float = _HEDGE_BLEND,
+    option_value_bonus: "dict[str, float] | None" = None,
 ) -> dict[str, int]:
     """Fill leftover slots (budget − core) with diversity-preferring insurance picks.
 
@@ -586,6 +674,12 @@ def _hedge_fill(
     uncovered, one copy per card (pure breadth), starting from the core's coverage state and
     never re-picking a core card. Returns {card: 1} for the hedge picks only (the insurance set);
     empty when the core already filled the budget or nothing positive remains.
+
+    ``option_value_bonus`` (feature-sfv-option-value): optional card → CVaR tail-robustness
+    bonus. Every hedge pick is, by construction, a card's first (and only) copy in the hedge
+    set — cards already in ``core_cards`` are skipped, and the loop never re-picks a card once
+    it's in ``insurance`` — so the bonus is applied unconditionally here (no first-copy check
+    needed). ``None``/empty → byte-identical to the pre-feature hedge.
     """
     slots = budget - sum(core_cards.values())
     if slots <= 0:
@@ -605,12 +699,16 @@ def _hedge_fill(
     for _ in range(slots):
         best_card: str | None = None
         best_gain = 0.0
-        for card, elems in model.candidate_covers.items():
+        for card in model.candidate_covers:
             if card in core_cards or card in insurance:
                 continue  # 1-of diversity; never touch a core commit
-            gain = sum(
-                wide[e] * _marginal_g(cov.get(e, 0) + 1) for e in elems if e in wide
-            )
+            # feature-sfv-breadth-objective: canonical Σ-over-elements marginal gain
+            # (weights=wide reproduces the prior inline `if e in wide` filter exactly,
+            # since `wide`'s keys are precisely the positive-weight elements).
+            gain = _element_sum_marginal_gain(model, card, cov, weights=wide)
+            # feature-sfv-option-value: CVaR tail-robustness bonus (always first-copy here).
+            if option_value_bonus:
+                gain += option_value_bonus.get(card, 0.0)
             if gain > best_gain or (
                 gain == best_gain and gain > 0.0 and (best_card is None or card < best_card)
             ):
@@ -636,6 +734,23 @@ _HATE_ELEMENT_PREFIX = "_hate:"
 
 # Minimum weight threshold for anti-hate pseudo-elements (filter out noise)
 _HATE_ELEMENT_MIN_WEIGHT = 0.02
+
+# feature-sfv-weights: cap on an UNCOVERED `_hate:` pseudo-element's weight, as a multiple of
+# the largest real (archetype, tag) element weight already in the model.  A `_hate:<tag>`
+# element's natural weight (Σ interactive field share × _SWING_SOFT) is NOT itself
+# impact-discounted per-opponent the way real coverage weights are, so on a real field it can
+# be several times larger than any single opponent element — that's fine IF the deck can
+# actually field a protective answer (real, servable coverage should compete on its full
+# weight). It becomes "dead crowding weight" (brief §2, distortion D2) only when NO catalog
+# candidate survives this deck's color/anti-synergy filters to cover it (e.g. Veil of
+# Summer/Carpet of Flowers need G; Defense Grid self-hoses a reactive counterspell deck — a UB
+# reactive tempo deck honestly has no castable, non-self-hosing protective answer today). In
+# that uncovered case only, cap the weight at this ratio × the model's own largest real element
+# weight so it can no longer categorically out-rank every actual opponent need. 1.0 = "no more
+# valuable than the single best real matchup this field presents" — generous enough that
+# self-protection still shows up in the audit trail and can still win a slot when nothing else
+# is competitive, but can't dominate for want of an answer nobody can play. See Step 4c below.
+_HATE_UNCOVERED_WEIGHT_CAP_RATIO = 1.0
 
 _HEURISTIC_NOTE = (
     "Swing magnitudes (_SWING_DEDICATED=0.20, _SWING_SOFT=0.10) are curated heuristic constants, "
@@ -1143,6 +1258,24 @@ _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 _RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
 _RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
 
+# Broad free/soft anti-noncreature interaction (feature-sfv-attachments): the exact
+# "counter target noncreature spell" template shared by Force of Negation / Spell Pierce /
+# Mental Misstep-style noncreature-restricted counters — distinct from the generic
+# "counter target spell" rule 1 already matches.  Attaches to the `noncreature-reliant`
+# archetype axis so these cards credit the WHOLE combo/control plurality they answer,
+# not only the narrower `combo`/`storm-reliant` tags rule 1 attaches to.
+_RE_COUNTER_NONCREATURE = re.compile(r"counter target noncreature spell", re.IGNORECASE)
+
+# Colorless-specific counter (feature-sfv-colorless-axis): "colorless spell" appearing
+# alongside a counter effect — Consign to Memory ("Counter target triggered ability or
+# colorless spell."), Ceremonious Rejection ("Counter target colorless spell.").  Attaches
+# to the `colorless-reliant` archetype axis (whattoplay._vulnerability_from_composition),
+# an axis independent of `noncreature-reliant` — a card can restrict to colorless spells
+# without restricting to noncreature spells, and vice versa (Force of Negation/Spell Pierce
+# hit noncreature spells of ANY color, including colorless, but do not specifically call out
+# "colorless spell" the way Consign/Ceremonious Rejection do).
+_RE_COUNTER_COLORLESS = re.compile(r"counter target.*colorless spell", re.IGNORECASE | re.DOTALL)
+
 
 def _derive_attacks_for_promoted(
     card_name: str,
@@ -1155,6 +1288,12 @@ def _derive_attacks_for_promoted(
 
     1. Counter magic:  "counter target" / "counter that spell"
        → {combo, storm-reliant}   (answers the most common free-spell targets)
+    1b. Broad anti-noncreature counter: "counter target noncreature spell" (feature-sfv-
+        attachments) → adds {noncreature-reliant}   (Force of Negation, Spell Pierce —
+        attaches to the WHOLE combo/control plurality, not just rule 1's narrower slice)
+    1c. Colorless-specific counter: "counter target ... colorless spell" (feature-sfv-
+        colorless-axis) → adds {colorless-reliant}   (Consign to Memory, Ceremonious
+        Rejection — an axis independent of 1b's noncreature restriction)
     2. Color blast: "target red/blue spell" / "target red/blue permanent" / "if it's red/blue"
        → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
     3. Graveyard exile: "exile" AND "graveyard" present
@@ -1178,6 +1317,17 @@ def _derive_attacks_for_promoted(
     # 1. Counter magic
     if "counter target" in text_lower or "counter that spell" in text_lower:
         tags.update({"combo", "storm-reliant"})
+
+    # 1b. Broad anti-noncreature counter (feature-sfv-attachments) — additive on top of
+    # rule 1's combo/storm-reliant: attaches to the noncreature-reliant axis so a card
+    # like Force of Negation credits the whole combo/control plurality it answers.
+    if _RE_COUNTER_NONCREATURE.search(text_lower):
+        tags.add("noncreature-reliant")
+
+    # 1c. Colorless-specific counter (feature-sfv-colorless-axis) — additive on top of
+    # rule 1's combo/storm-reliant, independent of 1b's noncreature-reliant.
+    if _RE_COUNTER_COLORLESS.search(text_lower):
+        tags.add("colorless-reliant")
 
     # 2. Color blast — checked before the generic "destroy target" removal rule below,
     # since blasts phrase permanent-destruction as "destroy target red/blue permanent",
@@ -1456,7 +1606,13 @@ def _build_coverage_model(
     NOT tagged low-interaction (conservative proxy for "can bring interactive sideboard
     cards") × the _SWING_SOFT constant.  Each counter-hoser covers only the hate
     pseudo-elements for the deck-vulnerability tags that interactive field archetypes
-    actually care about — not every tag indiscriminately.
+    actually care about — not every tag indiscriminately.  Coverability (feature-sfv-weights):
+    a counter-hoser that survives the color/anti-synergy/empirical-pool filters below covers
+    every `_hate:<tag>` element the deck carries at FULL natural weight — real self-protection
+    is real coverage.  When NO candidate survives those filters for a given deck (its
+    color/anti-synergy profile leaves nothing castable), Step 4c caps that element's weight
+    relative to the model's own real coverage scale instead of leaving it as uncapped "dead
+    crowding weight" (brief §2, D2).
 
     Anti-synergy filter (feature-archetype-empirical-recommendations):
     When ``anti_synergy_signals`` is not None, catalog candidates whose name appears in
@@ -1466,7 +1622,10 @@ def _build_coverage_model(
 
     Empirical pool filter (feature-archetype-empirical-recommendations):
     When ``empirical_pool`` is not None, catalog candidates NOT in the pool are dropped.
-    Gated-additive: ``empirical_pool=None`` → no-op.
+    Gated-additive: ``empirical_pool=None`` → no-op.  Counter-hosers (``"_hate"`` in
+    ``hoser.attacks``, feature-sfv-weights) are EXEMPT from this filter — see Step 4's inline
+    comment for why self-protection doesn't need corpus-adoption validation the way an
+    opponent-facing hoser does.
 
     Empirical pool promotion (fix-sideboard-surface-field-staples):
     When ``promoted_candidates`` is not None, those HoserCard entries are ADDED to the
@@ -1483,21 +1642,29 @@ def _build_coverage_model(
     catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
     → no-op (byte-identical to pre-feature for callers without card-value data).
 
-    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3):
+    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3;
+    draw-prob deflation removed by feature-sfv-weights):
     When ``opponent_linchpins`` is not None, each (archetype, tag) element's weight is
-    additionally multiplied by ``impact(best_hoser_for_tag, archetype, ...).score()`` — the
-    decomposed centrality × symmetry × castability × draw_prob score (see ``advisory.impact``)
-    of the SAME hoser Step 1 already selected as the tag's best-swing answer, evaluated
-    specifically against that opponent archetype's linchpins (``opponent_linchpins[archetype]``,
-    defaulting to ``[]``) and this deck's own colors/vulnerability-tags (``deck_colors``/
-    ``deck_tags`` — reused as-is; no separate "my-side" parameters needed).  ``opponent_cards``
-    optionally supplies each opponent's known maindeck composition for the ``cast_requires``
-    castability gate (e.g. Massacre's "opponent controls a Plains" clause).  Uses ``copies=1``
-    (the value of the card's first copy being present) — the copy-count taper itself is Unit
-    B4's job (the ILP/greedy per-copy marginal), so reapplying ``draw_probability`` here at
-    ``max_copies`` would double-count it.  Gated-additive: ``opponent_linchpins=None`` (the
-    default) → every impact multiplier is 1.0 → element weights are BYTE-IDENTICAL to
-    pre-impact (mirrors the ``matchup_pressure is None`` no-op above).
+    additionally multiplied by
+    ``impact(best_hoser_for_tag, archetype, ...).score_without_draw_prob()`` — the decomposed
+    centrality × symmetry × castability score (see ``advisory.impact``; NOT ``.score()``, which
+    also folds in ``draw_prob``) of the SAME hoser Step 1 already selected as the tag's
+    best-swing answer, evaluated specifically against that opponent archetype's linchpins
+    (``opponent_linchpins[archetype]``, defaulting to ``[]``) and this deck's own
+    colors/vulnerability-tags (``deck_colors``/``deck_tags`` — reused as-is; no separate
+    "my-side" parameters needed).  ``opponent_cards`` optionally supplies each opponent's known
+    maindeck composition for the ``cast_requires`` castability gate (e.g. Massacre's "opponent
+    controls a Plains" clause).  Uses ``copies=1`` only to evaluate castability
+    (``cast_requires`` gating can be copy-count-sensitive in principle, though none of today's
+    tokens are); the resulting ``draw_prob`` factor is discarded, never multiplied in — the
+    copy-count taper is EXCLUSIVELY Unit B4's job (the ILP/greedy per-copy marginal via
+    ``_u_redundancy``).  Folding ``draw_probability`` into the element weight too would
+    double-count the same draw dimension AND uniformly deflate the whole element-weight scale
+    (draw_prob(1)≈0.4 for every impact-modulated element) — the exact bug feature-sfv-weights
+    fixes (see ``docs/briefs/scorer-flexibility-valuation.md`` §2, distortion D2).
+    Gated-additive: ``opponent_linchpins=None`` (the default) → every impact multiplier is 1.0 →
+    element weights are BYTE-IDENTICAL to pre-impact (mirrors the ``matchup_pressure is None``
+    no-op above).
 
     Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage, Unit C2):
     When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
@@ -1588,7 +1755,13 @@ def _build_coverage_model(
                             copies=1,
                             opp_cards=opp_cards_for_arch,
                         )
-                        weight *= breakdown.score()
+                        # feature-sfv-weights: centrality × symmetry × castability ONLY —
+                        # NOT .score() (which also multiplies by draw_prob).  draw_prob(1)≈0.4
+                        # belongs exclusively to the per-copy taper (_u_redundancy, B4 below);
+                        # folding it into the element weight too double-counted the draw
+                        # dimension and uniformly deflated every impact-modulated weight ~0.4x
+                        # (see docstring + docs/briefs/scorer-flexibility-valuation.md §2 D2).
+                        weight *= breakdown.score_without_draw_prob()
 
                 element_weight[key] = weight
                 archetype_element_keys.add(key)
@@ -1606,6 +1779,13 @@ def _build_coverage_model(
                     "has no catalog hoser for any of its tags; weight=0"
                 )
 
+    # Snapshot of the largest REAL (archetype, tag) element weight, taken before any `_hate:`
+    # pseudo-element exists — this is the reference scale Step 4c's uncovered-weight cap sizes
+    # against (feature-sfv-weights).  Deliberately captured here (only Step 2 has run) rather
+    # than after Step 3b/3c's matchup-pressure/maindeck-discount multipliers, so the cap
+    # reference is stable and independent of those later, unrelated modulations.
+    _max_real_element_weight = max(element_weight.values(), default=0.0)
+
     # --- Step 3: Anti-hate pseudo-elements (tied to specific deck-tag categories) ---
     # For each vulnerability tag k the DECK carries:
     #   • Only create a pseudo-element if some counter-hoser in the catalog attacks "_hate".
@@ -1616,6 +1796,9 @@ def _build_coverage_model(
     #     counter-hosers in the catalog are general interaction (Veil, Defense Grid, Carpet),
     #     they cover ALL deck-tag hate pseudo-elements — but the weight is now field-appropriate
     #     rather than the full field share.
+    #   • Step 4c (below, feature-sfv-weights) caps this natural weight when NO candidate ends
+    #     up covering it — "dead crowding weight" per the epic's D2 finding — while a hate
+    #     element that IS covered by a real candidate keeps this full, uncapped weight.
     hate_elements_added: set[str] = set()
     counter_hosers_exist = any("_hate" in h.attacks for h in catalog.values())
     if deck_tags and counter_hosers_exist:
@@ -1680,8 +1863,19 @@ def _build_coverage_model(
 
     for card_name, hoser in catalog.items():
         # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
-        # This grounds recommendations in what real archetype sideboards actually run.
-        if empirical_pool is not None and card_name not in empirical_pool:
+        # This grounds OPPONENT-facing recommendations in what real archetype sideboards
+        # actually run.  Counter-hosers (attacks contains "_hate", feature-sfv-weights) are
+        # EXEMPT: self-protection castability is already fully decided by the color and
+        # anti-synergy checks below — a protective card doesn't need "the field to run answers
+        # like this" validation the way an opponent-facing hoser does, and gating it on
+        # adoption-in-the-corpus would just re-introduce uncoverable `_hate:` weight for any
+        # deck/archetype combination where nobody has happened to register it yet (mirrors the
+        # existing `_hate:` exemption from the Step 3c maindeck-aware discount below).
+        if (
+            empirical_pool is not None
+            and card_name not in empirical_pool
+            and "_hate" not in hoser.attacks
+        ):
             log.debug(
                 "_build_coverage_model: dropping %r — not in empirical archetype pool", card_name
             )
@@ -1775,6 +1969,44 @@ def _build_coverage_model(
                     card_name,
                 )
 
+    # --- Step 4c: cap UNCOVERED `_hate:` weight (feature-sfv-weights) ---
+    # The epic's locked decision is to make protective/counter-hoser cards actually COVER the
+    # `_hate:` pseudo-elements they represent (Step 3/4/4b above already do this correctly: a
+    # counter-hoser that survives the empirical-pool/anti-synergy/color filters covers every
+    # `_hate:<tag>` element the deck carries) — real, castable, non-self-hosing self-protection
+    # earns its full natural weight as genuine coverage, no cap.
+    #
+    # But a hate element can still end up with ZERO covering candidate — e.g. a UB reactive
+    # tempo deck: Veil of Summer / Carpet of Flowers require G, and Defense Grid is correctly
+    # anti-synergy-filtered for a reactive counterspell shell (it taxes the deck's OWN
+    # instant-speed answers too). That is not a bug to paper over — it would be dishonest to
+    # force a green card castable in a blue-black deck, or to waive a genuine self-harm check —
+    # it is the brief's D2 finding: dead crowding weight with no way to be served. Cap it
+    # relative to the model's own largest real element weight (``_max_real_element_weight``,
+    # snapshotted before Step 3) so it can no longer out-rank every actual opponent need, while
+    # staying visible (not zeroed) in the audit trail.
+    if hate_elements_added:
+        _hate_covered_keys: set[str] = set()
+        for covers in candidate_covers.values():
+            for key in covers:
+                if key.startswith(_HATE_ELEMENT_PREFIX):
+                    _hate_covered_keys.add(key)
+        for tag in sorted(hate_elements_added):
+            hate_key = _HATE_ELEMENT_PREFIX + tag
+            if hate_key in _hate_covered_keys:
+                continue  # a real candidate covers it — full natural weight stands
+            if _max_real_element_weight <= 0.0:
+                continue  # nothing real to size the cap against — leave the natural weight
+            natural = element_weight.get(hate_key, 0.0)
+            cap = _HATE_UNCOVERED_WEIGHT_CAP_RATIO * _max_real_element_weight
+            if natural > cap:
+                element_weight[hate_key] = cap
+                warnings.append(
+                    f"// hate-uncovered: capped {hate_key} weight to {cap:.4f} "
+                    f"(was {natural:.4f}) — no compatible protective card covers it "
+                    "for this deck (color/anti-synergy exclusion)"
+                )
+
     # --- Step 5: functional_group de-dup (feature-sb-effect-tagging-model, Unit 5) ---
     # Cards sharing a functional_group are mechanically identical effects (Hydroblast ≡
     # Blue Elemental Blast, both "red-blast") — only the best-swing candidate per group
@@ -1835,6 +2067,7 @@ def _greedy_solve(
     budget: int,
     redundancy_strength: float = 0.0,
     tau: float = 0.0,
+    option_value_bonus: "dict[str, float] | None" = None,
 ) -> tuple[dict[str, int], list[PickTrace]]:
     """Greedy saturating-coverage with diminishing-returns marginal gain.
 
@@ -1848,6 +2081,12 @@ def _greedy_solve(
 
     ``max_copies`` is respected; halts only when budget is exhausted or every remaining
     candidate has zero marginal gain (degenerate model).
+
+    ``option_value_bonus`` (feature-sfv-option-value): optional card → CVaR tail-robustness
+    bonus (see ``_build_option_value_bonuses``), credited ONLY on a card's first copy — the
+    option value is "having access to this answer at all", not a per-copy dimension, strictly
+    separate from the redundancy/draw-probability taper below. ``None``/empty → byte-identical
+    to the pre-feature objective.
 
     Returns (card→copies, ordered_trace).
     """
@@ -1867,19 +2106,21 @@ def _greedy_solve(
             if current_copies >= max_copies:
                 continue  # exhausted this card's copy limit
 
-            # Marginal gain = Σ_e weight_e × (g(cov_e+1) − g(cov_e)) for each covered element.
-            # With the saturating model this is always > 0, so redundant answers earn value.
-            gain = 0.0
-            for e in element_ids:
-                w = model.element_weight.get(e, 0.0)
-                if w > 0.0:
-                    cov_e = cov_counts.get(e, 0)
-                    gain += w * _marginal_g(cov_e + 1)
+            # feature-sfv-breadth-objective: canonical Σ-over-elements submodular marginal
+            # gain (see `_element_sum_marginal_gain`) — a card's value aggregates its
+            # marginal contribution across EVERY element it covers, not one in isolation.
+            # With the saturating model this per-element term is always > 0, so redundant
+            # answers earn value.
+            gain = _element_sum_marginal_gain(model, card_name, cov_counts)
 
             # Per-card-copy redundancy penalty: the (current_copies+1)-th copy of THIS card
             # is worth less (or net-negative) than its raw coverage marginal. No-op when
             # redundancy_strength == 0.0 (byte-identical baseline).
             gain -= _redundancy_penalty(current_copies + 1, strength=redundancy_strength)
+
+            # feature-sfv-option-value: CVaR tail-robustness bonus, first copy only.
+            if current_copies == 0 and option_value_bonus:
+                gain += option_value_bonus.get(card_name, 0.0)
 
             if gain > best_gain or (
                 gain == best_gain and gain > 0 and (best_card is None or card_name < best_card)
@@ -1919,7 +2160,14 @@ class _ILPFailed(Exception):
     pass
 
 
-def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float = 0.0, tau: float = 0.0) -> dict[str, int]:
+def _ilp_solve(
+    model: CoverageModel,
+    *,
+    budget: int,
+    redundancy_strength: float = 0.0,
+    tau: float = 0.0,
+    option_value_bonus: "dict[str, float] | None" = None,
+) -> dict[str, int]:
     """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
 
     Formulation:
@@ -1927,8 +2175,11 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
         x_c ∈ {0..max_copies} integer for each candidate card c.
         y_a^t ∈ {0,1} for element a and coverage level t = 1..T_a
             (T_a = min(sum of max_copies of covering cards, _ILP_T_CAP)).
+        p_c ∈ [0,1] continuous for each card c with a positive option-value bonus
+            (feature-sfv-option-value; omitted entirely when ``option_value_bonus`` is
+            None/empty).
       Objective:
-        max Σ_{a,t} weight_a · (g(t)−g(t−1)) · y_a^t
+        max Σ_{a,t} weight_a · (g(t)−g(t−1)) · y_a^t  +  Σ_c option_value_bonus[c] · p_c
       Constraints:
         Σ_c x_c ≤ budget                               (slot budget)
         x_c ≤ max_copies_c                              (copy cap)
@@ -1936,6 +2187,9 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
         y_a^t ∈ {0,1}                                   (binary; monotone fill is automatic because
                                                          coefficients are decreasing so solver prefers
                                                          lower t first)
+        p_c ≤ x_c                                       (p_c is a presence indicator: the
+                                                         solver sets it to min(1, x_c) since its
+                                                         objective coefficient is non-negative)
 
     The y_a^t monotone-fill property: since g(t)−g(t−1) > g(t+1)−g(t) (decreasing marginals),
     the solver will always prefer to fill y_a^1 before y_a^2, so explicit ordering constraints
@@ -1995,6 +2249,25 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
                 if pen > 0.0:
                     penalty_terms.append(-pen * z[k])
 
+    # --- Option-value presence bonus (feature-sfv-option-value) ---
+    # p_c ∈ [0,1] continuous, constrained p_c ≤ x_c: since the objective is a MAXIMIZATION
+    # and every bonus_c ≥ 0, the solver always sets p_c = min(1, x_c) at the optimum — an
+    # exact LP encoding of "does this card appear at all" that needs no extra integer/binary
+    # variable. Credited once per card (not per copy) — strictly separate from the per-copy
+    # redundancy penalty above, mirroring the first-copy-only gating in `_greedy_solve`/
+    # `_hedge_fill`/`_rank_considering_pool`. Only cards with a positive bonus get a p_c var
+    # at all (mirrors the `if coef > 0.0`/`if pen > 0.0` filters elsewhere) — when
+    # `option_value_bonus` is None/empty, no p_c vars or constraints are created → the model
+    # is byte-identical to the pre-feature ILP.
+    option_bonus_terms: list = []
+    if option_value_bonus:
+        for card_name, bonus in option_value_bonus.items():
+            if bonus <= 0.0 or card_name not in x_vars:
+                continue
+            p_c = pulp.LpVariable(name=f"p_{_safe(card_name)}", lowBound=0, upBound=1, cat="Continuous")
+            prob += p_c <= x_vars[card_name], f"presence_{_safe(card_name)}"
+            option_bonus_terms.append(bonus * p_c)
+
     # --- Decision variables: y_a^t for each element a and level t ---
     # T_a = min(total possible answers for element a, _ILP_T_CAP)
     y_vars: dict[tuple[str, int], pulp.LpVariable] = {}
@@ -2016,6 +2289,12 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
             )
 
     # --- Objective: saturating coverage ---
+    # feature-sfv-breadth-objective: this sum over (element, level) pairs is the LP
+    # linearization of the SAME aggregate quantity `_element_sum_marginal_gain` computes for
+    # greedy — Σ_{a,t} weight_a·Δg(t)·y_a^t equals Σ_e weight_e·g(cov_e) at the optimum, so a
+    # card credited across many elements accumulates exactly as much objective value here as
+    # in the greedy trace. Kept as an explicit y_a^t LP (not a call into the greedy helper)
+    # because CBC needs a linear objective; the two are provably the same F(S).
     obj_terms = []
     for elem_id, weight in model.element_weight.items():
         t_cap = elem_t_cap.get(elem_id, 0)
@@ -2024,6 +2303,7 @@ def _ilp_solve(model: CoverageModel, *, budget: int, redundancy_strength: float 
             if coef > 0.0:
                 obj_terms.append(coef * y_vars[(elem_id, t)])
     obj_terms.extend(penalty_terms)  # negative per-copy redundancy terms (empty when off)
+    obj_terms.extend(option_bonus_terms)  # positive first-copy option-value terms (empty when off)
     # Natural-budget τ (dedicated-core): a per-slot opportunity cost so the ILP only fills
     # a slot whose marginal coverage clears τ — mirrors the greedy stop, returns <budget at
     # the knee. τ == 0.0 (default) adds nothing → byte-identical to the pre-feature objective.
@@ -2399,6 +2679,7 @@ def _rank_considering_pool(
     *,
     cap: int = _CONSIDERING_CAP,
     promoted_names: "frozenset[str] | None" = None,
+    option_value_bonus: "dict[str, float] | None" = None,
 ) -> "list[ConsideringCard]":
     """Rank candidates NOT in the final 15 by residual marginal coverage gain.
 
@@ -2421,6 +2702,11 @@ def _rank_considering_pool(
     promoted_names
         Set of card names that were promoted from the empirical pool (not in catalog).
         Used to set ``ConsideringCard.promoted``.
+    option_value_bonus
+        Optional card → CVaR tail-robustness bonus (feature-sfv-option-value; see
+        ``_build_option_value_bonuses``), credited only when the card has zero copies in
+        ``final_cards`` (a card already at some copies here is being evaluated for its NEXT
+        copy, not its first). ``None``/empty → byte-identical to the pre-feature ranking.
 
     Returns
     -------
@@ -2447,17 +2733,16 @@ def _rank_considering_pool(
         if current_copies >= max_copies:
             continue
 
-        # Compute residual marginal gain (as if we added one more copy).
-        gain = 0.0
-        residual_elements: set[str] = set()
-        for e in element_ids:
-            w = model.element_weight.get(e, 0.0)
-            if w > 0.0:
-                cov_e = cov_counts.get(e, 0)
-                mg = _marginal_g(cov_e + 1)
-                gain += w * mg
-                if mg > 0.0:
-                    residual_elements.add(e)
+        # feature-sfv-breadth-objective: canonical Σ-over-elements marginal gain (as if we
+        # added one more copy) — same formula the greedy solver and hedge fill use.
+        gain = _element_sum_marginal_gain(model, card_name, cov_counts)
+        # feature-sfv-option-value: CVaR tail-robustness bonus, first copy only.
+        if current_copies == 0 and option_value_bonus:
+            gain += option_value_bonus.get(card_name, 0.0)
+        # Elements this card would contribute residual value to. `_marginal_g(cov_e+1)` is
+        # always > 0 (see its docstring), so this reduces exactly to "positive weight" —
+        # matching the prior per-element `mg > 0.0` check without recomputing mg.
+        residual_elements = {e for e in element_ids if model.element_weight.get(e, 0.0) > 0.0}
 
         if gain <= 0.0:
             continue  # no residual coverage value → skip
@@ -2666,6 +2951,181 @@ def _dirichlet_share_lower_bound(
         else:
             bounds[arch] = float(_beta_dist.ppf(quantile, alpha_i, beta_i))
     return bounds
+
+
+# ---------------------------------------------------------------------------
+# Unit B6 (feature-sfv-option-value): CVaR-style tail-robustness option value.
+#
+# The submodular coverage objective above (Units B1-B4 + feature-sfv-breadth-objective's
+# `_element_sum_marginal_gain`) already credits a card by its marginal coverage summed
+# across every element it answers — but that sum is evaluated entirely at the field's
+# POINT-ESTIMATE (mean) share. It has no notion that the field itself is uncertain: two
+# cards with equal mean-field marginal gain are scored identically even when one of them
+# only pays off if a single archetype shows up and the other pays off across many.
+#
+# This unit adds a SEPARATE, PURELY ADDITIVE axis: a per-card "option value" bonus that
+# credits a card for retaining coverage value in the WORST-TAIL draws of the uncertain
+# (Dirichlet) field, not just its mean — docs/briefs/scorer-flexibility-valuation.md §3.
+# Computed ONCE per `recommend_sideboard` call (objective-search-split: the field/model
+# inspection happens once, producing a plain `dict[str, float]`) and looked up by every
+# consumer (`_greedy_solve`, `_hedge_fill`, `_rank_considering_pool`, `_ilp_solve`) via an
+# `option_value_bonus` parameter — never recomputed inline, mirroring how
+# `_element_sum_marginal_gain` itself became the single canonical home for breadth credit.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_OPTION_VALUE_ALPHA: float = 0.7
+"""Risk-appetite dial (brief §3): blends how much a card's option-value bonus leans on the
+field's mean estimate vs. its worst-tail (Dirichlet lower-quantile) estimate. ``alpha=1.0``
+means "tune entirely to the expected field" (bonus is always 0.0 — the documented disabled
+path); a smaller ``alpha`` means "hedge more toward the field you fear" (the bonus grows
+toward ``_OPTION_VALUE_SCALE * tail_share``). 0.7 is a conservative default, chosen by the
+field-scoped `advise backtest` acceptance run (Dimir Tempo vs the Boulder field, see this
+feature's design notes) so the bonus nudges ranking toward robust, multi-archetype cards
+without moving the already-validated recommendation off the overlap it earned."""
+
+_OPTION_VALUE_SCALE: float = 0.05
+"""Swing-unit scale for the option-value bonus. NOTE the operating regime (2026-07-03 review):
+on the real model the positive opponent element weights run ~0.0006-0.0135 (median ~0.0035)
+after impact modulation, so a broad card's bonus (measured 0.0014-0.0125) is COMPARABLE to a
+whole element's weight and 27-68% of its entire base marginal gain — a substantial re-ranking
+force, not a small nudge relative to raw ``_SWING_SOFT``. The defaults (alpha=0.7, scale=0.05)
+are justified EMPIRICALLY by the field-scoped ``advise backtest`` acceptance run (overlap
+improved 5->6/7 with FoN held at 99.2%), not by an a-priori magnitude argument."""
+
+
+def _dirichlet_group_lower_bound(
+    field: FieldDistribution,
+    archetypes: "frozenset[str] | set[str]",
+    *,
+    quantile: float = _DEFAULT_RISK_QUANTILE,
+    gamma: float = _DIRICHLET_GAMMA,
+) -> "float | None":
+    """Closed-form Dirichlet AGGREGATE lower-quantile share for a GROUP of archetypes.
+
+    Extends ``_dirichlet_share_lower_bound``'s single-archetype identity via the standard
+    Dirichlet AGGREGATION property: the sum of any subset R of a Dirichlet's components is
+    itself Beta-distributed, ``Beta(alpha_R, alpha_0 - alpha_R)`` where
+    ``alpha_R = Σ_{a in R} (counts[a] + gamma)`` and ``alpha_0 = Σ_all (counts[a] + gamma)`` —
+    the same closed-form machinery (``scipy.stats.beta.ppf``), summed over a SUBSET of
+    categories before reading the quantile off, rather than over just one. Deterministic and
+    exact — no RNG/seed, no Monte Carlo.
+
+    This is the mechanism that makes a card's coverage of MANY archetypes worth more, in the
+    tail, than treating each archetype's uncertainty independently would suggest: a Beta's
+    coefficient of variation (std/mean) shrinks as its mean grows, for the SAME ``alpha_0``
+    (``Var = mean·(1−mean)/(alpha_0+1)``, so relative spread scales like ``1/mean``). A group
+    spanning several archetypes has a larger aggregate mean than any single member, so its
+    lower-quantile retains a LARGER fraction of its mean than any individual member's
+    lower-quantile retains of ITS mean — concretely, the group's tail share exceeds the SUM
+    of the members' individually-computed tail shares. That is the closed-form expression of
+    CVaR's subadditivity ("diversification never increases risk", brief §3
+    ``[cvar-expected-shortfall]``): pooling many matchups one card can plausibly answer into
+    a single aggregate need is safer, in the tail, than scoring each matchup's uncertainty
+    alone — exactly the flexibility hedge this feature exists to value.
+
+    Returns ``None`` when ``field.counts`` is ``None`` (no backing sample; mirrors
+    ``_dirichlet_share_lower_bound``'s contract) or when ``archetypes`` is empty.
+    """
+    if field.counts is None or not archetypes:
+        return None
+
+    all_archetypes = list(field.shares)
+    if not all_archetypes:
+        return None
+
+    alphas = {arch: field.counts.get(arch, 0) + gamma for arch in all_archetypes}
+    alpha_total = sum(alphas.values())
+    alpha_r = sum(alphas[a] for a in archetypes if a in alphas)
+    if alpha_r <= 0.0:
+        return 0.0
+    beta_r = alpha_total - alpha_r
+    if beta_r <= 0:
+        # Degenerate: the group IS the entire field — no meaningful lower bound below the
+        # point-estimate sum itself.
+        return sum(field.shares.get(a, 0.0) for a in archetypes)
+    return float(_beta_dist.ppf(quantile, alpha_r, beta_r))
+
+
+def _card_covered_archetypes(model: "CoverageModel", card_name: str) -> "frozenset[str]":
+    """Archetypes ``card_name`` has REAL (positively-weighted) coverage against.
+
+    Deliberately derived from ``model.candidate_covers``/``model.element_weight`` — the
+    model's OWN attachment computation — rather than re-testing ``hoser.attacks`` against
+    ``archetype_tags`` the way ``_relevant_field_archetypes`` does for the coverage%
+    diagnostic. That looser test can be True for an archetype the card is thematically
+    relevant to even when NO element was ever created for it (e.g. no catalog hoser has
+    positive swing for that specific tag) — using it here would let the option-value bonus
+    credit a card with ZERO underlying coverage, manufacturing a pick out of pure
+    field-relevance rather than rewarding an EXISTING coverage need's robustness. Restricting
+    to the model's actual ``<archetype>|<tag>`` keys (skipping ``_hate:`` pseudo-elements,
+    which carry no ``|``) guarantees the option-value bonus is exactly 0.0 whenever the
+    card's mean-field marginal gain (``_element_sum_marginal_gain``) is also 0.0.
+    """
+    archetypes: set[str] = set()
+    for key in model.candidate_covers.get(card_name, frozenset()):
+        if "|" not in key:
+            continue  # skip `_hate:` pseudo-elements
+        if model.element_weight.get(key, 0.0) <= 0.0:
+            continue  # no real coverage value on this element
+        archetypes.add(key.split("|", 1)[0])
+    return frozenset(archetypes)
+
+
+def _build_option_value_bonuses(
+    model: "CoverageModel",
+    field: FieldDistribution,
+    *,
+    alpha: float = _DEFAULT_OPTION_VALUE_ALPHA,
+    quantile: float = _DEFAULT_RISK_QUANTILE,
+    gamma: float = _DIRICHLET_GAMMA,
+    scale: float = _OPTION_VALUE_SCALE,
+) -> "dict[str, float]":
+    """Pure-mechanics CVaR tail-robustness bonus, one scalar per candidate card.
+
+    ``bonus(card) = (1 - alpha) * scale * tail_share(_card_covered_archetypes(card))`` where
+    ``tail_share`` is the closed-form Dirichlet GROUP lower-quantile above. Always ``>= 0.0``
+    — a bonus, never a penalty — and is added ON TOP of the existing mean-field marginal-gain
+    sum, never substituted for it, so a card's already-validated mean-field coverage value is
+    preserved intact; only the RELATIVE ranking among candidates shifts, toward cards whose
+    EXISTING coverage is robust to field uncertainty. A card with zero real coverage
+    (``_card_covered_archetypes`` empty) always gets bonus 0.0 — this term can never promote a
+    card with ZERO covered archetypes into the board (empty covered set -> bonus 0.0 — the
+    hard guardrail against manufacturing picks from field-relevance alone). It CAN, however,
+    add an already-covering card whose residual coverage gain is saturated to ~0 (redundant
+    coverage) purely on its static first-copy bonus — observed: the recommended board grows
+    6->9 cards when the term turns on. That is intended "flexible insurance" behavior
+    (brief §4's one-of insurance thesis), but it means the term adds cards, not just re-ranks.
+
+    Zero-mechanics, no empirical winning-board input (epic guardrail): the only inputs are
+    the field's own Dirichlet posterior (``field.counts``/``field.shares``) and the model's
+    own already-computed attachment (``candidate_covers``/``element_weight``) — no new data
+    source, no empirical adoption signal.
+
+    Counter-hosers (``"_hate"`` in ``hoser.attacks``) are excluded — self-protection is not a
+    "which matchup will I face" hedge; it is a different axis, already made coverable by
+    feature-sfv-weights' ``_hate:`` pseudo-elements.
+
+    Returns ``{}`` (every consumer's ``.get(card, 0.0)`` then no-ops, byte-identical to the
+    pre-feature objective) when disabled (``alpha >= 1.0``) or when the field carries no
+    backing counts (``field.counts is None``, e.g. a share-only custom field).
+    """
+    if alpha >= 1.0 or field.counts is None:
+        return {}
+
+    bonuses: "dict[str, float]" = {}
+    for card_name, hoser in model.candidate_meta.items():
+        if "_hate" in hoser.attacks:
+            continue
+        covered = _card_covered_archetypes(model, card_name)
+        if not covered:
+            continue
+        tail_share = _dirichlet_group_lower_bound(field, covered, quantile=quantile, gamma=gamma)
+        if tail_share is None or tail_share <= 0.0:
+            continue
+        bonus = (1.0 - alpha) * scale * tail_share
+        if bonus > 0.0:
+            bonuses[card_name] = bonus
+    return bonuses
 
 
 @dataclass(frozen=True)
@@ -3165,8 +3625,19 @@ def recommend_sideboard(
     # Hedge mode (epic-sideboard-core-and-hedge-hedge-allocator): "off" (default) | "expected".
     # When "expected", leftover slots the core left open (τ stopped it short of budget) are
     # filled with diversity-preferring insurance picks over a uniform-widened field. "off" → no
-    # hedge → byte-identical. (CVaR/worst-tail is a documented future dial.)
+    # hedge → byte-identical.
     hedge: str = "off",
+    # CVaR tail-robustness risk-appetite dial (feature-sfv-option-value, brief §3):
+    # alpha=1.0 tunes the objective purely to the field's mean (point-estimate) share — the
+    # documented byte-identical no-op. Smaller alpha credits cards more for coverage that
+    # survives the field's own worst-tail (Dirichlet lower-quantile) draws, on top of (never
+    # instead of) the existing mean-field marginal-gain sum. Default 0.7 is ON by default
+    # (this IS the epic's shipped mechanism, not an opt-in experiment) — see
+    # `_DEFAULT_OPTION_VALUE_ALPHA`'s docstring for the backtest-driven calibration rationale.
+    # No-ops automatically (bonus map is `{}`) when the field carries no backing counts
+    # (`field.counts is None`, e.g. a share-only custom field) — nothing here fabricates
+    # Dirichlet uncertainty that isn't actually backed by a sample.
+    option_value_alpha: float = _DEFAULT_OPTION_VALUE_ALPHA,
 ) -> SideboardPackage:
     """Recommend a 15-card sideboard via weighted max-coverage.
 
@@ -3538,6 +4009,15 @@ def recommend_sideboard(
     )
     warnings.extend(model.warnings)
 
+    # --- Step 4a: CVaR tail-robustness option-value bonuses (feature-sfv-option-value) ---
+    # Computed ONCE from the already-built model + field (objective-search-split): a plain
+    # card -> bonus dict every solver below looks up via `option_value_bonus`. `{}` when
+    # `option_value_alpha >= 1.0` or `field.counts is None` (share-only custom field) —
+    # byte-identical to the pre-feature objective in both cases.
+    option_value_bonus = _build_option_value_bonuses(
+        model, field, alpha=option_value_alpha,
+    )
+
     # --- Step 4b: Slot-ROI + punt table (feature-sb-slot-roi-punt, Units D1+D2) ---
     # ADDITIVE decision-support layer: consumes the coverage model just built above (so its
     # max_equity_gain matches what the solver can actually buy) + a freshly-built adaptive
@@ -3597,7 +4077,10 @@ def recommend_sideboard(
 
     if solver == "ilp":
         try:
-            ilp_cards = _ilp_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
+            ilp_cards = _ilp_solve(
+                model, budget=budget, redundancy_strength=redundancy_strength, tau=tau,
+                option_value_bonus=option_value_bonus,
+            )
             solver_used = "ilp"
         except _ILPFailed as exc:
             log.warning("recommend_sideboard: ILP failed (%s); falling back to greedy", exc)
@@ -3609,7 +4092,10 @@ def recommend_sideboard(
             solver_used = "greedy"
 
     # Always compute greedy trace (explainability rationale)
-    greedy_cards, greedy_trace = _greedy_solve(model, budget=budget, redundancy_strength=redundancy_strength, tau=tau)
+    greedy_cards, greedy_trace = _greedy_solve(
+        model, budget=budget, redundancy_strength=redundancy_strength, tau=tau,
+        option_value_bonus=option_value_bonus,
+    )
 
     # Choose final cards based on solver
     final_cards = ilp_cards if solver_used == "ilp" else greedy_cards
@@ -3621,7 +4107,7 @@ def recommend_sideboard(
     _core_count = sum(final_cards.values())
     _insurance: dict[str, int] = {}
     if hedge == "expected":
-        _insurance = _hedge_fill(model, final_cards, budget=budget)
+        _insurance = _hedge_fill(model, final_cards, budget=budget, option_value_bonus=option_value_bonus)
         for _c, _n in _insurance.items():
             final_cards[_c] = final_cards.get(_c, 0) + _n
 
@@ -3664,7 +4150,8 @@ def recommend_sideboard(
     # Gated-additive: final_cards / model / trace are byte-identical to pre-feature.
     _promoted_names = frozenset(promoted_candidates.keys()) if promoted_candidates else frozenset()
     considering_pool = _rank_considering_pool(
-        model, final_cards, promoted_names=_promoted_names
+        model, final_cards, promoted_names=_promoted_names,
+        option_value_bonus=option_value_bonus,
     )
 
     # --- Collection-aware annotation (gated-additive, feature-collection-aware-engine) ---

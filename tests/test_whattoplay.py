@@ -1142,6 +1142,302 @@ class TestColorContingentTags:
         tags = _color_contingent_tags(cards)
         assert "plays-red" in tags
 
+    @pytest.mark.parametrize(
+        "color,tag",
+        [
+            ("W", "plays-white"),
+            ("U", "plays-blue"),
+            ("B", "plays-black"),
+            ("R", "plays-red"),
+            ("G", "plays-green"),
+        ],
+    )
+    def test_fires_symmetrically_for_every_wubrg_color(self, color, tag):
+        """feature-sfv-attachments: plays-<color> is symmetric across all five colors —
+        not just red/blue.  A deck (or opponent composition) with >= _COLOR_SPELL_MIN
+        copies of ANY color's nonland spells emits that color's plays-<color> tag."""
+        cards = [(_make_card(name="Test Spell", colors=[color]), _COLOR_SPELL_MIN)]
+        tags = _color_contingent_tags(cards)
+        assert tag in tags, f"Expected {tag} in {tags} for a {color}-heavy composition"
+
+
+# ---------------------------------------------------------------------------
+# TestPlaysColorOpponentVulnerability — plays-<color> as an OPPONENT vulnerability
+# (feature-sfv-attachments, D3 half 1): the same tag a deck emits for its OWN protective
+# hoser-matching (plays-red) must ALSO fire for a FIELD OPPONENT's aggregate composition,
+# symmetrically across all five colors, so a color-blast/soft-counter hoser can attach to
+# it.  vulnerability_tags(con, archetype) is exactly the code path sideboard.py's
+# field_vulnerability_tags feeds into archetype_tags for opponent coverage elements.
+# ---------------------------------------------------------------------------
+
+class TestPlaysColorOpponentVulnerability:
+    """plays-<color> fires as an opponent vulnerability for every WUBRG color."""
+
+    _COLOR_CARDS: dict[str, tuple[str, str, str]] = {
+        "W": ("Swords to Plowshares", "Instant",
+              "Exile target creature. Its controller gains life equal to its power."),
+        "U": ("Brainstorm", "Instant",
+              "Draw three cards, then put two cards from your hand on top of your library."),
+        "B": ("Thoughtseize", "Sorcery",
+              "Target player reveals their hand. You choose a nonland card from it. "
+              "That player discards that card. You lose 2 life."),
+        "R": ("Lightning Bolt", "Instant", "Lightning Bolt deals 3 damage to any target."),
+        "G": ("Rancor", "Enchantment — Aura", "Enchanted creature gets +2/+0 and has trample."),
+    }
+
+    def _build_color_corpus(self, color: str, archetype: str):
+        import uuid
+
+        name, type_line, oracle_text = self._COLOR_CARDS[color]
+        con = _con()
+        cards = [
+            Card(name=name, type_line=type_line, oracle_text=oracle_text, cmc=1.0, colors=[color]),
+            Card(name="Wastes", type_line="Basic Land — Wastes", oracle_text="{T}: Add {C}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        tid = str(uuid.uuid4())
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
+        )
+        con.execute(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, 0, "p0", "1st", archetype]
+        )
+        for card_name, count in [(name, _COLOR_SPELL_MIN), ("Wastes", 20)]:
+            con.execute(
+                "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, 0, "main", card_name, count]
+            )
+        return con
+
+    @pytest.mark.parametrize(
+        "color,tag",
+        [
+            ("W", "plays-white"),
+            ("U", "plays-blue"),
+            ("B", "plays-black"),
+            ("R", "plays-red"),
+            ("G", "plays-green"),
+        ],
+    )
+    def test_plays_color_fires_for_field_opponent(self, color, tag):
+        archetype = f"Test{color}Archetype"
+        con = self._build_color_corpus(color, archetype)
+        tags = vulnerability_tags(con, archetype)
+        assert tag in tags, f"Expected {tag} in opponent vulnerability tags; got {tags}"
+        con.close()
+
+    def test_blue_opponent_has_more_corpus_coverage_than_red_would_imply(self):
+        """Regression guard: plays-blue must not be a code path that only red exercises.
+
+        Directly exercises the opponent-facing archetype aggregate (not the deck-facing
+        helper), confirming the same _color_contingent_tags union fires for a blue-heavy
+        FIELD ARCHETYPE exactly as it does for red.
+        """
+        con = self._build_color_corpus("U", "BlueOpponent")
+        tags = vulnerability_tags(con, "BlueOpponent")
+        assert "plays-blue" in tags
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# TestNoncreatureReliantTag — feature-sfv-attachments broad-interaction attachment axis:
+# an archetype whose creature-slot density is LOW carries "noncreature-reliant", the
+# element free/soft anti-noncreature counters (Force of Negation, Spell Pierce) attach to.
+# ---------------------------------------------------------------------------
+
+class TestNoncreatureReliantTag:
+    def test_low_creature_density_deck_gets_noncreature_reliant(self):
+        """A deck with zero creatures (all spells + lands) gets noncreature-reliant."""
+        con = _con()
+        cards = [
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top of your library.",
+                 cmc=1.0),
+            Card(name="Counterspell", type_line="Instant", oracle_text="Counter target spell.", cmc=2.0),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Brainstorm": 4, "Counterspell": 4, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "noncreature-reliant" in tags, f"Expected noncreature-reliant in {tags}"
+
+    def test_high_creature_density_deck_does_not_get_noncreature_reliant(self):
+        """A creature-heavy deck (well above the threshold) does NOT get noncreature-reliant."""
+        con = _con()
+        cards = [
+            Card(name="Tarmogoyf", type_line="Creature — Lhurgoyf",
+                 oracle_text="Tarmogoyf's power is equal to the number of card types among "
+                 "cards in all graveyards and its toughness is that number plus 1.",
+                 cmc=2.0),
+            Card(name="Goblin Guide", type_line="Creature — Goblin", oracle_text="Haste.", cmc=1.0),
+            Card(name="Mountain", type_line="Basic Land — Mountain", oracle_text="{T}: Add {R}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Tarmogoyf": 4, "Goblin Guide": 4, "Mountain": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "noncreature-reliant" not in tags, f"Unexpected noncreature-reliant in {tags}"
+        assert "creature-based" in tags, f"Expected creature-based in {tags}"
+
+    def test_boundary_at_threshold_does_not_fire(self):
+        """Creature density exactly AT _NONCREATURE_RELIANT_MAX (0.15) does not fire
+        (strict '<' — the threshold itself is the boundary of the OTHER side)."""
+        con = _con()
+        cards = [
+            Card(name="Tarmogoyf", type_line="Creature — Lhurgoyf", oracle_text="", cmc=2.0),
+            Card(name="Brainstorm", type_line="Instant", oracle_text="Draw three cards.", cmc=1.0),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # 15 creature copies / 100 total = exactly 0.15
+        maindeck = {"Tarmogoyf": 15, "Brainstorm": 65, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "noncreature-reliant" not in tags, (
+            f"Density exactly at threshold must not fire (strict '<'); got {tags}"
+        )
+
+    def test_control_archetype_gets_noncreature_reliant_without_combo_signal(self):
+        """A control-shaped archetype (low creatures, no tutors/storm/graveyard-recursion)
+        gets noncreature-reliant even though it never qualifies for 'combo' — this is the
+        gap feature-sfv-attachments closes: control decks were previously invisible to
+        broad free-counter attribution."""
+        import uuid
+
+        con = _con()
+        cards = [
+            Card(name="Counterspell", type_line="Instant", oracle_text="Counter target spell.", cmc=2.0),
+            Card(name="Swords to Plowshares", type_line="Instant",
+                 oracle_text="Exile target creature. Its controller gains life equal to its power.",
+                 cmc=1.0),
+            Card(name="Wrath of God", type_line="Sorcery", oracle_text="Destroy all creatures.", cmc=4.0),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        tid = str(uuid.uuid4())
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [tid, "Test", "2026-01-01", None, "Legacy", "test", "test"],
+        )
+        con.execute(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [tid, 0, "p0", "1st", "Azorius Control"]
+        )
+        for name, count in [
+            ("Counterspell", 4),
+            ("Swords to Plowshares", 4),
+            ("Wrath of God", 4),
+            ("Island", 20),
+        ]:
+            con.execute(
+                "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [tid, 0, "main", name, count]
+            )
+        tags = vulnerability_tags(con, "Azorius Control")
+        assert "noncreature-reliant" in tags, f"Expected noncreature-reliant in {tags}"
+        assert "combo" not in tags, f"Control shape should not also read as combo; got {tags}"
+
+
+# ---------------------------------------------------------------------------
+# TestColorlessReliantTag — feature-sfv-colorless-axis: colorless-nonland-spell density
+# is the attachment point for Consign to Memory's colorless-spell half ("Counter target
+# triggered ability or colorless spell."). Corpus-verified firing pattern (2026-07-03):
+# Eldrazi/Mystic Forge Combo/Blue Artifacts/Black Saga Storm fire; Dimir Tempo/Izzet
+# Delver/Death & Taxes do not — see _COLORLESS_RELIANT_DENSITY's docstring for the
+# measured densities that calibrated the 0.15 threshold.
+# ---------------------------------------------------------------------------
+
+class TestColorlessReliantTag:
+    def test_eldrazi_style_composition_gets_colorless_reliant(self):
+        """A colorless-spell-heavy composition (Eldrazi-style: colorless creatures/lands)
+        fires colorless-reliant. Hermetic fixture — no production DB dependency."""
+        con = _con()
+        cards = [
+            Card(name="Reality Smasher", type_line="Creature — Eldrazi",
+                 oracle_text="Trample. Whenever this creature attacks, defending player "
+                 "loses 3 life unless they sacrifice a creature or planeswalker.",
+                 cmc=6.0, colors=[]),
+            Card(name="Thought-Knot Seer", type_line="Creature — Eldrazi",
+                 oracle_text="When this creature enters, target opponent reveals their "
+                 "hand. You choose a nonland card from it. Exile that card.",
+                 cmc=3.0, colors=[]),
+            Card(name="Eldrazi Temple", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Reality Smasher": 20, "Thought-Knot Seer": 20, "Eldrazi Temple": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, f"Expected colorless-reliant in {tags}"
+
+    def test_dimir_style_composition_does_not_get_colorless_reliant(self):
+        """A colored-spell-heavy composition (Dimir-style) does NOT fire colorless-reliant
+        even though it has plenty of nonland spells. Hermetic fixture."""
+        con = _con()
+        cards = [
+            Card(name="Fatal Push", type_line="Instant",
+                 oracle_text="Destroy target creature if it has mana value 2 or less.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Fatal Push": 20, "Brainstorm": 20, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" not in tags, f"Unexpected colorless-reliant in {tags}"
+
+    def test_boundary_at_threshold_fires(self):
+        """Colorless density exactly AT _COLORLESS_RELIANT_DENSITY (0.15) DOES fire —
+        this axis uses '>=' like creature-based/storm-reliant/gy-recursion (NOT the
+        strict-'<' complement style noncreature-reliant uses)."""
+        con = _con()
+        cards = [
+            Card(name="Colorless Artifact", type_line="Artifact", oracle_text="", cmc=2.0, colors=[]),
+            Card(name="Blue Spell", type_line="Instant", oracle_text="Draw a card.",
+                 cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # 15 colorless copies / 100 total = exactly 0.15
+        maindeck = {"Colorless Artifact": 15, "Blue Spell": 65, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, (
+            f"Density exactly at threshold must fire ('>=' semantics); got {tags}"
+        )
+
+    def test_boundary_just_below_threshold_does_not_fire(self):
+        """Colorless density just below the threshold (0.14) does not fire."""
+        con = _con()
+        cards = [
+            Card(name="Colorless Artifact", type_line="Artifact", oracle_text="", cmc=2.0, colors=[]),
+            Card(name="Blue Spell", type_line="Instant", oracle_text="Draw a card.",
+                 cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # 14 colorless copies / 100 total = 0.14, just under 0.15
+        maindeck = {"Colorless Artifact": 14, "Blue Spell": 66, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" not in tags, (
+            f"Density just below threshold must not fire; got {tags}"
+        )
+
+    def test_colorless_reliant_independent_of_creature_density(self):
+        """colorless-reliant is an INDEPENDENT axis from creature-based/noncreature-reliant:
+        a creature-DENSE colorless deck (Eldrazi-shaped) carries BOTH creature-based and
+        colorless-reliant simultaneously — it is not a refinement of either existing axis."""
+        con = _con()
+        cards = [
+            Card(name="Reality Smasher", type_line="Creature — Eldrazi",
+                 oracle_text="Trample.", cmc=6.0, colors=[]),
+            Card(name="Kozilek's Command", type_line="Sorcery",
+                 oracle_text="Choose two.", cmc=4.0, colors=[]),
+            Card(name="Eldrazi Temple", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Reality Smasher": 30, "Kozilek's Command": 10, "Eldrazi Temple": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, f"Expected colorless-reliant in {tags}"
+        assert "creature-based" in tags, (
+            f"Creature-dense colorless deck should also carry creature-based; got {tags}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestHateEquity — share-sum per tag; covered_share dedupes multi-tag archetypes

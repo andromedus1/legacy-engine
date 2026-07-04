@@ -102,12 +102,12 @@
     },
     {
       "name": "Consign to Memory",
-      "attacks": ["combo", "storm-reliant"],
+      "attacks": ["combo", "storm-reliant", "colorless-reliant"],
       "colors": ["U"],
       "max_copies": 4,
       "swing": "dedicated",
       "symmetry": "asymmetric",
-      "_comment": "Counters spells regardless of protection or hexproof; can counter multiple spells in a storm chain."
+      "_comment": "Oracle (DB-verified 2026-07-03): 'Replicate {1}' + 'Counter target triggered ability or colorless spell.' Counters COLORLESS spells and TRIGGERED ABILITIES only — not a general counterspell. Premier vs storm triggers (storm is a triggered ability), Saga chapter triggers, Chalice triggers, and colorless (Eldrazi/artifact) spells; replicate {1} scales to multiple triggers in one turn. 'colorless-reliant' (feature-sfv-colorless-axis) attaches the colorless-spell half of this text to the mechanics-derived colorless-nonland-spell-density axis (whattoplay._vulnerability_from_composition); the triggered-ability half is not separately attached — a companion 'trigger-reliant' axis was evaluated and declined as not cleanly composition-derivable (see whattoplay.VulnerabilityTag docstring)."
     },
     {
       "name": "Thoughtseize",
@@ -124,6 +124,24 @@
       "max_copies": 4,
       "swing": "soft",
       "symmetry": "asymmetric"
+    },
+    {
+      "name": "Force of Negation",
+      "attacks": ["combo", "storm-reliant", "noncreature-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'you may exile a blue card from your hand rather than pay this spell's mana cost' (free on the opponent's turn) — 'Counter target noncreature spell.' Attacks noncreature-reliant (the broad-interaction axis) in addition to combo/storm-reliant so it credits the whole combo/control plurality it answers, not just tiny combo elements."
+    },
+    {
+      "name": "Spell Pierce",
+      "attacks": ["combo", "storm-reliant", "noncreature-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'Counter target noncreature spell unless its controller pays {2}.' Soft (taxing, not a hard counter) anti-noncreature answer — attacks noncreature-reliant alongside combo/storm-reliant, same broad-interaction attribution as Force of Negation but at _SWING_SOFT."
     },
     {
       "name": "Veil of Summer",
@@ -236,6 +254,15 @@
       "symmetry": "asymmetric",
       "functional_group": "blue-blast",
       "_comment": "Added. 'Counter target blue spell' / 'Destroy target blue permanent' — functionally identical to Pyroblast."
+    },
+    {
+      "name": "Mystical Dispute",
+      "attacks": ["plays-blue"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'This spell costs {2} less to cast if it targets a blue spell. Counter target spell unless its controller pays {3}.' plays-blue-contingent — a generic soft counter that is cheap and effective specifically against a blue-heavy field, matching the Pyroblast/Red Elemental Blast attachment convention rather than the noncreature-reliant axis (it targets ANY spell, not specifically noncreature ones)."
     },
     {
       "name": "Chalice of the Void",
