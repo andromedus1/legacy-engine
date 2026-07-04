@@ -3018,6 +3018,117 @@ def advise_sideboard(
         con.close()
 
 
+@advise.command("backtest")
+@click.option(
+    "--archetype",
+    required=True,
+    help="Archetype to backtest: the scorer's recommendation vs top-finisher boards.",
+)
+@click.option(
+    "--field",
+    "field_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a field file (<share> <archetype> lines) — the field to score "
+         "the recommended board against.",
+)
+@click.option("--since", default=None, help="Window start (ISO date, inclusive).")
+@click.option("--until", default=None, help="Window end (ISO date, exclusive).")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def advise_backtest(
+    archetype: str,
+    field_file: str,
+    since: str | None,
+    until: str | None,
+    db: str | None,
+    verbose: bool,
+) -> None:
+    """Backtest the scorer's recommended sideboard against what top-finishers actually ran.
+
+    The empirical anchor for the sideboard scoring model: compares `recommend_sideboard`'s
+    output for ARCHETYPE + FIELD against the sideboards top-finishing ARCHETYPE decks
+    actually ran in the window. Never a pass/fail verdict — see the caveat line below.
+    """
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.backtest import _OBSERVED_THRESHOLD, backtest_board
+    from legacy_engine.advisory.report import _load_field
+    from legacy_engine.ingestion import store
+
+    field_text = Path(field_file).read_text()
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        field = _load_field(con, field_text=field_text)
+        result = backtest_board(con, archetype, field, since=since, until=until)
+
+        click.echo(f"// backtest: {result.archetype}")
+        click.echo(f"// window: since={since or 'earliest'} until={until or 'latest'}")
+        click.echo(f"// top-finisher decks sampled: {result.n_winning_decks}")
+
+        if result.confidence is None:
+            click.echo(
+                "// HONEST DEGRADE: no top-finisher decks found for this archetype/window — "
+                "insufficient data, no comparison possible."
+            )
+        else:
+            click.echo(f"// confidence: {result.confidence}")
+            if result.confidence == "speculative":
+                click.echo(
+                    f"// HONEST DEGRADE: thin winner sample (n={result.n_winning_decks}) — "
+                    "treat findings below as low-confidence."
+                )
+
+        def _render_group(title: str, cards: tuple[str, ...]) -> None:
+            click.echo(f"\n{title} ({len(cards)}):")
+            if not cards:
+                click.echo("  (none)")
+                return
+            for card in cards:
+                pct = result.observed_frequency.get(card, 0.0)
+                click.echo(f"  {card:<32} observed {pct * 100:5.1f}%")
+
+        click.echo(f"\nRecommended board ({len(result.recommended)} cards):")
+        if not result.recommended:
+            click.echo("  (none — scorer produced no recommendation for this archetype/field)")
+        for card in result.recommended:
+            pct = result.observed_frequency.get(card, 0.0)
+            click.echo(f"  {card:<32} observed {pct * 100:5.1f}%")
+
+        _render_group(
+            f"Overlap — recommended AND commonly played (>= {_OBSERVED_THRESHOLD:.0%})",
+            result.overlap,
+        )
+        _render_group(
+            "Scorer-only — recommended but rarely/never played (candidate false positives)",
+            result.scorer_only,
+        )
+        _render_group(
+            "Winners-only — commonly played but not recommended (candidate blind spots)",
+            result.winners_only,
+        )
+
+        n_rec = len(result.recommended)
+        agreement_pct = (len(result.overlap) / n_rec * 100.0) if n_rec else 0.0
+        click.echo(
+            f"\n// agreement: {len(result.overlap)}/{n_rec} recommended cards "
+            f"({agreement_pct:.0f}%) match observed top-finisher boards"
+        )
+        click.echo(
+            "// divergence is a signal to investigate, not proof of error "
+            "(winning boards are self-selected + metagame-lagged)"
+        )
+    finally:
+        con.close()
+
+
 @advise.command("whattoplay")
 @click.option(
     "--deck",
