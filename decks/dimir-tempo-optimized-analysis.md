@@ -97,8 +97,10 @@ These stay diagnostic overrides, not score edits — the pure-mechanics guardrai
 ## 5. Online-lens variant (venue divergence — reported as a diff, never blended)
 
 Solve vs the online field (`provenance='online'`, current regime; Tron 11.7% #1, Izzet 8.1%,
-Show&Tell 7.2%, Energy 6.5%, Grixis Reanimator 6.4%): the raw engine board is **card-identical**
-to the the local meta solve — but the dedicated core deepens (natural budget 9/15 vs 6/15; the online
+Show&Tell 7.2%, Energy 6.5%, Grixis Reanimator 6.4%): the raw engine board matches the the local meta
+solve on **14 of 15 cards** (insurance differs by one: the local meta holds Nihil Spellbomb where the
+online solve holds Toxic Deluge — corrected per review), and the dedicated core deepens
+(natural budget 9/15 vs 6/15; the online
 field is more concentrated, so more slots clear the τ floor). After the same overrides, the same
 15 stands. Two online-specific notes: Consign's stock rises further (Tron #1 = colorless triggers
 everywhere), and Surgical's case is materially stronger online (Reanimator 6.4% + Doomsday 5.1%)

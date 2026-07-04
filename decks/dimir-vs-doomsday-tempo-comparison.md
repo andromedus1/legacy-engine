@@ -2,7 +2,7 @@
 
 Stage 4 of the deck-prep arc. Decks: [dimir-tempo-optimized](dimir-tempo-optimized.txt) vs
 [doomsday-tempo-local](doomsday-tempo-local.txt) / [-online](doomsday-tempo-online.txt).
-Method: `advise compare` (adaptive ban-aware matrix, MC field EV, 20k draws) + `advise
+Method: `advise compare` (adaptive ban-aware matrix, MC field EV, 20k draws; no seed flag — P values reproduce within ±0.01 MC noise) + `advise
 positioning --candidates` (seed 42) per meta. All numbers are leans — every CI pair overlaps.
 
 ## Verdict shape (never blended across venues)
@@ -25,7 +25,9 @@ methodology drift.
 
 ## Head-to-head
 
-Dimir Tempo 54.0% vs Doomsday directly (thin cell, n<30 — present-but-unreliable marker).
+Dimir Tempo 54.0% vs Doomsday directly (adaptive-window cell over 132 recorded matches
+since 2024-12-16; the engine's thin marker sits on Doomsday's own mirror cell, not this one —
+corrected per review).
 The tempo pilot is slightly favored in the pseudo-mirror; both decks' worst shared enemy is
 Death & Taxes (35.7% / — vs Doomsday's 68.8%, the single biggest divergence cell).
 
