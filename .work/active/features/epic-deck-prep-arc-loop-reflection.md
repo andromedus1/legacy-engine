@@ -29,3 +29,12 @@ process doc + substrate items for whatever the reflection promotes.
 
 - Parent epic: `epic-deck-prep-arc`
 - Position: terminal stride; consumes everything upstream as worked examples.
+
+## Additional deliverable (Andrew, 2026-07-04)
+
+When the entire loop completes, write up a **cross-arc study of everything found** (sweep
+findings + copy-count study + all five deck-prep stages) and produce a **polished HTML
+artifact** for viewing (Claude Artifact; load artifact-design + dataviz skills before
+building; self-contained, theme-aware, copy histograms and matchup/positioning charts
+included). "I would be extremely appreciative" — treat presentation quality as a first-
+class acceptance criterion, not an afterthought.
