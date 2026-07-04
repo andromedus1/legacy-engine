@@ -3717,6 +3717,29 @@ class TestDeriveAttacksForPromoted:
         assert "combo" in attacks, f"Expected 'combo' in {attacks}"
         assert "storm-reliant" in attacks, f"Expected 'storm-reliant' in {attacks}"
 
+    def test_broad_anti_noncreature_maps_to_noncreature_reliant(self):
+        """Spell Pierce-style 'counter target noncreature spell' → noncreature-reliant,
+        the feature-sfv-attachments broad-interaction axis — distinct from (additive to)
+        the narrower combo/storm-reliant tags rule 1 already adds for any counter."""
+        attacks = _derive_attacks_for_promoted(
+            "Spell Pierce",
+            "Counter target noncreature spell unless its controller pays {2}.",
+            "Instant",
+        )
+        assert "noncreature-reliant" in attacks, f"Expected 'noncreature-reliant' in {attacks}"
+        assert "combo" in attacks and "storm-reliant" in attacks, (
+            f"Generic counter-magic rule (1) should still fire alongside it; got {attacks}"
+        )
+
+    def test_generic_counter_without_noncreature_restriction_is_not_tagged(self):
+        """A counter that does NOT restrict to noncreature spells ('counter target spell')
+        does not get the specific noncreature-reliant tag — only the narrower phrase
+        template ('counter target noncreature spell') does."""
+        attacks = _derive_attacks_for_promoted(
+            "Generic Counter", "Counter target spell.", "Instant",
+        )
+        assert "noncreature-reliant" not in attacks, f"Unexpected 'noncreature-reliant' in {attacks}"
+
     def test_graveyard_exile_maps_to_graveyard_recursion(self):
         """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
@@ -4128,8 +4151,17 @@ class TestMaindeckAwareCoverageIntegration:
 # ---------------------------------------------------------------------------
 
 def _build_fon_corpus():
-    """Corpus: Dimir Tempo archetype with Force of Negation + Consign to Memory
-    in >5% of sideboards.  Both cards are absent from HOSER_CATALOG.
+    """Corpus: Dimir Tempo archetype with Force of Negation + Consign to Memory + Daze
+    in >5% of sideboards.
+
+    NOTE (feature-sfv-attachments): Force of Negation and Consign to Memory are now
+    curated HOSER_CATALOG entries (added in this feature and feature-hoser-catalog-
+    expansion respectively) — they surface via the catalog path, not promotion.  ``Daze``
+    (also free_interaction, also absent from HOSER_CATALOG) is the promotion-mechanism
+    example card for tests that specifically exercise the "absent from catalog → promoted
+    from the empirical pool" boundary; FoN/Consign remain in the corpus for tests that only
+    check they're surfaced by ``recommend_sideboard`` (true regardless of catalog vs
+    promoted path).
 
     Also seeds Reanimator and ANT Storm decks with appropriate cards so
     ``field_vulnerability_tags`` can classify them (needed for the recommend_sideboard
@@ -4160,6 +4192,16 @@ def _build_fon_corpus():
             type_line="Instant",
             oracle_text="Counter target spell. If you control no permanents, draw a card.",
             cmc=1.0,
+            colors=["U"],
+        ),
+        Card(
+            name="Daze",
+            type_line="Instant",
+            oracle_text=(
+                "You may return an Island you control to its owner's hand rather than pay "
+                "this spell's mana cost. Counter target spell unless its controller pays {1}."
+            ),
+            cmc=2.0,
             colors=["U"],
         ),
         # --- Catalog card also run by Dimir Tempo ---
@@ -4257,7 +4299,9 @@ def _build_fon_corpus():
         for card_name, count in [("Brainstorm", 4), ("Underground Sea", 4)]:
             con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
                         [tid, idx, "main", card_name, count])
-        for card_name, count in [("Force of Negation", 2), ("Consign to Memory", 1), ("Surgical Extraction", 2)]:
+        for card_name, count in [
+            ("Force of Negation", 2), ("Consign to Memory", 1), ("Daze", 2), ("Surgical Extraction", 2),
+        ]:
             con.execute("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
                         [tid, idx, "side", card_name, count])
         idx += 1
@@ -4302,14 +4346,20 @@ class TestBuildPromotedCandidates:
         con.close()
 
     def test_promotes_fon_not_in_catalog_consign_in_catalog(self):
-        """Force of Negation (absent from catalog) is promoted; Consign to Memory is now a catalog
-        card (added in feature-hoser-catalog-expansion) so it is NOT promoted."""
+        """Daze (absent from catalog) is promoted; Consign to Memory AND Force of Negation
+        are now catalog cards (feature-hoser-catalog-expansion / feature-sfv-attachments)
+        so neither is promoted."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation", "Consign to Memory", "Surgical Extraction"})
-        freq_map = {"Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
+        pool = frozenset({"Daze", "Force of Negation", "Consign to Memory", "Surgical Extraction"})
+        freq_map = {"Daze": 2, "Force of Negation": 2, "Consign to Memory": 1, "Surgical Extraction": 2}
         promoted, warnings = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        assert "Force of Negation" in promoted, (
-            "Force of Negation (absent from catalog) must be promoted"
+        assert "Daze" in promoted, "Daze (absent from catalog) must be promoted"
+        # Force of Negation is now in HOSER_CATALOG (feature-sfv-attachments) → NOT promoted
+        assert "Force of Negation" not in promoted, (
+            "Force of Negation (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be in HOSER_CATALOG as a catalog entry"
         )
         # Consign to Memory is now in HOSER_CATALOG → NOT promoted (catalog card)
         assert "Consign to Memory" not in promoted, (
@@ -4325,46 +4375,48 @@ class TestBuildPromotedCandidates:
         con.close()
 
     def test_promoted_fon_attacks_combo_and_storm(self):
-        """Promoted Force of Negation has attacks ⊇ {combo, storm-reliant}."""
+        """Promoted Daze (free_interaction, absent from catalog) has attacks ⊇
+        {combo, storm-reliant} — the promotion-mechanism example card since Force of
+        Negation is now a curated catalog entry (feature-sfv-attachments)."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 2}
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 2}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        assert "Force of Negation" in promoted
-        fon = promoted["Force of Negation"]
-        assert "combo" in fon.attacks, f"Expected 'combo' in FoN attacks; got {fon.attacks}"
-        assert "storm-reliant" in fon.attacks, f"Expected 'storm-reliant' in FoN attacks; got {fon.attacks}"
+        assert "Daze" in promoted
+        daze = promoted["Daze"]
+        assert "combo" in daze.attacks, f"Expected 'combo' in Daze attacks; got {daze.attacks}"
+        assert "storm-reliant" in daze.attacks, f"Expected 'storm-reliant' in Daze attacks; got {daze.attacks}"
         con.close()
 
     def test_promoted_fon_is_blue(self):
-        """Promoted Force of Negation has colors={'U'}."""
+        """Promoted Daze has colors={'U'}."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 2}
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 2}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.colors == frozenset({"U"}), f"Expected colors={{'U'}}; got {fon.colors}"
+        daze = promoted["Daze"]
+        assert daze.colors == frozenset({"U"}), f"Expected colors={{'U'}}; got {daze.colors}"
         con.close()
 
     def test_promoted_max_copies_from_freq_map(self):
         """Promoted card's max_copies comes from freq_map (modal count), capped at 4."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
+        pool = frozenset({"Daze"})
         # modal_count=3
-        freq_map = {"Force of Negation": 3}
+        freq_map = {"Daze": 3}
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.max_copies == 3, f"Expected max_copies=3 from freq_map; got {fon.max_copies}"
+        daze = promoted["Daze"]
+        assert daze.max_copies == 3, f"Expected max_copies=3 from freq_map; got {daze.max_copies}"
         con.close()
 
     def test_promoted_max_copies_capped_at_4(self):
         """modal_count > 4 is capped at 4."""
         con, _ = _build_fon_corpus()
-        pool = frozenset({"Force of Negation"})
-        freq_map = {"Force of Negation": 10}  # unrealistically large
+        pool = frozenset({"Daze"})
+        freq_map = {"Daze": 10}  # unrealistically large
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        fon = promoted["Force of Negation"]
-        assert fon.max_copies <= 4, f"max_copies must be capped at 4; got {fon.max_copies}"
+        daze = promoted["Daze"]
+        assert daze.max_copies <= 4, f"max_copies must be capped at 4; got {daze.max_copies}"
         con.close()
 
     def test_promoted_card_not_in_db_uses_fallback(self):
@@ -4434,12 +4486,12 @@ class TestEmpiricalPromotion:
         con.close()
 
     def test_fon_or_consign_in_candidate_universe(self):
-        """FoN/Consign are accessible in the candidate universe.
+        """Daze/Consign are accessible in the candidate universe.
 
-        Consign to Memory was added to HOSER_CATALOG in feature-hoser-catalog-expansion,
-        so it is now a catalog card (not a promoted card).  FoN remains absent from the
-        catalog and is promoted from the empirical pool.  Both must appear in the empirical
-        pool.
+        Consign to Memory (feature-hoser-catalog-expansion) and Force of Negation
+        (feature-sfv-attachments) are now catalog cards (not promoted cards).  Daze
+        remains absent from the catalog and is promoted from the empirical pool.  All
+        three must appear in the empirical pool.
         """
         con, archetype = _build_fon_corpus()
         from legacy_engine.advisory.sideboard import (
@@ -4452,13 +4504,20 @@ class TestEmpiricalPromotion:
         freq_map = {f.name: f.modal_count for f in freqs}
         pool = frozenset(f.name for f in freqs if f.inclusion_pct >= _EMPIRICAL_POOL_MIN_ADOPTION)
 
+        assert "Daze" in pool, "Daze must appear in empirical pool"
         assert "Force of Negation" in pool, "FoN must appear in empirical pool"
         assert "Consign to Memory" in pool, "Consign must appear in empirical pool"
 
         promoted, _ = _build_promoted_candidates(pool, HOSER_CATALOG, freq_map, con)
-        # FoN is absent from HOSER_CATALOG → promoted from empirical pool
-        assert "Force of Negation" in promoted, "FoN must be promoted (not in catalog)"
-        # Consign is now in HOSER_CATALOG → NOT promoted (catalog card); verify catalog membership
+        # Daze is absent from HOSER_CATALOG → promoted from empirical pool
+        assert "Daze" in promoted, "Daze must be promoted (not in catalog)"
+        # FoN and Consign are now in HOSER_CATALOG → NOT promoted (catalog cards)
+        assert "Force of Negation" not in promoted, (
+            "Force of Negation (now in HOSER_CATALOG) must NOT be promoted"
+        )
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be present in HOSER_CATALOG as a catalog entry"
+        )
         assert "Consign to Memory" not in promoted, (
             "Consign to Memory (now in HOSER_CATALOG) must NOT be promoted"
         )
@@ -4496,13 +4555,18 @@ class TestEmpiricalPromotion:
         assert set(pkg_no_arch.cards.keys()) == set(pkg_catalog.cards.keys()), (
             "archetype=None must produce catalog-only output (no promotion)"
         )
-        # FoN must NOT appear (not in catalog; no promotion without archetype)
-        assert "Force of Negation" not in pkg_no_arch.cards, (
-            "FoN must NOT appear when archetype=None (gated-additive no-op)"
+        # Daze must NOT appear (not in catalog; no promotion without archetype) — the
+        # gated-additive no-op example card now that Force of Negation is a catalog entry.
+        assert "Daze" not in pkg_no_arch.cards, (
+            "Daze must NOT appear when archetype=None (gated-additive no-op)"
         )
-        # Consign to Memory is now in HOSER_CATALOG — it CAN appear via the catalog path
-        # even without archetype (not gated by the promotion mechanism).
-        # The gated-additive no-op only applies to empirically-promoted cards like FoN.
+        # Force of Negation / Consign to Memory are now in HOSER_CATALOG — they CAN appear
+        # via the catalog path even without archetype (not gated by the promotion
+        # mechanism).  The gated-additive no-op only applies to empirically-promoted
+        # cards like Daze.
+        assert "Force of Negation" in HOSER_CATALOG, (
+            "Force of Negation must be a catalog card (not gated by empirical promotion)"
+        )
         assert "Consign to Memory" in HOSER_CATALOG, (
             "Consign to Memory must be a catalog card (not gated by empirical promotion)"
         )
@@ -5405,6 +5469,108 @@ class TestHoserCatalogExpansion:
         )
         assert "Toxic Deluge" in model.candidate_covers, (
             "Toxic Deluge (B, creature-based) must be in candidate set for UB deck"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestAttachmentsFeature — feature-sfv-attachments: the 3 new catalog entries
+# (Force of Negation, Spell Pierce, Mystical Dispute) load with correct attribution,
+# and a flexible counter's broad-interaction attachment reaches multiple archetypes.
+# ---------------------------------------------------------------------------
+
+class TestAttachmentsFeature:
+    """Spec-derived — new catalog entries + multi-archetype broad-interaction attachment."""
+
+    # ── New catalog entries load with correct attribution ──────────────────────
+
+    def test_force_of_negation_catalog_entry(self):
+        assert "Force of Negation" in HOSER_CATALOG, "Force of Negation missing from catalog"
+        h = HOSER_CATALOG["Force of Negation"]
+        assert h.attacks == frozenset({"combo", "storm-reliant", "noncreature-reliant"}), (
+            f"Unexpected attacks for Force of Negation: {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_DEDICATED)
+        assert h.max_copies == 4
+        assert h.symmetry == "asymmetric"
+
+    def test_spell_pierce_catalog_entry(self):
+        assert "Spell Pierce" in HOSER_CATALOG, "Spell Pierce missing from catalog"
+        h = HOSER_CATALOG["Spell Pierce"]
+        assert h.attacks == frozenset({"combo", "storm-reliant", "noncreature-reliant"}), (
+            f"Unexpected attacks for Spell Pierce: {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_SOFT)
+        assert h.symmetry == "asymmetric"
+
+    def test_mystical_dispute_catalog_entry(self):
+        assert "Mystical Dispute" in HOSER_CATALOG, "Mystical Dispute missing from catalog"
+        h = HOSER_CATALOG["Mystical Dispute"]
+        assert h.attacks == frozenset({"plays-blue"}), (
+            f"Mystical Dispute must be plays-blue-contingent only; got {sorted(h.attacks)}"
+        )
+        assert h.colors == frozenset({"U"})
+        assert h.swing == pytest.approx(_SWING_SOFT)
+        assert h.symmetry == "asymmetric"
+
+    # ── Broad-interaction attribution reaches multiple, previously-unreachable archetypes ──
+
+    def test_force_of_negation_attaches_to_combo_and_control_plurality(self):
+        """A flexible free counter must attach to BOTH a combo archetype (via combo/
+        storm-reliant) AND a control archetype that carries no combo/storm-reliant/
+        plays-blue tag at all (via noncreature-reliant) — the exact D3 gap this feature
+        closes: previously a control archetype was invisible to Force of Negation."""
+        field = _make_field({"ANT Storm": 0.4, "Azorius Control": 0.4, "Elves": 0.2})
+        archetype_tags = {
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+            "Azorius Control": frozenset({"noncreature-reliant"}),
+            "Elves": frozenset({"creature-based"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U", "B"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        assert "Force of Negation" in model.candidate_covers, (
+            "Force of Negation must be a UB-legal candidate"
+        )
+        covered = model.candidate_covers["Force of Negation"]
+        covered_archetypes = {key.split("|", 1)[0] for key in covered if "|" in key}
+        assert "ANT Storm" in covered_archetypes, (
+            f"Force of Negation must attach to the combo archetype; covered={covered}"
+        )
+        assert "Azorius Control" in covered_archetypes, (
+            f"Force of Negation must attach to the control archetype via noncreature-reliant "
+            f"even though it carries no combo/storm-reliant tag; covered={covered}"
+        )
+        assert "Elves" not in covered_archetypes, (
+            f"Force of Negation must not attach to the creature-based archetype; covered={covered}"
+        )
+
+    def test_mystical_dispute_attaches_only_to_plays_blue_archetypes(self):
+        """Mystical Dispute (plays-blue-contingent) attaches to a blue-heavy opponent and
+        NOT to a combo archetype that carries no plays-blue tag — narrower, single-axis
+        attribution, distinct from Force of Negation's broad attachment."""
+        field = _make_field({"Azorius Miracles": 0.5, "ANT Storm": 0.5})
+        archetype_tags = {
+            "Azorius Miracles": frozenset({"plays-blue", "noncreature-reliant"}),
+            "ANT Storm": frozenset({"combo", "storm-reliant"}),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}),
+            deck_tags=frozenset(),
+            catalog=HOSER_CATALOG,
+        )
+        covered = model.candidate_covers.get("Mystical Dispute", frozenset())
+        covered_archetypes = {key.split("|", 1)[0] for key in covered if "|" in key}
+        assert "Azorius Miracles" in covered_archetypes, (
+            f"Mystical Dispute must attach to the plays-blue archetype; covered={covered}"
+        )
+        assert "ANT Storm" not in covered_archetypes, (
+            f"Mystical Dispute must not attach to a non-blue combo archetype; covered={covered}"
         )
 
 

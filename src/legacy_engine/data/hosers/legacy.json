@@ -126,6 +126,24 @@
       "symmetry": "asymmetric"
     },
     {
+      "name": "Force of Negation",
+      "attacks": ["combo", "storm-reliant", "noncreature-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "dedicated",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'you may exile a blue card from your hand rather than pay this spell's mana cost' (free on the opponent's turn) — 'Counter target noncreature spell.' Attacks noncreature-reliant (the broad-interaction axis) in addition to combo/storm-reliant so it credits the whole combo/control plurality it answers, not just tiny combo elements."
+    },
+    {
+      "name": "Spell Pierce",
+      "attacks": ["combo", "storm-reliant", "noncreature-reliant"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'Counter target noncreature spell unless its controller pays {2}.' Soft (taxing, not a hard counter) anti-noncreature answer — attacks noncreature-reliant alongside combo/storm-reliant, same broad-interaction attribution as Force of Negation but at _SWING_SOFT."
+    },
+    {
       "name": "Veil of Summer",
       "attacks": ["_hate"],
       "colors": ["G"],
@@ -236,6 +254,15 @@
       "symmetry": "asymmetric",
       "functional_group": "blue-blast",
       "_comment": "Added. 'Counter target blue spell' / 'Destroy target blue permanent' — functionally identical to Pyroblast."
+    },
+    {
+      "name": "Mystical Dispute",
+      "attacks": ["plays-blue"],
+      "colors": ["U"],
+      "max_copies": 4,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "feature-sfv-attachments: 'This spell costs {2} less to cast if it targets a blue spell. Counter target spell unless its controller pays {3}.' plays-blue-contingent — a generic soft counter that is cheap and effective specifically against a blue-heavy field, matching the Pyroblast/Red Elemental Blast attachment convention rather than the noncreature-reliant axis (it targets ANY spell, not specifically noncreature ones)."
     },
     {
       "name": "Chalice of the Void",

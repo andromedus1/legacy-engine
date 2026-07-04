@@ -66,6 +66,10 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
       Attribution rules (``_derive_attacks_for_promoted``):
         - "counter target" or "counter that spell" in oracle_text → ``{"combo", "storm-reliant"}``
+        - "counter target noncreature spell" (feature-sfv-attachments) additionally adds
+          ``{"noncreature-reliant"}`` — the broad-interaction attachment axis so a free/soft
+          anti-noncreature counter (Force of Negation, Spell Pierce) credits the WHOLE
+          combo/control plurality it answers, not just the narrower combo/storm-reliant slice.
         - "target red/blue spell/permanent" or "if it's red/blue" (color-blast template
           shared by Pyroblast/Hydroblast/Blue|Red Elemental Blast) → ``{"plays-red"}`` /
           ``{"plays-blue"}``
@@ -1143,6 +1147,14 @@ _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 _RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
 _RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
 
+# Broad free/soft anti-noncreature interaction (feature-sfv-attachments): the exact
+# "counter target noncreature spell" template shared by Force of Negation / Spell Pierce /
+# Mental Misstep-style noncreature-restricted counters — distinct from the generic
+# "counter target spell" rule 1 already matches.  Attaches to the `noncreature-reliant`
+# archetype axis so these cards credit the WHOLE combo/control plurality they answer,
+# not only the narrower `combo`/`storm-reliant` tags rule 1 attaches to.
+_RE_COUNTER_NONCREATURE = re.compile(r"counter target noncreature spell", re.IGNORECASE)
+
 
 def _derive_attacks_for_promoted(
     card_name: str,
@@ -1155,6 +1167,9 @@ def _derive_attacks_for_promoted(
 
     1. Counter magic:  "counter target" / "counter that spell"
        → {combo, storm-reliant}   (answers the most common free-spell targets)
+    1b. Broad anti-noncreature counter: "counter target noncreature spell" (feature-sfv-
+        attachments) → adds {noncreature-reliant}   (Force of Negation, Spell Pierce —
+        attaches to the WHOLE combo/control plurality, not just rule 1's narrower slice)
     2. Color blast: "target red/blue spell" / "target red/blue permanent" / "if it's red/blue"
        → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
     3. Graveyard exile: "exile" AND "graveyard" present
@@ -1178,6 +1193,12 @@ def _derive_attacks_for_promoted(
     # 1. Counter magic
     if "counter target" in text_lower or "counter that spell" in text_lower:
         tags.update({"combo", "storm-reliant"})
+
+    # 1b. Broad anti-noncreature counter (feature-sfv-attachments) — additive on top of
+    # rule 1's combo/storm-reliant: attaches to the noncreature-reliant axis so a card
+    # like Force of Negation credits the whole combo/control plurality it answers.
+    if _RE_COUNTER_NONCREATURE.search(text_lower):
+        tags.add("noncreature-reliant")
 
     # 2. Color blast — checked before the generic "destroy target" removal rule below,
     # since blasts phrase permanent-destruction as "destroy target red/blue permanent",
