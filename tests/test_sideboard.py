@@ -29,6 +29,7 @@ from legacy_engine.advisory.sideboard import (
     _CONSIDERING_CAP,
     _SWING_DEDICATED,
     _SWING_SOFT,
+    _HATE_UNCOVERED_WEIGHT_CAP_RATIO,
     _EMPIRICAL_SWING_CAP,
     _EMPIRICAL_SWING_MIN_LIFT,
     _build_coverage_model,
@@ -413,7 +414,14 @@ class TestCoverageModel:
         assert len(hate_elements) >= 1, "Expected at least one anti-hate pseudo-element"
 
     def test_veil_of_summer_covers_anti_hate_element(self):
-        """Veil of Summer (attacks=_hate) covers the _hate:combo pseudo-element."""
+        """Veil of Summer (attacks=_hate) covers the _hate:combo pseudo-element.
+
+        RE-BASELINED (feature-sfv-weights): this used to be a weak conditional assertion
+        (``if ... in ... : assert ...``) that silently passed if the coverage never happened
+        to materialize — it never actually LOCKED IN the coverability claim. Veil of Summer IS
+        a valid candidate here (colors={G} ⊆ deck_colors={U,G}, no anti-synergy signals
+        supplied) so both preconditions are guaranteed; assert them directly (unconditional)
+        so a real regression in the hate-coverage mechanism can no longer pass silently."""
         field = _make_field({"Reanimator": 0.5, "Storm": 0.5})
         archetype_tags = {
             "Reanimator": frozenset({"graveyard-recursion"}),
@@ -433,8 +441,14 @@ class TestCoverageModel:
             deck_tags=frozenset({"combo"}),
             catalog=catalog,
         )
-        if "_hate:combo" in model.element_weight and "Veil of Summer" in model.candidate_covers:
-            assert "_hate:combo" in model.candidate_covers["Veil of Summer"]
+        assert "_hate:combo" in model.element_weight
+        assert "Veil of Summer" in model.candidate_covers
+        assert "_hate:combo" in model.candidate_covers["Veil of Summer"]
+        # Covered -> full natural weight, NOT the Step 4c uncovered-weight cap.
+        interactive_share = 1.0  # neither Reanimator nor Storm is low-interaction
+        assert model.element_weight["_hate:combo"] == pytest.approx(
+            interactive_share * _SWING_SOFT
+        )
 
     def test_archetype_with_no_catalog_answer_gets_warning(self):
         """An archetype no catalog hoser covers gets no element keys and a warning.
@@ -1373,6 +1387,159 @@ class TestRegressionPeerReviewFixes:
 
 
 # ---------------------------------------------------------------------------
+# TestHateCoverability — feature-sfv-weights: make `_hate:` self-protection coverable,
+# and cap it when it genuinely isn't.
+# ---------------------------------------------------------------------------
+
+
+class TestHateCoverability:
+    """A `_hate:` pseudo-element that IS covered by a surviving candidate keeps its full
+    natural weight (real self-protection = real coverage); one that ends up with ZERO
+    covering candidate (color/anti-synergy exclusion) is capped relative to the model's own
+    real coverage scale so it can't crowd out every actual opponent need (brief §2, D2)."""
+
+    # A field split so the real "Storm|combo" element (weighted by Storm's OWN, small share)
+    # is much smaller than the hate weight (weighted by the WHOLE interactive field share) —
+    # the shape that actually needs capping.  "Aggro" carries a tag no catalog hoser attacks
+    # (so it contributes no real element) but is NOT low-interaction, so it still counts
+    # toward interactive_share the way any non-low-interaction archetype would.
+    _FIELD = {"Storm": 0.2, "Aggro": 0.8}
+    _ARCHETYPE_TAGS = {"Storm": frozenset({"combo"}), "Aggro": frozenset({"creature-based"})}
+
+    def test_covered_hate_element_keeps_full_weight_alongside_real_coverage(self, make_hoser):
+        """A deck with BOTH real opponent coverage AND a castable, non-self-hosing protective
+        card: the hate element is covered -> NOT capped, even though its natural weight
+        exceeds the single real element's weight."""
+        field = _make_field(self._FIELD)
+        catalog = {
+            # Real opponent coverage: Storm's own (small) field share limits this weight.
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}),
+                colors=frozenset({"U"}), swing=_SWING_SOFT,
+            ),
+            # Colorless, non-self-hosing counter-hoser: always a valid candidate here.
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        model = _build_coverage_model(
+            field, self._ARCHETYPE_TAGS,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            # No anti_synergy_signals -> Defense Grid is NOT filtered (not marked reactive).
+        )
+        hate_key = "_hate:combo"
+        assert hate_key in model.element_weight
+        assert "Defense Grid" in model.candidate_covers
+        assert hate_key in model.candidate_covers["Defense Grid"]
+        # Full natural weight — interactive_share(Storm+Aggro)=1.0 × _SWING_SOFT — NOT capped
+        # down to the (smaller) real "Storm|combo" element weight (0.2 × _SWING_SOFT).
+        assert model.element_weight[hate_key] == pytest.approx(1.0 * _SWING_SOFT)
+        assert model.element_weight[hate_key] > model.element_weight["Storm|combo"]
+        assert not any(w.startswith("// hate-uncovered:") for w in model.warnings)
+
+    def test_uncovered_hate_element_is_capped_to_real_coverage_scale(self, make_hoser):
+        """The Andrew's-Dimir-Tempo shape: a reactive UB deck where the only catalog `_hate`
+        card (Defense Grid) is anti-synergy-filtered (self-hoses a reactive deck), so the
+        `_hate:combo` pseudo-element ends up with ZERO covering candidate. Its natural weight
+        (which would otherwise dwarf real opponent coverage) is capped at
+        `_HATE_UNCOVERED_WEIGHT_CAP_RATIO` × the largest real element weight."""
+        field = _make_field(self._FIELD)
+        catalog = {
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}),
+                colors=frozenset({"U"}), swing=_SWING_SOFT,
+            ),
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        signals = DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=True)
+        model = _build_coverage_model(
+            field, self._ARCHETYPE_TAGS,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            anti_synergy_signals=signals,
+        )
+        hate_key = "_hate:combo"
+        assert "Defense Grid" not in model.candidate_covers, "anti-synergy must still filter it"
+        assert not any(
+            hate_key in covers for covers in model.candidate_covers.values()
+        ), "no candidate should cover _hate:combo in this scenario"
+
+        real_weight = model.element_weight["Storm|combo"]
+        natural_weight = 1.0 * _SWING_SOFT  # what it would be, uncapped
+        assert natural_weight > real_weight, "the scenario must actually need capping"
+        assert model.element_weight[hate_key] == pytest.approx(
+            _HATE_UNCOVERED_WEIGHT_CAP_RATIO * real_weight
+        )
+        assert model.element_weight[hate_key] < natural_weight
+        assert any(w.startswith(f"// hate-uncovered: capped {hate_key}") for w in model.warnings)
+
+    def test_no_real_elements_leaves_uncovered_hate_weight_uncapped(self, make_hoser):
+        """When the model has NO real (archetype, tag) elements at all, there is nothing to
+        size a cap against — the natural hate weight is left as-is (not zeroed)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"storm-reliant"})}  # no hoser attacks this tag
+        catalog = {
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        signals = DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=False, reactive=True)
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            anti_synergy_signals=signals,
+        )
+        assert not any(k for k in model.element_weight if "|" in k), "no real elements exist"
+        assert model.element_weight["_hate:combo"] == pytest.approx(1.0 * _SWING_SOFT)
+        assert not any(w.startswith("// hate-uncovered:") for w in model.warnings)
+
+    def test_hate_counter_hoser_exempt_from_empirical_pool_filter(self, make_hoser):
+        """A counter-hoser NOT in the empirical pool still covers `_hate:` elements — self-
+        protection castability doesn't need corpus-adoption validation the way an opponent-
+        facing hoser does (mirrors the maindeck-discount exemption for `_hate:` elements)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Defense Grid": make_hoser(
+                name="Defense Grid", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+        }
+        # Empirical pool excludes Defense Grid entirely (0% real-world adoption).
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset({"combo"}),
+            catalog=catalog,
+            empirical_pool=frozenset(),  # nothing is in the pool
+        )
+        assert "Defense Grid" in model.candidate_covers, (
+            "empirical_pool must not filter out a _hate counter-hoser"
+        )
+        assert "_hate:combo" in model.candidate_covers["Defense Grid"]
+
+    def test_non_hate_card_still_filtered_by_empirical_pool(self, make_hoser):
+        """The empirical-pool exemption is scoped to `_hate` cards only — an ordinary
+        opponent-facing hoser is still dropped when it's not in the pool."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Flusterstorm": make_hoser(
+                name="Flusterstorm", attacks=frozenset({"combo"}), colors=frozenset({"U"}),
+            ),
+        }
+        model = _build_coverage_model(
+            field, archetype_tags,
+            deck_colors=frozenset({"U"}), deck_tags=frozenset(),
+            catalog=catalog,
+            empirical_pool=frozenset(),  # Flusterstorm not in the (empty) pool
+        )
+        assert "Flusterstorm" not in model.candidate_covers
+
+
+# ---------------------------------------------------------------------------
 # TestSaturatingCoverage — new tests for the g(n) = 1-(1-p)^n objective
 # ---------------------------------------------------------------------------
 
@@ -2034,15 +2201,20 @@ class TestImpactModulatedWeighting:
             },
         )
         # No data -> centrality floors at _CENTRALITY_BASELINE; a confirmed hit -> full 1.0.
-        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless, draw_prob(copies=1)
-        # is the same fixed factor on both sides, so it cancels in the ratio but must still
-        # be included in the absolute expected value.)
-        draw_prob_1 = _draw_probability(1)
+        # (symmetry=1.0 asymmetric-default, castability=1.0 colorless.)
+        #
+        # RE-BASELINED (feature-sfv-weights): the element weight no longer carries the
+        # draw_prob(copies=1)≈0.4 factor — it used centrality × symmetry × castability ×
+        # draw_prob (``.score()``) before this feature and now uses ``.score_without_draw_prob()``
+        # (centrality × symmetry × castability only). The draw_prob factor was uniform across
+        # both sides of this comparison so it never affected the RATIO assertion below, but the
+        # ABSOLUTE expected values here must drop it to match the new (un-deflated) magnitude —
+        # this is the deflation fix itself, not a loosened assertion.
         assert pytest.approx(no_data.element_weight[key]) == (
-            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE * draw_prob_1
+            1.0 * _SWING_DEDICATED * _CENTRALITY_BASELINE
         )
         assert pytest.approx(linchpin_hit.element_weight[key]) == (
-            1.0 * _SWING_DEDICATED * 1.0 * draw_prob_1
+            1.0 * _SWING_DEDICATED * 1.0
         )
         assert linchpin_hit.element_weight[key] > no_data.element_weight[key]
         assert pytest.approx(linchpin_hit.element_weight[key] / no_data.element_weight[key]) == (

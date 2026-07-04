@@ -103,12 +103,15 @@ Impact-modulated element weights + draw-probability copy-shaping
   stop, the hedge allocator) is untouched:
 
   (B3) Element weight for an (archetype, tag) pair becomes
-       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score()`` instead of
-       plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1 already
-       selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
-       *modulates* the weight computed from it).  The impact call uses ``copies=1`` (the value
-       of the FIRST copy being present); the copy-count taper itself is (B4)'s job, so applying
-       ``draw_probability`` a second time here at ``max_copies`` would double-count the taper.
+       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score_without_draw_prob()``
+       instead of plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1
+       already selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
+       *modulates* the weight computed from it).  The impact call uses ``copies=1`` but the
+       resulting ``draw_prob`` factor is DISCARDED (feature-sfv-weights) — the element weight
+       asks "is there a good, castable, non-self-hosing answer", never "how likely am I to draw
+       it"; draw-probability belongs exclusively to (B4)'s per-copy taper below, so applying it
+       here too would double-count that same draw dimension AND (being a near-uniform ~0.4×
+       factor) silently deflate the whole element-weight scale the natural-budget τ stop reads.
        Needs, per opponent archetype: that opponent's ``Linchpin`` list (``opp_linchpins``) and
        optionally its known maindeck composition (``opp_cards``, for ``cast_requires`` gating)
        — both precomputed ONCE by ``recommend_sideboard`` (objective-search-split:
@@ -640,6 +643,23 @@ _HATE_ELEMENT_PREFIX = "_hate:"
 
 # Minimum weight threshold for anti-hate pseudo-elements (filter out noise)
 _HATE_ELEMENT_MIN_WEIGHT = 0.02
+
+# feature-sfv-weights: cap on an UNCOVERED `_hate:` pseudo-element's weight, as a multiple of
+# the largest real (archetype, tag) element weight already in the model.  A `_hate:<tag>`
+# element's natural weight (Σ interactive field share × _SWING_SOFT) is NOT itself
+# impact-discounted per-opponent the way real coverage weights are, so on a real field it can
+# be several times larger than any single opponent element — that's fine IF the deck can
+# actually field a protective answer (real, servable coverage should compete on its full
+# weight). It becomes "dead crowding weight" (brief §2, distortion D2) only when NO catalog
+# candidate survives this deck's color/anti-synergy filters to cover it (e.g. Veil of
+# Summer/Carpet of Flowers need G; Defense Grid self-hoses a reactive counterspell deck — a UB
+# reactive tempo deck honestly has no castable, non-self-hosing protective answer today). In
+# that uncovered case only, cap the weight at this ratio × the model's own largest real element
+# weight so it can no longer categorically out-rank every actual opponent need. 1.0 = "no more
+# valuable than the single best real matchup this field presents" — generous enough that
+# self-protection still shows up in the audit trail and can still win a slot when nothing else
+# is competitive, but can't dominate for want of an answer nobody can play. See Step 4c below.
+_HATE_UNCOVERED_WEIGHT_CAP_RATIO = 1.0
 
 _HEURISTIC_NOTE = (
     "Swing magnitudes (_SWING_DEDICATED=0.20, _SWING_SOFT=0.10) are curated heuristic constants, "
@@ -1477,7 +1497,13 @@ def _build_coverage_model(
     NOT tagged low-interaction (conservative proxy for "can bring interactive sideboard
     cards") × the _SWING_SOFT constant.  Each counter-hoser covers only the hate
     pseudo-elements for the deck-vulnerability tags that interactive field archetypes
-    actually care about — not every tag indiscriminately.
+    actually care about — not every tag indiscriminately.  Coverability (feature-sfv-weights):
+    a counter-hoser that survives the color/anti-synergy/empirical-pool filters below covers
+    every `_hate:<tag>` element the deck carries at FULL natural weight — real self-protection
+    is real coverage.  When NO candidate survives those filters for a given deck (its
+    color/anti-synergy profile leaves nothing castable), Step 4c caps that element's weight
+    relative to the model's own real coverage scale instead of leaving it as uncapped "dead
+    crowding weight" (brief §2, D2).
 
     Anti-synergy filter (feature-archetype-empirical-recommendations):
     When ``anti_synergy_signals`` is not None, catalog candidates whose name appears in
@@ -1487,7 +1513,10 @@ def _build_coverage_model(
 
     Empirical pool filter (feature-archetype-empirical-recommendations):
     When ``empirical_pool`` is not None, catalog candidates NOT in the pool are dropped.
-    Gated-additive: ``empirical_pool=None`` → no-op.
+    Gated-additive: ``empirical_pool=None`` → no-op.  Counter-hosers (``"_hate"`` in
+    ``hoser.attacks``, feature-sfv-weights) are EXEMPT from this filter — see Step 4's inline
+    comment for why self-protection doesn't need corpus-adoption validation the way an
+    opponent-facing hoser does.
 
     Empirical pool promotion (fix-sideboard-surface-field-staples):
     When ``promoted_candidates`` is not None, those HoserCard entries are ADDED to the
@@ -1504,21 +1533,29 @@ def _build_coverage_model(
     catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
     → no-op (byte-identical to pre-feature for callers without card-value data).
 
-    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3):
+    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3;
+    draw-prob deflation removed by feature-sfv-weights):
     When ``opponent_linchpins`` is not None, each (archetype, tag) element's weight is
-    additionally multiplied by ``impact(best_hoser_for_tag, archetype, ...).score()`` — the
-    decomposed centrality × symmetry × castability × draw_prob score (see ``advisory.impact``)
-    of the SAME hoser Step 1 already selected as the tag's best-swing answer, evaluated
-    specifically against that opponent archetype's linchpins (``opponent_linchpins[archetype]``,
-    defaulting to ``[]``) and this deck's own colors/vulnerability-tags (``deck_colors``/
-    ``deck_tags`` — reused as-is; no separate "my-side" parameters needed).  ``opponent_cards``
-    optionally supplies each opponent's known maindeck composition for the ``cast_requires``
-    castability gate (e.g. Massacre's "opponent controls a Plains" clause).  Uses ``copies=1``
-    (the value of the card's first copy being present) — the copy-count taper itself is Unit
-    B4's job (the ILP/greedy per-copy marginal), so reapplying ``draw_probability`` here at
-    ``max_copies`` would double-count it.  Gated-additive: ``opponent_linchpins=None`` (the
-    default) → every impact multiplier is 1.0 → element weights are BYTE-IDENTICAL to
-    pre-impact (mirrors the ``matchup_pressure is None`` no-op above).
+    additionally multiplied by
+    ``impact(best_hoser_for_tag, archetype, ...).score_without_draw_prob()`` — the decomposed
+    centrality × symmetry × castability score (see ``advisory.impact``; NOT ``.score()``, which
+    also folds in ``draw_prob``) of the SAME hoser Step 1 already selected as the tag's
+    best-swing answer, evaluated specifically against that opponent archetype's linchpins
+    (``opponent_linchpins[archetype]``, defaulting to ``[]``) and this deck's own
+    colors/vulnerability-tags (``deck_colors``/``deck_tags`` — reused as-is; no separate
+    "my-side" parameters needed).  ``opponent_cards`` optionally supplies each opponent's known
+    maindeck composition for the ``cast_requires`` castability gate (e.g. Massacre's "opponent
+    controls a Plains" clause).  Uses ``copies=1`` only to evaluate castability
+    (``cast_requires`` gating can be copy-count-sensitive in principle, though none of today's
+    tokens are); the resulting ``draw_prob`` factor is discarded, never multiplied in — the
+    copy-count taper is EXCLUSIVELY Unit B4's job (the ILP/greedy per-copy marginal via
+    ``_u_redundancy``).  Folding ``draw_probability`` into the element weight too would
+    double-count the same draw dimension AND uniformly deflate the whole element-weight scale
+    (draw_prob(1)≈0.4 for every impact-modulated element) — the exact bug feature-sfv-weights
+    fixes (see ``docs/briefs/scorer-flexibility-valuation.md`` §2, distortion D2).
+    Gated-additive: ``opponent_linchpins=None`` (the default) → every impact multiplier is 1.0 →
+    element weights are BYTE-IDENTICAL to pre-impact (mirrors the ``matchup_pressure is None``
+    no-op above).
 
     Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage, Unit C2):
     When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
@@ -1609,7 +1646,13 @@ def _build_coverage_model(
                             copies=1,
                             opp_cards=opp_cards_for_arch,
                         )
-                        weight *= breakdown.score()
+                        # feature-sfv-weights: centrality × symmetry × castability ONLY —
+                        # NOT .score() (which also multiplies by draw_prob).  draw_prob(1)≈0.4
+                        # belongs exclusively to the per-copy taper (_u_redundancy, B4 below);
+                        # folding it into the element weight too double-counted the draw
+                        # dimension and uniformly deflated every impact-modulated weight ~0.4x
+                        # (see docstring + docs/briefs/scorer-flexibility-valuation.md §2 D2).
+                        weight *= breakdown.score_without_draw_prob()
 
                 element_weight[key] = weight
                 archetype_element_keys.add(key)
@@ -1627,6 +1670,13 @@ def _build_coverage_model(
                     "has no catalog hoser for any of its tags; weight=0"
                 )
 
+    # Snapshot of the largest REAL (archetype, tag) element weight, taken before any `_hate:`
+    # pseudo-element exists — this is the reference scale Step 4c's uncovered-weight cap sizes
+    # against (feature-sfv-weights).  Deliberately captured here (only Step 2 has run) rather
+    # than after Step 3b/3c's matchup-pressure/maindeck-discount multipliers, so the cap
+    # reference is stable and independent of those later, unrelated modulations.
+    _max_real_element_weight = max(element_weight.values(), default=0.0)
+
     # --- Step 3: Anti-hate pseudo-elements (tied to specific deck-tag categories) ---
     # For each vulnerability tag k the DECK carries:
     #   • Only create a pseudo-element if some counter-hoser in the catalog attacks "_hate".
@@ -1637,6 +1687,9 @@ def _build_coverage_model(
     #     counter-hosers in the catalog are general interaction (Veil, Defense Grid, Carpet),
     #     they cover ALL deck-tag hate pseudo-elements — but the weight is now field-appropriate
     #     rather than the full field share.
+    #   • Step 4c (below, feature-sfv-weights) caps this natural weight when NO candidate ends
+    #     up covering it — "dead crowding weight" per the epic's D2 finding — while a hate
+    #     element that IS covered by a real candidate keeps this full, uncapped weight.
     hate_elements_added: set[str] = set()
     counter_hosers_exist = any("_hate" in h.attacks for h in catalog.values())
     if deck_tags and counter_hosers_exist:
@@ -1701,8 +1754,19 @@ def _build_coverage_model(
 
     for card_name, hoser in catalog.items():
         # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
-        # This grounds recommendations in what real archetype sideboards actually run.
-        if empirical_pool is not None and card_name not in empirical_pool:
+        # This grounds OPPONENT-facing recommendations in what real archetype sideboards
+        # actually run.  Counter-hosers (attacks contains "_hate", feature-sfv-weights) are
+        # EXEMPT: self-protection castability is already fully decided by the color and
+        # anti-synergy checks below — a protective card doesn't need "the field to run answers
+        # like this" validation the way an opponent-facing hoser does, and gating it on
+        # adoption-in-the-corpus would just re-introduce uncoverable `_hate:` weight for any
+        # deck/archetype combination where nobody has happened to register it yet (mirrors the
+        # existing `_hate:` exemption from the Step 3c maindeck-aware discount below).
+        if (
+            empirical_pool is not None
+            and card_name not in empirical_pool
+            and "_hate" not in hoser.attacks
+        ):
             log.debug(
                 "_build_coverage_model: dropping %r — not in empirical archetype pool", card_name
             )
@@ -1794,6 +1858,44 @@ def _build_coverage_model(
                 log.debug(
                     "_build_coverage_model: promoted %r covers no live elements — skipped",
                     card_name,
+                )
+
+    # --- Step 4c: cap UNCOVERED `_hate:` weight (feature-sfv-weights) ---
+    # The epic's locked decision is to make protective/counter-hoser cards actually COVER the
+    # `_hate:` pseudo-elements they represent (Step 3/4/4b above already do this correctly: a
+    # counter-hoser that survives the empirical-pool/anti-synergy/color filters covers every
+    # `_hate:<tag>` element the deck carries) — real, castable, non-self-hosing self-protection
+    # earns its full natural weight as genuine coverage, no cap.
+    #
+    # But a hate element can still end up with ZERO covering candidate — e.g. a UB reactive
+    # tempo deck: Veil of Summer / Carpet of Flowers require G, and Defense Grid is correctly
+    # anti-synergy-filtered for a reactive counterspell shell (it taxes the deck's OWN
+    # instant-speed answers too). That is not a bug to paper over — it would be dishonest to
+    # force a green card castable in a blue-black deck, or to waive a genuine self-harm check —
+    # it is the brief's D2 finding: dead crowding weight with no way to be served. Cap it
+    # relative to the model's own largest real element weight (``_max_real_element_weight``,
+    # snapshotted before Step 3) so it can no longer out-rank every actual opponent need, while
+    # staying visible (not zeroed) in the audit trail.
+    if hate_elements_added:
+        _hate_covered_keys: set[str] = set()
+        for covers in candidate_covers.values():
+            for key in covers:
+                if key.startswith(_HATE_ELEMENT_PREFIX):
+                    _hate_covered_keys.add(key)
+        for tag in sorted(hate_elements_added):
+            hate_key = _HATE_ELEMENT_PREFIX + tag
+            if hate_key in _hate_covered_keys:
+                continue  # a real candidate covers it — full natural weight stands
+            if _max_real_element_weight <= 0.0:
+                continue  # nothing real to size the cap against — leave the natural weight
+            natural = element_weight.get(hate_key, 0.0)
+            cap = _HATE_UNCOVERED_WEIGHT_CAP_RATIO * _max_real_element_weight
+            if natural > cap:
+                element_weight[hate_key] = cap
+                warnings.append(
+                    f"// hate-uncovered: capped {hate_key} weight to {cap:.4f} "
+                    f"(was {natural:.4f}) — no compatible protective card covers it "
+                    "for this deck (color/anti-synergy exclusion)"
                 )
 
     # --- Step 5: functional_group de-dup (feature-sb-effect-tagging-model, Unit 5) ---

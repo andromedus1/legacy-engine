@@ -260,6 +260,34 @@ class TestImpactBreakdownScore:
         assert breakdown.score() > 0.0
 
 
+class TestImpactBreakdownScoreWithoutDrawProb:
+    """feature-sfv-weights: the element-weight factor excludes draw_prob entirely."""
+
+    def test_excludes_draw_prob_factor(self):
+        breakdown = ImpactBreakdown(centrality=0.8, symmetry=0.5, castability=1.0, draw_prob=0.4)
+        assert breakdown.score_without_draw_prob() == pytest.approx(0.8 * 0.5 * 1.0)
+
+    def test_independent_of_draw_prob_value(self):
+        """The SAME centrality/symmetry/castability with wildly different draw_prob values
+        must produce the identical score_without_draw_prob() — draw_prob genuinely excluded,
+        not just numerically negligible."""
+        low = ImpactBreakdown(centrality=0.8, symmetry=0.5, castability=1.0, draw_prob=0.01)
+        high = ImpactBreakdown(centrality=0.8, symmetry=0.5, castability=1.0, draw_prob=0.99)
+        assert low.score_without_draw_prob() == pytest.approx(high.score_without_draw_prob())
+
+    def test_zero_castability_still_hard_gates_to_zero(self):
+        """The remaining three factors still multiplicatively hard-gate."""
+        breakdown = ImpactBreakdown(centrality=1.0, symmetry=1.0, castability=0.0, draw_prob=1.0)
+        assert breakdown.score_without_draw_prob() == 0.0
+
+    def test_zero_draw_prob_no_longer_zeroes_this_score(self):
+        """The whole point of the split: a 0-copies (draw_prob=0) card still has a nonzero
+        score_without_draw_prob() — copy-count gating is the per-copy taper's job now, not
+        the element weight's."""
+        breakdown = ImpactBreakdown(centrality=1.0, symmetry=1.0, castability=1.0, draw_prob=0.0)
+        assert breakdown.score_without_draw_prob() == pytest.approx(1.0)
+
+
 class TestImpactOrchestration:
     def test_impact_combines_all_four_factors(self, make_hoser, make_linchpin):
         hoser = make_hoser(
