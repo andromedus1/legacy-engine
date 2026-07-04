@@ -1,266 +1,162 @@
-# Doomsday Tempo
+# Doomsday Tempo (Moxfield primer, the maintainer's list conventions)
 
-*Legacy · post–Undercity Informer regime · the consensus UB Tempo Doomsday maindeck, sideboarded for the local paper meta*
+Paste everything below the marker into the Moxfield deck description.
+List = decks/doomsday-tempo-local.txt (consensus tempo camp n=47, 2026-07-04; board = engine
+reference vs the local field). Online swap: -1 brazen borrower -> +1 thoughtseize (3rd).
 
-A blue-black tempo deck that disrupts, clocks, and grinds like Dimir Tempo — but
-carries a **Doomsday → Thassa's Oracle** combo as a second way to win. You choose,
-game by game, whether to play the fair tempo game or assemble the kill. Against the
-resilient permanent decks that crush fair tempo (Death & Taxes, Lands, prison), you
-combo *under* them; against the blue mirrors that punish all-in combo, you fall back
-to the fair plan.
-
-**The maindeck is the stock current-regime consensus list, untouched.** All of the
-the local meta/meta adaptation lives in the sideboard — so the deck you practice is the deck
-the broader field has already tuned, and your local read is expressed only where it
-belongs.
+<!-- PASTE BELOW -->
 
 ---
-
-## Why this deck for the local meta (read the gates first)
-
-This is a **lean, not a verdict.** On a **regime-clean** field (current-regime
-composition, adaptive ban-aware matrix) Doomsday positions at **S ≈ 0.50 [0.465,
-0.539], ~54% coverage**, *ahead of* Dimir Tempo (≈0.483) for the current meta. But:
-
-- **Regime currency:** your local the local meta 4-month sample is only ~29% current-regime;
-  the regime-clean read uses global paper as a proxy (not local-field-specific).
-- **Coverage:** ~44% of the field has no matchup data (Jeskai/Esper/TES/Stiflenought).
-- **CIs overlap** every candidate — no deck is *statistically* best.
-- The local "Doomsday 65%" is **pilot-skill-inflated**, and **Doomsday has a steep
-  learning curve** — the deck rewards reps.
-
-**The honest case:** Doomsday inverts your worst Dimir-Tempo matchups (Death & Taxes
-34%→76%, Lands 34%→56%) by going under them. **The risk:** your biggest the local meta
-matchup, **Izzet Delver (~14%), is Doomsday's worst (~40%)** — counters + a fast clock
-+ burn punish a combo deck sitting at half life. The sideboard is built around that
-problem.
+---
+:::notes:::
+* build = consensus over the TEMPO camp of doomsday (mains murktide/tamiyo, no personal tutor/one ring): n=47 of 134 regime decks, evolving tier; paper subset n=8 — predominantly online-informed
+* online-meta board swap: -1 brazen borrower -> +1 thoughtseize (3rd) // only card that differs
+* board is the engine reference 15 (1-of hedge spread) — pitch counters at 1 is a KNOWN engine bias (fon/flusterstorm want 2 per the copy study); tune with reps
+* matchup wrs below are ARCHETYPE-level (all doomsday camps pooled) — tempo-camp cells don't exist yet; treat as priors
+* engine override held: defense grid stays OUT (0.0% of winners, systematic false positive)
 
 ---
+**plan:**
+* two decks in one — pick per game, not per match:
+  * fair mode: tamiyo/murktide + daze/fow tempo (dimir tempo's shell minus the black grind)
+  * kill mode: doomsday -> 5-card pile -> thassa's oracle // combo UNDER the fair decks that beat tempo
+* mode select: vs resilient-permanent/prison (d&t, lands, eldrazi) = combo asap; vs blue mirrors = fair game first, combo when their shields are down
+* doomsday costs HALF YOUR LIFE — track burn range (izzet) + your own wraith/thoughtseize life spend before committing
+* the clean pile (top -> bottom): street wraith / edge of autumn / thassa's oracle / buffer / buffer
+  * line: kickoff draw -> wraith (cycle, 2 life) -> edge (cycle, sac a land) -> oracle w/ {U}{U} -> devotion 2 >= library 2, win
+  * mana math: {B}{B}{B} doomsday + {U}{U} oracle in one turn = why ritual/petal/LED; LED cracks AFTER doomsday (hand is spent anyway)
+  * cavern names merfolk or wizard (oracle = merfolk wizard) -> oracle uncounterable
+  * count BEFORE you cast doomsday: kickoff draw + free-draws + {U}{U} confirmed, or you just halved your life to show them your hand
+* unearth returns oracle (mv2) from the yard — the recovery line vs counters/mill; grindstone milling you can WIN you the game
 
-## The two game plans
-
-**Plan A — Fair tempo.** Tamiyo and Murktide backed by Thoughtseize, Force of Will,
-Daze, and Wasteland — nearly your Dimir Tempo game. Use it when comboing is too risky:
-open counters, fast clocks, graveyard hate.
-
-**Plan B — The Doomsday kill.** Resolve Doomsday, build a five-card pile, dig through
-it in one turn, win with Thassa's Oracle. Use it when the coast is clear — they're
-tapped out, out of counters (Thoughtseize confirms), or you're racing a combo/prison
-deck you can't beat fairly.
-
-The deck's skill is knowing **which plan, when** — and threatening both.
-
----
-
-## How the combo works
-
-The pieces (oracle text, exact):
-
-- **Doomsday** `{B}{B}{B}` — *Search your library and graveyard for five cards and exile
-  the rest. Put them on top of your library in any order. You lose half your life,
-  rounded up.* (Dark Ritual powers it out turn 1–2; you set a five-card stack and torch
-  the rest of your deck.)
-- **Thassa's Oracle** `{U}{U}` — *When it enters, look at the top X cards where X is your
-  devotion to blue; **if X ≥ the number of cards in your library, you win.***
-- **Free / cheap draws to eat the pile:** your **draw step**, **Street Wraith** (cycle —
-  pay 2 life), **Edge of Autumn** (cycle — sacrifice a land), **Consider**, **Brainstorm/
-  Ponder**, and **Lion's Eye Diamond** (sac → three mana for the Oracle).
-- **Protection & redundancy:** **Cavern of Souls** naming **Merfolk** makes Thassa's
-  Oracle **uncounterable** (this is a *stock* consensus card — the counter-protection a
-  blue field needs comes free with the list). **Unearth** `{B}` returns a countered/
-  discarded Oracle from the graveyard. **Jace, Wielder of Mysteries** (sideboard) is a
-  third, hard-to-interact-with win condition.
-
-**The principle:** build the pile so Thassa's Oracle is the **last** card, stack
-free/cheap draws above it, dig your library down to (at most) your blue devotion in one
-turn, then cast the Oracle. The exact pile depends on the mana and draws you have when
-Doomsday resolves — **pile construction is the core skill of the deck.** The common
-shape is `[mana source] [free draw] [free draw] [setup] [Thassa's Oracle]`, run
-top-to-bottom in one turn. Don't fire a Doomsday you can't finish.
+**mulligans:**
+* snap keeps: ritual + doomsday + cantrip/protection; LED hands w/ a path to {U}{U}
+* good keeps: tamiyo + daze/fow + 2 lands (fair-mode hand — the combo finds itself off cantrips)
+* pitch: no-cantrip no-combo 4-land hands; all-protection-no-plan
+* life is a resource w/ a floor: wraith cycles + thoughtseize + doomsday half — don't keep greedy-life hands vs red
+* count blue cards for fow before keeping
 
 ---
-
-## Playing out the combo — a worked pile
-
-**The goal:** after Doomsday resolves, your library *is* the five pile cards. Win by
-emptying it down to your blue devotion and resolving Thassa's Oracle. Devotion counts
-`{U}` symbols in your permanents' costs — **Thassa's Oracle is `{U}{U}`, so it pays for
-itself**: with just the Oracle out, devotion is 2, so a library of **2 or fewer wins.**
-(Each extra blue permanent — a Tamiyo — raises that ceiling.)
-
-**The engine of every pile is free draws.** Street Wraith (cycle — pay 2 life) and Edge
-of Autumn (cycle — sacrifice a land) each draw a card for *no mana*, so they chain you
-down the pile in a single turn. Every draw removes the top card of your library.
-
-**A clean five-card pile** (top → bottom):
-
-1. **Street Wraith**
-2. **Edge of Autumn**
-3. **Thassa's Oracle**
-4. buffer (any card)
-5. buffer (any card)
-
-**The line** — you need one *kickoff* draw (your draw step, a held Consider, or a Street
-Wraith already in hand) plus `{U}{U}` for the Oracle:
-
-1. Kickoff draw → **Street Wraith** to hand. *(library: 4)*
-2. Cycle Street Wraith (pay 2 life) → draw **Edge of Autumn**. *(library: 3)*
-3. Cycle Edge of Autumn (sacrifice a spare land) → draw **Thassa's Oracle**. *(library: 2)*
-4. Cast Thassa's Oracle for `{U}{U}`. Devotion 2 ≥ library 2 → **you win.**
-
-**The mana math** is why Dark Ritual / Lotus Petal / Lion's Eye Diamond are in the deck:
-in one turn you need `{B}{B}{B}` for Doomsday *and* the kickoff *and* `{U}{U}` for the
-Oracle — more than your lands alone usually make. **LED is the closer:** cast Doomsday
-off lands, then crack LED (discarding your now-spent hand) for the `{U}{U}{U}` that powers
-the kickoff + the Oracle. That's also how you combo at instant speed or on their end step.
-
-**Practical sequencing:**
-- **Disrupt first.** Thoughtseize to strip the counter and confirm the path, *then* go
-  off. Daze / Force of Will protect the Oracle on the stack; Cavern (Merfolk) makes it
-  uncounterable outright.
-- **Count before you commit.** Verify you have the kickoff draw, the free-draw cards (or
-  mana to dig), and `{U}{U}` *before* casting Doomsday. A pile you can't finish just
-  halves your life and shows them your hand.
-- **You don't always need an empty library.** Extra blue permanents (Tamiyo, a second
-  Oracle) raise your devotion, letting you stop the chain a card or two early.
-- **Unearth is your insurance** — if the Oracle is countered or discarded, Unearth (`{B}`)
-  returns it from the graveyard for a second swing; Jace (post-board) is a third.
+---
+**interaction targets — what you save it for:**
+* fow/daze: protect the combo turn (their response to doomsday/oracle) OR their gameplan card in fair mode — pick a job per game
+* flusterstorm: the stack war ON your combo turn (instants/sorceries only; storm copies beat their fluster)
+* duress/thoughtseize: turn BEFORE you go off — strip the counter, see the coast; take sweepers in fair mode
+* veil of summer: their blue/black targeted response — hexproof stops discard/push/consign-on-your-trigger; does NOT stop red blasts or binding (white)
+* consign: THEIR oracle trigger (mirror), chalice's counter-trigger, saga chapters, eldrazi casts, emrakul
+* abrupt decay: can't be countered — chalice, painter, grindstone, binding/beanstalk (all mv<=3)
+* long goodbye: can't be countered, mv<=3 — thalia, DRC, bowmasters; NOT thought-knot (mv4), NOT murktide (mv7 — delve cuts the cost paid, not mv)
+* fatal push: cheap threats; bitter triumph: the mv4+ overflow (discard/3-life cost — mind the doomsday half)
 
 ---
+---
+**matchups & sideboard** // wr = adaptive matrix vs local field, ARCHETYPE-level (camps pooled); imputed = no cell data // online board: brazen lines become the 3rd thoughtseize
 
-## The maindeck (stock current-regime consensus)
+**izzet delver — 11% of field, 41.5% wr (worst measured — their burn taxes doomsday's half-life):**
+* their plan: cheap clock + bolt your face (shrinks your combo window) + counter war; REB hits doomsday THROUGH painter? no — REB only if blue; their fluster/daze the oracle
+* mode: fair-lean; combo only behind cavern/duress or when they tap out
+* interaction: hydroblast their bolts/blasts; push/long goodbye = DRC class; murktide (mv7) needs fow/daze on the stack or brazen bounce; carpet ramps you under their daze
+* in: +1 hydroblast +1 fatal push +1 long goodbye +1 carpet of flowers
+* out: -2 thoughtseize -1 unearth -1 consider
 
-**Combo core (13)**
-- **4 Doomsday**, **4 Dark Ritual** — the engine and the ritual that casts it ahead of curve.
-- **2 Lotus Petal**, **1 Lion's Eye Diamond** — free/fast mana for Doomsday or the Oracle.
-- **1 Thassa's Oracle** — the kill (one copy is enough with Unearth + Cavern as backups).
-- **1 Unearth** — rebuy a countered Oracle (or a creature MV ≤ 3) for `{B}`.
+**show and tell — 10%, 57.3% wr:**
+* their plan: s&t/sneak the fatty; you're faster + your combo doesn't care about their board
+* interaction: fow/daze the s&t itself; consign = emrakul cast + trigger; race first, answer second
+* in: +1 consign +1 force of negation +1 flusterstorm
+* out: -2 murktide -1 unearth
 
-**Card selection (15)**
-- **4 Brainstorm**, **4 Ponder**, **1 Consider** — dig to pieces or threats.
-- **4 Flow State** — `{1}{U}` dig-3-take-1 (take-2 with an instant + sorcery in the yard);
-  also fuels Murktide.
-- **1 Street Wraith**, **1 Edge of Autumn** — "free" cantrips that double as pile-diggers.
+**white beanstalk — 7.5%, 47.9% wr:**
+* their plan: beanstalk card adv + binding/swords; slow — your combo goes under it
+* interaction: decay their beanstalk/binding (uncounterable, both mv<=3); duress the counter if they splash
+* in: +1 abrupt decay +1 duress +1 barrowgoyf
+* out: -2 daze -1 murktide
 
-**Threats (6)** — **4 Tamiyo, Inquisitive Student**, **2 Murktide Regent**.
+**dimir tempo — 7.5%, 46.0% wr (the deck you know from the other side):**
+* their plan: YOUR fair shell + bowmasters + consign — bowmasters punishes every wraith/edge cycle draw, consign counters YOUR oracle trigger
+* interaction: VEIL IS THE CARD — hexproof from blue/black blanks their consign-on-trigger, thoughtseize, push during the combo turn
+* duress first, veil on the turn; kill bowmasters BEFORE cycling through a pile
+* in: +1 veil of summer +1 duress +1 fatal push +1 long goodbye
+* out: -2 murktide -1 unearth -1 consider
 
-**Disruption (9)** — **4 Force of Will**, **3 Daze**, **2 Thoughtseize**.
+**jeskai midrange — 7.5%, ~50 (imputed):**
+* their plan: counters + REB + swords/phlage
+* interaction: veil (their counters are blue) + duress; hydroblast the blasts; combo end-of-their-turn w/ LED
+* in: +1 veil of summer +1 duress +1 flusterstorm +1 hydroblast
+* out: -2 murktide -1 unearth -1 consider
 
-**Manabase (17)** — 4 Underground Sea, 1 Undercity Sewers, 1 Island, 1 Swamp ·
-4 Polluted Delta, 1 Flooded Strand, 1 Misty Rainforest · **1 Cavern of Souls** (name
-Merfolk) · **3 Wasteland**.
+**azorius midrange — 6.5%, ~50 (imputed):**
+* counters + binding; slow clock = your best combo window
+* in: +1 veil of summer +1 duress +1 abrupt decay
+* out: -2 murktide -1 unearth
+
+**black midrange — 6.5%, ~50 (thin data):**
+* discard + bowmasters grind; they strip the pile pieces
+* interaction: kill bowmasters before cycling; barrowgoyf carries fair mode; veil blanks their discard on the key turn
+* in: +1 barrowgoyf +1 fatal push +1 long goodbye +1 veil of summer
+* out: -2 daze -1 consider -1 wasteland
+
+**black saga storm — 6.5%, ~50 (thin data):**
+* their plan: beseech storm — a pure race you usually win w/ interaction backup
+* interaction: flusterstorm + consign (the storm trigger) + duress their protection; daze stays (their curve is tight)
+* in: +1 flusterstorm +1 consign +1 duress
+* out: -2 murktide -1 unearth
+
+**death & taxes — 5.6%, 68.8% wr (BEST — the whole reason this deck exists):**
+* their plan: vial + thalia tax your pile spells; mother protects; jitte grinds
+* interaction: thalia ON SIGHT (long goodbye/push — both dodge her tax? no: they're cast, taxed +1 — budget for it); combo through revoker by having spare mana sources
+* counters near-dead through vial — cut daze
+* in: +1 fatal push +1 long goodbye +1 bitter triumph
+* out: -2 daze -1 consider
+
+**doomsday mirror — 5.6%, ~50 (thin):**
+* race + stack war; duress war decides it
+* interaction: consign THEIR oracle trigger; flusterstorm their protection; veil yours
+* in: +1 duress +1 flusterstorm +1 consign +1 veil of summer
+* out: -2 murktide -1 unearth -1 consider
+
+**eldrazi — 5.6%, 43.5% wr:**
+* their plan: chalice@1 (kills brainstorm/ponder/petal), TKS strips the pile, fast colorless clock
+* interaction: consign the chalice counter-TRIGGER (your 1-drops resolve anyway); decay the chalice itself (uncounterable); long goodbye does NOT kill TKS (mv4)
+* combo before TKS lands or after decoying it
+* in: +1 consign +1 abrupt decay +1 brazen borrower (bounce chalice/TKS)
+* out: -2 daze -1 consider
+  * // online config: brazen unavailable — +1 thoughtseize instead (strip TKS before it strips you)
+
+**painter — 4.7%, 48.5% wr:**
+* their plan: painter names blue -> ALL their REBs counter/kill anything, grindstone mills you
+* interaction: decay painter/grindstone (uncounterable, mv<=2); hydroblast their now-blue permanents? no — hydroblast targets RED (painter naming blue doesn't remove red); their deck is red anyway ✓
+* grindstone milling you is LIVE FOR YOU: unearth returns a milled oracle — devotion vs empty library = win
+* in: +1 abrupt decay +1 hydroblast +1 fatal push
+* out: -2 daze -1 consider
+
+**blue artifacts — 3.7%, 43.4% wr:**
+* their plan: saga constructs + counter backup + colorless spell base
+* interaction: consign their colorless casts + saga chapters; decay the saga payoff; wasteland every saga
+* in: +1 consign +1 abrupt decay +1 duress
+* out: -2 murktide -1 unearth
+
+**energy — 3.7%, ~50 (imputed):**
+* their plan: fast white-red aggro + lifegain; their clock + your doomsday half-life is the whole matchup
+* interaction: kill guide of souls on sight; combo a turn earlier than comfortable
+* in: +1 fatal push +1 long goodbye +1 bitter triumph
+* out: -2 thoughtseize -1 wasteland
 
 ---
-
-## Sideboard (15) — consensus base, tuned for the local meta + the post-ban global shift
-
-| Cards | Role | vs consensus |
-|---|---|---|
-| **4 Barrowgoyf** | Transform into a fair grind deck (lifelink flips burn races) | consensus |
-| **2 Dauthi Voidwalker** | Evasive clock **+ graveyard hate** (DRC delirium, Murktide delve, Reanimator) | consensus |
-| **2 Force of Negation** | Combo/control counter; the only answer to Cori-Steel Cutter | consensus |
-| **1 Long Goodbye** | Uncounterable removal (Thalia, DRC, MV ≤ 3 threats) | consensus |
-| **1 Jace, Wielder of Mysteries** | Resilient win condition vs Jeskai/Esper | consensus |
-| **1 Fatal Push** | Cheap removal | consensus (−1) |
-| **1 Consign to Memory** | Colorless spells / triggers (Show & Tell fatties, Tron) | consensus (−1) |
-| **2 Hydroblast** | **the local meta tweak:** red is ~21% locally (Izzet 14% + Painter 7%) — kills DRC, Cori-Steel Cutter, Bolt | **+2 off-consensus** |
-| **1 Surgical Extraction** | **Meta-shift tweak:** Grixis Reanimator rose +1.9% post-ban; also the mirror + Dredge | **+1 off-consensus** |
-
-*The two labeled deviations (Hydroblast, Surgical) are reasoned from your field + the
-global movers — **hypotheses to test at the table, not proven local tech.** The cuts
-(−1 Fatal Push, −1 Consign, −Bitter Triumph) track what the global meta shed since the
-ban (Eldrazi −2.0%, Mystic Forge −2.3%).*
+---
+**board logic recap (why these 15):**
+* engine reference board vs the local field (natural budget 5/15 dedicated + hedge), overrides applied; every slot 1-of = known hedge bias, tune w/ reps
+* protection suite (veil/duress/flusterstorm/consign/fon): the combo's real currency — most matchups board 2-4 of these
+* removal suite (push/long goodbye/bitter triumph/decay): thalia/bowmasters/chalice class — the cards that tax the pile
+* grind package (barrowgoyf/dauthi/brazen/nihil): fair-mode depth; dauthi doubles as yard hate + clock
+* carpet of flowers: blue-field mana cheat — combo under daze
+* acquisition reality: 5 SB cards unowned (decay, bitter triumph, carpet, flusterstorm, veil) + ~14 maindeck names incl. 1 LED — this is the BUILD-LATER deck; verdict says stay dimir for local until the field drifts fair/prison
+* slot-by-slot + camp split: decks/doomsday-tempo-analysis.md
 
 ---
-
-## local sideboard vs. the consensus global sideboard
-
-The maindeck is stock consensus; the sideboard is where the the local meta read lives. For
-reference, the **consensus global Tempo-Doomsday sideboard** (15) is:
-
-> 4 Barrowgoyf · 2 Force of Negation · 2 Dauthi Voidwalker · 2 Fatal Push ·
-> 2 Consign to Memory · 1 Long Goodbye · 1 Bitter Triumph · 1 Jace, Wielder of Mysteries
-
-This build keeps that core and makes a **3-card swap** for the local field:
-
-| Change | Card | Why |
-|---|---|---|
-| **IN** | **+2 Hydroblast** | the local meta is ~21% red (Izzet Delver 14% + Painter 7%) — kills Dragon's Rage Channeler, Cori-Steel Cutter, Lightning Bolt. *Off-consensus, local-field-specific.* |
-| **IN** | **+1 Surgical Extraction** | Tracks the post-ban global shift — Grixis Reanimator rose +1.9%; also covers the mirror + Dredge. *Off-consensus.* |
-| **OUT** | **−1 Bitter Triumph** | Redundant removal next to Long Goodbye + Fatal Push. |
-| **OUT** | **−1 Fatal Push** (2→1) | Hydroblast now covers the red creatures it would have killed. |
-| **OUT** | **−1 Consign to Memory** (2→1) | The field shed its colorless-spell decks since the ban (Eldrazi −2.0%, Mystic Forge −2.3%), so one copy is enough. |
-
-**Unchanged from consensus:** 4 Barrowgoyf, 2 Force of Negation, 2 Dauthi Voidwalker,
-1 Long Goodbye, 1 Jace.
-
-> **Honesty note:** Hydroblast and Surgical are *reasoned* deviations from your field +
-> the global movers — not observed local tech. There are only 6–18 paper Doomsday decks
-> in the data and zero local decklists, so treat these two as **hypotheses to test at
-> the table**, not proven includes. The consensus 15 is the safer default if you're
-> unsure.
+---
+**references:**
+* build + camp analysis: decks/doomsday-tempo-analysis.md
+* cross-meta verdict (dimir for local; doomsday = online lean + field-drift option): decks/dimir-vs-doomsday-tempo-comparison.md
 
 ---
-
-## Matchup & sideboard guide
-
-*Plans are starting points. Against blue decks, transform (Plan A); against fair/prison
-decks, combo under them (Plan B).*
-
-### Unfavored — the build's focus
-
-**Izzet Delver** (worst + most common, ~14%) — **full transform into a fair UB deck.**
-- IN: 4 Barrowgoyf, 2 Dauthi Voidwalker, 2 Hydroblast, 2 Force of Negation, 1 Fatal Push, 1 Long Goodbye
-- OUT: 4 Doomsday, 4 Dark Ritual, 1 Lion's Eye Diamond, 1 Thassa's Oracle, 1 Street Wraith, 1 Lotus Petal
-- Why: their counters + clock + burn make the combo a trap, and you're at half life. Out-grind them instead — Barrowgoyf's lifelink undoes their burn race, Dauthi shuts off DRC delirium + Murktide delve, Hydroblast kills DRC/Cutter/Bolt. **Cori-Steel Cutter is your problem card** — nothing removes it once it lands; counter it with FoN on the cast or kill the Monk tokens and race.
-
-**Jeskai / Esper control** (no data — play to not lose to counters)
-- IN: 4 Barrowgoyf, 2 Dauthi Voidwalker, 1 Jace, 2 Force of Negation
-- OUT: 4 Doomsday, 1 Lion's Eye Diamond, 2 Lotus Petal, 1 Thassa's Oracle, 1 Street Wraith
-- Why: grind with threats + Jace as the inevitability they can't easily answer. You *can* keep a slim combo here (they punish a stumble slower than Izzet).
-
-### Favored
-
-**Death & Taxes** (your best) — combo under their hatebears; kill Thalia so she can't tax you.
-- IN: 1 Fatal Push, 1 Long Goodbye, 2 Dauthi Voidwalker
-- OUT: 3 Daze (mana denial), 1 Street Wraith
-
-**Show and Tell** — race their cheat with a protected, faster kill.
-- IN: 2 Force of Negation, 1 Consign to Memory
-- OUT: 2 Murktide, 1 Street Wraith
-
-**Lands** — go under the lock; Wasteland slows them, Marit Lage doesn't matter if you win first.
-- IN: 1 Surgical Extraction (Loam / Field of the Dead)
-- OUT: 1 Murktide
-
-### Roughly even
-
-**Painter** (red combo, ~7% local) — disrupt the combo, attack the red half.
-- IN: 2 Force of Negation, 2 Hydroblast
-- OUT: 3 Daze, 1 Street Wraith
-
 ---
-
-## Mulligan & play tips
-
-- **Keep hands that do *a* thing well**, not hands that need everything. A disruptive
-  tempo hand (Thoughtseize + threat + counter) is a fine keep with no combo; so is a
-  fast, protected combo hand. Half-and-half and slow is a mulligan.
-- **Don't fire a Doomsday you can't finish** — halving your life and stacking five known
-  cards with no payoff hands the game away. Count draws and mana first.
-- **Thoughtseize before you go off** — take the counter, confirm the path, then combo.
-- **Name Merfolk with Cavern** by default (uncounterable Oracle); name Dragon only if
-  Murktide is your actual wincon that game.
-- **Sequence black mana carefully** — Flooded Strand / Misty can only fetch your
-  *Island-typed* duals for black; lead on Polluted Delta when you need Swamp.
-- **Pick your plan by matchup, then board state.** Blue counters up → transform. Fair
-  deck durdling → combo.
-
----
-
-*Build: Tempo Doomsday — stock current-regime consensus maindeck, locally tuned
-sideboard. 60 + 15. Positions ≈0.50 vs a regime-clean current field (CI [0.465, 0.539],
-~54% coverage) — a lean, not a verdict. Inverts Dimir Tempo's worst matchups at the cost
-of Izzet Delver; sideboard transforms into fair UB tempo vs the blue decks. The two
-off-consensus sideboard cards (Hydroblast, Surgical) are local hypotheses — validate
-them at the table.*
