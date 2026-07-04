@@ -1,7 +1,7 @@
 ---
 id: feature-archetype-sweep-backtest
 kind: feature
-stage: implementing
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []
@@ -318,3 +318,30 @@ caveats: visualize histograms, don't trust normality p-values, per-category fits
   per-archetype parallelism is possible later (DuckDB read-only connections), not now.
 - **Report noise from micro-adoption divergences**: winners_only already thresholded at 20%
   inclusion (`_OBSERVED_THRESHOLD`) per archetype — inherited, not re-invented.
+
+## Run results + validation gate (2026-07-04) — PASSED, feature complete
+
+Shipped in PR #35 (squash-merged, CI green; 3 child stories done). First real runs: global
+current-regime field + Boulder field (`decks/boulder-field-since-518.txt`), 26 archetypes
+swept each (98 below min-decks, honestly skipped), ~7s/archetype.
+
+**Validation gate — all four session-1 findings rediscovered:**
+1. FoN/Consign (fixed): absent as systematic divergences; both in Dimir Tempo's recommended
+   board and played by winners. ✓
+2. Defense Grid: scorer-only in **18/26 archetypes** (global) + Dimir-vs-Boulder; Damping
+   Sphere: scorer-only in 6 (ramp cluster) + Dimir-vs-Boulder. ✓ (amplified to systematic)
+3. Creature-interaction winners-only cluster: `creature-based` across 7 archetypes
+   (Sheoldred's Edict / Long Goodbye / Fatal Push / Toxic Deluge / Snuff Out), labeled THIN. ✓
+4. Field-scope mechanism: Dimir-vs-Boulder excludes 6/14 off-field tournaments; Grafdigger's
+   Cage 36%→25% when era noise is excluded while genuinely-in-field Surgical holds ~60%
+   (Boulder field contains Reanimator/Doomsday — honest, not suppressed). ✓
+
+**Findings emitted:** [[idea-hoser-catalog-new-card-gap]] (NEW — unclassified cluster is
+rank-1, 24 archetypes; Disruptor Flute winners-only in 10), sweep-scale confirmations
+appended to [[idea-hate-coverability-overvalues-defense-grid]],
+[[idea-damping-sphere-base-model-near-miss]], [[idea-winners-only-triage-creature-interaction]];
+[[idea-sweep-report-polish]] (NEW, cosmetic). Copy-count study complete →
+docs/analysis/copy-count-distribution-study.md; promoted [[feature-min-viable-copy-count]]
+(mechanics-derived k_min for pitch/threshold cards). The error map for the rules-engine arc
+([[idea-card-semantics-rules-layer]]) now exists: catalog/tag coverage gaps + symmetric-
+self-cost representability + pitch/threshold copy semantics.

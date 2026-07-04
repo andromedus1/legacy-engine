@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-07-04T19:31:09Z'
+generated_at: '2026-07-04T21:39:48Z'
 generated_from: frontmatter
-total_docs: 22
+total_docs: 23
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -44,6 +44,16 @@ documents:
   consumer_hint: Read when scoping what to build — the capabilities, domain entities,
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).
+- path: docs/analysis/copy-count-distribution-study.md
+  title: Copy-count distribution study — winners' sideboard copy histograms vs the
+    concave taper
+  type: brief
+  kind: research
+  updated: '2026-07-04'
+  status: complete
+  consumer_hint: Read when modeling per-copy sideboard value or questioning the concave
+    taper — the distribution-first empirical study of winners' copy-count histograms
+    from the archetype sweep.
 - path: docs/briefs/advisory-methods.md
   title: 'Brief: Advisory Statistics & Optimization Methods'
   type: brief
