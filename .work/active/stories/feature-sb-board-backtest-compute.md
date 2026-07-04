@@ -1,7 +1,7 @@
 ---
 id: feature-sb-board-backtest-compute
 kind: story
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: feature-sb-board-backtest
 depends_on: []
