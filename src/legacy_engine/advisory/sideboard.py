@@ -66,7 +66,10 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
 
       Attribution rules (``_derive_attacks_for_promoted``):
         - "counter target" or "counter that spell" in oracle_text → ``{"combo", "storm-reliant"}``
-        - "exile" + "graveyard" in oracle_text → ``{"graveyard-reliant"}``
+        - "target red/blue spell/permanent" or "if it's red/blue" (color-blast template
+          shared by Pyroblast/Hydroblast/Blue|Red Elemental Blast) → ``{"plays-red"}`` /
+          ``{"plays-blue"}``
+        - "exile" + "graveyard" in oracle_text → ``{"graveyard-recursion"}``
         - Removal keywords ("destroy target", "exile target creature") → ``{"creature-based"}``
         - ``staple_role`` == "free_interaction" → ``{"combo", "storm-reliant"}``
         - Unattributed cards: a conservative ``{"combo"}`` set (labeled in a warning) so
@@ -87,27 +90,80 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
       lookup dict).  No promotion → no-op.
     - Existing tests supply empty maindecks and no archetype → both filters are no-ops →
       test output is byte-identical to pre-feature.
+
+Impact-modulated element weights + draw-probability copy-shaping
+(feature-sb-field-weighted-scorer, Units B3+B4 — "replace the scoring core in place"):
+  The decomposed ``advisory.impact`` model (centrality × symmetry × castability × draw_prob,
+  see that module) modulates two, and only two, things in the existing ILP+greedy+τ+hedge
+  machinery — everything else (swing sourcing, coverage saturation g(n), the natural-budget
+  stop, the hedge allocator) is untouched:
+
+  (B3) Element weight for an (archetype, tag) pair becomes
+       ``field_share × swing × impact(best_hoser_for_tag, archetype, ...).score()`` instead of
+       plain ``field_share × swing``.  ``best_hoser_for_tag`` is the SAME hoser Step 1 already
+       selects for the tag's swing magnitude (swing sourcing is unchanged — impact only
+       *modulates* the weight computed from it).  The impact call uses ``copies=1`` (the value
+       of the FIRST copy being present); the copy-count taper itself is (B4)'s job, so applying
+       ``draw_probability`` a second time here at ``max_copies`` would double-count the taper.
+       Needs, per opponent archetype: that opponent's ``Linchpin`` list (``opp_linchpins``) and
+       optionally its known maindeck composition (``opp_cards``, for ``cast_requires`` gating)
+       — both precomputed ONCE by ``recommend_sideboard`` (objective-search-split:
+       ``_field_opponent_linchpins`` does the DB work; ``_build_coverage_model`` stays pure) and
+       threaded in via the new ``opponent_linchpins``/``opponent_cards`` params.  My deck's own
+       colors/vulnerability-tags reuse the ``deck_colors``/``deck_tags`` params already threaded
+       through for the anti-hate elements — no new "my-side" parameters needed.
+
+       GATING: ``opponent_linchpins=None`` (the default) → every impact multiplier is 1.0 →
+       element weights are BYTE-IDENTICAL to pre-impact (mirrors the ``matchup_pressure is None``
+       precedent above).  ``recommend_sideboard`` only supplies a non-None dict when it found
+       real linchpin data (derived from corpus composition OR a curated override) for at least
+       one field archetype — a field of archetypes with no in-regime decks and no curated
+       overrides degrades to the same None gate.
+
+  (B4) The per-card-copy utility curve ``_U_REDUNDANCY_DEFAULT`` (consumed by ``_u_redundancy``
+       / ``_redundancy_penalty``, unchanged otherwise) is now DERIVED from the
+       ``advisory.impact.draw_probability`` hypergeometric marginal (``P(draw≥1 in a Bo3)``)
+       instead of the generic curated ``(1.0, 0.55, 0.25, 0.10)`` constants — the Nth copy's
+       utility is ``(draw_prob(N) − draw_prob(N−1))`` normalized so the 1st copy stays exactly
+       1.0 (preserving ``_redundancy_penalty``'s ``penalty(1) == 0`` contract).  This is still a
+       precomputed tuple of floats (LP-representable exactly like the curve it replaces); the
+       ILP's ``z_c^k`` incremental-copy linearization and the greedy per-copy subtraction are
+       untouched.  Still fully gated by ``redundancy_strength``/``tau`` == 0.0 → no-op.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass, field as dc_field, replace as _dc_replace
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import duckdb
+from scipy.stats import beta as _beta_dist
 
 import re
 
 from legacy_engine.advisory.field import FieldDistribution
+from legacy_engine.analytics.matchup import lookup_head_to_head
+from legacy_engine.advisory.impact import ImpactBreakdown
+from legacy_engine.advisory.impact import draw_probability as _draw_probability
+from legacy_engine.advisory.impact import impact as _compute_impact
+from legacy_engine.advisory.linchpins import Linchpin, linchpins_for_archetype
 from legacy_engine.advisory.whattoplay import (
     field_vulnerability_tags,
     vulnerability_tags_for_deck,
     _load_deck_cards,
 )
 from legacy_engine.colors import compute_deck_colors
+from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
+
+# Reused verbatim from `advise positioning`'s Dirichlet field-share uncertainty model
+# (SSOT — see Unit B5's `_dirichlet_share_lower_bound` docstring below for why sideboard.py
+# needs only the independent-marginal shortcut, not positioning's full joint-MC machinery).
+# `compare.py` already establishes the precedent of importing these two private constants
+# directly from `positioning` rather than re-declaring them.
+from legacy_engine.advisory.positioning import _DEFAULT_RISK_QUANTILE, _DIRICHLET_GAMMA
 
 # Alternative-cost ("pitch") spell detection — mirrors card_tags._FREE_SPELL_RE.
 # Force of Will (CMC 5), Force of Negation (CMC 3), Daze (CMC 2), etc. are playable
@@ -309,6 +365,88 @@ def _field_matchup_values(
 
 
 # ---------------------------------------------------------------------------
+# Per-opponent linchpins + composition (feature-sb-field-weighted-scorer-wiring, Unit B3)
+# ---------------------------------------------------------------------------
+# Objective-search-split: the DB work (resolving an archetype's in-regime maindeck
+# composition to feed advisory.linchpins.linchpins_for_archetype) happens HERE, once per
+# archetype, so _build_coverage_model's impact-modulated weight computation stays a pure,
+# DB-free function fed a precomputed dict — exactly like matchup_pressure / empirical_pool /
+# card_swing_overrides above.
+
+def _archetype_linchpins_and_cards(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> "tuple[list[Linchpin], dict[str, int]]":
+    """Resolve one archetype's linchpins + known maindeck composition from the corpus.
+
+    ``card_frequencies`` (board="main") supplies inclusion_pct + modal_count for the
+    archetype's real 60; ``_load_deck_cards`` resolves those names to ``Card`` objects so
+    ``linchpins_for_archetype`` (pure — see linchpins.py) can classify roles/derive centrality.
+
+    ``linchpins_for_archetype`` is called even when the corpus has NO in-regime decks for this
+    archetype (empty ``cards_with_counts``/``inclusion_pct``) — it always merges in curated
+    ``LINCHPIN_OVERRIDES`` regardless of derived candidates, so a well-known archetype (e.g.
+    Painter) still yields its curated linchpins against a thin or synthetic corpus.
+
+    Returns ``([], {})`` — an honest "no data", not a crash — on any DB/lookup failure, or
+    when the archetype has neither corpus composition nor a curated override.  The second
+    element (``dict[name, modal_count]``) doubles as the ``opp_cards`` composition signal for
+    ``impact.castability_factor``'s ``cast_requires`` gating (e.g. "does this opponent run a
+    Plains").
+    """
+    cards_with_counts: "list[tuple[Card, int]]" = []
+    inclusion_pct: "dict[str, float]" = {}
+    modal_counts: "dict[str, int]" = {}
+    try:
+        from legacy_engine.generation.consensus import card_frequencies
+        freqs = card_frequencies(con, archetype, board="main", since=since, until=until)
+        inclusion_pct = {cf.name: cf.inclusion_pct for cf in freqs}
+        modal_counts = {cf.name: cf.modal_count for cf in freqs}
+        if modal_counts:
+            cards_with_counts = _load_deck_cards(con, modal_counts)
+    except Exception as exc:
+        log.debug(
+            "_archetype_linchpins_and_cards: composition lookup failed for %r: %s", archetype, exc
+        )
+
+    try:
+        linchpins = linchpins_for_archetype(archetype, cards_with_counts, inclusion_pct)
+    except Exception as exc:
+        log.debug(
+            "_archetype_linchpins_and_cards: linchpins_for_archetype failed for %r: %s",
+            archetype, exc,
+        )
+        linchpins = []
+
+    return linchpins, modal_counts
+
+
+def _field_opponent_linchpins(
+    con: duckdb.DuckDBPyConnection,
+    field: FieldDistribution,
+    *,
+    since: str | None = None,
+    until: str | None = None,
+) -> "tuple[dict[str, list[Linchpin]], dict[str, dict[str, int]]]":
+    """``_archetype_linchpins_and_cards`` for every archetype in the field.
+
+    Mirrors ``field_vulnerability_tags``'s one-query-per-archetype precedent.  Returns
+    ``(linchpins_by_archetype, cards_by_archetype)`` — both keyed by every archetype in
+    ``field.shares`` (values are ``[]``/``{}`` for archetypes with no data, never a missing key).
+    """
+    linchpins_by_arch: "dict[str, list[Linchpin]]" = {}
+    cards_by_arch: "dict[str, dict[str, int]]" = {}
+    for archetype in field.shares:
+        lps, cards = _archetype_linchpins_and_cards(con, archetype, since=since, until=until)
+        linchpins_by_arch[archetype] = lps
+        cards_by_arch[archetype] = cards
+    return linchpins_by_arch, cards_by_arch
+
+
+# ---------------------------------------------------------------------------
 # Saturating coverage model  g(n) = 1 − (1−p)^n
 # ---------------------------------------------------------------------------
 
@@ -328,7 +466,9 @@ def _marginal_g(n: int) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value)
+# Per-card-copy redundancy penalty (epic-sideboard-core-and-hedge-concave-value;
+# curve replaced by the draw-probability marginal in feature-sb-field-weighted-scorer-wiring,
+# Unit B4)
 # ---------------------------------------------------------------------------
 # The per-element saturating g(n) above already diminishes the value of multiple
 # *answers* to one element (the access-probability term). What it does NOT capture is
@@ -340,7 +480,32 @@ def _marginal_g(n: int) -> float:
 # objective. Gated-additive: strength=0.0 → penalty(k)=0 ∀k → byte-identical baseline.
 
 # Utility weight of the k-th drawn copy (k=1,2,3,4); k>len clamps to the last entry.
-_U_REDUNDANCY_DEFAULT: tuple[float, ...] = (1.0, 0.55, 0.25, 0.10)
+#
+# Unit B4: derived from advisory.impact.draw_probability's hypergeometric marginal —
+# P(draw>=1 copy in a Bo3) — instead of a hand-curated (1.0, 0.55, 0.25, 0.10) constant.
+# u(k) = (draw_prob(k) - draw_prob(k-1)) / (draw_prob(1) - draw_prob(0)), normalized so
+# u(1) == 1.0 exactly (preserving _redundancy_penalty's "penalty(1) == 0" contract). The
+# hypergeometric marginal is concave/decreasing over 1..4 copies by construction (see
+# draw_probability's docstring) — same SHAPE as the constant it replaces, now grounded in
+# the mechanics-based draw model instead of a curated guess. Still a plain tuple of floats
+# precomputed once at import time, so it stays a drop-in, LP-representable replacement:
+# _u_redundancy / _redundancy_penalty / the ILP's z_c^k linearization are all unchanged.
+def _draw_prob_redundancy_curve(max_k: int = 4) -> tuple[float, ...]:
+    """Build the B4 per-copy utility curve from the draw-probability marginal.
+
+    Degrades to an all-1.0 curve (no shaping) in the defensive case ``draw_probability(1)``
+    is somehow 0 — cannot happen with the module's own default constants, but keeps this a
+    total function rather than one that could divide by zero if the underlying constants are
+    ever retuned to something degenerate.
+    """
+    marginals = [_draw_probability(k) - _draw_probability(k - 1) for k in range(1, max_k + 1)]
+    m1 = marginals[0]
+    if m1 <= 0.0:
+        return tuple(1.0 for _ in range(max_k))
+    return tuple(m / m1 for m in marginals)
+
+
+_U_REDUNDANCY_DEFAULT: tuple[float, ...] = _draw_prob_redundancy_curve()
 # Penalty scale in coverage-value units. Tunable; default chosen so the 2nd copy of a
 # card competes with covering a fresh element rather than stacking. The natural-budget
 # τ stop (dedicated-core feature) is the real budget control; this only *shapes* copies.
@@ -581,6 +746,18 @@ class HoserCard:
                  castable regardless of deck color identity (e.g. Phyrexian mana,
                  free-activation abilities).  When True the color pre-filter is
                  bypassed so all decks can receive the card as a candidate.
+    ``symmetry``: ``"asymmetric"`` (default; affects only the opponent/their stuff) or
+                 ``"symmetric"`` (affects the controller too — e.g. Grafdigger's Cage
+                 stops ALL players casting from graveyard/library, including a
+                 graveyard-recursion deck's own plan).  Consumed by Feature B's
+                 self-hosing check; validated-but-inert in this feature.
+    ``cast_requires``: a structured cast-condition token, or ``None`` when the card has
+                 no conditional-cast requirement.  Known tokens: ``None``,
+                 ``"opp_controls_plains"`` (e.g. Massacre's free-cast clause).
+    ``functional_group``: identical-effect group key, or ``None``.  Cards sharing a
+                 ``functional_group`` (Hydroblast ≡ Blue Elemental Blast, both
+                 ``"red-blast"``) are de-duplicated to one coverage contribution in
+                 ``_build_coverage_model`` — they don't stack as distinct coverage.
     """
 
     name: str
@@ -589,6 +766,9 @@ class HoserCard:
     max_copies: int
     swing: float
     castable_any_color: bool = False
+    symmetry: str = "asymmetric"
+    cast_requires: "str | None" = None
+    functional_group: "str | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +785,14 @@ _SWING_ALIAS: dict[str, float] = {
 
 _VALID_COLORS = frozenset("WUBRG")
 
+# HoserCard.symmetry: valid values (Unit 2, feature-sb-effect-tagging-model).
+_VALID_SYMMETRY = frozenset({"asymmetric", "symmetric"})
+
+# HoserCard.cast_requires: known structured cast-condition tokens.  "opp_controls_plains"
+# is Massacre's free-cast clause; Massacre itself is empirically promoted (not a curated
+# catalog entry), so no shipped entry uses this token yet — the loader must still accept it.
+_VALID_CAST_REQUIRES = frozenset({"opp_controls_plains"})
+
 
 def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
     """Load and validate a hoser catalog from a JSON data file.
@@ -620,10 +808,14 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
     Optional:
       ``castable_any_color`` (bool, default False)
+      ``symmetry``           (str, one of "asymmetric"/"symmetric"; default "asymmetric")
+      ``cast_requires``      (str or null; one of the known tokens; default null)
+      ``functional_group``   (str or null; identical-effect group key; default null)
       ``_comment``           (str, ignored)
 
     Raises ``ValueError`` on schema violations (bad swing alias, empty attacks,
-    invalid colors, max_copies < 1) or ``FileNotFoundError`` when the path is absent.
+    invalid colors, max_copies < 1, unrecognized ``symmetry``/``cast_requires``)
+    or ``FileNotFoundError`` when the path is absent.
     Duplicate names raise ``ValueError`` so catalog integrity is enforced at load time.
 
     This is a module-level loader called once at import; the result is cached as
@@ -695,6 +887,26 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
         castable_any_color = bool(entry.get("castable_any_color", False))
 
+        symmetry = entry.get("symmetry", "asymmetric")
+        if symmetry not in _VALID_SYMMETRY:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'symmetry' {symmetry!r} must be one of "
+                f"{sorted(_VALID_SYMMETRY)}"
+            )
+
+        cast_requires = entry.get("cast_requires")
+        if cast_requires is not None and cast_requires not in _VALID_CAST_REQUIRES:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'cast_requires' {cast_requires!r} must be "
+                f"null or one of {sorted(_VALID_CAST_REQUIRES)}"
+            )
+
+        functional_group_raw = entry.get("functional_group")
+        if functional_group_raw is not None and not isinstance(functional_group_raw, str):
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'functional_group' must be a string or null"
+            )
+
         catalog[name] = HoserCard(
             name=name,
             attacks=attacks,
@@ -702,6 +914,9 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
             max_copies=max_copies,
             swing=swing,
             castable_any_color=castable_any_color,
+            symmetry=symmetry,
+            cast_requires=cast_requires,
+            functional_group=functional_group_raw,
         )
 
     return catalog
@@ -921,6 +1136,13 @@ _EMPIRICAL_PROMOTE_MIN_ADOPTION: float = _EMPIRICAL_POOL_MIN_ADOPTION
 # Conservative single tag so the card participates but does not over-capture.
 _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 
+# Color-blast oracle-text detection (feature-sb-effect-tagging-model, Unit 5).
+# Matches the "Choose one — Counter target <color> spell; or Destroy target <color>
+# permanent." template shared by Pyroblast/Hydroblast/Blue Elemental Blast/Red Elemental
+# Blast, plus the "if it's <color>" phrasing Pyroblast/Hydroblast themselves use.
+_RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
+_RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
+
 
 def _derive_attacks_for_promoted(
     card_name: str,
@@ -933,15 +1155,17 @@ def _derive_attacks_for_promoted(
 
     1. Counter magic:  "counter target" / "counter that spell"
        → {combo, storm-reliant}   (answers the most common free-spell targets)
-    2. Graveyard exile: "exile" AND "graveyard" present
-       → {graveyard-reliant}
-    3. Removal: "destroy target" / "exile target creature" / "exile target attacking"
+    2. Color blast: "target red/blue spell" / "target red/blue permanent" / "if it's red/blue"
+       → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
+    3. Graveyard exile: "exile" AND "graveyard" present
+       → {graveyard-recursion}
+    4. Removal: "destroy target" / "exile target creature" / "exile target attacking"
        → {creature-based}
-    4. staple_role == "free_interaction" (card_tags lookup)
+    5. staple_role == "free_interaction" (card_tags lookup)
        → {combo, storm-reliant}   (Force of Negation, Daze, etc.)
-    5. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
+    6. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
        → {greedy-manabase}        (answers Blood Moon, Back to Basics, Chalice)
-    6. Fallback: {combo}  (conservative — labeled in warning by caller).
+    7. Fallback: {combo}  (conservative — labeled in warning by caller).
 
     Returns a frozenset of tag strings.  Never returns the empty frozenset so
     ``HoserCard.attacks`` is always non-empty.
@@ -955,23 +1179,34 @@ def _derive_attacks_for_promoted(
     if "counter target" in text_lower or "counter that spell" in text_lower:
         tags.update({"combo", "storm-reliant"})
 
-    # 2. Graveyard exile
-    if "graveyard" in text_lower and "exile" in text_lower:
-        tags.add("graveyard-reliant")
+    # 2. Color blast — checked before the generic "destroy target" removal rule below,
+    # since blasts phrase permanent-destruction as "destroy target red/blue permanent",
+    # which would otherwise false-positive into creature-based.
+    is_color_blast = False
+    if _RE_BLAST_RED.search(text_lower):
+        tags.add("plays-red")
+        is_color_blast = True
+    if _RE_BLAST_BLUE.search(text_lower):
+        tags.add("plays-blue")
+        is_color_blast = True
 
-    # 3. Creature removal
-    if (
+    # 3. Graveyard exile
+    if "graveyard" in text_lower and "exile" in text_lower:
+        tags.add("graveyard-recursion")
+
+    # 4. Creature removal (skip when already attributed as a color blast — see #2)
+    if not is_color_blast and (
         "destroy target" in text_lower
         or "exile target creature" in text_lower
         or "exile target attacking" in text_lower
     ):
         tags.add("creature-based")
 
-    # 4. staple_role == free_interaction (Force of Negation, Daze, etc.)
+    # 5. staple_role == free_interaction (Force of Negation, Daze, etc.)
     if staple_role(card_name) == "free_interaction":
         tags.update({"combo", "storm-reliant"})
 
-    # 5. Artifact/enchantment removal → answers lock pieces / mana hosers
+    # 6. Artifact/enchantment removal → answers lock pieces / mana hosers
     if (
         "destroy target artifact" in text_lower
         or "destroy target enchantment" in text_lower
@@ -1082,6 +1317,89 @@ def _build_promoted_candidates(
 
 
 # ---------------------------------------------------------------------------
+# Unit C1 (feature-sb-maindeck-aware-coverage, story …-discount): maindeck-answer
+# coverage detector.
+# ---------------------------------------------------------------------------
+
+# Max fraction of an element's weight a fully-maindeck-covered tag loses (never fully
+# zeroes an axis — a maindeck answer is rarely a perfect substitute for a dedicated SB
+# slot: it may be a single copy already in play, timing-constrained, or matched up
+# against a different specific threat than the SB slot would cover).
+_MAINDECK_DISCOUNT: float = 0.6
+
+# Copies of maindeck answers at which a tag's coverage saturates to 1.0. 4 mirrors the
+# Legacy 4-of ceiling — a deck answering an axis with its full playset of copies is
+# treated as maximally (but not more than maximally) covering that axis.
+_MAINDECK_SATURATION: int = 4
+
+
+def _maindeck_answer_coverage(
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+    *,
+    catalog: "dict[str, HoserCard] | None" = None,
+) -> "dict[str, float]":
+    """Saturating [0,1] per-tag coverage the MAINDECK already provides.
+
+    For each maindeck card (name -> copy count), determine which vulnerability tags it
+    answers and accumulate a copy-weighted coverage score per tag, saturating at
+    ``_MAINDECK_SATURATION`` copies (a full playset maxes a tag's coverage at 1.0; more
+    copies cannot push it past 1.0).
+
+    Attribution, in priority order:
+      1. Catalog lookup — when the maindeck card is itself a curated ``HOSER_CATALOG``
+         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"greedy-manabase"}``),
+         its hand-curated ``attacks`` are authoritative. This is the common case for the
+         motivating bug (maindeck utility lands/interaction that double as catalog hosers).
+      2. Oracle-text derivation — for maindeck cards NOT in the catalog, reuse
+         ``_derive_attacks_for_promoted`` (the same oracle->attacks heuristic
+         ``_build_promoted_candidates`` already uses for empirical SB promotions) against
+         the card's resolved ``oracle_text``/``type_line``. Cards for which the heuristic
+         only reaches its conservative ``_FALLBACK_ATTACKS`` (i.e. no concrete signal
+         matched) are treated as answering NOTHING — crediting the fallback tag here would
+         indiscriminately discount that tag for every maindeck (60 cards, most of which
+         answer nothing), which is not the intent.
+
+    ``get_card``: name -> resolved ``Card`` (or ``None`` if unresolved). Injected so this
+    function stays DB-free and pure (objective-search-split): the caller resolves cards
+    ONCE (``_load_deck_cards``) and passes a plain dict-backed lookup; this loop is then
+    unit-testable with hand-built ``get_card`` callables, no DB required.
+
+    The ``"_hate"`` pseudo-attack (counter-hoser marker) is not a real vulnerability tag
+    and is excluded from the returned coverage, mirroring how ``_build_coverage_model``
+    already excludes ``_hate:`` pseudo-elements from other multiplier passes.
+    """
+    if catalog is None:
+        catalog = HOSER_CATALOG
+
+    raw_copies: dict[str, float] = {}  # tag -> Σ copies of maindeck cards answering it
+    for name, count in main_cards.items():
+        if count <= 0:
+            continue
+
+        hoser = catalog.get(name)
+        if hoser is not None:
+            attacks = hoser.attacks
+        else:
+            card = get_card(name)
+            if card is None:
+                continue
+            attacks = _derive_attacks_for_promoted(name, card.oracle_text, card.type_line)
+            if attacks == _FALLBACK_ATTACKS:
+                continue  # no concrete signal — don't credit the conservative fallback
+
+        for tag in attacks:
+            if tag == "_hate":
+                continue
+            raw_copies[tag] = raw_copies.get(tag, 0.0) + count
+
+    return {
+        tag: min(1.0, copies / _MAINDECK_SATURATION)
+        for tag, copies in raw_copies.items()
+    }
+
+
+# ---------------------------------------------------------------------------
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
@@ -1113,6 +1431,9 @@ def _build_coverage_model(
     empirical_pool: "frozenset[str] | None" = None,
     promoted_candidates: "dict[str, HoserCard] | None" = None,
     card_swing_overrides: "dict[str, float] | None" = None,
+    opponent_linchpins: "dict[str, list[Linchpin]] | None" = None,
+    opponent_cards: "dict[str, dict[str, int]] | None" = None,
+    maindeck_coverage: "dict[str, float] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -1161,6 +1482,36 @@ def _build_coverage_model(
     when computing ``best_swing_for_tag``.  Where data is thin (not in overrides), the
     catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
     → no-op (byte-identical to pre-feature for callers without card-value data).
+
+    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3):
+    When ``opponent_linchpins`` is not None, each (archetype, tag) element's weight is
+    additionally multiplied by ``impact(best_hoser_for_tag, archetype, ...).score()`` — the
+    decomposed centrality × symmetry × castability × draw_prob score (see ``advisory.impact``)
+    of the SAME hoser Step 1 already selected as the tag's best-swing answer, evaluated
+    specifically against that opponent archetype's linchpins (``opponent_linchpins[archetype]``,
+    defaulting to ``[]``) and this deck's own colors/vulnerability-tags (``deck_colors``/
+    ``deck_tags`` — reused as-is; no separate "my-side" parameters needed).  ``opponent_cards``
+    optionally supplies each opponent's known maindeck composition for the ``cast_requires``
+    castability gate (e.g. Massacre's "opponent controls a Plains" clause).  Uses ``copies=1``
+    (the value of the card's first copy being present) — the copy-count taper itself is Unit
+    B4's job (the ILP/greedy per-copy marginal), so reapplying ``draw_probability`` here at
+    ``max_copies`` would double-count it.  Gated-additive: ``opponent_linchpins=None`` (the
+    default) → every impact multiplier is 1.0 → element weights are BYTE-IDENTICAL to
+    pre-impact (mirrors the ``matchup_pressure is None`` no-op above).
+
+    Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage, Unit C2):
+    When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
+    (archetype, tag) element's weight is additionally multiplied by
+    ``(1 - _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0))`` — an axis the maindeck
+    already answers (e.g. 4 maindeck Wasteland covering "greedy-manabase") should not also
+    claim a full-weight dedicated SB slot for the same axis. ``_hate:`` pseudo-elements are
+    EXEMPT (mirrors the ``"|" not in key`` skip in the ``matchup_pressure`` pass above) —
+    they represent field-wide interaction pressure against the DECK's own vulnerabilities,
+    not an archetype-vs-tag coverage axis a maindeck card could substitute for. A
+    ``// maindeck-aware: ...`` audit line is appended to ``warnings`` for each tag actually
+    discounted. Gated-additive: ``maindeck_coverage=None`` or ``{}`` → no-op → element
+    weights are BYTE-IDENTICAL to pre-discount (mirrors the ``opponent_linchpins is None``
+    no-op above).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -1174,7 +1525,12 @@ def _build_coverage_model(
     # Data-informed swing overrides (feature-empirical-sideboard-swings): when provided,
     # a card's override swing (presence-correlational proxy, gate-cleared) replaces its
     # catalog swing in this computation.  Thin-data cards retain the catalog constant.
+    # best_hoser_for_tag (Unit B3): the specific hoser object achieving best_swing_for_tag[tag],
+    # tracked alongside so the impact multiplier in Step 2 can be computed for "the same best
+    # hoser for the tag the code already selects" — best_swing_for_tag's VALUES are unaffected
+    # (still the strict running max), only this extra hoser-identity bookkeeping is new.
     best_swing_for_tag: dict[str, float] = {}
+    best_hoser_for_tag: dict[str, HoserCard] = {}
     _all_hosers_for_swing = list(catalog.values())
     if promoted_candidates:
         _all_hosers_for_swing.extend(promoted_candidates.values())
@@ -1188,7 +1544,9 @@ def _build_coverage_model(
                 if card_swing_overrides and hoser.name in card_swing_overrides
                 else hoser.swing
             )
-            best_swing_for_tag[tag] = max(best_swing_for_tag.get(tag, 0.0), effective_swing)
+            if effective_swing > best_swing_for_tag.get(tag, 0.0):
+                best_swing_for_tag[tag] = effective_swing
+                best_hoser_for_tag[tag] = hoser
 
     # --- Step 2: Build (archetype, tag) element weights ---
     # Each element is keyed as "<archetype>|<tag>" so a soft hoser covering only
@@ -1205,7 +1563,34 @@ def _build_coverage_model(
             swing = best_swing_for_tag.get(tag, 0.0)
             if swing > 0.0:
                 key = f"{archetype}|{tag}"
-                element_weight[key] = share * swing
+                weight = share * swing
+
+                # Impact modulation (Unit B3): scale by the decomposed impact score of the
+                # tag's best-swing hoser against THIS specific opponent archetype. A
+                # symmetric self-hosing hoser or one this deck can't cast for this matchup
+                # shouldn't carry full weight just because it's the theoretical best swing.
+                # copies=1: the taper across MULTIPLE copies is Unit B4's job (the ILP/greedy
+                # per-copy marginal) — reusing draw_probability here at max_copies would
+                # double-count that taper.
+                if opponent_linchpins is not None:
+                    best_hoser = best_hoser_for_tag.get(tag)
+                    if best_hoser is not None:
+                        opp_lps = opponent_linchpins.get(archetype, [])
+                        opp_cards_for_arch = (
+                            opponent_cards.get(archetype) if opponent_cards else None
+                        )
+                        breakdown = _compute_impact(
+                            best_hoser,
+                            archetype,
+                            opp_linchpins=opp_lps,
+                            my_vulnerability_tags=deck_tags,
+                            my_colors=deck_colors,
+                            copies=1,
+                            opp_cards=opp_cards_for_arch,
+                        )
+                        weight *= breakdown.score()
+
+                element_weight[key] = weight
                 archetype_element_keys.add(key)
                 any_covered = True
         _archetype_tag_keys[archetype] = archetype_element_keys
@@ -1260,6 +1645,34 @@ def _build_coverage_model(
             multiplier = matchup_pressure.get(arch, 1.0)
             if multiplier != 1.0:
                 element_weight[key] = element_weight[key] * multiplier
+
+    # --- Step 3c: Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage,
+    # Unit C2) ---
+    # When maindeck_coverage is not None, discount each (archetype, tag) element's weight
+    # by how much the MAINDECK already answers that tag — stops the solver from double-
+    # counting an axis (e.g. 4 maindeck Wasteland already covering "greedy-manabase" ->
+    # the SB shouldn't also spend a full-weight slot on Ghost Quarter for the same axis).
+    # `_hate:` pseudo-elements are exempt (same "|" not in key skip as Step 3b) — they
+    # model field-wide interactive pressure against the deck's OWN vulnerabilities, not an
+    # archetype coverage axis a maindeck card could substitute for.
+    # When maindeck_coverage is None (or empty), this step is a no-op -> byte-identical.
+    if maindeck_coverage:
+        _discounted_tags: set[str] = set()
+        for key in list(element_weight.keys()):
+            if "|" not in key:
+                continue  # skip anti-hate pseudo-elements
+            tag = key.split("|", 1)[1]
+            coverage = maindeck_coverage.get(tag, 0.0)
+            if coverage <= 0.0:
+                continue
+            discount = _MAINDECK_DISCOUNT * coverage
+            element_weight[key] = element_weight[key] * (1.0 - discount)
+            _discounted_tags.add(tag)
+        for tag in sorted(_discounted_tags):
+            pct = _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0) * 100.0
+            warnings.append(
+                f"// maindeck-aware: discounted {tag} by {pct:.0f}% (deck already answers it)"
+            )
 
     # --- Step 4: Color-prefiltered candidate hosers ---
     candidate_covers: dict[str, frozenset[str]] = {}
@@ -1361,6 +1774,39 @@ def _build_coverage_model(
                     "_build_coverage_model: promoted %r covers no live elements — skipped",
                     card_name,
                 )
+
+    # --- Step 5: functional_group de-dup (feature-sb-effect-tagging-model, Unit 5) ---
+    # Cards sharing a functional_group are mechanically identical effects (Hydroblast ≡
+    # Blue Elemental Blast, both "red-blast") — only the best-swing candidate per group
+    # stays in the candidate universe so they don't stack as distinct coverage.  Ties break
+    # on name for determinism.  Ownership is deliberately NOT a tiebreaker here: the
+    # coverage model must stay collection-blind (byte-identical contract, Unit 2 of
+    # epic-deck-generation-sideboard-maindeck) — ownership is a post-hoc annotation layer.
+    _group_best: dict[str, tuple[float, str]] = {}
+    for name, hoser in candidate_meta.items():
+        group = hoser.functional_group
+        if group is None:
+            continue
+        effective_swing = (
+            card_swing_overrides[name]
+            if card_swing_overrides and name in card_swing_overrides
+            else hoser.swing
+        )
+        current = _group_best.get(group)
+        if current is None or effective_swing > current[0] or (
+            effective_swing == current[0] and name < current[1]
+        ):
+            _group_best[group] = (effective_swing, name)
+
+    for name in list(candidate_meta.keys()):
+        group = candidate_meta[name].functional_group
+        if group is not None and _group_best[group][1] != name:
+            log.debug(
+                "_build_coverage_model: dropping %r — functional_group %r de-dup (kept %r)",
+                name, group, _group_best[group][1],
+            )
+            del candidate_meta[name]
+            del candidate_covers[name]
 
     return CoverageModel(
         element_weight=element_weight,
@@ -1935,7 +2381,7 @@ class ConsideringCard:
     ``covers_elements``: frozenset of element IDs (archetype|tag or _hate:tag) this
                         card covers that are not yet fully saturated by the solution.
     ``label``:          human-readable "why on bubble" string (coverage contribution
-                        and value tier; e.g. "covers graveyard-reliant (Dredge 18%)").
+                        and value tier; e.g. "covers graveyard-recursion (Dredge 18%)").
     ``promoted``:       True when the card was promoted from the empirical pool (not
                         in the hand-curated catalog) — indicates best-effort attribution.
     """
@@ -2080,6 +2526,483 @@ def _considering_label(
 
 
 # ---------------------------------------------------------------------------
+# Unit B5 (feature-sb-field-weighted-scorer-output): explainable per-card breakdown +
+# coverage% diagnostic + Dirichlet field-share uncertainty.
+#
+# SCOPE: this unit is output/explainability/uncertainty-annotation ONLY. It does NOT touch
+# `_build_coverage_model`'s element_weight computation (Units B1-B4, already wired + reviewed
+# on main) — the ILP/greedy objective, and therefore which cards get recommended, is
+# byte-identical before and after this unit. Everything below is computed from the ALREADY-
+# SOLVED `final_cards` and is purely additive to `SideboardPackage`.
+# ---------------------------------------------------------------------------
+
+_BRITTLE_SHARE_SHRINK_RATIO = 0.5
+"""A recommendation's reference matchup is flagged ``brittle`` when the Dirichlet
+lower-quantile (risk-adjusted) share estimate for that archetype falls below this fraction
+of its raw point-estimate share — i.e. the field's own share-uncertainty could plausibly cut
+the matchup's true weight by half or more. This is the concrete, numeric form of "don't
+over-commit a silver bullet to a noisy small-share matchup" (parent feature § commitments):
+a genuinely well-sampled archetype's lower quantile sits close to its point estimate (ratio
+~1.0) regardless of the raw share's size, so this only fires for THIN-count archetypes, not
+merely small ones with plenty of backing data."""
+
+
+def _relevant_field_archetypes(
+    hoser: HoserCard,
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> "frozenset[str]":
+    """Field archetypes this hoser is meaningfully relevant against.
+
+    "Relevant" = the hoser's ``attacks`` tags overlap the archetype's vulnerability tags —
+    the same tag-overlap test ``_build_coverage_model`` uses to decide coverage, but recomputed
+    here directly against ``field``/``archetype_tags`` (already-resolved, DB-free inputs) rather
+    than the model's internal ``_archetype_tag_keys`` bookkeeping, so this helper works for any
+    hoser independent of whether it ended up in the final solution.
+
+    This is the "field coverage" axis from the feature's design input: "the share of the
+    current field a card is meaningfully relevant against, summing field-shares of the
+    archetypes it impacts" (e.g. "Null Rod hits ~26%"). Deliberately independent of
+    ``opponent_linchpins`` — coverage% renders even when impact data (Unit B1-B4's per-opponent
+    linchpin signal) is unavailable, since it needs only tags, not linchpins.
+
+    Counter-hosers (``"_hate"`` in ``hoser.attacks``) never match here — no archetype carries
+    the pseudo-tag ``"_hate"`` — so they correctly report 0% field coverage by this measure;
+    their value is deck-protection, not archetype-targeted relevance, and is out of scope for
+    this diagnostic.
+    """
+    return frozenset(
+        arch
+        for arch, tags in archetype_tags.items()
+        if arch in field.shares and hoser.attacks & tags
+    )
+
+
+def _card_coverage_pct(
+    hoser: HoserCard,
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> float:
+    """Σ field-share of archetypes this one hoser is relevant against (point estimate)."""
+    return sum(
+        field.shares[arch] for arch in _relevant_field_archetypes(hoser, field, archetype_tags)
+    )
+
+
+def _board_coverage_pct(
+    final_cards: "dict[str, int]",
+    candidate_meta: "dict[str, HoserCard]",
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+) -> float:
+    """Σ field-share of archetypes the WHOLE recommended board is relevant against.
+
+    Union across all recommended cards, not a sum of per-card coverage — an archetype
+    double-covered by two cards (e.g. two graveyard hosers vs Reanimator) contributes its
+    share once, not twice. This is a diagnostic headline number for the package as a whole,
+    the board-level analogue of ``_card_coverage_pct``.
+    """
+    relevant: "set[str]" = set()
+    for card_name in final_cards:
+        hoser = candidate_meta.get(card_name)
+        if hoser is None:
+            continue
+        relevant |= _relevant_field_archetypes(hoser, field, archetype_tags)
+    return sum(field.shares.get(arch, 0.0) for arch in relevant)
+
+
+def _dirichlet_share_lower_bound(
+    field: FieldDistribution,
+    *,
+    quantile: float = _DEFAULT_RISK_QUANTILE,
+    gamma: float = _DIRICHLET_GAMMA,
+) -> "dict[str, float] | None":
+    """Risk-adjusted (lower-quantile) field share per archetype.
+
+    Reuses `advise positioning`'s Dirichlet field-share uncertainty model verbatim
+    (``positioning._DIRICHLET_GAMMA`` for the Jeffreys pseudo-count, and the same
+    ``_DEFAULT_RISK_QUANTILE`` positioning's own ``rank_decks`` uses to risk-adjust away from
+    thin-data spikes) rather than reinventing a shrinkage scheme for this feature.
+
+    Positioning treats the field share vector as ``w ~ Dirichlet(counts + gamma)`` and draws
+    it jointly via Monte Carlo (``rng.dirichlet``) because it needs cross-archetype
+    CORRELATION to produce an honest P(best) across competing decks (``_sample_S``). Nothing
+    here needs that correlation — this function only needs a conservative bound on ONE
+    archetype's share in isolation, so it uses the standard Dirichlet identity that each
+    component's MARGINAL distribution is exactly ``Beta(alpha_i, alpha_0 - alpha_i)`` where
+    ``alpha_i = counts[i] + gamma`` and ``alpha_0 = Σ alpha``. The lower quantile is then read
+    off in closed form via ``scipy.stats.beta.ppf`` — deterministic and exact, no RNG/seed
+    needed, and cheap enough to run on every ``recommend_sideboard`` call.
+
+    A thin-count archetype's Beta marginal is wide, so its lower quantile sits well below its
+    point share; a well-sampled archetype's marginal is tight, so its lower quantile sits close
+    to its point share. This is the numeric form of "don't over-commit a silver bullet to a
+    noisy small-share matchup" — see ``_BRITTLE_SHARE_SHRINK_RATIO``.
+
+    Returns ``None`` when ``field.counts`` is ``None`` — a share-only custom field (built via
+    ``build_custom_field`` without ``counts``) has no backing sample to build a posterior over,
+    mirroring positioning's own "counts=None -> fixed point shares, no share-variance"
+    contract. Callers should fall back to treating every share as fully-trusted (no shrink, no
+    confidence gating) in that case.
+    """
+    if field.counts is None:
+        return None
+
+    archetypes = list(field.shares)
+    if not archetypes:
+        return {}
+
+    alphas = {arch: field.counts.get(arch, 0) + gamma for arch in archetypes}
+    alpha_total = sum(alphas.values())
+
+    bounds: "dict[str, float]" = {}
+    for arch in archetypes:
+        alpha_i = alphas[arch]
+        beta_i = alpha_total - alpha_i
+        if beta_i <= 0:
+            # Degenerate (single-archetype field): the Beta marginal collapses to a point
+            # mass at 1.0 — no meaningful "lower bound" below the point share itself.
+            bounds[arch] = field.shares[arch]
+        else:
+            bounds[arch] = float(_beta_dist.ppf(quantile, alpha_i, beta_i))
+    return bounds
+
+
+@dataclass(frozen=True)
+class CardImpactAnnotation:
+    """Per-recommended-card explainability + honest-uncertainty annotation (Unit B5).
+
+    ``breakdown``: the ``ImpactBreakdown`` (centrality/symmetry/castability/draw_prob) computed
+        for this card against ``reference_archetype`` at its ACTUAL recommended copy count —
+        so the pilot can audit exactly why the card scored the way it did, factor by factor.
+    ``reference_archetype``: the highest-field-share opponent archetype this card's ``attacks``
+        tags actually address. Impact is inherently per-(card, opponent) — never a flat score
+        (see ``advisory.impact`` module docstring) — so one concrete anchor matchup is chosen
+        rather than averaging across unrelated archetypes into a meaningless composite. The
+        highest-share relevant archetype is the most consequential single matchup to audit.
+    ``reference_share``: that archetype's point-estimate field share (for display context).
+    ``confidence``: ``tier_for_sample(field.counts[reference_archetype])`` — ``None`` when the
+        field carries no backing counts at all (share-only custom field; honestly "no data" is
+        distinct from a graded tier, never silently defaulted to a tier).
+    ``brittle``: True when the Dirichlet lower-quantile share estimate for
+        ``reference_archetype`` falls below ``_BRITTLE_SHARE_SHRINK_RATIO`` of its point share —
+        this card's coverage leans on a thin-count matchup whose true weight the field's own
+        uncertainty could materially cut. False (never fabricated True) when ``field.counts``
+        is unavailable — the flag requires backing counts to compute honestly.
+    """
+
+    breakdown: "ImpactBreakdown"
+    reference_archetype: str
+    reference_share: float
+    confidence: "ConfidenceLevel | None"
+    brittle: bool
+
+
+def _build_impact_annotations(
+    final_cards: "dict[str, int]",
+    candidate_meta: "dict[str, HoserCard]",
+    field: FieldDistribution,
+    archetype_tags: "dict[str, frozenset[str]]",
+    opponent_linchpins: "dict[str, list[Linchpin]] | None",
+    opponent_cards: "dict[str, dict[str, int]] | None",
+    deck_colors: "frozenset[str]",
+    deck_tags: "frozenset[str]",
+) -> "dict[str, CardImpactAnnotation]":
+    """Build the per-card ``CardImpactAnnotation`` map for the FINAL recommended cards.
+
+    Gated on ``opponent_linchpins is not None`` — the same gate ``_build_coverage_model``
+    (Unit B3) already uses to decide whether real per-opponent linchpin data was found for
+    this field. When it's None, no per-card breakdown is fabricated: the no-impact-data path
+    returns ``{}`` (nothing to render), consistent with the honest-degrade convention of never
+    showing a number that wasn't actually computed from data.
+
+    Counter-hosers (``"_hate"`` in ``hoser.attacks``) and cards with zero relevant field
+    archetypes are skipped — impact is defined per-(card, opponent), and neither has a single
+    coherent opponent to anchor a breakdown to.
+
+    Uses each card's ACTUAL recommended copy count (not a fixed ``copies=1`` like Unit B3's
+    element-weight computation) — this is a display-only recomputation, so it can afford to
+    show the more informative, copy-count-accurate draw probability without affecting the
+    (already-solved, unchanged) objective.
+    """
+    if opponent_linchpins is None:
+        return {}
+
+    conservative_shares = _dirichlet_share_lower_bound(field)
+
+    annotations: "dict[str, CardImpactAnnotation]" = {}
+    for card_name, copies in final_cards.items():
+        hoser = candidate_meta.get(card_name)
+        if hoser is None or "_hate" in hoser.attacks:
+            continue
+
+        relevant = _relevant_field_archetypes(hoser, field, archetype_tags)
+        if not relevant:
+            continue
+
+        reference_archetype = max(relevant, key=lambda arch: field.shares.get(arch, 0.0))
+        reference_share = field.shares.get(reference_archetype, 0.0)
+
+        opp_lps = opponent_linchpins.get(reference_archetype, [])
+        opp_cards_for_arch = (
+            opponent_cards.get(reference_archetype) if opponent_cards else None
+        )
+        breakdown = _compute_impact(
+            hoser,
+            reference_archetype,
+            opp_linchpins=opp_lps,
+            my_vulnerability_tags=deck_tags,
+            my_colors=deck_colors,
+            copies=copies,
+            opp_cards=opp_cards_for_arch,
+        )
+
+        confidence: "ConfidenceLevel | None" = None
+        brittle = False
+        if field.counts is not None:
+            confidence = tier_for_sample(field.counts.get(reference_archetype, 0))
+        if (
+            conservative_shares is not None
+            and reference_share > 0.0
+            and conservative_shares.get(reference_archetype, 0.0) / reference_share
+            < _BRITTLE_SHARE_SHRINK_RATIO
+        ):
+            brittle = True
+
+        annotations[card_name] = CardImpactAnnotation(
+            breakdown=breakdown,
+            reference_archetype=reference_archetype,
+            reference_share=reference_share,
+            confidence=confidence,
+            brittle=brittle,
+        )
+    return annotations
+
+
+# ---------------------------------------------------------------------------
+# Units D1+D2: Slot-ROI table + punt detection (feature-sb-slot-roi-punt)
+# ---------------------------------------------------------------------------
+# ADDITIVE decision-support layer on top of the already-solved coverage model + field's
+# matchup matrix. Answers "is dedicating sideboard slots to matchup X worth it, or would
+# those slots buy more expected wins moved elsewhere?" — a slot-ALLOCATION question above
+# per-card scoring. Does NOT touch card selection: `_slot_roi_table` is a pure function of
+# already-resolved inputs (field, matchup matrix, coverage model) and never mutates or
+# re-derives `final_cards`.
+#
+# max_equity_gain deliberately REUSES the coverage model's own concave per-copy shaping
+# (`_u_redundancy`, Unit B4's draw-probability-derived curve) rather than a fresh curve, so
+# this layer's ROI numbers are consistent with what the solver can actually buy — the risk
+# called out in the parent feature's "Risks" section (a divergent curve would misinform).
+
+# Number of dedicated copies the realistic-ceiling projection sums over. Matches the length
+# of `_U_REDUNDANCY_DEFAULT` (copies beyond it clamp to the curve's last, near-zero entry via
+# `_u_redundancy`, so summing further would add negligible value anyway).
+_MAX_DEDICATED_SLOTS: int = len(_U_REDUNDANCY_DEFAULT)
+
+# Hard ceiling on any single matchup's projected max_equity_gain — mirrors
+# `_EMPIRICAL_SWING_CAP`'s role elsewhere as a sanity bound against an unrealistic swing
+# estimate dominating the advice (e.g. a single high-swing hoser stacked with a large field
+# share should not imply an implausible double-digit equity swing).
+_MAX_REALISTIC_EQUITY_GAIN: float = 0.35
+
+# Reallocation-punt margin (Unit D2, condition b). A matchup's first-slot ROI must fall
+# BELOW this fraction of the best viable (crosses_half) alternative's ROI elsewhere in the
+# field before it is flagged for reallocation. A literal "not strictly the top-ranked
+# matchup" test would flag every matchup but the single best one, which is not useful
+# decision support (real boards legitimately hedge across several matchups) — this requires
+# a MEANINGFUL gap: the slot here buys less than half the expected match-wins available
+# elsewhere.
+_REALLOCATION_MARGIN: float = 0.5
+
+# Punt reason labels (rendered verbatim by `advise sideboard`'s slot-ROI block).
+_PUNT_REASON_CANT_CROSS_HALF = "max dedication still <50%"
+_PUNT_REASON_BETTER_ROI_ELSEWHERE = "better ROI elsewhere"
+
+# Minimum field share for a matchup to earn a slot-ROI row at all. Mirrors the same 1%
+# noise-floor threshold `recommend_sideboard` already applies when scanning opponents for
+# data-informed swing overrides ("skip negligible-share opponents to avoid noise") — a
+# real field distribution can carry a long tail of hundreds of near-zero-share archetypes
+# (rounding error / one-off registrations), and a slot-allocation decision-support table is
+# not useful, and actively noisy, if it lists all of them.
+_MIN_FIELD_SHARE_FOR_ROI: float = 0.01
+
+
+@dataclass(frozen=True)
+class MatchupROI:
+    """Decision-support record: is dedicating sideboard slots to ``opponent`` worth it?
+
+    ``opponent``: field archetype.
+    ``field_share``: this opponent's share of the expected field.
+    ``base_equity``: matchup cell ``p_shrunk`` (pre-board) vs the deck's own archetype.
+        Honest-degrade: ``0.5`` when the cell is thin (``speculative`` tier) or absent
+        entirely (no matrix, archetype not in the matrix, or an unobserved pair) — see
+        ``confidence``.
+    ``max_equity_gain``: realistic ceiling on how far dedicating slots can move
+        ``base_equity``, reusing the coverage model's own concave swing × ``_u_redundancy``
+        per-copy shaping (Unit B4) so this number is consistent with what the solver can
+        actually buy. Capped at ``_MAX_REALISTIC_EQUITY_GAIN``. ``0.0`` when no catalog
+        candidate answers any tag of this opponent.
+    ``roi_per_slot``: the FIRST dedicated slot's marginal equity gain × ``field_share`` —
+        the expected-match-win unit this table ranks by (comparable across matchups).
+    ``crosses_half``: whether ``base_equity + max_equity_gain >= 0.5`` — whether max
+        realistic dedication is enough to flip this matchup favorable.
+    ``punt``: True when investment doesn't pay (Unit D2). HARD RULE: never True when
+        ``confidence == "speculative"`` — a thin/absent cell is labeled low-confidence
+        instead of used to recommend conceding a matchup on noise.
+    ``confidence``: tier sourced from the matchup cell (``tier_for_sample`` semantics via
+        ``MatchupCell.tier``); ``"speculative"`` for the honest-degrade branch.
+    ``punt_reason``: human-readable reason when ``punt`` is True; ``""`` otherwise.
+    """
+
+    opponent: str
+    field_share: float
+    base_equity: float
+    max_equity_gain: float
+    roi_per_slot: float
+    crosses_half: bool
+    punt: bool
+    confidence: "ConfidenceLevel | None"
+    punt_reason: str = ""
+
+
+def _matchup_max_equity_gain(
+    opponent: str,
+    field_share: float,
+    coverage_model: "CoverageModel",
+) -> "tuple[float, float]":
+    """Realistic ceiling + first-slot marginal gain for dedicating slots vs ``opponent``.
+
+    Recovers the per-copy equity swing the coverage model actually assigned to this
+    opponent's best-covered ``(archetype, tag)`` element: ``element_weight`` there is
+    already ``field_share × swing × impact_multiplier`` (Unit B3), so dividing back out
+    ``field_share`` yields the per-copy equity value the solver itself would realize for
+    the FIRST copy answering this opponent — not a re-derived heuristic. Multiple dedicated
+    copies are shaped by the SAME concave ``_u_redundancy`` curve the solver uses for
+    per-card-copy diminishing returns (Unit B4), summed over ``_MAX_DEDICATED_SLOTS``
+    copies and capped at ``_MAX_REALISTIC_EQUITY_GAIN``.
+
+    Returns ``(max_equity_gain, first_slot_gain)``. Both are ``0.0`` when
+    ``field_share <= 0`` (nothing to divide by; a zero-share matchup has no ROI) or when the
+    coverage model has no candidate covering any tag of ``opponent`` (an honest "we can't
+    do anything about this matchup" — distinct from, and a stronger signal than, a punt).
+    """
+    if field_share <= 0.0:
+        return 0.0, 0.0
+    prefix = f"{opponent}|"
+    opp_weights = [
+        w for key, w in coverage_model.element_weight.items() if key.startswith(prefix)
+    ]
+    if not opp_weights:
+        return 0.0, 0.0
+    per_copy_equity = max(opp_weights) / field_share
+    first_slot_gain = per_copy_equity * _u_redundancy(1)  # _u_redundancy(1) == 1.0 always
+    cumulative = sum(
+        per_copy_equity * _u_redundancy(k) for k in range(1, _MAX_DEDICATED_SLOTS + 1)
+    )
+    max_equity_gain = min(cumulative, _MAX_REALISTIC_EQUITY_GAIN)
+    return max_equity_gain, first_slot_gain
+
+
+def _slot_roi_table(
+    deck_archetype: "str | None",
+    field: FieldDistribution,
+    matchup_matrix: "object | None",
+    coverage_model: "CoverageModel",
+) -> "list[MatchupROI]":
+    """Per-field-matchup slot ROI + punt detection (Units D1+D2, feature-sb-slot-roi-punt).
+
+    Pure given resolved inputs — no DB access. Reads the ALREADY-BUILT ``coverage_model``
+    (so ``max_equity_gain`` matches what the solver can actually buy) and the field's own
+    matchup matrix for base equities; never touches card selection.
+
+    ``matchup_matrix`` accepts a plain ``MatchupMatrix``, the ``AdaptiveMatrix`` wrapper
+    returned by ``build_adaptive_matrix`` (its ``.matrix`` is unwrapped automatically), or
+    ``None`` — which degrades every matchup to the absent-cell honest-degrade branch
+    (``base_equity=0.5``, ``confidence="speculative"``).
+
+    Mirror matches (``opponent == deck_archetype``) and negligible-share field entries
+    (below ``_MIN_FIELD_SHARE_FOR_ROI``, 1%) are skipped — there is no meaningful "hose the
+    mirror" question for this layer, and a real field's long tail of near-zero-share
+    archetypes would otherwise make the table noise rather than decision support.
+
+    Unit D2 punt rules (evaluated only for non-``speculative`` rows — the hard rule below):
+      (a) ``not crosses_half`` — max realistic dedication still can't reach 50%.
+      (b) this matchup's ``roi_per_slot`` is below ``_REALLOCATION_MARGIN`` of the best
+          OTHER matchup's ``roi_per_slot`` among matchups that themselves ``crosses_half``
+          (a genuinely investable alternative, not just a theoretically higher number).
+
+    HARD RULE: ``confidence == "speculative"`` (thin/absent cell) never punts — it is
+    labeled low-confidence instead, per the parent feature's explicit risk mitigation
+    against conceding a matchup on noise.
+
+    Returns rows sorted by ``roi_per_slot`` descending; ``[]`` when ``deck_archetype`` is
+    ``None`` or the field is empty.
+    """
+    if deck_archetype is None or not field.shares:
+        return []
+
+    # Unwrap AdaptiveMatrix (.matrix) without importing the type — avoids a hard dependency
+    # on analytics.matchup's wrapper class for callers that pass a plain MatchupMatrix.
+    matrix = getattr(matchup_matrix, "matrix", matchup_matrix)
+
+    rows: list[MatchupROI] = []
+    for opponent, share in field.shares.items():
+        if opponent == deck_archetype or share < _MIN_FIELD_SHARE_FOR_ROI:
+            continue
+
+        cell = lookup_head_to_head(matrix, deck_archetype, opponent) if matrix is not None else None
+        confidence: "ConfidenceLevel | None"
+        if cell is None or cell.tier == "speculative":
+            base_equity = 0.5
+            confidence = "speculative"
+        else:
+            base_equity = cell.p_shrunk if cell.p_shrunk is not None else 0.5
+            confidence = cell.tier
+
+        max_gain, first_slot_gain = _matchup_max_equity_gain(opponent, share, coverage_model)
+        crosses_half = (base_equity + max_gain) >= 0.5
+
+        rows.append(
+            MatchupROI(
+                opponent=opponent,
+                field_share=share,
+                base_equity=base_equity,
+                max_equity_gain=max_gain,
+                roi_per_slot=first_slot_gain * share,
+                crosses_half=crosses_half,
+                punt=False,  # resolved below, once every row's crosses_half is known
+                confidence=confidence,
+            )
+        )
+
+    # --- Unit D2: punt detection (needs the full ranked set for condition (b)) ---
+    resolved: list[MatchupROI] = []
+    for row in rows:
+        punt = False
+        reason = ""
+        if row.confidence != "speculative":  # hard rule: never punt on thin/absent data
+            if not row.crosses_half:
+                punt = True
+                reason = _PUNT_REASON_CANT_CROSS_HALF
+            else:
+                best_other = max(
+                    (
+                        r.roi_per_slot
+                        for r in rows
+                        if r.opponent != row.opponent and r.crosses_half
+                    ),
+                    default=0.0,
+                )
+                if best_other > 0.0 and row.roi_per_slot < best_other * _REALLOCATION_MARGIN:
+                    punt = True
+                    reason = _PUNT_REASON_BETTER_ROI_ELSEWHERE
+        resolved.append(_dc_replace(row, punt=punt, punt_reason=reason))
+
+    resolved.sort(key=lambda r: r.roi_per_slot, reverse=True)
+    return resolved
+
+
+# ---------------------------------------------------------------------------
 # Unit 5: SideboardPackage + recommend_sideboard
 # ---------------------------------------------------------------------------
 
@@ -2158,6 +3081,29 @@ class SideboardPackage:
     marginal_curve: tuple[tuple[int, float], ...] = dc_field(default_factory=tuple)
     uncovered_tail: tuple[tuple[str, float], ...] = dc_field(default_factory=tuple)
     insurance_cards: frozenset[str] = dc_field(default_factory=frozenset)
+    # --- Additive fields (feature-sb-field-weighted-scorer-output, Unit B5) ---
+    # Explainable per-card breakdown + honest field-share uncertainty annotation. Empty/0.0
+    # defaults are the byte-identical no-op path (matches every other gated-additive field
+    # above): a caller ignoring these fields sees no change; recommend_sideboard only
+    # populates them when the underlying data (impact linchpins / field counts) exists.
+    # impact_annotations: card -> CardImpactAnnotation (ImpactBreakdown + reference opponent +
+    #   confidence tier + brittle flag). Empty dict when opponent_linchpins was None (no
+    #   per-opponent impact data available) — never a fabricated breakdown.
+    # board_coverage_pct / card_coverage_pct: the coverage% DIAGNOSTIC (locked decision: a
+    #   relevance number, NOT the optimization objective) — Σ field-share of archetypes the
+    #   board/card is meaningfully relevant against (union at board level, per-card at card
+    #   level). Always computed (needs only tags, independent of impact-data availability).
+    impact_annotations: "dict[str, CardImpactAnnotation]" = dc_field(default_factory=dict)
+    board_coverage_pct: float = 0.0
+    card_coverage_pct: "dict[str, float]" = dc_field(default_factory=dict)
+    # --- Additive field (feature-sb-slot-roi-punt, Units D1+D2+D3) ---
+    # slot_roi: per-field-matchup decision-support table (see `_slot_roi_table`) — ranked by
+    # roi_per_slot desc, with punt flags for matchups where dedicating slots doesn't pay.
+    # DECISION SUPPORT ONLY: computed from the field + matchup matrix + the already-built
+    # coverage model; never fed back into card selection. Empty tuple when `archetype` was
+    # not supplied to `recommend_sideboard` or matrix/model construction failed — an honest
+    # "not computed", never a fabricated table.
+    slot_roi: "tuple[MatchupROI, ...]" = dc_field(default_factory=tuple)
 
 
 def _compute_covered_weight(cards: dict[str, int], model: CoverageModel) -> float:
@@ -2538,6 +3484,42 @@ def recommend_sideboard(
                     {k: f"{v:.3f}" for k, v in sorted(overrides.items())},
                 )
 
+    # --- Step 3f: Opponent linchpins + composition (feature-sb-field-weighted-scorer-wiring,
+    # Unit B3) ---
+    # Computed ONCE here (objective-search-split) and threaded into _build_coverage_model so
+    # its impact-modulated element weights stay a pure/DB-free computation. Gated: stays None
+    # (byte-identical element weights) unless at least one field archetype yields real linchpin
+    # data — derived from in-regime corpus composition, or a curated LINCHPIN_OVERRIDES entry
+    # (checked even when the corpus has no decks for that archetype) — mirrors the
+    # any_gate_cleared gating already used for matchup_pressure above.
+    opponent_linchpins: "dict[str, list[Linchpin]] | None" = None
+    opponent_cards: "dict[str, dict[str, int]] | None" = None
+    try:
+        _linchpins_by_arch, _cards_by_arch = _field_opponent_linchpins(
+            con, field, since=eff_since, until=eff_until
+        )
+        if any(_linchpins_by_arch.values()):
+            opponent_linchpins = _linchpins_by_arch
+            opponent_cards = _cards_by_arch
+            log.debug(
+                "recommend_sideboard: opponent linchpin data for %d/%d field archetypes",
+                sum(1 for lps in _linchpins_by_arch.values() if lps), len(_linchpins_by_arch),
+            )
+    except Exception as exc:
+        log.debug("recommend_sideboard: _field_opponent_linchpins failed: %s", exc)
+
+    # --- Step 3g: Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage,
+    # Unit C1) ---
+    # Computed ONCE here from the already-resolved deck_card_objects (objective-search-split
+    # — no extra DB round-trip inside the pure _maindeck_answer_coverage loop) and threaded
+    # into _build_coverage_model so it can discount element weights for axes the maindeck
+    # itself already answers (e.g. 4 maindeck Wasteland -> "greedy-manabase"). Empty when the
+    # deck answers no tracked vulnerability tags -> _build_coverage_model no-ops (byte-identical).
+    _card_by_name: "dict[str, Card]" = {card.name: card for card in deck_card_objects}
+    maindeck_coverage = _maindeck_answer_coverage(
+        deck_maindeck, _card_by_name.get, catalog=catalog
+    )
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -2550,8 +3532,30 @@ def recommend_sideboard(
         empirical_pool=empirical_pool,
         promoted_candidates=promoted_candidates,
         card_swing_overrides=card_swing_overrides,
+        opponent_linchpins=opponent_linchpins,
+        opponent_cards=opponent_cards,
+        maindeck_coverage=maindeck_coverage,
     )
     warnings.extend(model.warnings)
+
+    # --- Step 4b: Slot-ROI + punt table (feature-sb-slot-roi-punt, Units D1+D2) ---
+    # ADDITIVE decision-support layer: consumes the coverage model just built above (so its
+    # max_equity_gain matches what the solver can actually buy) + a freshly-built adaptive
+    # matchup matrix for base equities. Computed here — before the solver runs — because it
+    # is a pure function of (archetype, field, matrix, model) and does NOT depend on, or
+    # feed back into, final_cards. Gated on `archetype` (need a "my side" to look up matchup
+    # cells for) and degrades to `[]` (never a fabricated table) on any matrix-build failure
+    # (e.g. a rounds-less corpus) — every row inside `_slot_roi_table` already honest-degrades
+    # per-cell, but the matrix build itself can raise on a schema-less/absent `rounds` table.
+    slot_roi: "tuple[MatchupROI, ...]" = ()
+    if archetype is not None:
+        try:
+            from legacy_engine.analytics.matchup import build_adaptive_matrix
+            _adaptive_matrix = build_adaptive_matrix(con)
+            slot_roi = tuple(_slot_roi_table(archetype, field, _adaptive_matrix, model))
+        except Exception as exc:
+            log.debug("recommend_sideboard: slot-ROI table failed: %s", exc)
+            slot_roi = ()
 
     if not model.candidate_covers:
         warnings.append("no catalog hosers are castable in this deck's colors — returning empty sideboard")
@@ -2573,6 +3577,7 @@ def recommend_sideboard(
             collection_aware=collection is not None,
             swing_data_informed=_swing_data_informed,
             swing_overrides_count=_swing_overrides_count,
+            slot_roi=slot_roi,
         )
 
     # --- Smart-mode calibration (epic-sideboard-core-and-hedge-gating) ---
@@ -2696,6 +3701,28 @@ def recommend_sideboard(
         )
         _uncovered_tail = tuple((e, round(w, 4)) for e, w in _tail[:8])
 
+    # --- Step 6e: Explainable breakdown + coverage% diagnostic + field-share uncertainty
+    # (feature-sb-field-weighted-scorer-output, Unit B5) ---
+    # Purely additive/derived from the ALREADY-SOLVED final_cards; does not affect the
+    # objective, solver_used, or which cards were picked (see Unit B5's module-level scope
+    # note above `_relevant_field_archetypes`).
+    _impact_annotations = _build_impact_annotations(
+        final_cards,
+        model.candidate_meta,
+        field,
+        archetype_tags,
+        opponent_linchpins,
+        opponent_cards,
+        deck_colors,
+        deck_tags,
+    )
+    _board_coverage = _board_coverage_pct(final_cards, model.candidate_meta, field, archetype_tags)
+    _card_coverage = {
+        card_name: _card_coverage_pct(hoser, field, archetype_tags)
+        for card_name, hoser in model.candidate_meta.items()
+        if card_name in final_cards
+    }
+
     return SideboardPackage(
         cards=final_cards,
         trace=greedy_trace,
@@ -2719,5 +3746,9 @@ def recommend_sideboard(
         natural_budget_count=_natural_budget_count,
         marginal_curve=_marginal_curve,
         uncovered_tail=_uncovered_tail,
+        slot_roi=slot_roi,
         insurance_cards=frozenset(_insurance),  # hedge picks (commit = the rest)
+        impact_annotations=_impact_annotations,
+        board_coverage_pct=_board_coverage,
+        card_coverage_pct=_card_coverage,
     )

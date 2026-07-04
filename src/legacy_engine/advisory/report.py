@@ -587,7 +587,9 @@ def _interaction_annotation(card_name: str, con: duckdb.DuckDBPyConnection) -> s
         from legacy_engine.models.card import Card
 
         hoser = HOSER_CATALOG.get(card_name)
-        if hoser is None or "graveyard-reliant" not in hoser.attacks:
+        if hoser is None or not (
+            {"graveyard-recursion", "graveyard-fuel"} & hoser.attacks
+        ):
             return None
 
         # Look up the real oracle_text from the DB — no hardcoded cache.

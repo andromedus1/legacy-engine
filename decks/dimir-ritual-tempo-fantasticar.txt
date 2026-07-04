@@ -1,0 +1,47 @@
+# DIMIR "RITUAL TEMPO" + THE FANTASTICAR — explosive fast-mana variant of Dimir Tempo
+# Leans into Dark Ritual + Lotus Petal + Barrowgoyf + The Fantasticar: a disruptive tempo deck
+# that can curve-cheat a threat a turn early (T1 Fantasticar / Barrowgoyf, T2 Kaito) behind
+# Force + Daze + Thoughtseize. This is a PIVOT off stock Dimir Tempo, not a tune — it trades
+# Murktide (a bad ritual target, fights the low curve) and shaves lands/Wasteland for fast mana.
+#
+# HONEST NOTES:
+#  - Fantasticar is the real ritual payoff: a FIXED 4/4 flyer the moment it lands, graveyard-free,
+#    dodges sorcery-speed removal (creature only when you choose). Ritual/Petal cast it turn 1-2.
+#  - Barrowgoyf is */1+* (power = card types in all graveyards) — small on an EMPTY board, so a
+#    T1 ritual-Barrowgoyf is a ~1/2 deathtoucher. It wants a LATE graveyard; it is the WEAK half
+#    of the ritual plan. Kept because deathtouch+lifelink is still fine and it grinds late.
+#  - Dark Ritual / Lotus Petal are card disadvantage a fair deck normally avoids; justified only
+#    by the explosive curve-out + protect plan. This is a fringe build — rep-test before trusting.
+4 Tamiyo, Inquisitive Student
+3 Barrowgoyf
+3 The Fantasticar
+2 Kaito, Bane of Nightmares
+2 Baleful Strix
+4 Dark Ritual
+2 Lotus Petal
+4 Force of Will
+3 Daze
+4 Thoughtseize
+4 Fatal Push
+4 Brainstorm
+3 Ponder
+4 Underground Sea
+1 Watery Grave
+1 Undercity Sewers
+1 Island
+1 Swamp
+4 Polluted Delta
+3 Scalding Tarn
+1 Bloodstained Mire
+2 Wasteland
+
+Sideboard
+2 Hydroblast
+2 Toxic Deluge
+2 Hurkyl's Recall
+2 Flusterstorm
+1 Force of Negation
+2 Massacre
+1 Surgical Extraction
+1 Consign to Memory
+2 Sheoldred's Edict

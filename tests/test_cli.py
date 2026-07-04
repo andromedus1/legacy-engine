@@ -897,3 +897,256 @@ class TestAdviseCompare:
         )
         assert result.exit_code != 0
         assert "not in the field" in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSideboardOutputDiagnostics — feature-sb-field-weighted-scorer-output, Unit B5
+# ---------------------------------------------------------------------------
+
+
+class TestSideboardOutputDiagnostics:
+    """CLI render tests for `advise sideboard`'s coverage% diagnostic + explainable
+    per-card impact-breakdown audit lines (Unit B5)."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """File-backed DuckDB for `advise sideboard --db <path>` (never the default DB —
+        file-backed-cli-test-db-builder pattern)."""
+        db_path = tmp_path / "test_sb_output.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_coverage_diagnostic_and_impact_breakdown_render(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A SideboardPackage carrying populated coverage%/impact_annotations renders the
+        labeled coverage diagnostic + the per-card auditable-factor breakdown line."""
+        from legacy_engine.advisory import sideboard as sb_mod
+        from legacy_engine.advisory.impact import ImpactBreakdown
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            card_coverage_pct={"Surgical Extraction": 0.26},
+            board_coverage_pct=0.26,
+            impact_annotations={
+                "Surgical Extraction": sb_mod.CardImpactAnnotation(
+                    breakdown=ImpactBreakdown(
+                        centrality=1.0, symmetry=1.0, castability=1.0, draw_prob=0.7
+                    ),
+                    reference_archetype="Reanimator",
+                    reference_share=0.26,
+                    confidence="established",
+                    brittle=False,
+                ),
+            },
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_diag.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// coverage diagnostic — NOT the optimization objective" in result.output
+        assert "Surgical Extraction: ~26% of field" in result.output
+        assert "board coverage diagnostic: ~26% of field" in result.output
+        assert "// impact breakdown" in result.output
+        assert "Surgical Extraction vs Reanimator (26.0% share)" in result.output
+        assert "centrality=1.00 symmetry=1.00 castability=1.00 draw=0.70" in result.output
+        assert "impact=0.700" in result.output
+        assert "confidence=established" in result.output
+        assert "BRITTLE" not in result.output
+
+    def test_brittle_flag_renders_honest_degrade_note(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A brittle=True annotation (thin-sample reference matchup) renders the labeled
+        honest-degrade BRITTLE note, and its confidence tier is shown."""
+        from legacy_engine.advisory import sideboard as sb_mod
+        from legacy_engine.advisory.impact import ImpactBreakdown
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Null Rod": 1},
+            trace=[],
+            covered_weight=0.1,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            card_coverage_pct={"Null Rod": 0.03},
+            board_coverage_pct=0.03,
+            impact_annotations={
+                "Null Rod": sb_mod.CardImpactAnnotation(
+                    breakdown=ImpactBreakdown(
+                        centrality=0.5, symmetry=1.0, castability=1.0, draw_prob=0.3
+                    ),
+                    reference_archetype="ThinArchetype",
+                    reference_share=0.03,
+                    confidence="speculative",
+                    brittle=True,
+                ),
+            },
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_brittle.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "BRITTLE" in result.output
+        assert "confidence=speculative" in result.output
+
+    def test_no_impact_data_omits_breakdown_block(self, runner, db_with_corpus, tmp_path):
+        """Real (non-mocked) recommend_sideboard on a corpus with no curated/derivable
+        linchpin data for 'Control' -> impact_annotations={} -> no impact-breakdown block
+        rendered (the no-impact-data path never fabricates a breakdown)."""
+        deck = tmp_path / "sb_deck_plain.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// impact breakdown" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# TestSlotROIPuntRender — feature-sb-slot-roi-punt, Unit D3
+# ---------------------------------------------------------------------------
+
+
+class TestSlotROIPuntRender:
+    """CLI render tests for `advise sideboard`'s slot-ROI + punt decision-support block."""
+
+    @pytest.fixture
+    def db_with_corpus(self, tmp_path, make_rounds_corpus):
+        """File-backed DuckDB for `advise sideboard --db <path>` (never the default DB —
+        file-backed-cli-test-db-builder pattern)."""
+        db_path = tmp_path / "test_sb_slot_roi.duckdb"
+        con_mem, _ = make_rounds_corpus(n_repeats=5)
+        from legacy_engine.ingestion import store as _store
+        con_file = _store.connect(str(db_path))
+        _store.init_schema(con_file)
+        for table in ("tournaments", "decks", "deck_cards", "rounds"):
+            rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+            if rows:
+                placeholders = ", ".join(["?"] * len(rows[0]))
+                con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+        con_mem.close()
+        con_file.close()
+        return str(db_path)
+
+    def test_slot_roi_block_renders_ranked_rows_with_punt_markers(
+        self, runner, db_with_corpus, tmp_path, monkeypatch
+    ):
+        """A SideboardPackage carrying a populated slot_roi table renders the labeled
+        decision-support block, in order, with PUNT markers and confidence tiers."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            slot_roi=(
+                sb_mod.MatchupROI(
+                    opponent="Delver", field_share=0.6, base_equity=0.45,
+                    max_equity_gain=0.10, roi_per_slot=0.05, crosses_half=False,
+                    punt=True, confidence="established",
+                    punt_reason="max dedication still <50%",
+                ),
+                sb_mod.MatchupROI(
+                    opponent="Combo", field_share=0.1, base_equity=0.5,
+                    max_equity_gain=0.0, roi_per_slot=0.0, crosses_half=True,
+                    punt=False, confidence="speculative", punt_reason="",
+                ),
+            ),
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_roi.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--archetype", "Control", "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "// slot-ROI (decision support — expected match-win per dedicated slot):"
+            in result.output
+        )
+        assert "vs Delver (60.0% share)" in result.output
+        assert "45.0% → 55.0% equity" in result.output
+        assert "ROI/slot=0.0500" in result.output
+        assert "confidence=established" in result.output
+        assert "[PUNT — max dedication still <50%]" in result.output
+        assert "vs Combo (10.0% share)" in result.output
+        assert "confidence=speculative" in result.output
+        # Delver (rank 1, punted) must render before Combo (rank 2) — table order preserved.
+        assert result.output.index("vs Delver") < result.output.index("vs Combo")
+        # The speculative Combo row is never punted (hard rule) — no PUNT marker on its line.
+        combo_line = next(ln for ln in result.output.splitlines() if "vs Combo" in ln)
+        assert "PUNT" not in combo_line
+
+    def test_no_slot_roi_omits_block(self, runner, db_with_corpus, tmp_path, monkeypatch):
+        """An empty slot_roi tuple (the gated default — e.g. `archetype=None` was passed to
+        `recommend_sideboard`, or the field itself is empty) renders no slot-ROI block."""
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        fake_pkg = sb_mod.SideboardPackage(
+            cards={"Surgical Extraction": 2},
+            trace=[],
+            covered_weight=0.5,
+            budget=15,
+            reserved=0,
+            solver_used="greedy",
+            field_source="custom",
+            heuristic_note="heuristic note",
+            warnings=(),
+            slot_roi=(),
+        )
+        monkeypatch.setattr(sb_mod, "recommend_sideboard", lambda *a, **k: fake_pkg)
+
+        deck = tmp_path / "sb_deck_no_roi.txt"
+        deck.write_text("4 Brainstorm\n56 Island\n")
+        result = runner.invoke(
+            main,
+            ["advise", "sideboard", "--deck", str(deck), "--db", db_with_corpus,
+             "--solver", "greedy"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// slot-ROI" not in result.output
