@@ -696,3 +696,140 @@ class TestAdviseBacktestCLI:
             "// divergence is a signal to investigate, not proof of error "
             "(winning boards are self-selected + metagame-lagged)" in out
         )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: copy-count surfaces (feature-archetype-sweep-backtest)
+# ---------------------------------------------------------------------------
+
+
+class TestCopyCountSurfaces:
+    """`recommended_counts` + `observed_copy_distribution` + `solver` pass-through —
+    the gated-additive copy dimension the archetype sweep serializes."""
+
+    def test_observed_copy_distribution_histograms_the_top_finisher_sample(
+        self, tmp_path, monkeypatch
+    ):
+        """T1+T2's 4 qualifying the local meta decks each run their side cards at 1 copy —
+        the histogram must count decks per copy-count, over qualifiers only."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+        )
+        try:
+            result = backtest_board(con, "the local meta", _fake_field())
+        finally:
+            con.close()
+
+        assert result.n_winning_decks == 4
+        assert result.observed_copy_distribution["Surgical Extraction"] == {1: 4}
+        assert result.observed_copy_distribution["Ravenous Trap"] == {1: 3}
+        assert result.observed_copy_distribution["Rest in Peace"] == {1: 1}
+        # Non-qualifying decks' cards must not leak in (same gate as observed_frequency).
+        assert "Wear // Tear" not in result.observed_copy_distribution
+        assert "Pyroblast" not in result.observed_copy_distribution
+        # 0-copy bucket is derivable, not stored: n_winning_decks − Σ n_decks.
+        ravenous = result.observed_copy_distribution["Ravenous Trap"]
+        assert result.n_winning_decks - sum(ravenous.values()) == 1
+
+    def test_multi_copy_and_dupe_rows_sum_per_deck(self, tmp_path, monkeypatch):
+        """A deck listing the same side card on two rows (1+1) counts as ONE deck at
+        2 copies; distinct copy counts across decks land in distinct buckets."""
+        db_path = str(tmp_path / "copies.duckdb")
+        con = store.connect(db_path)
+        try:
+            raw = {
+                "Tournament": {
+                    "Name": "Copy Histogram Corpus",
+                    "Date": "2026-02-01",
+                    "Uri": "https://www.mtgo.com/decklist/copy-histogram-corpus",
+                    "Formats": "Legacy",
+                },
+                "Decks": [
+                    # Dupe rows: Toxic Deluge twice at Count 1 -> per-deck copies = 2.
+                    _deck("alice", "the local meta", ["Brainstorm"],
+                          ["Toxic Deluge", "Toxic Deluge"], "1st"),
+                    _deck("bob", "the local meta", ["Brainstorm"], ["Toxic Deluge"], "2nd"),
+                    _deck("carol", "Doomsday", ["Dark Ritual"], [], "3rd"),
+                    _deck("dave", "Doomsday", ["Dark Ritual"], [], "4th"),
+                    _deck("p5", "Doomsday", ["Dark Ritual"], [], "5th"),
+                    _deck("p6", "Doomsday", ["Dark Ritual"], [], "6th"),
+                    _deck("p7", "Doomsday", ["Dark Ritual"], [], "7th"),
+                    _deck("p8", "Doomsday", ["Dark Ritual"], [], "8th"),
+                ],
+                "Rounds": [],
+                "Standings": [
+                    _standing(1, "alice"), _standing(2, "bob"), _standing(3, "carol"),
+                    _standing(4, "dave"), _standing(5, "p5"), _standing(6, "p6"),
+                    _standing(7, "p7"), _standing(8, "p8"),
+                ],
+            }
+            tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+            _label_archetypes(con, tid, {
+                "alice": "the local meta", "bob": "the local meta", "carol": "Doomsday",
+                "dave": "Doomsday", "p5": "Doomsday", "p6": "Doomsday",
+                "p7": "Doomsday", "p8": "Doomsday",
+            })
+            monkeypatch.setattr(
+                backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
+            )
+            result = backtest_board(con, "the local meta", _fake_field())
+        finally:
+            con.close()
+
+        # alice (2 copies via dupe rows) + bob (1 copy) -> {2: 1, 1: 1}.
+        assert result.n_winning_decks == 2
+        assert result.observed_copy_distribution["Toxic Deluge"] == {1: 1, 2: 1}
+
+    def test_recommended_counts_preserves_solver_copies(self, tmp_path, monkeypatch):
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        monkeypatch.setattr(
+            backtest_mod,
+            "recommend_sideboard",
+            lambda *a, **k: _fake_package({"Surgical Extraction": 2, "Toxic Deluge": 1}),
+        )
+        try:
+            result = backtest_board(con, "the local meta", _fake_field())
+        finally:
+            con.close()
+
+        assert result.recommended_counts == {"Surgical Extraction": 2, "Toxic Deluge": 1}
+        # The flattened tuple keeps its existing contract (sorted names).
+        assert result.recommended == ("Surgical Extraction", "Toxic Deluge")
+
+    def test_scorer_failure_degrades_recommended_counts_to_empty(self, tmp_path, monkeypatch):
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+
+        def _boom(*a, **k):
+            raise RuntimeError("scorer exploded")
+
+        monkeypatch.setattr(backtest_mod, "recommend_sideboard", _boom)
+        try:
+            result = backtest_board(con, "the local meta", _fake_field())
+        finally:
+            con.close()
+
+        assert result.recommended == ()
+        assert result.recommended_counts == {}
+        # Observed side stays populated — "nothing to compare against" is the honest state.
+        assert result.observed_copy_distribution["Surgical Extraction"] == {1: 4}
+
+    def test_solver_kwarg_passes_through_to_recommend_sideboard(self, tmp_path, monkeypatch):
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+        seen: dict = {}
+
+        def _capture(*a, **k):
+            seen.update(k)
+            return _fake_package({})
+
+        monkeypatch.setattr(backtest_mod, "recommend_sideboard", _capture)
+        try:
+            backtest_board(con, "the local meta", _fake_field(), solver="greedy")
+        finally:
+            con.close()
+
+        assert seen.get("solver") == "greedy"

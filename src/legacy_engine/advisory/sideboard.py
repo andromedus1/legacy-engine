@@ -2165,15 +2165,25 @@ class _ILPFailed(Exception):
     pass
 
 
-def _ilp_solve(
+def _build_ilp_problem(
     model: CoverageModel,
     *,
     budget: int,
     redundancy_strength: float = 0.0,
     tau: float = 0.0,
     option_value_bonus: "dict[str, float] | None" = None,
-) -> dict[str, int]:
-    """Exact saturating-coverage ILP via PuLP/CBC with incremental y_a^t linearization.
+) -> "tuple[object, dict[str, object]]":
+    """Construct the saturating-coverage ILP; returns ``(problem, x_vars)`` unsolved.
+
+    Split from ``_ilp_solve`` (idea-ilp-tiebreak-nondeterminism) so tests can assert the
+    construction invariant directly: the generated formulation must be identical regardless
+    of the iteration order of ``model``'s dicts. Upstream those dicts inherit run-to-run-
+    unstable orderings (DuckDB's multithreaded row emission; str-hash randomization across
+    processes); pre-fix that order decided CONSTRAINT insertion order (PuLP name-sorts
+    variables at write time, but rows keep insertion order), and CBC's tie resolution is
+    sensitive to row order — equal-objective boards flipped between runs (observed: Snuff
+    Out vs Sheoldred's Edict on identical Dimir Tempo inputs, 2026-07-04). Every loop below
+    therefore iterates in sorted order.
 
     Formulation:
       Variables:
@@ -2200,8 +2210,7 @@ def _ilp_solve(
     the solver will always prefer to fill y_a^1 before y_a^2, so explicit ordering constraints
     are unnecessary.
 
-    Returns card→copies (only x_c > 0 entries).
-    Raises _ILPFailed if CBC is unavailable or status is not Optimal.
+    Raises _ILPFailed if PuLP is unavailable.
     """
     try:
         import pulp
@@ -2224,7 +2233,7 @@ def _ilp_solve(
 
     # --- Decision variables: x_c for each candidate card ---
     x_vars: dict[str, pulp.LpVariable] = {}
-    for card_name, hoser in model.candidate_meta.items():
+    for card_name, hoser in sorted(model.candidate_meta.items()):
         x_vars[card_name] = pulp.LpVariable(
             name=f"x_{_safe(card_name)}",
             lowBound=0,
@@ -2238,7 +2247,7 @@ def _ilp_solve(
     # entirely when redundancy_strength == 0.0 → model byte-identical to the pre-feature ILP.
     penalty_terms: list = []
     if redundancy_strength > 0.0:
-        for card_name, hoser in model.candidate_meta.items():
+        for card_name, hoser in sorted(model.candidate_meta.items()):
             mc = hoser.max_copies
             if mc < 1:
                 continue
@@ -2266,7 +2275,7 @@ def _ilp_solve(
     # is byte-identical to the pre-feature ILP.
     option_bonus_terms: list = []
     if option_value_bonus:
-        for card_name, bonus in option_value_bonus.items():
+        for card_name, bonus in sorted(option_value_bonus.items()):
             if bonus <= 0.0 or card_name not in x_vars:
                 continue
             p_c = pulp.LpVariable(name=f"p_{_safe(card_name)}", lowBound=0, upBound=1, cat="Continuous")
@@ -2278,7 +2287,7 @@ def _ilp_solve(
     y_vars: dict[tuple[str, int], pulp.LpVariable] = {}
     elem_t_cap: dict[str, int] = {}
 
-    for elem_id, weight in model.element_weight.items():
+    for elem_id, weight in sorted(model.element_weight.items()):
         # Max feasible answers = sum of max_copies of all cards covering this element
         max_answers = sum(
             model.candidate_meta[c].max_copies
@@ -2301,7 +2310,7 @@ def _ilp_solve(
     # in the greedy trace. Kept as an explicit y_a^t LP (not a call into the greedy helper)
     # because CBC needs a linear objective; the two are provably the same F(S).
     obj_terms = []
-    for elem_id, weight in model.element_weight.items():
+    for elem_id, weight in sorted(model.element_weight.items()):
         t_cap = elem_t_cap.get(elem_id, 0)
         for t in range(1, t_cap + 1):
             coef = weight * _marginal_g(t)
@@ -2324,13 +2333,13 @@ def _ilp_solve(
     prob += pulp.lpSum(x_vars.values()) <= budget, "budget"
 
     # --- Linking constraints: Σ_t y_a^t ≤ Σ_{c covers a} x_c ---
-    for elem_id in model.element_weight:
+    for elem_id in sorted(model.element_weight):
         t_cap = elem_t_cap.get(elem_id, 0)
         if t_cap == 0:
             continue
         covering_cards = [
             x_vars[c]
-            for c, elems in model.candidate_covers.items()
+            for c, elems in sorted(model.candidate_covers.items())
             if elem_id in elems and c in x_vars
         ]
         if covering_cards:
@@ -2344,7 +2353,31 @@ def _ilp_solve(
             for t in range(1, t_cap + 1):
                 prob += y_vars[(elem_id, t)] == 0, f"nocov_{_safe(elem_id)}_t{t}"
 
-    # --- Solve ---
+    return prob, x_vars
+
+
+def _ilp_solve(
+    model: CoverageModel,
+    *,
+    budget: int,
+    redundancy_strength: float = 0.0,
+    tau: float = 0.0,
+    option_value_bonus: "dict[str, float] | None" = None,
+) -> dict[str, int]:
+    """Exact saturating-coverage ILP via PuLP/CBC — see ``_build_ilp_problem`` for the model.
+
+    Returns card→copies (only x_c > 0 entries).
+    Raises _ILPFailed if CBC is unavailable or status is not Optimal.
+    """
+    prob, x_vars = _build_ilp_problem(
+        model,
+        budget=budget,
+        redundancy_strength=redundancy_strength,
+        tau=tau,
+        option_value_bonus=option_value_bonus,
+    )
+    import pulp  # _build_ilp_problem already proved it importable
+
     try:
         prob.solve(pulp.PULP_CBC_CMD(msg=0))
     except Exception as exc:
