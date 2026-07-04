@@ -12,7 +12,6 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
   * -1 fatal push (4th) -> +1 consign (3rd) // winners' copy-mode = 3; pitch-class valley-at-1
 * online-meta variant: -1 toxic deluge -> +1 surgical extraction // reanimator+doomsday ~12% online
 * engine overrides held: defense grid (0.0% of winners) & damping sphere (3.0%) stay OUT // systematic scorer false-positives, tracked
-* prev board (massacre/hurkyl's/flusterstorm era) retired — flusterstorm & echoing truth not in collection anyway
 
 ---
 **plan:**
@@ -149,12 +148,20 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * NOT here: defense grid (0.0% of 263 winner boards) + damping sphere (3.0%) — engine wants both; overridden, mechanisms tracked
 * slot-by-slot + copy histograms: decks/dimir-tempo-optimized-analysis.md
 
+**online config (-1 toxic deluge -> +1 surgical extraction):**
+* why: online field = grixis reanimator 6.4% + doomsday 5.1% (+dredge tail) vs boulder's near-zero yard share; fair-creature sweep targets thinner online
+* surgical targets: reanimator — exile the fatty in RESPONSE to entomb/reanimate (their yard, before it lands); dredge — exile the dredger; marginal: mirror murktide fuel
+  * vs doomsday it does NOT hit the pile (library, not yard) — counters/consign stay the plan there
+* plan deltas vs the guide above (only where toxic appeared):
+  * d&t / black midrange / energy: toxic slot gone — board the edict/ee package as listed, +1 hydroblast (energy) or stay 1 lighter; don't stretch
+  * reanimator (online-only matchup): in: +1 surgical +1 dauthi +2 fon / out: -3 push -1 snuff // dauthi's replacement effect voids their yard from anywhere, surgical cleans what slips
+* everything else unchanged
+
 ---
 ---
 **references:**
 * engine analysis: decks/dimir-tempo-optimized-analysis.md
 * cross-meta verdict (stay dimir for boulder): decks/dimir-vs-doomsday-tempo-comparison.md
-* session study: https://claude.ai/code/artifact/b954ac08-4558-4303-8c36-9a9f536ed26f
 
 ---
 ---
