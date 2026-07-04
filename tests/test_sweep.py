@@ -108,15 +108,17 @@ class TestClusterDivergences:
     def test_directions_never_merge(self):
         entries = [
             _entry("A", _bt("A", scorer_only=("Fatal Push",), winners_only=("Snuff Out",),
-                            observed={"Snuff Out": 0.5})),
+                            observed={"Snuff Out": 0.5, "Fatal Push": 0.15})),
         ]
         clusters = cluster_divergences(entries, _lookup)
         keys = {(c.direction, c.tag) for c in clusters}
         assert ("scorer_only", "creature-based") in keys
         assert ("winners_only", "creature-based") in keys
-        # scorer_only members carry 0.0 adoption (not commonly played, by definition).
+        # scorer_only members keep their REAL sub-threshold adoption (15% here) — a
+        # recommendation some winners play is a weaker false-positive signal than one
+        # nobody plays; clamping to 0.0 would fabricate away that distinction.
         so = next(c for c in clusters if c.direction == "scorer_only")
-        assert all(m.adoption_pct == 0.0 for m in so.members)
+        assert [m.adoption_pct for m in so.members] == [pytest.approx(0.15)]
 
     def test_multi_tag_card_contributes_to_every_tag(self):
         entries = [_entry("A", _bt("A", scorer_only=("Defense Grid",)))]
@@ -177,9 +179,16 @@ class TestRankClusters:
         high = self._cluster("high", "winners_only", nonspec=1, adoption=0.9, n_arch=1)
         assert [c.tag for c in rank_clusters([low, high])] == ["high", "low"]
 
+    def test_scorer_only_adoption_ranks_inverted(self):
+        """For false positives, LOWER winner adoption = harder false positive: a cluster
+        of 0%-played recommendations outranks one winners play at 19%."""
+        soft = self._cluster("soft-fp", "scorer_only", nonspec=1, adoption=0.19, n_arch=1)
+        hard = self._cluster("hard-fp", "scorer_only", nonspec=1, adoption=0.0, n_arch=1)
+        assert [c.tag for c in rank_clusters([soft, hard])] == ["hard-fp", "soft-fp"]
+
     def test_deterministic_tail_by_direction_and_tag(self):
-        a = self._cluster("alpha", "scorer_only", nonspec=1, adoption=0.5, n_arch=1)
-        b = self._cluster("alpha", "winners_only", nonspec=1, adoption=0.5, n_arch=1)
+        a = self._cluster("alpha", "scorer_only", nonspec=1, adoption=0.0, n_arch=1)
+        b = self._cluster("alpha", "winners_only", nonspec=1, adoption=0.0, n_arch=1)
         ranked = rank_clusters([b, a])
         assert [c.direction for c in ranked] == ["scorer_only", "winners_only"]
 
@@ -263,6 +272,31 @@ class TestRunSweep:
             con.close()
         assert seen.get("solver") == "greedy"
         assert result.solver == "greedy"
+
+    def test_backtest_raise_becomes_skipped_entry_and_warning_never_a_crash(
+        self, tmp_path, monkeypatch
+    ):
+        """backtest_board never raises by contract, but if it ever does the sweep must
+        degrade that archetype to a skipped entry + warning and keep sweeping."""
+        db_path = _build_backtest_db(tmp_path)
+        con = store.connect(db_path)
+
+        def _boom(con, archetype, *a, **k):
+            raise RuntimeError(f"backtest exploded for {archetype}")
+
+        import legacy_engine.advisory.sweep as sweep_mod
+
+        monkeypatch.setattr(sweep_mod, "backtest_board", _boom)
+        try:
+            result = run_sweep(con, _fake_field(), min_decks=7)
+        finally:
+            con.close()
+
+        qualifying = [e for e in result.entries if e.n_decks_in_window >= 7]
+        assert qualifying and all(e.backtest is None for e in qualifying)
+        assert all("backtest failed" in (e.skipped_reason or "") for e in qualifying)
+        assert any("backtest exploded" in w for w in result.warnings)
+        assert result.clusters == ()
 
     def test_empty_corpus_degrades_honestly(self, tmp_path):
         db_path = str(tmp_path / "empty.duckdb")

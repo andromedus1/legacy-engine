@@ -68,7 +68,13 @@ class ClusterMember:
 
     card: str
     archetype: str
-    adoption_pct: float                 # observed inclusion% (0.0 for scorer_only cards)
+    # Observed inclusion% among that archetype's top-finisher boards. For winners_only
+    # members this is >= the observed threshold by definition; for scorer_only members it
+    # is SUB-threshold (< 0.20) but deliberately NOT clamped to 0.0 — a recommendation
+    # some winners do play (e.g. 19%) is a weaker false-positive signal than one nobody
+    # plays (0%), and clamping would fabricate away that distinction. Ranking accounts
+    # for the direction (see rank_clusters).
+    adoption_pct: float
     confidence: str | None              # the archetype's winner-sample tier
 
 
@@ -219,11 +225,12 @@ def cluster_divergences(
     clusters: list[DivergenceCluster] = []
     for (direction, tag), members in sorted(buckets.items()):
         members_sorted = tuple(sorted(members, key=lambda m: (m.card, m.archetype)))
+        # One tier per archetype: each archetype gets exactly one backtest_board call, and
+        # confidence-None entries were excluded above, so every value here is a real tier.
         arch_tiers: dict[str, str | None] = {m.archetype: m.confidence for m in members_sorted}
         tier_breakdown: dict[str, int] = {}
         for tier in arch_tiers.values():
-            label = tier if tier is not None else "none"
-            tier_breakdown[label] = tier_breakdown.get(label, 0) + 1
+            tier_breakdown[str(tier)] = tier_breakdown.get(str(tier), 0) + 1
         clusters.append(
             DivergenceCluster(
                 tag=tag,
@@ -245,15 +252,22 @@ def rank_clusters(
 ) -> tuple[DivergenceCluster, ...]:
     """PURE: rank clusters most-systematic-first, honestly tier-gated.
 
-    Sort key: non-speculative archetype support first (thin-only clusters sink), then total
-    adoption, then raw archetype count, then (direction, tag) for a deterministic tail.
+    Sort key: non-speculative archetype support first (thin-only clusters sink), then an
+    adoption term whose sense depends on the cluster's direction — for winners_only,
+    HIGHER total adoption = a more widely-played blind spot = more severe; for
+    scorer_only, LOWER total adoption = recommendations winners play *less* = a harder
+    false positive (a cluster of 0%-played recommendations outranks one of 19%-played
+    ones) — then raw archetype count, then (direction, tag) for a deterministic tail.
     """
+    def _adoption_term(c: DivergenceCluster) -> float:
+        return c.total_adoption if c.direction == "scorer_only" else -c.total_adoption
+
     return tuple(
         sorted(
             clusters,
             key=lambda c: (
                 -c.n_archetypes_nonspeculative,
-                -c.total_adoption,
+                _adoption_term(c),
                 -c.n_archetypes,
                 c.direction,
                 c.tag,
