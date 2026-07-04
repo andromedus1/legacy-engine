@@ -1,7 +1,7 @@
 ---
 id: feature-sb-maindeck-aware-coverage-discount
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-sb-maindeck-aware-coverage
 depends_on: []

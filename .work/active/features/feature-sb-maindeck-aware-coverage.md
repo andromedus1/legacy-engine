@@ -1,7 +1,7 @@
 ---
 id: feature-sb-maindeck-aware-coverage
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: epic-sideboard-scoring-model
 depends_on: [feature-sb-field-weighted-scorer]
