@@ -1,7 +1,7 @@
 ---
 id: gate-tests-pair-adaptive-later-since
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,10 @@ Hermetic DB with hero/opponent archetypes carrying different ban-affectedness va
 
 ## Test location
 `tests/analytics/test_slot_test.py::TestWindowing`
+
+## Resolution
+Added `test_pair_adaptive_since_later_of_two` (Hero ban-affected by Grief at 2024-08-26, Opp
+ban-affected by Entomb at 2025-11-10 — asserts the pair window is the LATER date, 2025-11-10) and
+`test_pair_adaptive_since_one_affected_one_not` (only Opp is ban-affected — asserts the pair still
+resolves to Opp's valid_since rather than None). Both use real BAN_EVENTS dates with hand-built
+pre-ban decks running the banned card in half the cohort (>= the 0.25 affect_threshold).

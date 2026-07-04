@@ -1,7 +1,7 @@
 ---
 id: gate-tests-compare-honesty-banners
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,8 @@ In TestAdviseCompare: run a basic comparison, assert both banner substrings; re-
 
 ## Test location
 `tests/test_cli.py::TestAdviseCompare`
+
+## Resolution
+Added `tests/test_cli.py::TestAdviseCompare::test_honesty_banners_always_print` — asserts both
+the lift-overlay and transform-optimistic-ceiling banner strings print on a bare `advise compare`
+run, and re-asserts both still print with `--a-lift` + `--b-transform` supplied together.

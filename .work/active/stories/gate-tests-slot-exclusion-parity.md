@@ -1,7 +1,7 @@
 ---
 id: gate-tests-slot-exclusion-parity
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,9 @@ Extend the hermetic _build_slot_db corpus with a bye + an unmatched row; assert 
 
 ## Test location
 `tests/analytics/test_slot_test.py::TestBuckets`
+
+## Resolution
+Added `test_bye_and_unmatched_excluded` — extends the hermetic corpus with a bye round (empty
+Player2) and an unmatched round (opponent deck's archetype left NULL), alongside one real decisive
+Tempo-vs-Foe match. Asserts `n_matches == 1` (the bye and unmatched rows don't leak in) and the
+`Tech` cell's WITH/WITHOUT counts reflect only the one decisive match.

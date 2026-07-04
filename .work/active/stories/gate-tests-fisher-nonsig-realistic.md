@@ -1,7 +1,7 @@
 ---
 id: gate-tests-fisher-nonsig-realistic
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,10 @@ Construct cohorts ~38% (n~71) vs ~46% (n~67); assert diff materially non-zero AN
 
 ## Test location
 `tests/analytics/test_slot_test.py::TestStats`
+
+## Resolution
+Replaced `test_near_5050_not_significant` (1/2 vs 1/2, diff exactly 0.0) with
+`test_sizeable_nonzero_diff_not_significant`: WITH cohort 27/71 (38.0%), WITHOUT cohort 31/67
+(46.3%) — the exact split named in the AC, matching the module docstring's "Null Rod vs Blue
+Artifacts" cautionary example. Asserts `abs(diff) > 0.05` (material, not the degenerate 0.0 case),
+`0.05 < p_value < 0.6` (non-significant, sane band — actual p≈0.389), and `significant is False`.

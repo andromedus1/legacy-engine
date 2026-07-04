@@ -1,7 +1,7 @@
 ---
 id: gate-tests-contrast-custom-window
 kind: story
-stage: drafting
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,8 @@ report cards --contrast ... --since X --until Y --db <tmp>: assert exactly one s
 
 ## Test location
 `tests/test_cli.py::TestReportCardsContrast`
+
+## Resolution
+Added `test_contrast_custom_window_single_section` — `report cards --contrast ... --since
+2026-01-01 --until 2026-12-31`; asserts `result.output.count("// window:") == 1`, a `"custom ("`
+label is present, and neither `"adaptive ban-aware"` nor `"full-corpus (all-time)"` appear.

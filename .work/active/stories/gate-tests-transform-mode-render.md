@@ -1,7 +1,7 @@
 ---
 id: gate-tests-transform-mode-render
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,11 @@ Rewrite: build a matrix where mode B strictly wins one matchup and loses another
 
 ## Test location
 `tests/test_cli.py::TestAdviseCompare::test_transform_mode_shown` (rewrite)
+
+## Resolution
+Rewrote `test_transform_mode_shown` against a new hermetic fixture `transform_split_db`
+(4 hand-built matchup cells, n=20 each: Combo 80% vs X / 20% vs Y, Control 20% vs X / 80% vs Y)
+plus `xy_field_file` ({X:0.5, Y:0.5}). Config A is an unrelated imputed archetype so its label
+can't collide with B's mode text. Asserts the X row shows B's chosen mode as "Combo" (and NOT
+"Control"), and the Y row shows "Control" (and NOT "Combo") — the mode label now differs per row,
+proving it tracks the actual per-matchup max rather than being a static field label.

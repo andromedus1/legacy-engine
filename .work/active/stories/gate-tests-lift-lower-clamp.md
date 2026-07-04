@@ -1,7 +1,7 @@
 ---
 id: gate-tests-lift-lower-clamp
 kind: story
-stage: drafting
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,7 @@ Negative lift larger than base WR; assert wr_a_adj == 0.0 and EV finite/sane.
 
 ## Test location
 `tests/advisory/test_compare.py::TestPointEngine`
+
+## Resolution
+Added `test_lift_clamped_to_zero` — a -0.95 lift on a 0.6 base WR; asserts `wr_a_adj == 0.0`
+(floors, doesn't go negative) and `ev_a_adj` is finite and within `[0, 1]`.
