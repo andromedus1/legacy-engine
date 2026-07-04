@@ -3,7 +3,7 @@ description: What statistical and optimization methods power the Meta Attack/Adv
 type: brief
 kind: research
 research_method: /research
-updated: 2026-05-29
+updated: 2026-07-03
 status: draft
 summary: |
   Methods brief for legacy-engine's advisory/ module (the Legacy-specific differentiator). Pins down:
@@ -20,7 +20,7 @@ key_findings:
   - "Bimodal-coverage caveat is mandatory: matchups come ONLY from rounds-bearing events (Challenges + paper); MTGO Leagues feed meta-share but not matchups. Keep matchup-sample and meta-share-sample as separate labeled fields — never conflate."
   - "Meta-positioning score S(D)=Σ_a w_a·winrate(D vs a) = expected WR vs the weighted field; use Bayesian Monte-Carlo (Beta posteriors on cells + Dirichlet posterior on shares) as primary uncertainty method; rank decks by probability-of-being-best from shared-field draws. Always report S(D) AND the unweighted aggregate (best-call vs best-deck)."
   - "Sideboard recommender = weighted MAXIMUM-COVERAGE (budget 15 slots), NOT set-cover; value = field_share x matchup-swing with a SATURATING (submodular) coverage function; solve EXACTLY with an ILP (PuLP/CBC, trivial scale) and keep greedy (1-1/e guarantee) as the explainable fallback. Bounded-integer copies; color/deck-fit pre-filter; anti-hate counter-hosers modeled as expected-opposing-hate pseudo-elements in one unified pass."
-  - "What-to-play: derive a continuous PROACTIVITY score from card composition (reactive mass = counters+removal+stax+draw+protection; proactive mass = fast-mana+ritual+tutor+low-curve+compact-combo), tag archetypes with VULNERABILITY classes (graveyard-reliant, combo, low-curve, greedy-manabase, creature-based, low-interaction, storm-reliant), compute hate-equity = field share each hate category attacks (coverage, not naive sum), and classify best-deck (low matchup-spread, robust) vs best-call (high-spread, field-specific gamble)."
+  - "What-to-play: derive a continuous PROACTIVITY score from card composition (reactive mass = counters+removal+stax+draw+protection; proactive mass = fast-mana+ritual+tutor+low-curve+compact-combo), tag archetypes with VULNERABILITY classes (graveyard-recursion, graveyard-fuel, plays-<color>, combo, low-curve, greedy-manabase, creature-based, low-interaction, storm-reliant, ramp), compute hate-equity = field share each hate category attacks (coverage, not naive sum), and classify best-deck (low matchup-spread, robust) vs best-call (high-spread, field-specific gamble)."
   - "No published prior art formulates sideboard-as-optimization (one NIU thesis 403-blocked, flagged for manual pull); the OR theory (max-coverage, NWF 1978 submodular greedy) is load-bearing and the MTG community confirms the inputs (matchup matrix + field share) are the right primitives."
 related:
   - {slug: docs/briefs/legacy-metagame.md, relationship: depends-on}
@@ -216,13 +216,16 @@ the metagame brief's archetype data:
 
 | Tag | Derivation | Exposes |
 |---|---|---|
-| graveyard-reliant | graveyard-recursion role / reanimate-escape-delve win-con | GY hate (Surgical, Endurance, Leyline, RIP) |
+| graveyard-recursion | graveyard-recursion role / reanimate-escape-delve win-con | exile-graveyard hate (Surgical, Endurance, Leyline, RIP) |
+| graveyard-fuel | graveyard-as-resource role (delve/threshold/flashback fuel, non-win-con) | weaker resource-denial GY hate (grindier answers than exile hate; less than a hard blowout) |
+| plays-<color> | deck's color identity (white/blue/black/red/green), color-contingent | color-hosers (Hydroblast/Pyroblast-style; also the Blue/Red Elemental Blast catalog entries) |
 | combo (compact) | compactness ≤3 + Thassa's Oracle/Tendrils line | free counters, Mindbreak Trap, stax |
 | low-curve | avg MV <2.0 + Ad Naus/Necro | life pressure, sphere/Rule-of-Law |
 | greedy-manabase | high fast-mana + nonbasic-heavy | Wasteland, Blood Moon, Back to Basics |
 | creature-based | creature win-con / mana dorks | board wipes, Toxic Deluge |
 | low-interaction | low counter+removal density | stax/sphere, taxing |
 | storm-reliant | storm role present | spell-count taxes (Thalia, Defense Grid mirror) |
+| ramp | mana-dork/ritual/land-ramp density above threshold | Wasteland/Blood Moon-style mana-denial, tempo disruption |
 
 **Hate-equity = the field share each hate category attacks** (`Σ field_share(a) for a carrying the tag`).
 Because a deck carries multiple tags, **use coverage, not a naive sum**, when ranking a *package*. This
@@ -233,8 +236,8 @@ field. Low spread + high mean = **BEST DECK** (robust, good vs everything — pl
 room). High spread + high mean-vs-this-field = **BEST CALL** (preys on specific shares — a metagame gamble).
 
 **The recommendation surface** (the advisor's output): a "Field Read & Deck Recommendation" report —
-field composition + derived vulnerability profile → field-read narrative ("X% of the field is
-graveyard-reliant → graveyard hate is highest-equity") → decks ranked by positioning score, each tagged
+field composition + derived vulnerability profile → field-read narrative ("X% of the field runs
+graveyard-recursion win-cons → exile-graveyard hate is highest-equity") → decks ranked by positioning score, each tagged
 proactive/reactive and best-deck/best-call → a recommended 15-card sideboard package → an **audit trail**
 (every number with its derivation, sample size, and a heuristic-vs-data-driven label).
 

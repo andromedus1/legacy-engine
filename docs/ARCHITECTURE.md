@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-06-29
+updated: 2026-07-03
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -33,7 +33,7 @@ decisions:
 
 # Architecture: legacy-engine
 
-*Last updated: 2026-06-14* (rolled forward to present implementation)
+*Last updated: 2026-07-03* (rolled forward to present implementation)
 
 > How the system is built. For *what* and *why*, see [VISION.md](VISION.md) and [SPEC.md](SPEC.md).
 > For decision heuristics, see [PRINCIPLES.md](PRINCIPLES.md). For what to build when, the roadmap/epics
@@ -54,7 +54,8 @@ observed → label → analytics → advisory arc.
 │  seed (cards|cache|rules|banlist|prices) · refresh (all|cards)                   │
 │  · label · report (meta|matchups|tiers|trends|cards|gaps|subgroup|variants|      │
 │    new-cards|speculate|prices|affectedness)                                       │
-│  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire|compare)│
+│  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire|compare| │
+│    backtest)                                                                      │
 │  · identify (suggest|strong|track)                                               │
 │  · generate (consensus|tune|doctor) · export (deck) · viz (deck|meta|matchups|   │
 │    trends|tiers)  [later: goldfish]                                               │
@@ -81,8 +82,9 @@ observed → label → analytics → advisory arc.
 │          │ │           │ │speculation │ │acquire      │ │               │
 │          │ │           │ │players/    │ │primer       │ │               │
 │          │ │           │ │ identity   │ │refresh      │ │               │
-│          │ │           │ │ strength   │ │             │ │               │
-│          │ │           │ │ history    │ │             │ │               │
+│          │ │           │ │ strength   │ │impact       │ │               │
+│          │ │           │ │ history    │ │linchpins    │ │               │
+│          │ │           │ │            │ │backtest     │ │               │
 └───┬─────┘ └────┬──────┘ └─────┬─────┘ └──────┬──────┘ └───────────────┘
     │            │              │              │
 ┌───▼─────────────────────────────────────────────────────────────────────────────┐
@@ -182,14 +184,17 @@ without a schema rewrite. CLI-first; no web UI (deferred to its own research).
 |---|---|---|
 | `field.py` | `FieldDistribution` (the SSOT for "what is the field"): global-from-`metashare` (with Dirichlet counts) + custom user field (normalize/impute/Other); consumed by positioning, sideboard, whattoplay. | advisory-methods |
 | `positioning.py` | `score(deck, field) = Σ w_a·winrate(D vs a)`; Bayesian Monte-Carlo (Beta cells + Dirichlet shares) primary, delta-method fast check; custom user field; rank by risk-adjusted lower-posterior-quantile from shared-field draws (P(best) reported as a secondary view) + a data-coverage flag; report S **and** unweighted aggregate. | advisory-methods |
-| `sideboard.py` | **Maindeck-aware, two-stage core+hedge.** Weighted submodular max-coverage (ILP/CBC primary + greedy explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements). **Stage 1 (dedicated core)**: a per-card-copy redundancy penalty (`_redundancy_penalty`, the brief's `U_redundancy`) + a per-slot natural-budget floor `τ` stop committing once a slot's net marginal clears τ — so the core may be **fewer than 15** instead of padding. **Stage 2 (hedge)**: `_hedge_fill` fills the leftover slots with diversity-preferring **insurance** picks over a uniform-widened field, never displacing a core commit. Smart-mode (`advise sideboard --smart`) calibrates redundancy/τ as fractions of `_coverage_scale` so defaults are field-scale-invariant; output carries commit/insurance labels + the marginal-coverage curve + the uncovered-field tail. **Gated-additive: `--smart` off (default) ⇒ forced-15, byte-identical to the prior model.** Still additively augmented by per-card×matchup value (`card_value`): gate-clearing opponents up-weight elements, and a per-matchup **OUT/IN plan** (`matchup_plans`) sides the maindeck's dead cards out for the chosen 15's best tech in (post-board exactly-60, copy-capped, locked-core protected). Degrades to pure coverage where per-card data is thin. Hoser catalog: `data/hosers/legacy.json` (package-shipped, curated SSOT loaded at startup). | advisory-methods |
-| `whattoplay.py` | Composition-derived proactivity score; vulnerability tags (graveyard-reliant/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant); hate-equity (coverage not sum); best-deck vs best-call (matchup-spread variance). | advisory-methods |
+| `sideboard.py` | **Maindeck-aware, two-stage core+hedge, impact-modulated.** Weighted submodular max-coverage (ILP/CBC primary + greedy explainable fallback; bounded-integer copies, color pre-filter, reserved slots, anti-hate pseudo-elements). Element weight for an (archetype, tag) pair is `field_share × swing × impact(best_hoser, archetype, ...).score()` (see `advisory/impact.py`); the per-copy redundancy curve is derived from `impact.draw_probability`'s hypergeometric marginal rather than a curated constant. **Stage 1 (dedicated core)**: a per-card-copy redundancy penalty (`_redundancy_penalty`, the brief's `U_redundancy`) + a per-slot natural-budget floor `τ` stop committing once a slot's net marginal clears τ — so the core may be **fewer than 15** instead of padding. **Stage 2 (hedge)**: `_hedge_fill` fills the leftover slots with diversity-preferring **insurance** picks over a uniform-widened field, never displacing a core commit. Smart-mode (`advise sideboard --smart`) calibrates redundancy/τ as fractions of `_coverage_scale` so defaults are field-scale-invariant; output carries commit/insurance labels + the marginal-coverage curve + the uncovered-field tail. `advise sideboard` output also includes a per-card impact-factor breakdown (centrality/symmetry/castability/draw_prob) with a Dirichlet-derived confidence/brittle flag, a coverage% diagnostic (explicitly NOT the optimization objective), and a slot-ROI/punt table (`MatchupROI`) ranking field matchups by expected-match-win-per-dedicated-slot. **Gated: `opponent_linchpins=None` (no corpus/curated linchpin data for the field) ⇒ byte-identical to the pre-impact weights.** Still additively augmented by per-card×matchup value (`card_value`): gate-clearing opponents up-weight elements, and a per-matchup **OUT/IN plan** (`matchup_plans`) sides the maindeck's dead cards out for the chosen 15's best tech in (post-board exactly-60, copy-capped, locked-core protected). Degrades to pure coverage where per-card data is thin. Hoser catalog: `data/hosers/legacy.json` (package-shipped, curated SSOT loaded at startup); its `attacks` tags were corrected to the new `plays-<color>` vocabulary (Hydroblast→plays-red, Pyroblast→plays-blue, plus newly-added Blue/Red Elemental Blast) as part of this rework. | advisory-methods, sideboard-core-and-hedge |
+| `impact.py` | Decomposed per-(hoser, opponent) impact score: `ImpactBreakdown` = `centrality × symmetry × castability × draw_prob`, multiplicative hard gates (any factor ≈0 zeroes the score, with floors so a merely-awkward card doesn't crater to a hard 0). `hoser_capabilities` bridges a hoser's `attacks` tags to a linchpin's `neutralized_by` capability vocabulary via a curated, oracle-text-grounded lookup. | advisory-methods |
+| `linchpins.py` | Archetype linchpin model (a linchpin = the card whose removal breaks the archetype's plan). Hybrid derive (near-mandatory inclusion% + combo-critical role, at a conservative default centrality) + curated override (`data/linchpins/legacy.json`, curated wins by name). Owns the `neutralized_by` capability-token vocabulary (artifact-ability-lock, artifact-bounce, artifact-removal, exile-graveyard, counter-on-cast, board-sweep, creature-removal, enchantment-removal). | advisory-methods |
+| `whattoplay.py` | Composition-derived proactivity score; vulnerability tags (graveyard-recursion/graveyard-fuel/plays-<color>/combo/low-curve/greedy-manabase/creature-based/low-interaction/storm-reliant/ramp) — the single monolithic graveyard-vulnerability tag was split into `graveyard-recursion`/`graveyard-fuel`, and `plays-<color>` is color-contingent (white/blue/black/red/green), driving Hydroblast/Pyroblast-style matching; hate-equity (coverage not sum); best-deck vs best-call (matchup-spread variance). | advisory-methods |
 | `report.py` | The "Field Read & Deck Recommendation" surface: field composition + vulnerability profile + ranked decks + sideboard package + audit trail (every number with derivation, n, heuristic-vs-data label). Handles `--venues` cross-venue positioning comparison. | advisory-methods |
 | `window.py` | `resolve_advisory_window` → `WindowResolution`: converts `--since/--until/--regime/--all-time` flags into a concrete window; degrades thin regimes (<500 rounds) to full corpus + a loud banner. `build_advisory_inputs` assembles the regime-aware matrix + field window. Mode field: `adaptive` (per-cell ban-aware, default) / `uniform` / `full`. | — |
 | `collection.py` | `CollectionView`: parses `<qty> <card>` text into an owned-card map; drives owned/acquire annotations on sideboard recommendations without changing the core ILP path. | — |
 | `acquire.py` | `acquire_plan`: ranked priced buy list for a target archetype/board — scored by `impact = field_relevance × archetype_relevance`, price-sorted when `seed prices` has run, with redundancy/over-quantity flags. Exposed via `advise acquire`. | — |
 | `primer.py` | Plain-speak per-matchup primer: given the sideboard's `MatchupPlan` list, generates a human-readable explanation of each OUT/IN swap and why. When `plan.degraded=True` (no per-card data), labels the block reasoning-based and suppresses fabricated numbers. | — |
 | `refresh.py` | `run_refresh` + `render_refresh_result`: full deck-tuning refresh per venue — field-tuned maindeck + sideboard + primer in one call. Exposed via `advise refresh`. | — |
+| `backtest.py` | Board backtest: compares `recommend_sideboard`'s output for an archetype/field against the sideboards top-finishing decks of that archetype actually ran in a comparable window (top-quartile-by-standings-rank). Never emits pass/fail — reports overlap / scorer-only / winners-only with a named confounds caveat (self-selected + metagame-lagged). Exposed via `advise backtest`. | — |
 
 ### `models/` — shared Pydantic types
 `Card`, `Decklist`, `Deck`, `TournamentResult`, `Round`, `Standing`, `Archetype`, `ArchetypeRule`,
@@ -296,7 +301,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - `seed cards|cache|rules|banlist|prices`
   - `refresh all|cards`
   - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices|affectedness`
-  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`
+  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare|backtest`
   - `identify suggest|strong|track`
   - `generate consensus|tune|doctor` (`tune --discover` adds gap-discovery; `consensus --variant/--players/--strong`)
   - `export deck`
@@ -307,7 +312,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - **Regime-aware advisory**: `report matchups|gaps`, `advise positioning|whattoplay|report|refresh` take `--since/--until/--regime/--all-time` and default to the **adaptive per-cell ban-aware matrix + current-regime field** (via `advisory/window.py::resolve_advisory_window` + `build_advisory_inputs`); thin explicit windows degrade to full-corpus with a loud banner.
   - `report meta --venues KEYS` and `advise report --venues KEYS` enable cross-venue comparison; `report meta --by-variant` splits by variant tag.
   - `report meta` is deck-based (windows but never degrades; full-corpus default).
-  - **`--provenance online|paper`** filters by tournament provenance; available on all `advise` leaves (`positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`) and on `report matchups|meta`.
+  - **`--provenance online|paper`** filters by tournament provenance; available on all `advise` leaves (`positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`) and on `report matchups|meta`. `advise backtest` is a validation tool with its own `--since/--until`, not a regime-aware advisory surface — it deliberately does NOT take the full `--since/--until/--regime/--all-time/--provenance` advisory-window-resolution block.
   - **`advise positioning --list-granular`** enables an opt-in `S_granular` overlay that treats the deck as individual cards rather than a named archetype; experimental, printed alongside the standard S score.
   - **`report affectedness --archetype NAME`** explains which bans drove an archetype's `valid_since` (ban-affectedness derivation); `--provenance` scopes the archetype frequency check.
   - **`report trends --movers N`** appends a biggest-movers digest ranking archetypes by share delta between the two most recent regimes.
@@ -371,5 +376,6 @@ No web server. DuckDB is embedded (file-backed, no server) — keeps the "no ser
 | [research-plan.md](research-plan.md) | Research routing (all pre-architecture research complete) |
 | [briefs/ingestion-archetype-contracts/parent.md](briefs/ingestion-archetype-contracts/parent.md) | ingestion/ + archetype/ data contracts |
 | [briefs/advisory-methods.md](briefs/advisory-methods.md) | advisory/ statistical + optimization methods |
+| [briefs/sideboard-core-and-hedge.md](briefs/sideboard-core-and-hedge.md) | sideboard core/hedge construction theory (per-copy value curve, natural budget, hedge objective) |
 | [briefs/legacy-foundations.md](briefs/legacy-foundations.md) | rules, mulligan, format constraints (goldfish later) |
 | [briefs/legacy-metagame.md](briefs/legacy-metagame.md) | meta, data sources |

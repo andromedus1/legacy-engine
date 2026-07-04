@@ -21,8 +21,9 @@ All four draw from the same data layers; they answer different questions.
 3. **Deck Generation** — consensus baseline (mode 1) + field-tuning (mode 2) + gap-discovery (mode 3)
    + export are built; only goldfish-validated candidate-validation is deferred pending the `goldfish/` pillar.
 4. **Meta Attack / Advisory** *(the Legacy-specific differentiator)* — *how to attack the field*: a
-   meta-positioning score (expected win rate vs the weighted field), a sideboard recommender, and a
-   what-to-play advisor (proactive/reactive, best-deck vs best-call).
+   meta-positioning score (expected win rate vs the weighted field), a sideboard recommender with an
+   impact-decomposed, explainable, slot-ROI-aware scoring model, and a what-to-play advisor
+   (proactive/reactive, best-deck vs best-call).
 
 See [`docs/VISION.md`](docs/VISION.md) for the full vision and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 for how it's built.
@@ -30,7 +31,7 @@ for how it's built.
 ## Status
 
 The **observed-data spine, meta analytics, deck generation, the advisory differentiator, and a
-local visualization layer** are built and tested (2242 passing tests). Only the goldfish-simulation
+local visualization layer** are built and tested (2464 passing tests). Only the goldfish-simulation
 pillar remains deferred:
 
 | Capability | State |
@@ -49,6 +50,8 @@ pillar remains deferred:
 | Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
+| Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
+| Sideboard-scorer backtest (`advise backtest` — recommended vs top-finisher boards) | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
 | Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
 | Provenance-filtered advisory (`--provenance online|paper` on all advise leaves + report matchups/meta) | ✅ built |
@@ -146,6 +149,7 @@ legacy-engine advise report      --deck my.txt   # full Field Read & Deck Recomm
 legacy-engine advise report      --deck my.txt --venues online,paper  # cross-venue report
 legacy-engine advise refresh     --deck my.txt   # per-venue tuned maindeck + sideboard + primer
 legacy-engine advise acquire     --collection binder.txt --archetype "Dimir Tempo"  # priced buy list
+legacy-engine advise backtest --archetype "Dimir Tempo" --field field.txt  # scorer's board vs top-finisher boards (empirical anchor, never pass/fail)
 # --my-deck NAME loads a saved UserDeck; --field FILE supplies a custom field
 # --collection FILE enables owned/acquire annotations; --budget N caps the acquire plan
 # --provenance online|paper is available on all advise leaves (and report matchups/meta)
@@ -252,7 +256,7 @@ src/legacy_engine/
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 scripts/       # standalone helpers: knowledge-index gen; viz prototypes (meta_view.py, deck_vs_cohort_viz.py)
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (2242 tests)
+tests/         # pytest suite (2464 tests)
 ```
 
 ## License
