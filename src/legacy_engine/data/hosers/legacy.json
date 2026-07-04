@@ -1,89 +1,104 @@
 {
-  "version": "2026-06-14",
-  "_comment": "Hand-curated sideboard hoser catalog for Legacy. Each entry maps to a HoserCard in advisory/sideboard.py. swing: 'dedicated' = 0.20, 'soft' = 0.10. colors: WUBRG single-char list; empty = colorless. castable_any_color: true bypasses the color pre-filter (Phyrexian mana, free-activation abilities).",
+  "version": "2026-07-03",
+  "_comment": "Hand-curated sideboard hoser catalog for Legacy. Each entry maps to a HoserCard in advisory/sideboard.py. swing: 'dedicated' = 0.20, 'soft' = 0.10. colors: WUBRG single-char list; empty = colorless. castable_any_color: true bypasses the color pre-filter (Phyrexian mana, free-activation abilities). symmetry: 'asymmetric' (default; hits only the opponent/their stuff, incl. the caster choosing a target) or 'symmetric' (the effect's own text applies with no owner restriction, so it can hit the caster too). functional_group: identical-effect group key; at most one card per group contributes coverage (see _build_coverage_model de-dup).",
   "hosers": [
     {
       "name": "Surgical Extraction",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion"],
       "colors": ["B"],
       "max_copies": 2,
       "swing": "dedicated",
       "castable_any_color": true,
-      "_comment": "Phyrexian mana: castable for 2 life in any deck regardless of color identity."
+      "symmetry": "asymmetric",
+      "_comment": "Phyrexian mana: castable for 2 life in any deck regardless of color identity. Exiles all copies of one chosen card — denies recurring/casting that specific reanimation target."
     },
     {
       "name": "Faerie Macabre",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion"],
       "colors": ["B"],
       "max_copies": 2,
       "swing": "dedicated",
       "castable_any_color": true,
-      "_comment": "Free discard activation: usable at zero mana cost in any deck."
+      "symmetry": "asymmetric",
+      "_comment": "Free discard activation: usable at zero mana cost in any deck. Exiles up to two chosen cards from graveyards — narrow, targeted; denies specific recursion targets."
     },
     {
       "name": "Leyline of the Void",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion", "graveyard-fuel"],
       "colors": ["B"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "asymmetric",
+      "_comment": "Exiles every card that would go to an OPPONENT's graveyard going forward — denies both recursion targets and graveyard-as-fuel accumulation (delve/threshold) for that opponent."
     },
     {
       "name": "Endurance",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion", "graveyard-fuel"],
       "colors": ["G"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "asymmetric",
+      "_comment": "Flash creature; puts a chosen player's entire graveyard on the bottom of their library — a one-shot full reset that denies both recursion targets and fuel count for that player."
     },
     {
       "name": "Containment Priest",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion"],
       "colors": ["W"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "symmetric",
+      "_comment": "'If a nontoken creature would enter and it wasn't cast, exile it instead' has no owner restriction — it also exiles the controller's OWN reanimation/cheat-into-play targets, so it self-hoses a deck that itself reanimates."
     },
     {
       "name": "Grafdigger's Cage",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion"],
       "colors": [],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Colorless artifact — always castable."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact — always castable. 'Players can't cast spells from graveyards or libraries' has no owner restriction — stops ALL players, so it self-hoses a graveyard-recursion deck's own plan (Nethergoyf/Flow-State-style shells)."
     },
     {
       "name": "Nihil Spellbomb",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion", "graveyard-fuel"],
       "colors": ["B"],
       "max_copies": 4,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "Sacrifice: exile a chosen player's entire graveyard — a one-shot full reset like Endurance, denying both recursion targets and fuel count for the targeted player."
     },
     {
       "name": "Dauthi Voidwalker",
-      "attacks": ["graveyard-reliant"],
+      "attacks": ["graveyard-recursion", "graveyard-fuel"],
       "colors": ["B"],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Exiles cards from graveyards as they go there; creature body provides additional pressure."
+      "symmetry": "asymmetric",
+      "_comment": "Exiles cards from an OPPONENT's graveyard as they go there, ongoing — denies both recursion and fuel accumulation for that opponent; creature body provides additional pressure."
     },
     {
       "name": "Force of Will",
       "attacks": ["combo", "storm-reliant"],
       "colors": ["U"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "asymmetric"
     },
     {
       "name": "Flusterstorm",
       "attacks": ["combo", "storm-reliant"],
       "colors": ["U"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "asymmetric"
     },
     {
       "name": "Mindbreak Trap",
       "attacks": ["combo", "storm-reliant"],
       "colors": ["U"],
       "max_copies": 2,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "asymmetric"
     },
     {
       "name": "Consign to Memory",
@@ -91,6 +106,7 @@
       "colors": ["U"],
       "max_copies": 4,
       "swing": "dedicated",
+      "symmetry": "asymmetric",
       "_comment": "Counters spells regardless of protection or hexproof; can counter multiple spells in a storm chain."
     },
     {
@@ -98,14 +114,16 @@
       "attacks": ["combo", "storm-reliant"],
       "colors": ["B"],
       "max_copies": 4,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric"
     },
     {
       "name": "Duress",
       "attacks": ["combo", "storm-reliant"],
       "colors": ["B"],
       "max_copies": 4,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric"
     },
     {
       "name": "Veil of Summer",
@@ -113,7 +131,8 @@
       "colors": ["G"],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Counter-hoser: defends the deck against opposing interaction."
+      "symmetry": "asymmetric",
+      "_comment": "Counter-hoser: defends the deck against opposing interaction. Text is self-referential ('you'/'permanents you control') — beneficial only to the caster."
     },
     {
       "name": "Defense Grid",
@@ -121,7 +140,8 @@
       "colors": [],
       "max_copies": 4,
       "swing": "soft",
-      "_comment": "Colorless artifact — counter-hoser."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact — counter-hoser. 'Each spell costs {3} more except during its controller's turn' has no owner restriction — the caster's own instant-speed spells on the opponent's turn cost more too."
     },
     {
       "name": "Carpet of Flowers",
@@ -129,21 +149,26 @@
       "colors": ["G"],
       "max_copies": 4,
       "swing": "soft",
-      "_comment": "Counter-hoser."
+      "symmetry": "asymmetric",
+      "_comment": "Counter-hoser. Mana ability triggers off an opponent's Islands and adds mana only for the caster — beneficial only to the caster."
     },
     {
       "name": "Blood Moon",
       "attacks": ["greedy-manabase"],
       "colors": ["R"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "symmetric",
+      "_comment": "'Nonbasic lands are Mountains' has no owner restriction — it also turns the caster's own nonbasic lands into Mountains, self-hosing a nonbasic-heavy deck."
     },
     {
       "name": "Back to Basics",
       "attacks": ["greedy-manabase"],
       "colors": ["U"],
       "max_copies": 4,
-      "swing": "dedicated"
+      "swing": "dedicated",
+      "symmetry": "symmetric",
+      "_comment": "'Nonbasic lands don't untap during their controllers' untap steps' has no owner restriction — self-hoses a nonbasic-heavy caster (already the anti-synergy filter's basis for blocking it)."
     },
     {
       "name": "Wasteland",
@@ -151,7 +176,8 @@
       "colors": [],
       "max_copies": 4,
       "swing": "soft",
-      "_comment": "Colorless land — always legal."
+      "symmetry": "asymmetric",
+      "_comment": "Colorless land — always legal. Destroys a chosen nonbasic land; the caster picks the target."
     },
     {
       "name": "Force of Vigor",
@@ -159,28 +185,57 @@
       "colors": ["G"],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Answers Blood Moon / Back to Basics / Chalice."
+      "symmetry": "asymmetric",
+      "_comment": "Answers Blood Moon / Back to Basics / Chalice. Destroys up to two chosen artifacts/enchantments — the caster picks the targets."
     },
     {
       "name": "Krosan Grip",
       "attacks": ["greedy-manabase"],
       "colors": ["G"],
       "max_copies": 3,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "_comment": "Destroys a chosen artifact or enchantment — the caster picks the target."
     },
     {
       "name": "Pyroblast",
-      "attacks": ["combo", "low-interaction"],
+      "attacks": ["plays-blue"],
       "colors": ["R"],
       "max_copies": 4,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "functional_group": "blue-blast",
+      "_comment": "Corrected mis-tag (was combo/low-interaction). 'Counter target spell if it's blue' / 'Destroy target permanent if it's blue' — counters/destroys BLUE, functionally identical to Red Elemental Blast."
     },
     {
       "name": "Hydroblast",
-      "attacks": ["greedy-manabase", "low-interaction"],
+      "attacks": ["plays-red"],
       "colors": ["U"],
       "max_copies": 4,
-      "swing": "soft"
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "functional_group": "red-blast",
+      "_comment": "Corrected mis-tag (was greedy-manabase/low-interaction). 'Counter target spell if it's red' / 'Destroy target permanent if it's red' — counters/destroys RED, functionally identical to Blue Elemental Blast."
+    },
+    {
+      "name": "Blue Elemental Blast",
+      "attacks": ["plays-red"],
+      "colors": ["U"],
+      "max_copies": 2,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "functional_group": "red-blast",
+      "_comment": "Added (was previously only reachable via empirical promotion with a generic fallback tag). 'Counter target red spell' / 'Destroy target red permanent' — functionally identical to Hydroblast."
+    },
+    {
+      "name": "Red Elemental Blast",
+      "attacks": ["plays-blue"],
+      "colors": ["R"],
+      "max_copies": 2,
+      "swing": "soft",
+      "symmetry": "asymmetric",
+      "functional_group": "blue-blast",
+      "_comment": "Added. 'Counter target blue spell' / 'Destroy target blue permanent' — functionally identical to Pyroblast."
     },
     {
       "name": "Chalice of the Void",
@@ -188,7 +243,8 @@
       "colors": [],
       "max_copies": 2,
       "swing": "dedicated",
-      "_comment": "Colorless artifact — always castable. Anti-synergy: blocked for low-curve decks."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact — always castable. 'Whenever A PLAYER casts a spell with mana value equal to X' has no owner restriction — counters the caster's own spells at that cost too. Anti-synergy: blocked for low-curve decks."
     },
     {
       "name": "Engineered Explosives",
@@ -196,7 +252,8 @@
       "colors": [],
       "max_copies": 3,
       "swing": "soft",
-      "_comment": "Colorless artifact; sunburst lets it answer permanents at any CMC. Flexible removal vs Elves, Humans, tokens, lock pieces."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact; sunburst lets it answer permanents at any CMC. 'Destroy EACH nonland permanent with mana value equal to X' has no owner restriction — hits the caster's own permanents at that cost too."
     },
     {
       "name": "Sheoldred's Edict",
@@ -204,7 +261,8 @@
       "colors": ["B"],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Edict effect that bypasses hexproof/indestructible by making opponent sacrifice; hits creature-based strategies."
+      "symmetry": "asymmetric",
+      "_comment": "'Each OPPONENT sacrifices...' is explicitly opponent-scoped — bypasses hexproof/indestructible, hits creature-based strategies."
     },
     {
       "name": "Toxic Deluge",
@@ -212,7 +270,8 @@
       "colors": ["B"],
       "max_copies": 3,
       "swing": "dedicated",
-      "_comment": "One-sided board wipe that bypasses indestructible; scales CMC to handle any size threats."
+      "symmetry": "symmetric",
+      "_comment": "One-sided in name only — 'ALL creatures get -X/-X' has no owner restriction, so it can wipe the caster's own board too. Bypasses indestructible; scales CMC to handle any size threats."
     },
     {
       "name": "Harbinger of the Seas",
@@ -220,7 +279,8 @@
       "colors": ["U"],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Lands opponents control that aren't Islands don't untap — locks Tron and Cloudpost out of their mana."
+      "symmetry": "symmetric",
+      "_comment": "'Nonbasic lands are Islands' has no owner restriction — locks Tron/Cloudpost out of their mana, but also turns the caster's own nonbasic lands into Islands."
     },
     {
       "name": "Damping Sphere",
@@ -228,7 +288,8 @@
       "colors": [],
       "max_copies": 4,
       "swing": "dedicated",
-      "_comment": "Colorless artifact. Nonbasic, non-island lands produce only {C}; each additional spell costs {1} more — hoses Tron/Post mana AND storm chains."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact. Both clauses are explicitly per-player ('a land', 'a player has cast') with no owner restriction — hoses Tron/Post mana AND storm chains for BOTH players, including the caster."
     },
     {
       "name": "Pithing Needle",
@@ -236,15 +297,17 @@
       "colors": [],
       "max_copies": 2,
       "swing": "soft",
-      "_comment": "Colorless artifact. Names Eye of Ugin / Eldrazi Temple activated abilities; staxes planeswalkers and utility lands."
+      "symmetry": "symmetric",
+      "_comment": "Colorless artifact. 'Activated abilities of sources with the chosen name' has no owner restriction — if the caster runs a namesake, it locks their own copy too. Names Eye of Ugin / Eldrazi Temple activated abilities; staxes planeswalkers and utility lands."
     },
     {
       "name": "Null Rod",
       "attacks": ["ramp", "greedy-manabase"],
-      "colors": ["G"],
+      "colors": [],
       "max_copies": 4,
       "swing": "soft",
-      "_comment": "Shuts down mana artifacts (Mox Diamond, Chrome Mox, Grim Monolith) common in Eldrazi and Cloudpost shells."
+      "symmetry": "symmetric",
+      "_comment": "'Activated abilities of artifacts can't be activated' has no owner restriction — shuts down mana artifacts (Mox Diamond, Chrome Mox, Grim Monolith) for the caster too if their own deck runs them."
     }
   ]
 }

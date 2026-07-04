@@ -23,6 +23,8 @@ VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
 VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
 HOSERS_DIR = PACKAGE_DATA_DIR / "hosers"
 HOSERS_REGISTRY_PATH = HOSERS_DIR / "legacy.json"      # shipped hoser catalog (curated SSOT)
+LINCHPINS_DIR = PACKAGE_DATA_DIR / "linchpins"
+LINCHPINS_REGISTRY_PATH = LINCHPINS_DIR / "legacy.json"  # shipped linchpin overrides (curated SSOT)
 PLAYERS_DIR = PACKAGE_DATA_DIR / "players"
 ALIASES_PATH = PLAYERS_DIR / "aliases.json"             # shipped player-alias map (curated SSOT)
 
