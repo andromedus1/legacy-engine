@@ -12,14 +12,11 @@ import pytest
 from legacy_engine.advisory.whattoplay import (
     BestDeckCall,
     ProactivityProfile,
-    _archetype_composition,
     _card_roles,
     _color_contingent_tags,
     _load_deck_cards,
     _proactivity_from_cards,
     _COLOR_SPELL_MIN,
-    _GY_FUEL_DENSITY,
-    _GY_RECURSION_DENSITY,
     best_deck_vs_best_call,
     covered_share,
     field_vulnerability_tags,
@@ -29,29 +26,19 @@ from legacy_engine.advisory.whattoplay import (
     vulnerability_tags,
     vulnerability_tags_for_deck,
 )
-from legacy_engine.advisory.field import FieldDistribution, build_custom_field
 from legacy_engine.analytics.matchup import build_cell, build_mirror_cell, MatchupMatrix
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
+
+# gate-cruft-test-helper-duplication: _con/_make_field/_make_card are shared conftest
+# helpers now (were byte-identical local copies here, in test_sideboard.py, and — for
+# _make_card — in test_linchpins.py).
+from tests.conftest import _con, _make_card, _make_field
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _con():
-    """In-memory DuckDB connection, schema initialized."""
-    con = store.connect(":memory:")
-    store.init_schema(con)
-    return con
-
-
-def _make_card(**kwargs) -> Card:
-    """Construct a Card with defaults for unspecified fields."""
-    defaults = dict(name="Test Card", type_line="Instant", oracle_text="", cmc=1.0)
-    defaults.update(kwargs)
-    return Card(**defaults)
-
 
 def _make_matrix(cells: dict, archetypes: list[str]) -> MatchupMatrix:
     """Build a MatchupMatrix directly from a pre-built cells dict."""
@@ -62,10 +49,6 @@ def _make_matrix(cells: dict, archetypes: list[str]) -> MatchupMatrix:
         archetypes=archetypes,
         caveat="test",
     )
-
-
-def _make_field(shares: dict[str, float]) -> FieldDistribution:
-    return build_custom_field(shares)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +154,17 @@ class TestCardRoles:
         roles = _card_roles(reanimate)
         assert "graveyard_recursion" in roles
 
+    @pytest.mark.xfail(
+        reason=(
+            "REAL GAP found while draining gate-cruft-test-unused-locals (2026-07-04): "
+            "_RE_GRAVEYARD's third alternative only matches 'from (?:a|any|your) graveyard "
+            "...onto the battlefield', but Exhume's actual oracle text is symmetric ('each "
+            "player ... from THEIR graveyard'), which the regex does not recognize — "
+            "_card_roles(exhume) returns an EMPTY set today, not {'graveyard_recursion'}. "
+            "Not fixed here: this drain's scope is tests-only (no whattoplay.py src changes)."
+        ),
+        strict=True,
+    )
     def test_exhume_has_graveyard_recursion(self):
         exhume = _make_card(
             name="Exhume",
@@ -178,10 +172,14 @@ class TestCardRoles:
             oracle_text="Each player puts a creature card from their graveyard onto the battlefield.",
             cmc=2.0,
         )
-        # "from their graveyard" — matches "from your graveyard" pattern?
-        # Actually our regex requires "your graveyard" — test with reanimate style text
-        # Use a card that explicitly matches our regex
-        exhume2 = _make_card(
+        roles = _card_roles(exhume)
+        assert "graveyard_recursion" in roles
+
+    def test_animate_dead_has_graveyard_recursion(self):
+        """Animate Dead uses 'from your graveyard' (the phrasing _RE_GRAVEYARD does recognize) —
+        kept as the passing sibling of test_exhume_has_graveyard_recursion above, which xfails
+        on the symmetric 'their graveyard' phrasing gap."""
+        animate_dead = _make_card(
             name="Animate Dead",
             type_line="Enchantment — Aura",
             oracle_text=(
@@ -191,7 +189,7 @@ class TestCardRoles:
             ),
             cmc=2.0,
         )
-        roles = _card_roles(exhume2)
+        roles = _card_roles(animate_dead)
         assert "graveyard_recursion" in roles
 
     def test_delve_card_has_graveyard_fuel_not_recursion(self):
@@ -1618,6 +1616,7 @@ class TestBestDeckCall:
         matrix = _make_matrix(cells, archetypes)
         field = _make_field({a: 1 / 3 for a in archetypes})
         result = best_deck_vs_best_call(matrix, field, "A")
+        assert isinstance(result, BestDeckCall)
         assert result.archetype == "A"
         assert isinstance(result.spread_variance, float)
         assert isinstance(result.field_weighted_mean, float)
@@ -1732,6 +1731,9 @@ class TestRegressionPeerReviewFixes:
         A row whose ONLY strong cells are n<30 must NOT be classified BEST_DECK.
         """
         from legacy_engine.analytics.matchup import DISPLAY_GATE_N
+
+        # This test's n<30/n>=30 literals below assume the production display gate is 30.
+        assert DISPLAY_GATE_N == 30, "test's low/high-n literals assume this gate value"
 
         # Build a matrix where Archetype A has:
         #   - One cell vs B with n=5 (< 30, speculative), very high winrate 90%

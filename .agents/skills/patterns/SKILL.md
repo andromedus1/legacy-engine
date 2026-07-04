@@ -27,3 +27,6 @@ Available patterns:
 - [json-ssot-rebuildable-duckdb-table.md](json-ssot-rebuildable-duckdb-table.md) — raw JSON is SSOT; DuckDB tables are derived caches with `rebuild_*(con)`
 - [viz-spec-render-write-tail.md](viz-spec-render-write-tail.md) — viz leaf ends `spec_*(_*_model(...))` → mkdir → suffix-dispatch render → wrap `ValueError` as `ClickException("Render failed: …")`
 - [file-backed-cli-test-db-builder.md](file-backed-cli-test-db-builder.md) — CLI tests build a tmp DB via `_build_*_db(tmp_path)->str` and always invoke with `--db <that path>`, never the default DB
+- [hybrid-derived-curated-registry.md](hybrid-derived-curated-registry.md) — derive a mapping from data, then merge curated entries over it via a named precedence function — curated wins by key, derived fills gaps
+- [divergence-as-diagnostic-surface.md](divergence-as-diagnostic-surface.md) — surface the disagreement between two signals as a typed first-class output (labeled delta/partition + sample-tier note), not a blended number
+- [closed-vocabulary-fail-fast-token.md](closed-vocabulary-fail-fast-token.md) — enum-like tokens on curated input get a module-level frozenset allow-set + membership check raising ValueError naming token and allowed set
