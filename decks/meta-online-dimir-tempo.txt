@@ -1,7 +1,9 @@
 # DIMIR TEMPO — online meta list (engine-generated, 2026-07-04)
 # Consensus 60: current regime, provenance=online (n=86 decks). Board: engine-optimized vs the
 # online global field (Tron 11.7% #1); natural budget 9/15 dedicated (concentrated field).
-# Overridden out: 2 Defense Grid + 1 Damping Sphere; refills: Toxic Deluge, Thoughtseize, Barrowgoyf.
+# Overridden out: 2 Defense Grid + 1 Damping Sphere; refills: Toxic Deluge, Barrowgoyf, Brazen
+# Borrower (review correction: the raw refill offered a 5th Thoughtseize — combined main+SB 4-of
+# guard is missing in the refill path, tracked; swapped for the next legal considering candidate).
 # Same copy-count caveat as the Boulder list.
 1 Bloodstained Mire
 4 Brainstorm
@@ -31,6 +33,7 @@
 Sideboard
 1 Barrowgoyf
 1 Blue Elemental Blast
+1 Brazen Borrower
 1 Consign to Memory
 1 Dauthi Voidwalker
 1 Engineered Explosives
@@ -42,5 +45,4 @@ Sideboard
 1 Null Rod
 1 Sheoldred's Edict
 1 Snuff Out
-1 Thoughtseize
 1 Toxic Deluge

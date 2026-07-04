@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc
 kind: epic
-stage: implementing
+stage: done
 tags: [advisory, analysis, dogfooding]
 parent: null
 depends_on: [feature-archetype-sweep-backtest]
@@ -38,11 +38,11 @@ determinism-fixed solver and inherit any scorer findings).
 ## Design decisions (epic-design, 2026-07-04, autopilot)
 
 - **"Online meta" definition**: `tournaments.provenance = 'online'` over the current-regime
-  window (corpus vocabulary is online/paper, verified; 58 online Doomsday regime decks).
+  window (corpus vocabulary is online/paper, verified; 58 online Doomsday regime decks pre-refresh — 112 post-refresh).
 - **Best-pick collision rule**: if `whattoplay`'s top pick for a meta is Dimir Tempo, the
   best-pick list uses the top NON-Dimir archetype, with the collision noted honestly.
 - **Doomsday subarchetype reality check** (verified 2026-07-04): `decks.variant` is NULL
-  for all 1849 Doomsday decks — the corpus does NOT label subarchetypes. Stage 3 therefore
+  for all Doomsday decks (1849 pre-refresh count) — the corpus does NOT label subarchetypes. Stage 3 therefore
   identifies the tempo camp mechanically (co-occurrence split on tempo markers — the
   with-Murktide/Tamiyo camp vs Personal Tutor/One Ring turbo) with honest split sample
   sizes. A manual instance of [[idea-subarchetype-discovery]].
@@ -76,3 +76,13 @@ the deliverables build on each other).
   A-vs-B delta is itself a deliverable (what the collection is missing), not a failure.
 - **whattoplay best-pick is a lean, not a verdict** (P(best) has been ≤12.6% historically)
   — present per [[analysis-statistical-context-gates]].
+
+## Completion review (2026-07-04)
+
+Fresh-context completion pass verified 25+ quantitative claims against the live engine/DB
+(all reproduced exactly, incl. every adoption %, copy-histogram row, variant split count,
+positioning/compare number). Findings fixed before close: two format-ILLEGAL lists (5th
+Thoughtseize / 5th Pyroblast via the recommend/refill path — hand-corrected, root cause
+filed as bug-sb-combined-fourof-guard), a fabricated thin-cell caveat and an overstated
+"card-identical" claim (both reworded to match engine output), tempo-camp tier relabeled
+speculative→evolving per the canonical ladder, stale pre-refresh counts tagged. Epic done.

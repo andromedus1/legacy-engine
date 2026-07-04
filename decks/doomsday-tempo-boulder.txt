@@ -1,7 +1,7 @@
 # DOOMSDAY TEMPO — boulder list (consensus subarchetype, 2026-07-04)
 # Maindeck: consensus over the mechanically-split TEMPO camp of Doomsday (variant rule:
 # mains Murktide/Tamiyo AND NOT Personal Tutor/One Ring; n=47 of 134 regime Doomsday decks —
-# SPECULATIVE tier; paper subset is n=8, so this is predominantly online-informed).
+# EVOLVING tier per the canonical ladder (30-99); paper subset n=8 is speculative, so this is predominantly online-informed).
 # The old two-mode "transform" build is dead — this list defers to camp consensus throughout.
 # Board: engine-optimized vs the boulder field (smart+hedge; natural budget 5/15).
 # Overridden out: {'Defense Grid': 1} (sweep-confirmed); refills: [['Flusterstorm', 0.002390566237040403]].

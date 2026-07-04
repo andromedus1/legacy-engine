@@ -16,7 +16,7 @@ variant labels (re-derivable; the labeler may clear them on re-run):
 - Neither/both (n=38) left unlabeled — the rule is deliberately conservative; the "neither"
   bucket is a real residue (Oracle-shell piles without either package), not forced into a camp
 
-**Tier honesty: the tempo camp is SPECULATIVE (n=47), and paper-only is n=8 — there is still
+**Tier honesty: the tempo camp is EVOLVING (n=47, per the canonical 30-99 band), and paper-only is n=8 (speculative) — there is still
 no Boulder-specific Doomsday Tempo meta.** These lists are predominantly online-informed;
 "Boulder-tuning" is the field-weighted board, not observed local practice.
 
