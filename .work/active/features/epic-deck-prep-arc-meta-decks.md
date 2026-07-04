@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc-meta-decks
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, analysis, dogfooding]
 parent: epic-deck-prep-arc
 depends_on: [epic-deck-prep-arc-dimir-boards]
@@ -39,3 +39,15 @@ Does NOT cover: the Doomsday Tempo work (next feature) or cross-deck comparison.
 - Metas: the local meta = `decks/local-field-since-518.txt`; online = `provenance='online'`,
   current-regime window. Prior best-deck context: D&T topped both lenses on the regime-clean
   local field (2026-06-27 session; re-run, don't assume).
+
+## Design + results (2026-07-04, single-stride)
+
+Executed per the epic's decisions (design folded into the stride — composition of shipped
+surfaces; the only design call was the best-pick ranking surface: `advise positioning
+--candidates` over each field's archetypes, seed 42, since `whattoplay` is deck-relative).
+Best-picks: **Painter** (the local meta, S*=0.528 Q0.25-ranked lean) and **Doomsday** (online,
+S*=0.580, cov≈0 caveat) — no Dimir collision, so the collision rule stayed dormant.
+Deliverables: decks/meta-{local,online}-{dimir-tempo,bestpick-*}.txt +
+decks/meta-decks-analysis.md. Overrides applied mechanically and labeled per file; the
+1-of-pitch-counter scorer bias is deliberately left visible in these reference lists (the
+personal board hand-corrects it) so the arc's final study can show before/after.

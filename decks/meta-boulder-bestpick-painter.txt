@@ -1,0 +1,41 @@
+# PAINTER — the local meta best-pick list (engine-generated, 2026-07-04)
+# Engine's top-ranked archetype for the local field (S*=0.528, Q0.25=0.495, P(best)=0.093 — a
+# LEAN, not a verdict; CIs overlap the whole top group; coverage 0.48). Consensus 60: current
+# regime, all provenance (n=37 — EVOLVING tier, thinnest of the four lists).
+# Board: natural budget stopped at 2 dedicated + 5 insurance = 7 slots — the engine declines to
+# pad; remaining 8 slots are free for pilot preference (honest-degrade, not an error).
+# Overridden out: 2 Defense Grid.
+1 Agatha's Soul Cauldron
+4 Ancient Tomb
+1 Arena of Glory
+1 Ensnaring Bridge
+3 Fable of the Mirror-Breaker
+4 Goblin Engineer
+4 Goblin Welder
+2 Great Furnace
+2 Grindstone
+2 Karn, the Great Creator
+1 Legion Extruder
+2 Lotus Petal
+4 Melded Moxite
+2 Mountain
+1 Mox Opal
+4 Painter's Servant
+1 Phyrexian Dragon Engine
+4 Pyroblast
+3 Red Elemental Blast
+3 Sewer-veillance Cam
+3 Simian Spirit Guide
+1 Skateboard
+1 Soul-Guide Lantern
+4 Urza's Saga
+2 Wooded Foothills
+
+Sideboard
+1 Abrade
+1 Blood Moon
+1 Ghost Vacuum
+1 Pyroblast
+1 Soul-Guide Lantern
+1 Tormod's Crypt
+1 Untimely Malfunction
