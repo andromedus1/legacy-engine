@@ -1,10 +1,10 @@
-# DOOMSDAY TEMPO — local list (consensus subarchetype, 2026-07-04)
+# DOOMSDAY TEMPO — online list (consensus subarchetype, 2026-07-04)
 # Maindeck: consensus over the mechanically-split TEMPO camp of Doomsday (variant rule:
 # mains Murktide/Tamiyo AND NOT Personal Tutor/One Ring; n=47 of 134 regime Doomsday decks —
 # SPECULATIVE tier; paper subset is n=8, so this is predominantly online-informed).
 # The old two-mode "transform" build is dead — this list defers to camp consensus throughout.
-# Board: engine-optimized vs the local field (smart+hedge; natural budget 5/15).
-# Overridden out: {'Defense Grid': 1} (sweep-confirmed); refills: [['Flusterstorm', 0.002390566237040403]].
+# Board: engine-optimized vs the online field (smart+hedge; natural budget 7/15).
+# Overridden out: {'Defense Grid': 1} (sweep-confirmed); refills: [['Barrowgoyf', 0.0028618963605067374]].
 # Collection: 5 SB cards unowned (Abrupt Decay, Bitter Triumph, Carpet of Flowers, Flusterstorm,
 # Veil of Summer); maindeck needs a real acquisition (14 names incl. 1 Lion's Eye Diamond — the
 # tempo camp runs ONE, not the turbo camp's multiples). Owned-SB fallback in the analysis doc.
@@ -41,7 +41,6 @@ Sideboard
 1 Abrupt Decay
 1 Barrowgoyf
 1 Bitter Triumph
-1 Brazen Borrower
 1 Carpet of Flowers
 1 Consign to Memory
 1 Dauthi Voidwalker
@@ -52,4 +51,5 @@ Sideboard
 1 Hydroblast
 1 Long Goodbye
 1 Nihil Spellbomb
+1 Thoughtseize
 1 Veil of Summer
