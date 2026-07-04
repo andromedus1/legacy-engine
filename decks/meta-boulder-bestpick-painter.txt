@@ -4,7 +4,9 @@
 # regime, all provenance (n=37 — EVOLVING tier, thinnest of the four lists).
 # Board: natural budget stopped at 2 dedicated + 5 insurance = 7 slots — the engine declines to
 # pad; remaining 8 slots are free for pilot preference (honest-degrade, not an error).
-# Overridden out: 2 Defense Grid.
+# Overridden out: 2 Defense Grid. Review correction: the raw board offered a 5th Pyroblast
+# (4 already main; combined 4-of guard missing in the recommend path, tracked) — removed, so
+# the honest board is 6 slots.
 1 Agatha's Soul Cauldron
 4 Ancient Tomb
 1 Arena of Glory
@@ -35,7 +37,6 @@ Sideboard
 1 Abrade
 1 Blood Moon
 1 Ghost Vacuum
-1 Pyroblast
 1 Soul-Guide Lantern
 1 Tormod's Crypt
 1 Untimely Malfunction
