@@ -48,6 +48,9 @@ from legacy_engine.advisory.sideboard import (
     _derive_attacks_for_promoted,
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
+    _maindeck_answer_coverage,
+    _MAINDECK_DISCOUNT,
+    _MAINDECK_SATURATION,
     empirical_swing_proxy,
     recommend_sideboard,
 )
@@ -3797,6 +3800,318 @@ class TestDeriveAttacksForPromoted:
         """Return type is always a frozenset."""
         attacks = _derive_attacks_for_promoted("X", "Counter target spell.", "Instant")
         assert isinstance(attacks, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# TestMaindeckAwareCoverageDiscount — Units C1 + C2 of
+# feature-sb-maindeck-aware-coverage (story …-discount): discount SB coverage-model
+# element weights by what the MAINDECK already answers.
+# ---------------------------------------------------------------------------
+
+class _FakeResolvedCard:
+    """Minimal stand-in for a resolved ``Card`` (only the two attrs C1 reads)."""
+
+    def __init__(self, oracle_text: str, type_line: str = "Instant"):
+        self.oracle_text = oracle_text
+        self.type_line = type_line
+
+
+class TestMaindeckAnswerCoverage:
+    """Unit C1: ``_maindeck_answer_coverage`` — pure, saturating [0,1] per-tag coverage
+    the maindeck already provides."""
+
+    def test_wasteland_maps_to_greedy_manabase_via_catalog_short_circuit(self):
+        """Wasteland is itself a curated HOSER_CATALOG entry (attacks={'greedy-manabase'});
+        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup
+        is used rather than the oracle->attacks derivation, which would mislabel
+        'Destroy target nonbasic land' as creature-based (it contains the bare substring
+        'destroy target' — see TestDeriveAttacksForPromoted's removal rule)."""
+        coverage = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
+        assert coverage == {"greedy-manabase": pytest.approx(1.0)}
+
+    def test_copy_count_saturates_at_four(self):
+        """Coverage scales linearly with copies up to _MAINDECK_SATURATION (4), then holds
+        at 1.0 — a 5th 'copy' (hand-built to isolate the curve) does not exceed 1.0."""
+        assert _MAINDECK_SATURATION == 4
+        at_two = _maindeck_answer_coverage({"Wasteland": 2}, lambda name: None)
+        at_four = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
+        at_five = _maindeck_answer_coverage({"Wasteland": 5}, lambda name: None)
+        assert at_two["greedy-manabase"] == pytest.approx(0.5)
+        assert at_four["greedy-manabase"] == pytest.approx(1.0)
+        assert at_five["greedy-manabase"] == pytest.approx(1.0)  # saturated, not > 1.0
+
+    def test_oracle_text_derivation_used_for_non_catalog_cards(self):
+        """A maindeck card NOT in the catalog falls back to the same oracle->attacks
+        derivation _build_promoted_candidates already uses for empirical SB promotions."""
+        cards = {"Some Counterspell": _FakeResolvedCard("Counter target spell.")}
+        coverage = _maindeck_answer_coverage(
+            {"Some Counterspell": 4}, cards.get, catalog={}
+        )
+        assert coverage["combo"] == pytest.approx(1.0)
+        assert coverage["storm-reliant"] == pytest.approx(1.0)
+
+    def test_fallback_attacks_excluded_not_credited_as_combo(self):
+        """A maindeck card whose oracle_text matches no derivation rule falls back to
+        _FALLBACK_ATTACKS ({'combo'}) inside _derive_attacks_for_promoted. Crediting that
+        indiscriminately would discount 'combo' for every deck regardless of contents
+        (most of a 60-card maindeck answers nothing) — the conservative fallback is
+        excluded entirely rather than treated as real signal."""
+        cards = {"Some Vanilla Bear": _FakeResolvedCard("", type_line="Creature")}
+        coverage = _maindeck_answer_coverage(
+            {"Some Vanilla Bear": 4}, cards.get, catalog={}
+        )
+        assert coverage == {}
+
+    def test_unresolved_card_contributes_no_coverage(self):
+        """get_card returning None (unresolved/unknown name) is skipped, not an error."""
+        coverage = _maindeck_answer_coverage(
+            {"Unknown Card": 4}, lambda name: None, catalog={}
+        )
+        assert coverage == {}
+
+    def test_hate_pseudo_attack_excluded_from_coverage(self, make_hoser):
+        """A maindeck card whose (catalog) attacks include the '_hate' counter-hoser
+        marker does not leak '_hate' into the per-tag coverage dict."""
+        catalog = {
+            "Test Hate Card": make_hoser(
+                name="Test Hate Card", attacks=frozenset({"_hate", "combo"}),
+                colors=frozenset(),
+            ),
+        }
+        coverage = _maindeck_answer_coverage(
+            {"Test Hate Card": 4}, lambda name: None, catalog=catalog
+        )
+        assert coverage == {"combo": pytest.approx(1.0)}
+        assert "_hate" not in coverage
+
+    def test_zero_copy_entries_ignored(self):
+        """A maindeck dict entry with count<=0 contributes nothing (defensive; real
+        deck_maindeck dicts shouldn't carry zero-count entries, but the loop must not
+        misbehave if one appears)."""
+        coverage = _maindeck_answer_coverage({"Wasteland": 0}, lambda name: None)
+        assert coverage == {}
+
+
+class TestBuildCoverageModelMaindeckDiscount:
+    """Unit C2: ``_build_coverage_model``'s ``maindeck_coverage`` discount."""
+
+    @staticmethod
+    def _tron_field_and_tags():
+        field = _make_field({"Tron": 1.0})
+        archetype_tags = {"Tron": frozenset({"greedy-manabase"})}
+        return field, archetype_tags
+
+    def test_maindeck_coverage_none_is_byte_identical(self, make_hoser):
+        """maindeck_coverage=None (the default) -> byte-identical to the pre-feature
+        call signature; an explicit {} is equally a no-op (mirrors the
+        opponent_linchpins/matchup_pressure gating precedents)."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        omitted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        explicit_none = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage=None,
+        )
+        empty_dict = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={},
+        )
+        assert omitted.element_weight == explicit_none.element_weight
+        assert omitted.element_weight == empty_dict.element_weight
+        assert omitted.candidate_covers == explicit_none.candidate_covers == empty_dict.candidate_covers
+        assert omitted.warnings == explicit_none.warnings == empty_dict.warnings == ()
+
+    def test_maindeck_coverage_discounts_matching_element(self, make_hoser):
+        """A fully-saturated maindeck answer (coverage=1.0) discounts the matching
+        (archetype, tag) element by exactly _MAINDECK_DISCOUNT, and fires the audit line."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        discounted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 1.0},
+        )
+        key = "Tron|greedy-manabase"
+        assert discounted.element_weight[key] == pytest.approx(
+            baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT)
+        )
+        assert discounted.warnings == (
+            "// maindeck-aware: discounted greedy-manabase by 60% (deck already answers it)",
+        )
+
+    def test_partial_coverage_scales_the_discount(self, make_hoser):
+        """A half-saturated maindeck axis (coverage=0.5) applies half the max discount —
+        the discount is proportional, never fully zeroing an axis the maindeck only
+        partly covers."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        half = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 0.5},
+        )
+        key = "Tron|greedy-manabase"
+        assert half.element_weight[key] == pytest.approx(
+            baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT * 0.5)
+        )
+        assert half.element_weight[key] > 0.0
+
+    def test_unrelated_tag_in_maindeck_coverage_is_a_no_op(self, make_hoser):
+        """A maindeck_coverage entry for a tag that isn't live in this model's elements
+        neither discounts anything nor emits an audit line."""
+        field, archetype_tags = self._tron_field_and_tags()
+        catalog = {
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+        )
+        unrelated = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
+            maindeck_coverage={"storm-reliant": 1.0},
+        )
+        assert unrelated.element_weight == baseline.element_weight
+        assert unrelated.warnings == ()
+
+    def test_hate_pseudo_element_exempt_from_discount(self, make_hoser):
+        """`_hate:` pseudo-elements are NOT discounted even when maindeck_coverage names
+        the same tag — they model field-wide interactive pressure against the deck's own
+        vulnerabilities, not an archetype coverage axis a maindeck card substitutes for
+        (mirrors the "|" not in key skip in the matchup_pressure pass)."""
+        field = _make_field({"Storm": 1.0})
+        archetype_tags = {"Storm": frozenset({"combo"})}
+        catalog = {
+            "Carpet of Flowers": make_hoser(
+                name="Carpet of Flowers", attacks=frozenset({"_hate"}), colors=frozenset(),
+            ),
+            "Force of Vigor": make_hoser(
+                name="Force of Vigor", attacks=frozenset({"combo"}),
+                colors=frozenset({"G"}), swing=0.30,
+            ),
+        }
+        baseline = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset({"combo"}), catalog=catalog,
+        )
+        discounted = _build_coverage_model(
+            field, archetype_tags, frozenset({"U", "B", "G"}), frozenset({"combo"}), catalog=catalog,
+            maindeck_coverage={"combo": 1.0},
+        )
+        assert discounted.element_weight["_hate:combo"] == pytest.approx(
+            baseline.element_weight["_hate:combo"]
+        )
+        assert discounted.element_weight["Storm|combo"] < baseline.element_weight["Storm|combo"]
+
+
+class TestMaindeckAwareCoverageIntegration:
+    """Integration: the motivating dogfooding bug — a deck's maindeck already answers an
+    axis (e.g. 4 maindeck Wasteland -> greedy-manabase); the SB should stop padding a
+    redundant Ghost-Quarter-style candidate for that same axis."""
+
+    def test_ghost_quarter_style_pick_drops_when_maindeck_already_answers(self, make_hoser):
+        field = _make_field({"BigMana": 0.9, "Storm": 0.55})
+        archetype_tags = {
+            "BigMana": frozenset({"greedy-manabase"}),
+            "Storm": frozenset({"storm-reliant"}),
+        }
+        catalog = {
+            "Ghost Quarter": make_hoser(
+                name="Ghost Quarter", attacks=frozenset({"greedy-manabase"}),
+                colors=frozenset(), swing=0.20, max_copies=4,
+            ),
+            "Damping Sphere": make_hoser(
+                name="Damping Sphere", attacks=frozenset({"storm-reliant"}),
+                colors=frozenset(), swing=0.20, max_copies=4,
+            ),
+        }
+        no_answers = _build_coverage_model(
+            field, archetype_tags, frozenset(), frozenset(), catalog=catalog,
+        )
+        with_wasteland = _build_coverage_model(
+            field, archetype_tags, frozenset(), frozenset(), catalog=catalog,
+            maindeck_coverage={"greedy-manabase": 1.0},
+        )
+
+        # At a 1-slot budget, BigMana's higher pre-discount weight wins Ghost Quarter the
+        # only slot; once the maindeck already answers greedy-manabase, that same slot
+        # goes to the still-undiscounted storm-reliant axis instead.
+        no_answers_picks, _ = _greedy_solve(no_answers, budget=1)
+        with_wasteland_picks, _ = _greedy_solve(with_wasteland, budget=1)
+
+        assert no_answers_picks == {"Ghost Quarter": 1}, (
+            f"sanity: BigMana's higher share should win the lone slot pre-discount: {no_answers_picks}"
+        )
+        assert with_wasteland_picks.get("Ghost Quarter", 0) == 0, (
+            f"Ghost Quarter must no longer be padded once the maindeck already answers "
+            f"greedy-manabase: {with_wasteland_picks}"
+        )
+        assert with_wasteland_picks == {"Damping Sphere": 1}
+
+    def test_recommend_sideboard_wires_maindeck_coverage_end_to_end(self):
+        """recommend_sideboard resolves the caller's OWN maindeck (via _load_deck_cards),
+        computes maindeck_coverage (Unit C1), and threads it into _build_coverage_model
+        (Unit C2) through the real, non-mocked pipeline — not just the pure helpers.
+        Both catalog entries are castable_any_color to hold the color-filtered candidate
+        set identical between the two calls, isolating the discount's effect."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            field = _make_field({"Reanimator": 1.0})
+            catalog = {
+                "Surgical Extraction": HoserCard(
+                    name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_DEDICATED,
+                    castable_any_color=True,
+                ),
+                # Retagged purely as a wiring stand-in for "a maindeck card the deck
+                # already runs that answers the same axis" (mirrors the Null-Rod-retag
+                # precedent in TestRecommendSideboardOutputFieldsIntegration) — NOT a claim
+                # that Reanimate is a real sideboard hoser.
+                "Reanimate": HoserCard(
+                    name="Reanimate", attacks=frozenset({"graveyard-recursion"}),
+                    colors=frozenset(), max_copies=4, swing=_SWING_SOFT,
+                    castable_any_color=True,
+                ),
+            }
+            baseline = recommend_sideboard(
+                con, field, {"Swamp": 14}, solver="greedy", catalog=catalog,
+            )
+            with_answers = recommend_sideboard(
+                con, field, {"Reanimate": 4, "Swamp": 10}, solver="greedy", catalog=catalog,
+            )
+        finally:
+            con.close()
+
+        assert any(
+            w.startswith("// maindeck-aware: discounted graveyard-recursion")
+            for w in with_answers.warnings
+        ), f"expected maindeck-aware audit line: {with_answers.warnings}"
+        assert not any(w.startswith("// maindeck-aware:") for w in baseline.warnings)
+        assert with_answers.covered_weight == pytest.approx(
+            baseline.covered_weight * (1.0 - _MAINDECK_DISCOUNT)
+        )
 
 
 # ---------------------------------------------------------------------------

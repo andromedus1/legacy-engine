@@ -137,7 +137,7 @@ import json
 import logging
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import duckdb
 from scipy.stats import beta as _beta_dist
@@ -1316,6 +1316,89 @@ def _build_promoted_candidates(
 
 
 # ---------------------------------------------------------------------------
+# Unit C1 (feature-sb-maindeck-aware-coverage, story …-discount): maindeck-answer
+# coverage detector.
+# ---------------------------------------------------------------------------
+
+# Max fraction of an element's weight a fully-maindeck-covered tag loses (never fully
+# zeroes an axis — a maindeck answer is rarely a perfect substitute for a dedicated SB
+# slot: it may be a single copy already in play, timing-constrained, or matched up
+# against a different specific threat than the SB slot would cover).
+_MAINDECK_DISCOUNT: float = 0.6
+
+# Copies of maindeck answers at which a tag's coverage saturates to 1.0. 4 mirrors the
+# Legacy 4-of ceiling — a deck answering an axis with its full playset of copies is
+# treated as maximally (but not more than maximally) covering that axis.
+_MAINDECK_SATURATION: int = 4
+
+
+def _maindeck_answer_coverage(
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+    *,
+    catalog: "dict[str, HoserCard] | None" = None,
+) -> "dict[str, float]":
+    """Saturating [0,1] per-tag coverage the MAINDECK already provides.
+
+    For each maindeck card (name -> copy count), determine which vulnerability tags it
+    answers and accumulate a copy-weighted coverage score per tag, saturating at
+    ``_MAINDECK_SATURATION`` copies (a full playset maxes a tag's coverage at 1.0; more
+    copies cannot push it past 1.0).
+
+    Attribution, in priority order:
+      1. Catalog lookup — when the maindeck card is itself a curated ``HOSER_CATALOG``
+         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"greedy-manabase"}``),
+         its hand-curated ``attacks`` are authoritative. This is the common case for the
+         motivating bug (maindeck utility lands/interaction that double as catalog hosers).
+      2. Oracle-text derivation — for maindeck cards NOT in the catalog, reuse
+         ``_derive_attacks_for_promoted`` (the same oracle->attacks heuristic
+         ``_build_promoted_candidates`` already uses for empirical SB promotions) against
+         the card's resolved ``oracle_text``/``type_line``. Cards for which the heuristic
+         only reaches its conservative ``_FALLBACK_ATTACKS`` (i.e. no concrete signal
+         matched) are treated as answering NOTHING — crediting the fallback tag here would
+         indiscriminately discount that tag for every maindeck (60 cards, most of which
+         answer nothing), which is not the intent.
+
+    ``get_card``: name -> resolved ``Card`` (or ``None`` if unresolved). Injected so this
+    function stays DB-free and pure (objective-search-split): the caller resolves cards
+    ONCE (``_load_deck_cards``) and passes a plain dict-backed lookup; this loop is then
+    unit-testable with hand-built ``get_card`` callables, no DB required.
+
+    The ``"_hate"`` pseudo-attack (counter-hoser marker) is not a real vulnerability tag
+    and is excluded from the returned coverage, mirroring how ``_build_coverage_model``
+    already excludes ``_hate:`` pseudo-elements from other multiplier passes.
+    """
+    if catalog is None:
+        catalog = HOSER_CATALOG
+
+    raw_copies: dict[str, float] = {}  # tag -> Σ copies of maindeck cards answering it
+    for name, count in main_cards.items():
+        if count <= 0:
+            continue
+
+        hoser = catalog.get(name)
+        if hoser is not None:
+            attacks = hoser.attacks
+        else:
+            card = get_card(name)
+            if card is None:
+                continue
+            attacks = _derive_attacks_for_promoted(name, card.oracle_text, card.type_line)
+            if attacks == _FALLBACK_ATTACKS:
+                continue  # no concrete signal — don't credit the conservative fallback
+
+        for tag in attacks:
+            if tag == "_hate":
+                continue
+            raw_copies[tag] = raw_copies.get(tag, 0.0) + count
+
+    return {
+        tag: min(1.0, copies / _MAINDECK_SATURATION)
+        for tag, copies in raw_copies.items()
+    }
+
+
+# ---------------------------------------------------------------------------
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
@@ -1349,6 +1432,7 @@ def _build_coverage_model(
     card_swing_overrides: "dict[str, float] | None" = None,
     opponent_linchpins: "dict[str, list[Linchpin]] | None" = None,
     opponent_cards: "dict[str, dict[str, int]] | None" = None,
+    maindeck_coverage: "dict[str, float] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -1413,6 +1497,20 @@ def _build_coverage_model(
     ``max_copies`` would double-count it.  Gated-additive: ``opponent_linchpins=None`` (the
     default) → every impact multiplier is 1.0 → element weights are BYTE-IDENTICAL to
     pre-impact (mirrors the ``matchup_pressure is None`` no-op above).
+
+    Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage, Unit C2):
+    When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
+    (archetype, tag) element's weight is additionally multiplied by
+    ``(1 - _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0))`` — an axis the maindeck
+    already answers (e.g. 4 maindeck Wasteland covering "greedy-manabase") should not also
+    claim a full-weight dedicated SB slot for the same axis. ``_hate:`` pseudo-elements are
+    EXEMPT (mirrors the ``"|" not in key`` skip in the ``matchup_pressure`` pass above) —
+    they represent field-wide interaction pressure against the DECK's own vulnerabilities,
+    not an archetype-vs-tag coverage axis a maindeck card could substitute for. A
+    ``// maindeck-aware: ...`` audit line is appended to ``warnings`` for each tag actually
+    discounted. Gated-additive: ``maindeck_coverage=None`` or ``{}`` → no-op → element
+    weights are BYTE-IDENTICAL to pre-discount (mirrors the ``opponent_linchpins is None``
+    no-op above).
     """
     if catalog is None:
         catalog = HOSER_CATALOG
@@ -1546,6 +1644,34 @@ def _build_coverage_model(
             multiplier = matchup_pressure.get(arch, 1.0)
             if multiplier != 1.0:
                 element_weight[key] = element_weight[key] * multiplier
+
+    # --- Step 3c: Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage,
+    # Unit C2) ---
+    # When maindeck_coverage is not None, discount each (archetype, tag) element's weight
+    # by how much the MAINDECK already answers that tag — stops the solver from double-
+    # counting an axis (e.g. 4 maindeck Wasteland already covering "greedy-manabase" ->
+    # the SB shouldn't also spend a full-weight slot on Ghost Quarter for the same axis).
+    # `_hate:` pseudo-elements are exempt (same "|" not in key skip as Step 3b) — they
+    # model field-wide interactive pressure against the deck's OWN vulnerabilities, not an
+    # archetype coverage axis a maindeck card could substitute for.
+    # When maindeck_coverage is None (or empty), this step is a no-op -> byte-identical.
+    if maindeck_coverage:
+        _discounted_tags: set[str] = set()
+        for key in list(element_weight.keys()):
+            if "|" not in key:
+                continue  # skip anti-hate pseudo-elements
+            tag = key.split("|", 1)[1]
+            coverage = maindeck_coverage.get(tag, 0.0)
+            if coverage <= 0.0:
+                continue
+            discount = _MAINDECK_DISCOUNT * coverage
+            element_weight[key] = element_weight[key] * (1.0 - discount)
+            _discounted_tags.add(tag)
+        for tag in sorted(_discounted_tags):
+            pct = _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0) * 100.0
+            warnings.append(
+                f"// maindeck-aware: discounted {tag} by {pct:.0f}% (deck already answers it)"
+            )
 
     # --- Step 4: Color-prefiltered candidate hosers ---
     candidate_covers: dict[str, frozenset[str]] = {}
@@ -3150,6 +3276,18 @@ def recommend_sideboard(
     except Exception as exc:
         log.debug("recommend_sideboard: _field_opponent_linchpins failed: %s", exc)
 
+    # --- Step 3g: Maindeck-aware coverage discount (feature-sb-maindeck-aware-coverage,
+    # Unit C1) ---
+    # Computed ONCE here from the already-resolved deck_card_objects (objective-search-split
+    # — no extra DB round-trip inside the pure _maindeck_answer_coverage loop) and threaded
+    # into _build_coverage_model so it can discount element weights for axes the maindeck
+    # itself already answers (e.g. 4 maindeck Wasteland -> "greedy-manabase"). Empty when the
+    # deck answers no tracked vulnerability tags -> _build_coverage_model no-ops (byte-identical).
+    _card_by_name: "dict[str, Card]" = {card.name: card for card in deck_card_objects}
+    maindeck_coverage = _maindeck_answer_coverage(
+        deck_maindeck, _card_by_name.get, catalog=catalog
+    )
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -3164,6 +3302,7 @@ def recommend_sideboard(
         card_swing_overrides=card_swing_overrides,
         opponent_linchpins=opponent_linchpins,
         opponent_cards=opponent_cards,
+        maindeck_coverage=maindeck_coverage,
     )
     warnings.extend(model.warnings)
 
