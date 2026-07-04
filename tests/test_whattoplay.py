@@ -1335,6 +1335,111 @@ class TestNoncreatureReliantTag:
 
 
 # ---------------------------------------------------------------------------
+# TestColorlessReliantTag — feature-sfv-colorless-axis: colorless-nonland-spell density
+# is the attachment point for Consign to Memory's colorless-spell half ("Counter target
+# triggered ability or colorless spell."). Corpus-verified firing pattern (2026-07-03):
+# Eldrazi/Mystic Forge Combo/Blue Artifacts/Black Saga Storm fire; Dimir Tempo/Izzet
+# Delver/Death & Taxes do not — see _COLORLESS_RELIANT_DENSITY's docstring for the
+# measured densities that calibrated the 0.15 threshold.
+# ---------------------------------------------------------------------------
+
+class TestColorlessReliantTag:
+    def test_eldrazi_style_composition_gets_colorless_reliant(self):
+        """A colorless-spell-heavy composition (Eldrazi-style: colorless creatures/lands)
+        fires colorless-reliant. Hermetic fixture — no production DB dependency."""
+        con = _con()
+        cards = [
+            Card(name="Reality Smasher", type_line="Creature — Eldrazi",
+                 oracle_text="Trample. Whenever this creature attacks, defending player "
+                 "loses 3 life unless they sacrifice a creature or planeswalker.",
+                 cmc=6.0, colors=[]),
+            Card(name="Thought-Knot Seer", type_line="Creature — Eldrazi",
+                 oracle_text="When this creature enters, target opponent reveals their "
+                 "hand. You choose a nonland card from it. Exile that card.",
+                 cmc=3.0, colors=[]),
+            Card(name="Eldrazi Temple", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Reality Smasher": 20, "Thought-Knot Seer": 20, "Eldrazi Temple": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, f"Expected colorless-reliant in {tags}"
+
+    def test_dimir_style_composition_does_not_get_colorless_reliant(self):
+        """A colored-spell-heavy composition (Dimir-style) does NOT fire colorless-reliant
+        even though it has plenty of nonland spells. Hermetic fixture."""
+        con = _con()
+        cards = [
+            Card(name="Fatal Push", type_line="Instant",
+                 oracle_text="Destroy target creature if it has mana value 2 or less.",
+                 cmc=1.0, colors=["B"]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Fatal Push": 20, "Brainstorm": 20, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" not in tags, f"Unexpected colorless-reliant in {tags}"
+
+    def test_boundary_at_threshold_fires(self):
+        """Colorless density exactly AT _COLORLESS_RELIANT_DENSITY (0.15) DOES fire —
+        this axis uses '>=' like creature-based/storm-reliant/gy-recursion (NOT the
+        strict-'<' complement style noncreature-reliant uses)."""
+        con = _con()
+        cards = [
+            Card(name="Colorless Artifact", type_line="Artifact", oracle_text="", cmc=2.0, colors=[]),
+            Card(name="Blue Spell", type_line="Instant", oracle_text="Draw a card.",
+                 cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # 15 colorless copies / 100 total = exactly 0.15
+        maindeck = {"Colorless Artifact": 15, "Blue Spell": 65, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, (
+            f"Density exactly at threshold must fire ('>=' semantics); got {tags}"
+        )
+
+    def test_boundary_just_below_threshold_does_not_fire(self):
+        """Colorless density just below the threshold (0.14) does not fire."""
+        con = _con()
+        cards = [
+            Card(name="Colorless Artifact", type_line="Artifact", oracle_text="", cmc=2.0, colors=[]),
+            Card(name="Blue Spell", type_line="Instant", oracle_text="Draw a card.",
+                 cmc=1.0, colors=["U"]),
+            Card(name="Island", type_line="Basic Land — Island", oracle_text="{T}: Add {U}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        # 14 colorless copies / 100 total = 0.14, just under 0.15
+        maindeck = {"Colorless Artifact": 14, "Blue Spell": 66, "Island": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" not in tags, (
+            f"Density just below threshold must not fire; got {tags}"
+        )
+
+    def test_colorless_reliant_independent_of_creature_density(self):
+        """colorless-reliant is an INDEPENDENT axis from creature-based/noncreature-reliant:
+        a creature-DENSE colorless deck (Eldrazi-shaped) carries BOTH creature-based and
+        colorless-reliant simultaneously — it is not a refinement of either existing axis."""
+        con = _con()
+        cards = [
+            Card(name="Reality Smasher", type_line="Creature — Eldrazi",
+                 oracle_text="Trample.", cmc=6.0, colors=[]),
+            Card(name="Kozilek's Command", type_line="Sorcery",
+                 oracle_text="Choose two.", cmc=4.0, colors=[]),
+            Card(name="Eldrazi Temple", type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Reality Smasher": 30, "Kozilek's Command": 10, "Eldrazi Temple": 20}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "colorless-reliant" in tags, f"Expected colorless-reliant in {tags}"
+        assert "creature-based" in tags, (
+            f"Creature-dense colorless deck should also carry creature-based; got {tags}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestHateEquity — share-sum per tag; covered_share dedupes multi-tag archetypes
 # ---------------------------------------------------------------------------
 

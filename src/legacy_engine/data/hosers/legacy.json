@@ -102,12 +102,12 @@
     },
     {
       "name": "Consign to Memory",
-      "attacks": ["combo", "storm-reliant"],
+      "attacks": ["combo", "storm-reliant", "colorless-reliant"],
       "colors": ["U"],
       "max_copies": 4,
       "swing": "dedicated",
       "symmetry": "asymmetric",
-      "_comment": "Oracle (DB-verified 2026-07-03): 'Replicate {1}' + 'Counter target triggered ability or colorless spell.' Counters COLORLESS spells and TRIGGERED ABILITIES only — not a general counterspell. Premier vs storm triggers (storm is a triggered ability), Saga chapter triggers, Chalice triggers, and colorless (Eldrazi/artifact) spells; replicate {1} scales to multiple triggers in one turn."
+      "_comment": "Oracle (DB-verified 2026-07-03): 'Replicate {1}' + 'Counter target triggered ability or colorless spell.' Counters COLORLESS spells and TRIGGERED ABILITIES only — not a general counterspell. Premier vs storm triggers (storm is a triggered ability), Saga chapter triggers, Chalice triggers, and colorless (Eldrazi/artifact) spells; replicate {1} scales to multiple triggers in one turn. 'colorless-reliant' (feature-sfv-colorless-axis) attaches the colorless-spell half of this text to the mechanics-derived colorless-nonland-spell-density axis (whattoplay._vulnerability_from_composition); the triggered-ability half is not separately attached — a companion 'trigger-reliant' axis was evaluated and declined as not cleanly composition-derivable (see whattoplay.VulnerabilityTag docstring)."
     },
     {
       "name": "Thoughtseize",

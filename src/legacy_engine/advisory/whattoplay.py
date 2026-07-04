@@ -414,7 +414,7 @@ VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         # | plays-red | plays-blue | plays-white | plays-black | plays-green
                         # | combo | low-curve | greedy-manabase
                         # | creature-based | low-interaction | storm-reliant | ramp
-                        # | noncreature-reliant
+                        # | noncreature-reliant | colorless-reliant
                         #
                         # graveyard-recursion: deck recurs/casts cards FROM its graveyard
                         #   (reanimate, escape, flashback, regrowth-effects)
@@ -441,6 +441,31 @@ VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         #   "counter target noncreature spell") so those cards credit the WHOLE
                         #   combo/control plurality they answer, not just the narrower
                         #   `combo`/`storm-reliant` slice a subset of that plurality carries.
+                        # colorless-reliant: colorless-nonland-spell density (a card with EMPTY
+                        #   ``colors`` and a castable, non-land type) is >= _COLORLESS_RELIANT_DENSITY
+                        #   (feature-sfv-colorless-axis). The attachment point for the narrow
+                        #   colorless-specific half of Consign to Memory's oracle text ("Counter
+                        #   target triggered ability or colorless spell.") — distinct from
+                        #   `noncreature-reliant` (which fires on LOW creature density regardless of
+                        #   color) and from `combo`/`storm-reliant` (tutor/storm signal): an archetype
+                        #   can be colorless-reliant while being creature-dense (Eldrazi) or
+                        #   creature-light (Blue Artifacts), so this is an independent axis, not a
+                        #   refinement of either existing one. See the constant's docstring for the
+                        #   measured corpus densities that calibrated the threshold.
+                        #
+                        # DECLINED: a companion `trigger-reliant` axis (the OTHER half of Consign's
+                        #   text — "counter target triggered ability") was considered and rejected as
+                        #   not cleanly composition-derivable. Consign's triggered-ability targets
+                        #   (Saga chapters, storm-count triggers, Chalice-style ETB/cast triggers) are
+                        #   mechanically heterogeneous — there is no single card-composition signature
+                        #   (unlike `colors == []`) that identifies "this archetype leans on triggered
+                        #   abilities" without either (a) narrowing to one sub-mechanic (e.g. Saga
+                        #   permanent count), which would silently drop storm-count/Chalice triggers
+                        #   and misrepresent what Consign actually answers, or (b) a broad
+                        #   triggered-ability keyword scan, which fires on nearly every deck (almost
+                        #   any creature has an ETB/attack trigger) and so has no discriminating power
+                        #   as a density threshold. The storm-count slice is already covered by
+                        #   `storm-reliant`; shipping `colorless-reliant` alone is the honest scope.
                         #
                         # NOTE: the prior single graveyard vulnerability tag has been split
                         # into graveyard-recursion / graveyard-fuel (feature-sb-effect-tagging-model);
@@ -464,6 +489,25 @@ _STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → st
                                # (density gate kills false positives from stray storm cards in aggregates)
 _RAMP_BIGMANA_LAND_MIN = 4     # big-mana land copies >= threshold → ramp tag
                                # (Urzatron: 12 pieces; Cloudpost: 4+; Eldrazi: 4+)
+_COLORLESS_RELIANT_DENSITY = 0.15
+                               # colorless-nonland-spell copies / total maindeck copies >= threshold
+                               # → colorless-reliant (feature-sfv-colorless-axis). Denominator matches
+                               # _CREATURE_DENSITY / _NONCREATURE_RELIANT_MAX (total maindeck copies,
+                               # not total_nonland) for consistency with the other composition-share
+                               # tags in this function.
+                               #
+                               # Measured against the live corpus (2026-07-03, _archetype_composition
+                               # aggregates, colorless = card.colors == [] and not card.is_land):
+                               #   MUST fire   — Eldrazi 0.562, Mystic Forge Combo 0.635,
+                               #                 Blue Artifacts 0.365, Black Saga Storm 0.284
+                               #   MUST NOT    — Dimir Tempo 0.021, Izzet Delver 0.069,
+                               #                 Death & Taxes 0.080
+                               #   (checked, not required either way) Show and Tell 0.117,
+                               #                 Painter 0.271 (fires — genuinely artifact/colorless
+                               #                 heavy: Grindstone, Painter's Servant, Mishra's Bauble)
+                               # 0.15 sits in the wide gap between the highest must-not-fire archetype
+                               # (Death & Taxes 0.080; next-highest checked non-firer Show and Tell
+                               # 0.117) and the lowest must-fire archetype (Black Saga Storm 0.284).
 
 _COLOR_NAMES: dict[str, str] = {"W": "white", "U": "blue", "B": "black", "R": "red", "G": "green"}
 
@@ -583,6 +627,9 @@ def _vulnerability_from_composition(
     - creature-based: creature slot density ≥ threshold
     - noncreature-reliant: creature slot density < _NONCREATURE_RELIANT_MAX (feature-sfv-attachments
       broad-interaction attachment axis — see VulnerabilityTag's docstring note)
+    - colorless-reliant: colorless-nonland-spell slot density >= _COLORLESS_RELIANT_DENSITY
+      (feature-sfv-colorless-axis — see VulnerabilityTag's docstring note and the constant's
+      docstring for the corpus calibration)
     - greedy-manabase: high fast/dual lands + nonbasic heavy
     - low-interaction: low (counter + removal) density
     """
@@ -599,6 +646,7 @@ def _vulnerability_from_composition(
     fast_mana_cards = 0
     nonbasic_land_count = 0
     bigmana_land_count = 0   # copies of diagnostic big-mana / ramp lands
+    colorless_nonland_slots = 0  # feature-sfv-colorless-axis: colorless (colors==[]) nonland spells
     total_nonland = 0
     total_nonland_mv = 0.0
     cards_with_counts: list[tuple[Card, int]] = []
@@ -635,6 +683,10 @@ def _vulnerability_from_composition(
             # Creature detection via type_line
             if "Creature" in (card.type_line or ""):
                 creature_slots += count
+            # Colorless-nonland-spell detection (feature-sfv-colorless-axis): empty
+            # ``colors`` on a castable non-land card (Eldrazi, artifacts, devoid spells).
+            if not card.colors:
+                colorless_nonland_slots += count
 
         # Role tallies (apply to all cards)
         if "graveyard_recursion" in roles:
@@ -692,6 +744,15 @@ def _vulnerability_from_composition(
     # `storm-reliant` slice of that plurality.
     if total_cards > 0 and creature_slots / total_cards < _NONCREATURE_RELIANT_MAX:
         tags.add("noncreature-reliant")
+
+    # colorless-reliant (feature-sfv-colorless-axis): colorless-nonland-spell density is
+    # an INDEPENDENT axis from noncreature-reliant/creature-based — an archetype can be
+    # colorless-reliant while creature-dense (Eldrazi) or creature-light (Blue Artifacts).
+    # This is the attachment point for Consign to Memory's colorless-specific half
+    # ("Counter target triggered ability or colorless spell.").  See the constant's
+    # docstring for the corpus-measured densities that calibrated the threshold.
+    if total_cards > 0 and colorless_nonland_slots / total_cards >= _COLORLESS_RELIANT_DENSITY:
+        tags.add("colorless-reliant")
 
     # greedy-manabase
     if fast_mana_cards >= _GREEDY_MANABASE_MIN_FAST or nonbasic_land_count >= _GREEDY_NONBASIC_MIN:

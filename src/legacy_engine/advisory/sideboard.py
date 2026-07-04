@@ -87,6 +87,9 @@ Archetype-empirical recommendations extension (feature-archetype-empirical-recom
           ``{"noncreature-reliant"}`` — the broad-interaction attachment axis so a free/soft
           anti-noncreature counter (Force of Negation, Spell Pierce) credits the WHOLE
           combo/control plurality it answers, not just the narrower combo/storm-reliant slice.
+        - "counter target ... colorless spell" (feature-sfv-colorless-axis) additionally adds
+          ``{"colorless-reliant"}`` — Consign to Memory / Ceremonious Rejection; an axis
+          independent of the noncreature restriction above.
         - "target red/blue spell/permanent" or "if it's red/blue" (color-blast template
           shared by Pyroblast/Hydroblast/Blue|Red Elemental Blast) → ``{"plays-red"}`` /
           ``{"plays-blue"}``
@@ -1263,6 +1266,16 @@ _RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re
 # not only the narrower `combo`/`storm-reliant` tags rule 1 attaches to.
 _RE_COUNTER_NONCREATURE = re.compile(r"counter target noncreature spell", re.IGNORECASE)
 
+# Colorless-specific counter (feature-sfv-colorless-axis): "colorless spell" appearing
+# alongside a counter effect — Consign to Memory ("Counter target triggered ability or
+# colorless spell."), Ceremonious Rejection ("Counter target colorless spell.").  Attaches
+# to the `colorless-reliant` archetype axis (whattoplay._vulnerability_from_composition),
+# an axis independent of `noncreature-reliant` — a card can restrict to colorless spells
+# without restricting to noncreature spells, and vice versa (Force of Negation/Spell Pierce
+# hit noncreature spells of ANY color, including colorless, but do not specifically call out
+# "colorless spell" the way Consign/Ceremonious Rejection do).
+_RE_COUNTER_COLORLESS = re.compile(r"counter target.*colorless spell", re.IGNORECASE | re.DOTALL)
+
 
 def _derive_attacks_for_promoted(
     card_name: str,
@@ -1278,6 +1291,9 @@ def _derive_attacks_for_promoted(
     1b. Broad anti-noncreature counter: "counter target noncreature spell" (feature-sfv-
         attachments) → adds {noncreature-reliant}   (Force of Negation, Spell Pierce —
         attaches to the WHOLE combo/control plurality, not just rule 1's narrower slice)
+    1c. Colorless-specific counter: "counter target ... colorless spell" (feature-sfv-
+        colorless-axis) → adds {colorless-reliant}   (Consign to Memory, Ceremonious
+        Rejection — an axis independent of 1b's noncreature restriction)
     2. Color blast: "target red/blue spell" / "target red/blue permanent" / "if it's red/blue"
        → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
     3. Graveyard exile: "exile" AND "graveyard" present
@@ -1307,6 +1323,11 @@ def _derive_attacks_for_promoted(
     # like Force of Negation credits the whole combo/control plurality it answers.
     if _RE_COUNTER_NONCREATURE.search(text_lower):
         tags.add("noncreature-reliant")
+
+    # 1c. Colorless-specific counter (feature-sfv-colorless-axis) — additive on top of
+    # rule 1's combo/storm-reliant, independent of 1b's noncreature-reliant.
+    if _RE_COUNTER_COLORLESS.search(text_lower):
+        tags.add("colorless-reliant")
 
     # 2. Color blast — checked before the generic "destroy target" removal rule below,
     # since blasts phrase permanent-destruction as "destroy target red/blue permanent",

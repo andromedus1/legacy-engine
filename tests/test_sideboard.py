@@ -4018,6 +4018,52 @@ class TestDeriveAttacksForPromoted:
         )
         assert "noncreature-reliant" not in attacks, f"Unexpected 'noncreature-reliant' in {attacks}"
 
+    def test_consign_to_memory_real_oracle_text_maps_to_colorless_reliant(self):
+        """Consign to Memory's real oracle text ('Counter target triggered ability or
+        colorless spell.') → colorless-reliant, additive on top of rule 1's combo/
+        storm-reliant (feature-sfv-colorless-axis)."""
+        attacks = _derive_attacks_for_promoted(
+            "Consign to Memory",
+            "Replicate {1} (When you cast this spell, copy it for each time you paid its "
+            "replicate cost. You may choose new targets for the copies.) Counter target "
+            "triggered ability or colorless spell.",
+            "Instant",
+        )
+        assert "colorless-reliant" in attacks, f"Expected 'colorless-reliant' in {attacks}"
+        assert "combo" in attacks and "storm-reliant" in attacks, (
+            f"Generic counter-magic rule (1) should still fire alongside it; got {attacks}"
+        )
+        assert "noncreature-reliant" not in attacks, (
+            f"Consign's restriction is colorless/triggered-ability, not noncreature; "
+            f"got {attacks}"
+        )
+
+    def test_ceremonious_rejection_style_maps_to_colorless_reliant(self):
+        """A pure colorless-counter template ('Counter target colorless spell.') →
+        colorless-reliant (feature-sfv-colorless-axis)."""
+        attacks = _derive_attacks_for_promoted(
+            "Ceremonious Rejection", "Counter target colorless spell.", "Instant",
+        )
+        assert "colorless-reliant" in attacks, f"Expected 'colorless-reliant' in {attacks}"
+
+    def test_generic_counter_without_colorless_restriction_is_not_tagged(self):
+        """A counter that does NOT restrict to colorless spells ('counter target spell')
+        does not get colorless-reliant — only the narrower colorless-spell phrase does."""
+        attacks = _derive_attacks_for_promoted(
+            "Generic Counter", "Counter target spell.", "Instant",
+        )
+        assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
+
+    def test_noncreature_counter_does_not_get_colorless_reliant(self):
+        """Force of Negation / Spell Pierce's noncreature restriction is orthogonal to
+        colorless — 'counter target noncreature spell' must not also fire colorless-reliant."""
+        attacks = _derive_attacks_for_promoted(
+            "Spell Pierce",
+            "Counter target noncreature spell unless its controller pays {2}.",
+            "Instant",
+        )
+        assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
+
     def test_graveyard_exile_maps_to_graveyard_recursion(self):
         """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
@@ -5504,12 +5550,46 @@ class TestHoserCatalogExpansion:
     # ── (b) New staples present with correct tags ─────────────────────────────
 
     def test_consign_to_memory_attacks_combo_and_storm(self):
-        """Consign to Memory → combo + storm-reliant (new catalog entry)."""
+        """Consign to Memory → combo + storm-reliant + colorless-reliant (feature-sfv-
+        colorless-axis added colorless-reliant on top of the pre-existing combo/storm-reliant
+        catalog entry — the colorless-spell half of its oracle text is now attached)."""
         assert "Consign to Memory" in HOSER_CATALOG
         h = HOSER_CATALOG["Consign to Memory"]
         assert "combo" in h.attacks
         assert "storm-reliant" in h.attacks
+        assert "colorless-reliant" in h.attacks
         assert frozenset({"U"}) == h.colors
+
+    def test_consign_vs_fon_complement_on_colorless_axis(self):
+        """Consign and Force of Negation attack genuinely different axes, not a subset
+        relationship (feature-sfv-colorless-axis closes the tag-subset-dominance gap the
+        epic's acceptance oracle named).
+
+        FoN's oracle text ("Counter target noncreature spell.") answers noncreature spells
+        of ANY color, including colorless ones — but it does not specifically call out
+        "colorless spell", so it does NOT carry colorless-reliant. Consign's oracle text
+        ("Counter target triggered ability or colorless spell.") specifically answers
+        colorless spells AND triggered abilities (Saga chapters, storm-count triggers,
+        Chalice triggers) — noncreature-restriction is irrelevant to it, so it does not
+        carry noncreature-reliant. Neither card's attack set is a subset of the other's.
+        """
+        consign = HOSER_CATALOG["Consign to Memory"]
+        fon = HOSER_CATALOG["Force of Negation"]
+        assert "colorless-reliant" in consign.attacks
+        assert "colorless-reliant" not in fon.attacks, (
+            "FoN answers noncreature spells of any color, but its oracle text does not "
+            "specifically restrict to colorless spells — it must not carry colorless-reliant"
+        )
+        assert "noncreature-reliant" in fon.attacks
+        assert "noncreature-reliant" not in consign.attacks, (
+            "Consign's colorless/triggered-ability restriction is orthogonal to creature "
+            "type — it must not carry noncreature-reliant"
+        )
+        assert not consign.attacks <= fon.attacks, (
+            "Consign must no longer be a strict tag subset of FoN (the tag-subset-dominance "
+            "mechanism the epic's acceptance oracle identified)"
+        )
+        assert not fon.attacks <= consign.attacks
 
     def test_engineered_explosives_attacks_combo_and_greedy_manabase(self):
         """Engineered Explosives → combo + greedy-manabase + creature-based; colorless."""
