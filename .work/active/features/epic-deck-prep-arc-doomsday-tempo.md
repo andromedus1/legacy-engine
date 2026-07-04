@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc-doomsday-tempo
 kind: feature
-stage: drafting
+stage: done
 tags: [advisory, analysis, dogfooding]
 parent: epic-deck-prep-arc
 depends_on: [epic-deck-prep-arc-meta-decks]
@@ -39,3 +39,14 @@ Relates to [[idea-subarchetype-discovery]] (this stride is a manual instance of 
   the archetype (copy-count histograms + matchup shape where sample permits).
 - Boulder paper Doomsday sample will be thin (17 paper regime-wide) — honest-degrade
   labeling required, no fabricated Boulder-specific claims.
+
+## Design + results (2026-07-04, single-stride)
+
+Subarchetype split executed per the epic decision (markers: Murktide/Tamiyo vs Personal
+Tutor/One Ring; conservative — neither/both left unlabeled): Tempo n=47, Turbo n=49,
+residue 38. Variant labels persisted to decks.variant (re-derivable). Tempo-camp consensus
+(n=47, SPECULATIVE; paper n=8 — no real Boulder Doomsday meta, stated) + per-meta boards
+(differ by one card; natural budgets 5 vs 7). Board B (owned) = 14 slots, pool-exhausted,
+pitch counters at 2s. Deliverables: decks/doomsday-tempo-{boulder,online}.txt +
+doomsday-tempo-analysis.md. Maindeck acquisition (14 names, 1 LED) is the real gate; binder
+dual-land accounting flagged as a gap (owns/plays 4 Underground Sea, binder lists none).
