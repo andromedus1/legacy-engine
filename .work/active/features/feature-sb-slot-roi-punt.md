@@ -1,7 +1,7 @@
 ---
 id: feature-sb-slot-roi-punt
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-sideboard-scoring-model
 depends_on: [feature-sb-field-weighted-scorer]

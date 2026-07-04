@@ -1,7 +1,7 @@
 ---
 id: feature-sb-board-backtest
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: epic-sideboard-scoring-model
 depends_on: [feature-sb-field-weighted-scorer]
