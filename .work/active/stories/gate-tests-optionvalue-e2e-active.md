@@ -1,7 +1,7 @@
 ---
 id: gate-tests-optionvalue-e2e-active
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,16 @@ One hermetic corpus test with a counts-backed FieldDistribution, smart=True, hed
 
 ## Test location
 `tests/test_sideboard.py::TestOptionValueRecommendSideboardIntegration`
+
+## Resolution
+Added `test_option_value_active_e2e_with_counts_backed_field`. Uses
+`TestHedgeIntegrationNonVacuous._two_tag_corpus()` with a counts-backed
+`build_custom_field({"Reanimator": 0.85, "BigMana": 0.15}, counts={"Reanimator": 85, "BigMana": 15})`
+through the real `HOSER_CATALOG`, `smart=True`, `hedge="expected"`. Empirically verified (before
+writing assertions) that with the real catalog the final card SETS coincide between default alpha
+and alpha=1.0 on this corpus, so "differs from alpha=1.0" is asserted on the greedy trace's
+marginal gains (which DO differ — the bonus is added to the gain at every step, and even
+same-final-pick paths show a different trace) rather than on `.cards`, which is not guaranteed to
+differ and would have made the test flaky/corpus-dependent if asserted directly. Also asserts:
+`natural_budget_count` equals an independently-computed `hedge="off"` run's total (8 == 8, verified
+empirically), `insurance_cards <= set(cards)`, and `sum(cards.values()) <= budget`. Full suite green.

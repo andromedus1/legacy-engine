@@ -1,7 +1,7 @@
 ---
 id: gate-tests-symmetry-color-axis
 kind: story
-stage: drafting
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,9 @@ symmetry_factor(make_hoser(symmetric, attacks={plays-blue}), my_tags={plays-blue
 
 ## Test location
 `tests/test_impact.py::TestSymmetryFactor`
+
+## Resolution
+Added `test_symmetric_shared_color_axis_hits_floor` (Pyroblast-shaped: symmetric,
+attacks={"plays-blue"}, my_tags={"plays-blue","combo"} -> hits `_SYMMETRY_FLOOR`) and its
+complement `test_symmetric_color_axis_not_shared_stays_full_value` (my_tags={"plays-red","combo"}
+-> stays 1.0), exactly as suggested. Full suite green.

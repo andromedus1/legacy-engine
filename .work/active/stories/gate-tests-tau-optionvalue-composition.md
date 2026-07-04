@@ -1,7 +1,7 @@
 ---
 id: gate-tests-tau-optionvalue-composition
 kind: story
-stage: implementing
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,19 @@ DECISION (recorded here for the implementer): bonus-resurrection past tau is INT
 
 ## Test location
 `tests/test_sideboard.py` new `TestTauOptionValueComposition`
+
+## Resolution
+Added `TestTauOptionValueComposition` (tests/test_sideboard.py) with 4 tests on a single-card,
+single-element model (base first-copy gain 0.05, τ=0.06 — base gain does NOT clear τ):
+- `test_greedy_without_bonus_natural_stop_excludes_card` / `test_ilp_without_bonus_natural_stop_excludes_card`
+  pin the baseline (no bonus → natural-budget stop fires, card excluded) so the resurrection
+  tests below are non-vacuous.
+- `test_greedy_bonus_resurrects_card_past_tau` / `test_ilp_bonus_resurrects_card_past_tau` add
+  a bonus (0.02) that lifts the combined gain to 0.07 (> τ) and assert the card IS selected in
+  both solvers — pinning the DECISION that bonus-resurrection past τ is intended.
+Added the two authorized present-tense sentences to `src/legacy_engine/advisory/sideboard.py`:
+one in `_greedy_solve`'s `option_value_bonus` docstring paragraph (bonus is added before the τ
+comparison, can resurrect a card), and one in the natural-budget-stop inline comment (a
+bonus-resurrected pick is intended, not a bug). No other src changes.
+All new tests pass; full suite green (see gate-cruft-test-helper-duplication resolution for the
+final count).

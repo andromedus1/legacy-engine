@@ -1,7 +1,7 @@
 ---
 id: gate-tests-uncovered-tail-content
 kind: story
-stage: drafting
+stage: done
 tags: [testing]
 parent: null
 depends_on: []
@@ -27,3 +27,15 @@ Two-archetype field where one tag has no candidate answer; assert that element a
 
 ## Test location
 `tests/test_sideboard.py::TestOutputContract` (rewrite test_covered_element_not_in_uncovered_tail)
+
+## Resolution
+Rewrote `test_covered_element_not_in_uncovered_tail`. The existing `_gy_field_corpus`/`_gy_catalog`
+fixture is a single-element model (only Reanimator's element exists), so there was never a second,
+genuinely-uncovered element to surface — the old assertions (`isinstance(tuple)` + `all(w>=0)`)
+passed vacuously against an EMPTY tail. Rather than build a new DB corpus that could accidentally
+also fully cover both tags, monkeypatched `_build_coverage_model` to a fixed, hand-built 2-element
+`CoverageModel` (Reanimator|graveyard-recursion, weight 0.30, covered by the one catalog card;
+BigMana|ramp, weight 0.20, covered by NO candidate) — the same `_make_model` house style used
+throughout this file. Asserts the covered element is picked (clears τ=0.10), the uncovered
+BigMana|ramp element appears in `uncovered_tail` with its real weight (0.20), and the covered
+element does not appear in the tail. Full suite green.

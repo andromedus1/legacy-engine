@@ -23,18 +23,10 @@ from legacy_engine.advisory.linchpins import (
     linchpins_for_archetype,
     load_linchpin_overrides,
 )
-from legacy_engine.models.card import Card
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_card(**kwargs) -> Card:
-    """Construct a Card with defaults for unspecified fields (mirrors test_whattoplay.py)."""
-    defaults = dict(name="Test Card", type_line="Instant", oracle_text="", cmc=1.0)
-    defaults.update(kwargs)
-    return Card(**defaults)
+# gate-cruft-test-helper-duplication: _make_card is a shared conftest helper now (was a
+# byte-identical local copy here and in test_whattoplay.py).
+from tests.conftest import _make_card
 
 
 # ---------------------------------------------------------------------------
