@@ -1,7 +1,7 @@
 ---
 id: epic-deck-prep-arc-dimir-boards
 kind: feature
-stage: implementing
+stage: done
 tags: [advisory, analysis, dogfooding]
 parent: epic-deck-prep-arc
 depends_on: []

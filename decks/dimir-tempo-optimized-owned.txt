@@ -1,0 +1,50 @@
+# DIMIR TEMPO — Board B: owned-constrained sideboard (local field, 2026-07-04)
+# CONVERGES to Board A (dimir-tempo-optimized.txt): after the human overrides remove the engine's
+# only unowned picks (2 Defense Grid + Blue Elemental Blast → owned twin Hydroblast), Board A is
+# fully collection-covered, so the owned-constrained board is the SAME 15. Kept as a separate file
+# because Board B's mechanism differs and its audit trail matters:
+#
+# Mechanism: re-solve with the hoser catalog filtered to spare-owned cards (binder minus maindeck
+# usage) — NOT a native solver mode; the promoted-empirical-pool path bypasses the catalog, so
+# unowned entries are dropped and repaired from the considering pool (owned, by residual gain).
+# Raw owned-solve audit (pre-judgment): dropped Blue Elemental Blast (unowned, promoted-pool);
+# repaired in Long Goodbye (residual 0.0040); solver filled Mystical Dispute 2 / Damping Sphere /
+# Fatal Push as hedge — all displaced by the same judgment layer as Board A (winner adoption:
+# Mystical Dispute 14.8%, Damping Sphere 3.0%, 4th Push 6.1%; vs Consign 3rd-copy mode-3 evidence).
+#
+# Every card below: owned per decks/binder.txt with maindeck usage subtracted.
+4 Brainstorm
+1 Bloodstained Mire
+1 Brazen Borrower
+2 Barrowgoyf
+3 Daze
+3 Fatal Push
+4 Flow State
+4 Force of Will
+1 Island
+2 Kaito, Bane of Nightmares
+2 Murktide Regent
+4 Orcish Bowmasters
+4 Polluted Delta
+3 Ponder
+3 Scalding Tarn
+1 Snuff Out
+1 Swamp
+4 Tamiyo, Inquisitive Student
+4 Thoughtseize
+1 Undercity Sewers
+4 Underground Sea
+4 Wasteland
+
+Sideboard
+2 Force of Negation
+3 Consign to Memory
+2 Hydroblast
+1 Engineered Explosives
+1 Sheoldred's Edict
+1 Null Rod
+1 Dauthi Voidwalker
+1 Snuff Out
+1 Harbinger of the Seas
+1 Barrowgoyf
+1 Toxic Deluge

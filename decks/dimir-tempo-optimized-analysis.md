@@ -1,94 +1,132 @@
-# Dimir Tempo — sideboard optimization analysis (the local meta, 2026-07-04)
+# Dimir Tempo — sideboard optimization analysis (the local meta, 2026-07-04 refresh)
 
-Companion to [dimir-tempo-optimized.txt](dimir-tempo-optimized.txt). How the board was optimized:
-what the engine considered, why each decision fell the way it did. Engine: post-v0.2.0 scorer
-(decomposed impact + flexibility valuation), validated via field-scoped `advise backtest` against
-258 local-field-relevant top-finisher Dimir boards (established tier). Regenerate the raw surfaces:
-`advise sideboard --deck decks/dimir-tempo-current.txt --field decks/local-field-current.txt --smart`
-and `advise backtest --archetype "Dimir Tempo" --field decks/local-field-current.txt --field-scope`.
+Companion to [dimir-tempo-optimized.txt](dimir-tempo-optimized.txt) (Board A) and
+[dimir-tempo-optimized-owned.txt](dimir-tempo-optimized-owned.txt) (Board B — converges, see §6).
+Engine: post-sweep scorer (deterministic ILP, PR #35; equal-objective ties no longer vary
+run-to-run). Regenerate: `advise sideboard --deck decks/dimir-tempo-current.txt --field
+decks/local-field-since-518.txt --collection decks/binder.txt --smart` and `advise backtest
+--archetype "Dimir Tempo" --field decks/local-field-since-518.txt --field-scope`.
 
-## 1. What the engine saw
+**Data currency**: corpus refreshed 2026-07-04 to **2026-07-01** (was capped 2026-06-15), all
+regime decks labeled. Dimir Tempo current-regime pool 71→125 decks. Backtest winner sample
+**n=263 field-scoped top-finisher boards — ESTABLISHED tier** (283/449 candidate tournaments
+excluded as off-the local meta-field). Confounds (always): winning boards are self-selected and
+metagame-lagged; adoption %s validate, never drive, the scores.
 
-**Deck profile (before scoring a single SB card):**
-- *Maindeck-aware discounts fired:* **combo −60%** (4 FoW + 3 Daze + 4 Thoughtseize), **creature-based
-  −60%** (3 Push + Snuff Out + 4 Bowmasters), **greedy-manabase −60%** (4 Wasteland). SB candidates
-  duplicating these axes get their credit slashed — why no Ghost Quarter / extra discard.
-- *Own vulnerability tags* (low-curve, blue/black, instant-speed game) feed the **symmetry gate**: a
-  symmetric hoser that hits our own plan is floored to 0.15.
+## 1. The board (15) — and what changed
 
-**Field:** the 107-player post-ban the local meta snapshot — blue plurality ~45% (Izzet 11.2%, Show&Tell
-10.3%, mirror/Jeskai/Azorius/Esper), black/colorless combo wedge (Saga Storm 6.5%, Doomsday 5.6%),
-fair tail (D&T, Eldrazi, Painter, Blue Artifacts, Energy). Per-archetype vulnerability profiles are
-composition-derived, including the new axes: `noncreature-reliant` (plans living on the stack) and
-`colorless-reliant` (Eldrazi 0.562 / Mystic Forge 0.635 / Saga Storm 0.284 colorless density vs our
-0.021).
+| Card | Copies | Winners' adoption | Winners' copy mode | Basis |
+|---|---|---|---|---|
+| Force of Negation | 2 | 99.2% | 2 | engine core (pitch: 2nd copy is fuel) |
+| Consign to Memory | **3** ↑ | 95.4% | **3** (169/251) | engine core + 3rd copy judgment (see swap) |
+| Hydroblast | 2 | 85.9% | 2 | engine core (via functional twin BEB) |
+| Sheoldred's Edict | 1 | 52.1% | 1 | engine core |
+| Engineered Explosives | 1 | 47.9% | 1 | engine core |
+| Null Rod | 1 | 33.5% | 1 | engine core |
+| Dauthi Voidwalker | 1 | 31.9% | 2 | engine core |
+| Snuff Out | 1 | 30.0% | 1 | engine core |
+| Harbinger of the Seas | 1 | 25.9% | 2 | engine core |
+| Barrowgoyf | 1 | 84.0% | 2 | judgment fill (tracked blind spot) |
+| Toxic Deluge | 1 | 63.1% | 1 | judgment fill (tracked blind spot) |
 
-## 2. The objective, in plain terms
+**Paired swap vs the 2026-07-03 board** (per the paired-swap rule — every add names its cut):
 
-Maximize expected match-wins: each (archetype, vulnerability) element is weighted
-`field_share × swing × impact` where impact = **centrality × symmetry × castability** (linchpin hit
-or fringe? hoses us too? castable in that matchup?). A card is credited for its **total marginal
-coverage across every element it answers** (submodular breadth), plus a **CVaR option-value bonus**
-(α=0.7) for coverage robust to *which* field actually shows up. Copies taper by hypergeometric draw
-probability (2nd copy ≈61% of the 1st, 3rd ≈37%). The **natural budget** stopped at 6 dedicated
-slots — the field doesn't reward a rigid 15.
+- **−1 Fatal Push (4th) → +1 Consign to Memory (3rd).** Mechanics first: the creature axis is
+  already −60% maindeck-discounted (3 Push + 4 Bowmasters + 1 Snuff main), while Consign's 3rd
+  copy is the solver's **top considering residual (0.0062)** and Consign is a pitch-class card —
+  the copy-count study (docs/analysis/copy-count-distribution-study.md) found a hard valley-at-1
+  for this class (global P(1)=0.044 vs P(2)=0.647). Validation: 4th Push appears in 6.1% of
+  winner boards; Consign's copy mode among established Dimir winners is exactly 3 (67%).
 
-## 3. Slot-ROI — where the slots went
+Everything else held from 2026-07-03, with refreshed validation strengthening every slot
+(Barrowgoyf 83.7→84.0%, Toxic 63.1%, sample tier speculative→established).
 
-| Matchup | Equity → ceiling | ROI/slot | Call |
-|---|---|---|---|
-| Show and Tell (10.7%) | 62.0 → 89.6% | **0.0135** ⭐ | invest — best matchup gets better |
-| Izzet Delver (11.7%) | 54.9 → 76.9% | **0.0117** | invest — biggest share |
-| Black Midrange / Saga Storm (6.8% ea) | 50.0 → 76.4% | 0.0081 | invest (speculative data) |
-| W.Beanstalk / Jeskai / Doomsday | 50–55 → 72–79% | 0.0070–79 | moderate |
-| Painter · Eldrazi · D&T · Blue Artifacts | — | 0.0024–61 | **PUNT — better ROI elsewhere** |
+## 2. Copy-count histograms (winners, n=263; 0x = decks not running it)
 
-Counterintuitive but correct: **spend on your good matchups, concede the bad ones.** A Show&Tell slot
-buys ~3× the expected wins of a D&T slot. The old board spent ~7 slots on the punt column; this one
-spends ~2.
+Per the frequency-distribution-detail rule — full 0x-4x distributions, not inclusion%+avg:
 
-## 4. The 15, slot by slot
+| Card | 0x | 1x | 2x | 3x | 4x |
+|---|---|---|---|---|---|
+| Force of Negation | 2 | 30 | **226** | 5 | 0 |
+| Consign to Memory | 12 | 5 | 67 | **169** | 10 |
+| Hydroblast | 37 | 88 | **132** | 6 | 0 |
+| Barrowgoyf | 42 | 78 | **120** | 23 | 0 |
+| Toxic Deluge | 97 | **113** | 53 | 0 | 0 |
+| Surgical Extraction | 116 | 59 | **88** | 0 | 0 |
+| Sheoldred's Edict | 126 | **87** | 50 | 0 | 0 |
+| Grafdigger's Cage | 128 | **108** | 23 | 4 | 0 |
+| Engineered Explosives | 137 | **70** | 56 | 0 | 0 |
+| Null Rod | 175 | **72** | 16 | 0 | 0 |
+| Dauthi Voidwalker | 179 | 15 | **69** | 0 | 0 |
+| Snuff Out | 184 | **79** | 0 | 0 | 0 |
+| Harbinger of the Seas | 195 | 31 | **37** | 0 | 0 |
+| Feed the Cycle | 210 | **53** | 0 | 0 | 0 |
+| Fatal Push (SB) | 247 | **16** | 0 | 0 | 0 |
+| Damping Sphere | 255 | 4 | 4 | 0 | 0 |
+| Long Goodbye | 260 | 2 | 1 | 0 | 0 |
 
-**Counter core (2 FoN · 2 Consign · 2 Hydroblast)** — aimed at the top of the ROI table:
-- **Force of Negation** — breadth: attaches to the whole combo/storm/noncreature plurality (~44% of
-  field); largest option-value bonus. 99.2% of winning boards.
-- **Consign to Memory** — NOT FoN redundancy: `centrality=0.60 vs Saga Storm` (linchpin hit via
-  counter-on-cast) + the `colorless-reliant` axis FoN can't cover — **triggered abilities + colorless
-  spells** (Saga chapters, storm/Chalice triggers, Eldrazi). Complements, not subset. 95.7% winners.
-- **Hydroblast** — `plays-red`: Izzet (#1 share) + Painter + Energy. 85.7% winners. Two copies: the
-  draw taper still pays at copy 2 for ~20% target mass.
+Reading: the pitch/free counters (FoN, Consign) have hard valleys at 1 — archetype-local
+confirmation of the copy-count study. Reactive 1-ofs (Toxic, Edict, EE, Snuff) are legitimately
+modal at 1, matching the study's finding that pure concavity is right for that class.
 
-**One-of toolbox (EE, Edict, Null Rod, Dauthi, Snuff Out, Harbinger)** — natural-budget flexible
-tier, each a distinct axis: EE (low-curve sweep + Painter pair, 48.4% winners), Sheoldred's Edict
-(edict vs hexproof/ward, 50.4%), Null Rod (Painter **Grindstone linchpin lock** + artifact mana,
-32.9%), Dauthi (graveyard-*fuel* denial vs Murktide/delve, 31.8%), Snuff Out (free removal into
-Izzet low-curve — the top uncovered element, 30.2%), Harbinger (greedy manabases; deploy black
-first, then it's a mono-blue lock — 26.4%). Honesty detail: **EE and Null Rod carry symmetry=0.15**
-— the engine priced their self-hosing (EE sweeps our low curve; Null Rod is symmetric) and they
-earned slots anyway on breadth.
+## 3. Overrides (engine recommends → human excludes; both TRACKED, now sweep-confirmed)
 
-**Judgment fills (Barrowgoyf, Toxic Deluge, 4th Fatal Push)** — cover the engine's *tracked* blind
-spot (winners-only creature-interaction cluster). Barrowgoyf: **83.7%** of winners vs ~24% midrange
-field — the clearest "the field knows something the model doesn't yet."
+- **2 Defense Grid — 0.0% of 263 winner boards.** The sweep proved this systematic: scorer-only
+  in **18 of 26 swept archetypes**. Mechanism (tracked in
+  idea-hate-coverability-overvalues-defense-grid): `_hate` coverage applies no impact/symmetry
+  factor, and Grid's tax hits OUR own instant-speed game.
+- **1 Damping Sphere — 3.0%.** Scorer-only in 6 archetypes (ramp cluster); shares the
+  symmetric-self-cost representability gap (idea-damping-sphere-base-model-near-miss).
 
-## 5. Considered and rejected
+These stay diagnostic overrides, not score edits — the pure-mechanics guardrail.
 
-| Candidate | Verdict | Mechanism |
-|---|---|---|
-| Defense Grid (engine wanted 2) | **overridden out** | `_hate` coverage applies no impact/symmetry factor (confirmed structural defect, tracked); its tax hits our own instant-speed game. **0.0%** of winners. |
-| Damping Sphere (engine wanted 1) | **overridden out** | verified base-model near-miss (recommended even with option-value off); taxes our own cantrip turns. 2.7% of winners. Tracked. |
-| Mystical Dispute / Spell Pierce | not picked — legitimately | earlier hand *coverage* analysis over-rated them; with breadth aggregating correctly, FoN/Consign dominate the same axes at higher impact. Winners agree (<20% adoption). The model corrected the human. |
-| Ghost Quarter | not picked | maindeck-aware: 4 Wasteland pre-covers the axis 60%. |
-| Flusterstorm ×2 (old board) | cut | <20% winner adoption; dominated by FoN/Consign on the same elements. |
-| Surgical (old board) | cut | dead axis — no graveyard decks in the local meta; fuel-denial covered by Dauthi with a body. |
-| 2 Massacre + 1 Toxic, 2 Hurkyl's (old board) | trimmed | the punt column; kept 1 Toxic as insurance, EE+Null Rod cover artifacts more broadly. |
+## 4. What the engine still dissents on (documented, not blindly followed)
 
-## 6. Honest limits
+- **Surgical Extraction (55.9% of winners, mode 2)**: excluded — the local room's graveyard
+  share is thin (Doomsday piles use the yard lightly; no Reanimator at the venue). The winners'
+  number is inflated by field-scope's tolerance (in-field tournaments can still contain graveyard
+  decks). Watch item: if Grixis Reanimator (now #5 in the refreshed global regime, 157 decks)
+  reaches the local meta, Surgical is the first add (owns 3).
+- **Grafdigger's Cage (51.3%)**: same axis, same call; also anti-synergistic with our own
+  Murktide/delve angle at the margin.
+- **Feed the Cycle (20.2%, always 1-of)**: new-card watch item (owns 1). Not yet in the hoser
+  catalog (part of the sweep's unclassified-cluster catalog gap, idea-hoser-catalog-new-card-gap).
+- **Barrowgoyf SB copies**: winners' mode is 2 in the SB — but Build B mains 2, so our 1 SB copy
+  (3rd overall) is the same total exposure. Engine edge, documented since session 1.
 
-Per-card impacts are **speculative-tier** on this field (~36% of matchup cells thin); swings are
-curated-or-correlational, not causal; the ILP has one cosmetic tie (Snuff Out vs Long Goodbye, slot
-9 — tracked); the two overrides are engine defects being fixed, not meta-calls. The validation that
-matters: **7 of 9 engine picks appear in ≥20% of 258 local-field-relevant winning boards**, achieved by
-mechanism with zero winner data in the scores. Net: a portfolio — concentrated counters where the
-ROI is, a diversified toolbox across live axes, deliberate punts, self-hosing priced, redundancy
-with the 60 discounted, every number auditable.
+## 5. Online-lens variant (venue divergence — reported as a diff, never blended)
+
+Solve vs the online field (`provenance='online'`, current regime; Tron 11.7% #1, Izzet 8.1%,
+Show&Tell 7.2%, Energy 6.5%, Grixis Reanimator 6.4%): the raw engine board is **card-identical**
+to the the local meta solve — but the dedicated core deepens (natural budget 9/15 vs 6/15; the online
+field is more concentrated, so more slots clear the τ floor). After the same overrides, the same
+15 stands. Two online-specific notes: Consign's stock rises further (Tron #1 = colorless triggers
+everywhere), and Surgical's case is materially stronger online (Reanimator 6.4% + Doomsday 5.1%)
+— an online grinder would run Board A −1 Toxic +1 Surgical.
+
+## 6. Board B (owned-constrained) + acquisition list
+
+**Board B converges to Board A.** The unconstrained solve's only unowned picks were 2 Defense
+Grid + 1 Blue Elemental Blast — the two overridden false positives and a functional twin of owned
+Hydroblast. After the judgment layer, every card is collection-covered (binder minus maindeck
+usage). **Acquisition list: EMPTY.** No purchases needed for this board.
+
+Audit trail of the raw owned-constrained solve (mechanism: catalog filtered to spares; NOT a
+native solver mode): dropped BEB (unowned, entered via the promoted-pool path that bypasses the
+catalog), repaired in Long Goodbye (residual 0.0040); its hedge filled Mystical Dispute 2 /
+Damping Sphere / 4th Push — all displaced by the same judgment layer (adoption 14.8% / 3.0% /
+6.1%).
+
+**Collection honesty note**: `decks/binder.txt` (the current collection) contains NO Flusterstorm
+or Echoing Truth — the 2026-06-27 buy list was not executed, so the "current" sideboard listed in
+`dimir-tempo-current.txt` (2 Flusterstorm, 1 Echoing Truth, 2 Hurkyl's, 2 Massacre...) is
+partially aspirational. This refreshed board requires none of those cards, and winners agree
+(Flusterstorm 1.1%, Hurkyl's 0.4%, Massacre 10.3%). The sleeved-today gap to Board A is a
+straight swap of the old 15 for the new 15, all owned.
+
+## 7. Honest tiers
+
+Winner sample ESTABLISHED (n=263) — first time this analysis clears the top tier. Per-matchup
+impact factors remain speculative-tier (per-card matchup cells are thin; the engine labels each).
+Field = the maintainer's 107-player post-ban the local meta table snapshot; that field file predates the corpus
+refresh and is the next thing to re-derive if the venue shifts (regime window unchanged).
