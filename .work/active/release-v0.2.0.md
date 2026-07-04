@@ -61,4 +61,7 @@ solver rework — everything shipped to main between v0.1.0 and PR #27.
 
 
 ## Gate runs
-<!-- populated during quality-gate -->
+- **gate-tests** (2026-07-04) — 18 findings (3 critical, 6 high, 6 medium, 3 low→backlog); 5 vacuous tests flagged; strongest gaps: comparator CLI honesty banners, option-value×τ seam, e2e option-value-active
+- **gate-cruft** (2026-07-04) — 5 findings (3 high, 1 medium, 1 low→backlog); zero production-source cruft; all test-file dead code + helper duplication
+- **gate-docs** (2026-07-04) — 6 findings (4 foundation-doc-assertion, 1 readme, 1 pattern-anchors); post-epic-2 drift only (mid-bundle doc-review had cleared epic-1); resolved idea-docs-align backlog item deleted
+- **gate-patterns** — pending (runs after the finding drain)
