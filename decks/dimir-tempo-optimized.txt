@@ -1,33 +1,39 @@
-# DIMIR TEMPO — optimized sideboard (Boulder field, 2026-07-03)
-# Produced by the repaired scorer (epic-sideboard-scoring-model + epic-scorer-flexibility-valuation)
-# + explicit human overrides. Validation: field-scoped `advise backtest`, 258 Boulder-relevant
-# top-finisher Dimir boards (established tier). Every engine claim is pure-mechanics (no
-# winning-board prior in scores); winner-adoption %s below are the independent validation signal.
+# DIMIR TEMPO — optimized sideboard (Boulder field, 2026-07-04 refresh; corpus through 2026-07-01)
+# Produced by the post-sweep engine (deterministic ILP, PR #35) + explicit human overrides.
+# Validation: field-scoped `advise backtest`, 263 Boulder-relevant top-finisher Dimir boards
+# (ESTABLISHED tier; 283/449 candidate tournaments excluded as off-field). Every engine claim is
+# pure-mechanics (no winning-board prior in scores); winner-adoption %s are independent validation.
 #
-# ENGINE CORE (recommended by mechanism; winner adoption as validation):
-#   2 Force of Negation    — 99.2% of winners; breadth: combo/storm/noncreature plurality (~44% field)
-#   2 Consign to Memory    — 95.7%; complements FoN: colorless spells + TRIGGERED abilities
-#                            (Saga chapters, storm/Chalice triggers) via the calibrated colorless axis
-#   2 Hydroblast           — 85.7%; plays-red (Izzet #1 field share + Painter + Energy)
-#   1 Engineered Explosives — 48.4%; low-curve sweep, Painter pair, ward-proof
-#   1 Sheoldred's Edict    — 50.4%; creature interaction (D&T/Kaito/Murktide mirrors)
-#   1 Null Rod             — 32.9%; Painter lock + Saga Storm/Blue Artifacts mana
-#   1 Dauthi Voidwalker    — 31.8%; graveyard-fuel denial (Murktide/delve) + clock
-#   1 Snuff Out            — 30.2%; free removal, Izzet/low-curve (top uncovered axis + top slot-ROI)
-#   1 Harbinger of the Seas — 26.4%; greedy manabases (D&T/Eldrazi/Show&Tell Tombs)
-# JUDGMENT FILLS (tracked engine blind spot — winners-only creature cluster,
-# idea-winners-only-triage-creature-interaction):
-#   1 Barrowgoyf           — 83.7% of winners; grind vs the ~24% midrange field
-#   1 Toxic Deluge         — Eldrazi/D&T sweep; ward-proof; slot-ROI punt-adjacent but cheap insurance
-#   1 Fatal Push (4th)     — Izzet|low-curve, the engine's own top uncovered element
-# OVERRIDDEN OUT (engine recommends; human judgment excludes — both tracked with confirmed mechanisms):
-#   Defense Grid  (0.0% of winners) — _hate coverage applies no impact/symmetry factor; its tax hits
-#                                     OUR instant-speed game (idea-hate-coverability-overvalues-defense-grid)
-#   Damping Sphere (2.7%)           — base-model near-miss (idea-damping-sphere-base-model-near-miss)
-# NOTABLE CUTS from the prior board: Surgical Extraction (no graveyard decks in Boulder),
-# 2 Massacre + 1 Toxic trim (D&T is a slot-ROI punt: 36%→43% max), 2 Hurkyl's (Null Rod/EE cover
-# artifacts more broadly), 2 Flusterstorm (<20% winner adoption; FoN/Consign strictly better here),
-# Echoing Truth. All 15 below are owned (collection-verified).
+# ENGINE CORE (recommended by mechanism; winner adoption + copy-mode as validation):
+#   2 Force of Negation    — 99.2% of winners (copy mode 2); breadth: combo/storm/noncreature
+#                            plurality; pitch card (2nd copy is fuel — copy-count study k_min=2)
+#   3 Consign to Memory    — 95.4% (copy mode 3: 169/251 winners run exactly 3); colorless spells +
+#                            TRIGGERED abilities (Saga chapters, storm/Chalice, Eldrazi); pitch-class
+#                            valley-at-1; 3rd copy = top considering residual (0.0062), displacing
+#                            the 4th Fatal Push (see paired swap below)
+#   2 Hydroblast           — 85.9% (mode 2); plays-red (Izzet #1 share + Painter + Energy). Engine
+#                            emitted functional twin Blue Elemental Blast; Hydroblast owned+identical
+#   1 Engineered Explosives — 47.9%; low-curve sweep, ward-proof
+#   1 Sheoldred's Edict    — 52.1%; creature interaction (D&T/Kaito/Murktide mirrors)
+#   1 Null Rod             — 33.5%; Painter lock + Saga Storm/Blue Artifacts mana
+#   1 Dauthi Voidwalker    — 31.9%; graveyard-fuel denial (Murktide/delve) + clock
+#   1 Snuff Out            — 30.0%; free removal, Izzet|low-curve (top uncovered axis)
+#   1 Harbinger of the Seas — 25.9%; greedy manabases (D&T/Eldrazi/Show&Tell Tombs)
+# JUDGMENT FILLS (tracked engine blind spot — winners-only creature cluster, sweep-confirmed
+# across 7 archetypes, idea-winners-only-triage-creature-interaction):
+#   1 Barrowgoyf           — 84.0% of winners; grind vs the midrange field (3rd copy; Build B
+#                            already mains 2 — the engine discount fires on main saturation)
+#   1 Toxic Deluge         — 63.1%; Eldrazi/D&T/Energy sweep; ward-proof
+# PAIRED SWAP vs the 2026-07-03 board: −1 Fatal Push (4th; 6.1% of winners; creature axis already
+# −60% maindeck-discounted: 3 Push + 4 Bowmasters + Snuff main) → +1 Consign (3rd; see above).
+# OVERRIDDEN OUT (engine recommends; human judgment excludes — both sweep-confirmed SYSTEMATIC
+# false positives, scorer-only in 18 and 6 of 26 swept archetypes respectively):
+#   2 Defense Grid  (0.0% of winners) — _hate coverage applies no impact/symmetry factor; its tax
+#                                       hits OUR instant-speed game (idea-hate-coverability-…)
+#   1 Damping Sphere (3.0%)           — symmetric-self-cost near-miss (idea-damping-sphere-…)
+# COLLECTION: all 15 owned (binder-verified, spares after maindeck usage). Acquisition list: EMPTY —
+# the only unowned engine picks were the two overridden false positives + BEB (own the twin).
+# Board B (owned-constrained solve) converges to this same 15 — see dimir-tempo-optimized-owned.txt.
 4 Brainstorm
 1 Bloodstained Mire
 1 Brazen Borrower
@@ -53,7 +59,7 @@
 
 Sideboard
 2 Force of Negation
-2 Consign to Memory
+3 Consign to Memory
 2 Hydroblast
 1 Engineered Explosives
 1 Sheoldred's Edict
@@ -63,4 +69,3 @@ Sideboard
 1 Harbinger of the Seas
 1 Barrowgoyf
 1 Toxic Deluge
-1 Fatal Push
