@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-07-04T01:55:10Z'
+generated_at: '2026-07-04T03:12:15Z'
 generated_from: frontmatter
-total_docs: 21
+total_docs: 22
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -182,6 +182,17 @@ documents:
   consumer_hint: What is the current Legacy metagame (2026) — tier list, archetype
     mechanics & goldfish speeds, data sources, and how to attack the field? Read before
     designing meta-ingestion, the matchup model, or the meta-speed metric.
+- path: docs/briefs/scorer-flexibility-valuation.md
+  title: 'Brief: Valuing flexibility / breadth in a field-weighted coverage optimizer'
+  type: brief
+  kind: research
+  updated: '2026-07-03'
+  status: draft
+  research_method: /brief
+  blocks_phase: epic-scorer-flexibility-valuation
+  consumer_hint: How do you value a flexible catch-all (one card answering many matchups)
+    in a coverage-based sideboard scorer, from first principles, without regressing
+    to consensus? Read before designing epic-scorer-flexibility-valuation.
 - path: docs/briefs/sideboard-core-and-hedge.md
   title: 'Brief: Sideboard solver — core + hedge'
   type: brief

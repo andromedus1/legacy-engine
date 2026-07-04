@@ -7,3 +7,5 @@ Append-only. `N` is the human-readable index; the citation lint resolves by `han
 | 1 | sb-construction-walton | Walton, "Building Sideboards in Legacy" (CoolStuffInc) | https://www.coolstuffinc.com/a/building-sideboards-in-legacy/ |
 | 2 | sb-construction-fusco | Fusco, "Maximizing Your MTG Sideboard" (CoolStuffInc) | https://www.coolstuffinc.com/a/maximizing-your-mtg-sideboard-04232026 |
 | 3 | cvar-expected-shortfall | "Expected shortfall" (Wikipedia) | https://en.wikipedia.org/wiki/Expected_shortfall |
+| 4 | submodular-set-function | "Submodular set function" (Wikipedia) | https://en.wikipedia.org/wiki/Submodular_set_function |
+| 5 | max-coverage | "Maximum coverage problem" (Wikipedia) | https://en.wikipedia.org/wiki/Maximum_coverage_problem |

@@ -414,6 +414,7 @@ VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         # | plays-red | plays-blue | plays-white | plays-black | plays-green
                         # | combo | low-curve | greedy-manabase
                         # | creature-based | low-interaction | storm-reliant | ramp
+                        # | noncreature-reliant | colorless-reliant
                         #
                         # graveyard-recursion: deck recurs/casts cards FROM its graveyard
                         #   (reanimate, escape, flashback, regrowth-effects)
@@ -421,7 +422,50 @@ VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         #   (delve, delirium, threshold, *goyf sizing) — NOT recursion
                         # plays-<color>: deck runs a blast-worthy density of that color's
                         #   nonland spells (drives color-contingent hate matching, e.g.
-                        #   Hydroblast → plays-red)
+                        #   Hydroblast → plays-red).  Symmetric across all five colors —
+                        #   fires identically for a deck's OWN composition
+                        #   (vulnerability_tags_for_deck) and for a FIELD OPPONENT's
+                        #   composition (vulnerability_tags / field_vulnerability_tags), since
+                        #   both call this same _color_contingent_tags union.  A blue-heavy
+                        #   opponent emits plays-blue exactly as a red-heavy opponent emits
+                        #   plays-red — Mystical Dispute (attacks=["plays-blue"]) attaches to
+                        #   the former the same way Hydroblast attaches to the latter.
+                        # noncreature-reliant: creature-slot density is LOW (below
+                        #   _NONCREATURE_RELIANT_MAX) — the archetype's plan lives on the stack
+                        #   (combo enablers, control finishers/wraths/planeswalkers) rather than
+                        #   the battlefield.  Distinct axis from `combo` (tutor+low-MV+broken
+                        #   signal) and `storm-reliant` (storm density): this fires for ANY
+                        #   low-creature-density archetype, including control decks with neither
+                        #   tutors nor storm.  It is the ATTACHMENT POINT for broad free/soft
+                        #   anti-noncreature interaction (Force of Negation, Spell Pierce —
+                        #   "counter target noncreature spell") so those cards credit the WHOLE
+                        #   combo/control plurality they answer, not just the narrower
+                        #   `combo`/`storm-reliant` slice a subset of that plurality carries.
+                        # colorless-reliant: colorless-nonland-spell density (a card with EMPTY
+                        #   ``colors`` and a castable, non-land type) is >= _COLORLESS_RELIANT_DENSITY
+                        #   (feature-sfv-colorless-axis). The attachment point for the narrow
+                        #   colorless-specific half of Consign to Memory's oracle text ("Counter
+                        #   target triggered ability or colorless spell.") — distinct from
+                        #   `noncreature-reliant` (which fires on LOW creature density regardless of
+                        #   color) and from `combo`/`storm-reliant` (tutor/storm signal): an archetype
+                        #   can be colorless-reliant while being creature-dense (Eldrazi) or
+                        #   creature-light (Blue Artifacts), so this is an independent axis, not a
+                        #   refinement of either existing one. See the constant's docstring for the
+                        #   measured corpus densities that calibrated the threshold.
+                        #
+                        # DECLINED: a companion `trigger-reliant` axis (the OTHER half of Consign's
+                        #   text — "counter target triggered ability") was considered and rejected as
+                        #   not cleanly composition-derivable. Consign's triggered-ability targets
+                        #   (Saga chapters, storm-count triggers, Chalice-style ETB/cast triggers) are
+                        #   mechanically heterogeneous — there is no single card-composition signature
+                        #   (unlike `colors == []`) that identifies "this archetype leans on triggered
+                        #   abilities" without either (a) narrowing to one sub-mechanic (e.g. Saga
+                        #   permanent count), which would silently drop storm-count/Chalice triggers
+                        #   and misrepresent what Consign actually answers, or (b) a broad
+                        #   triggered-ability keyword scan, which fires on nearly every deck (almost
+                        #   any creature has an ETB/attack trigger) and so has no discriminating power
+                        #   as a density threshold. The storm-count slice is already covered by
+                        #   `storm-reliant`; shipping `colorless-reliant` alone is the honest scope.
                         #
                         # NOTE: the prior single graveyard vulnerability tag has been split
                         # into graveyard-recursion / graveyard-fuel (feature-sb-effect-tagging-model);
@@ -432,6 +476,10 @@ _GY_RECURSION_DENSITY = 0.08   # graveyard_recursion slots / total maindeck >= t
 _GY_FUEL_DENSITY = 0.10        # graveyard_fuel slots / total maindeck >= threshold → graveyard-fuel
 _COLOR_SPELL_MIN = 6           # nonland spell copies of a color >= threshold → plays-<color>
 _CREATURE_DENSITY = 0.25       # creature slots / total maindeck >= threshold → creature-based
+_NONCREATURE_RELIANT_MAX = 0.15  # creature slots / total maindeck < threshold → noncreature-reliant
+                                 # (feature-sfv-attachments: the broad-interaction attachment axis —
+                                 # kept well below _CREATURE_DENSITY so the two tags never overlap
+                                 # for the same archetype; see whattoplay.py's VulnerabilityTag note)
 _LOW_INTERACTION_MAX = 0.08    # (counter + removal) / total <= threshold → low-interaction
 _COMBO_AVG_MV_MAX = 2.5        # avg nonland MV must be below this for combo tag
 _COMBO_TUTOR_DENSITY = 0.05    # tutor slots / total maindeck >= threshold for combo
@@ -441,6 +489,25 @@ _STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → st
                                # (density gate kills false positives from stray storm cards in aggregates)
 _RAMP_BIGMANA_LAND_MIN = 4     # big-mana land copies >= threshold → ramp tag
                                # (Urzatron: 12 pieces; Cloudpost: 4+; Eldrazi: 4+)
+_COLORLESS_RELIANT_DENSITY = 0.15
+                               # colorless-nonland-spell copies / total maindeck copies >= threshold
+                               # → colorless-reliant (feature-sfv-colorless-axis). Denominator matches
+                               # _CREATURE_DENSITY / _NONCREATURE_RELIANT_MAX (total maindeck copies,
+                               # not total_nonland) for consistency with the other composition-share
+                               # tags in this function.
+                               #
+                               # Measured against the live corpus (2026-07-03, _archetype_composition
+                               # aggregates, colorless = card.colors == [] and not card.is_land):
+                               #   MUST fire   — Eldrazi 0.562, Mystic Forge Combo 0.635,
+                               #                 Blue Artifacts 0.365, Black Saga Storm 0.284
+                               #   MUST NOT    — Dimir Tempo 0.021, Izzet Delver 0.069,
+                               #                 Death & Taxes 0.080
+                               #   (checked, not required either way) Show and Tell 0.117,
+                               #                 Painter 0.271 (fires — genuinely artifact/colorless
+                               #                 heavy: Grindstone, Painter's Servant, Mishra's Bauble)
+                               # 0.15 sits in the wide gap between the highest must-not-fire archetype
+                               # (Death & Taxes 0.080; next-highest checked non-firer Show and Tell
+                               # 0.117) and the lowest must-fire archetype (Black Saga Storm 0.284).
 
 _COLOR_NAMES: dict[str, str] = {"W": "white", "U": "blue", "B": "black", "R": "red", "G": "green"}
 
@@ -452,6 +519,16 @@ def _color_contingent_tags(cards_with_counts: list[tuple[Card, int]]) -> set[str
     This is the substrate for color-contingent hate matching: a deck with enough red
     spells to justify sideboarding around it (Hydroblast, Blue Elemental Blast) emits
     ``plays-red`` rather than color hate being shoehorned into archetype tags.
+
+    Symmetric across all five colors by construction (the loop below iterates
+    ``_COLOR_NAMES``, not a hardcoded subset) — a blue-heavy deck emits ``plays-blue``
+    exactly as a red-heavy deck emits ``plays-red``.  Because ``_vulnerability_from_composition``
+    unions this into BOTH ``vulnerability_tags_for_deck`` (my own deck) and
+    ``vulnerability_tags``/``field_vulnerability_tags`` (a field OPPONENT's aggregate
+    composition), a blue-heavy opponent archetype genuinely carries ``plays-blue`` as an
+    opponent vulnerability that Mystical Dispute/Pyroblast/Red Elemental Blast can attach
+    to — confirmed against the live corpus (feature-sfv-attachments design note: 415/707
+    archetypes carry ``plays-blue``, more than the 270 that carry ``plays-red``).
     """
     color_counts: dict[str, int] = dict.fromkeys(_COLOR_NAMES, 0)
     for card, count in cards_with_counts:
@@ -548,6 +625,11 @@ def _vulnerability_from_composition(
     - combo: low avg MV + tutors + storm-or-graveyard-recursion signal
     - low-curve: avg nonland MV < 2.0 (same computation as proactivity low_curve_score)
     - creature-based: creature slot density ≥ threshold
+    - noncreature-reliant: creature slot density < _NONCREATURE_RELIANT_MAX (feature-sfv-attachments
+      broad-interaction attachment axis — see VulnerabilityTag's docstring note)
+    - colorless-reliant: colorless-nonland-spell slot density >= _COLORLESS_RELIANT_DENSITY
+      (feature-sfv-colorless-axis — see VulnerabilityTag's docstring note and the constant's
+      docstring for the corpus calibration)
     - greedy-manabase: high fast/dual lands + nonbasic heavy
     - low-interaction: low (counter + removal) density
     """
@@ -564,6 +646,7 @@ def _vulnerability_from_composition(
     fast_mana_cards = 0
     nonbasic_land_count = 0
     bigmana_land_count = 0   # copies of diagnostic big-mana / ramp lands
+    colorless_nonland_slots = 0  # feature-sfv-colorless-axis: colorless (colors==[]) nonland spells
     total_nonland = 0
     total_nonland_mv = 0.0
     cards_with_counts: list[tuple[Card, int]] = []
@@ -600,6 +683,10 @@ def _vulnerability_from_composition(
             # Creature detection via type_line
             if "Creature" in (card.type_line or ""):
                 creature_slots += count
+            # Colorless-nonland-spell detection (feature-sfv-colorless-axis): empty
+            # ``colors`` on a castable non-land card (Eldrazi, artifacts, devoid spells).
+            if not card.colors:
+                colorless_nonland_slots += count
 
         # Role tallies (apply to all cards)
         if "graveyard_recursion" in roles:
@@ -648,6 +735,24 @@ def _vulnerability_from_composition(
     # creature-based
     if total_cards > 0 and creature_slots / total_cards >= _CREATURE_DENSITY:
         tags.add("creature-based")
+
+    # noncreature-reliant (feature-sfv-attachments): the complement signal — an archetype
+    # whose plan lives on the stack rather than the battlefield.  Mechanically derived from
+    # composition alone (creature density), no empirical prior.  This is what lets a broad
+    # free/soft anti-noncreature counter (Force of Negation, Spell Pierce) attach to the
+    # WHOLE combo/control plurality it answers instead of only the narrower `combo`/
+    # `storm-reliant` slice of that plurality.
+    if total_cards > 0 and creature_slots / total_cards < _NONCREATURE_RELIANT_MAX:
+        tags.add("noncreature-reliant")
+
+    # colorless-reliant (feature-sfv-colorless-axis): colorless-nonland-spell density is
+    # an INDEPENDENT axis from noncreature-reliant/creature-based — an archetype can be
+    # colorless-reliant while creature-dense (Eldrazi) or creature-light (Blue Artifacts).
+    # This is the attachment point for Consign to Memory's colorless-specific half
+    # ("Counter target triggered ability or colorless spell.").  See the constant's
+    # docstring for the corpus-measured densities that calibrated the threshold.
+    if total_cards > 0 and colorless_nonland_slots / total_cards >= _COLORLESS_RELIANT_DENSITY:
+        tags.add("colorless-reliant")
 
     # greedy-manabase
     if fast_mana_cards >= _GREEDY_MANABASE_MIN_FAST or nonbasic_land_count >= _GREEDY_NONBASIC_MIN:
