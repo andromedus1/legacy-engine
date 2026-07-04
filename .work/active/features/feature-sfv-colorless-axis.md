@@ -130,3 +130,12 @@ tag-subset-dominance the epic's acceptance oracle identified). Full suite: 2556 
 (2546 floor + 10 new), no regressions.
 
 Escape hatch: not needed — the honest threshold reached the acceptance target on its own.
+
+
+## Determinism caveat (Phase-8 review, 2026-07-03)
+
+The backtest agreement recorded above reads **6/9 or 7/9 run-to-run** due to a pre-existing,
+untracked ILP tie in slot 9 (Snuff Out 30.2% observed vs Long Goodbye 1.2% —
+`idea-ilp-tiebreak-nondeterminism`). This feature's acceptance facts are stable across both
+optima: Consign in overlap (95.7%), FoN in overlap (99.2%), Damping Sphere + Defense Grid the
+scorer-only pair.

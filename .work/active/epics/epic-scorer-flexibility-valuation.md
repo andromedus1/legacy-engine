@@ -1,7 +1,7 @@
 ---
 id: epic-scorer-flexibility-valuation
 kind: epic
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on: []
@@ -120,9 +120,37 @@ Split by capability along the brief's causal chain: cards must **attach** to wha
 - `feature-sfv-backtest-scoped` — field/window-scoped `advise backtest` acceptance harness — depends on: `[]`
 - `feature-sfv-breadth-objective` — **(trickiest)** reformulate the objective to true submodular marginal-gain — depends on: `[feature-sfv-attachments, feature-sfv-weights]`
 - `feature-sfv-option-value` — CVaR tail-robustness over the Dirichlet field (risk-appetite dial) — depends on: `[feature-sfv-breadth-objective]`
+- `feature-sfv-colorless-axis` — colorless-reliant vulnerability axis (promoted mid-completion; closes the Consign acceptance criterion) — depends on: `[feature-sfv-attachments]`
 
 ### Decomposition risks
 
 - **Objective reformulation regresses the reviewed scorer.** breadth-objective rewrites the core `_build_coverage_model`/ILP path. *Mitigation*: the 2400+ existing tests + the field-scoped backtest as regression gate; feature-design forces 2-3 sub-options and picks the least-invasive that captures breadth; preserve τ/hedge machinery.
 - **CVaR option-value hard to make deterministic/testable.** *Mitigation*: closed-form Beta-marginal of the Dirichlet (positioning already computes it) over Monte-Carlo; named α; keep strictly separate from the copy-count taper axis.
 - **Critical path** attachments∥weights∥backtest-scoped → breadth-objective → option-value is 3 deep; parallelism is in the wave-1 trio. Acceptable for a 5-feature epic.
+
+
+## Completion (2026-07-03)
+
+All 6 features done (5 planned + `feature-sfv-colorless-axis` promoted mid-completion because the
+acceptance oracle names Consign). Phase-8 fresh-context completion review: **COMPLETE** — threshold
+calibration independently reproduced to three decimals against the DB; mechanism purity verified
+(no winning-board signal in any scoring path; the α/scale constants are offline-selected and
+disclosed in-source); suite 2556 green.
+
+**Acceptance oracle adjudication:** FoN winners-only→overlap (99.2%) MET · Consign
+winners-only→overlap (95.7%) MET · "Damping Sphere false-positive drops" NOT met — adjudicated
+covered by the oracle's own "surfaced for human judgment, not scored away" clause: verified
+pre-existing base-model near-miss (greedy at α=1.0 with option-value disabled already recommends
+it; a symmetric-self-cost representability gap shared with Defense Grid), not introduced or
+strengthened by this epic, diagnosed + tracked (`idea-damping-sphere-base-model-near-miss`,
+`idea-hate-coverability-overvalues-defense-grid`). The only in-epic ways to force it to drop were
+an empirical prior (forbidden by the same oracle) or a new self-cost mechanic no feature scoped.
+
+**Determinism caveat (recorded per review Finding 1):** backtest agreement reads 6/9 or 7/9
+depending on an untracked ILP tie in slot 9 (Snuff Out 30.2% vs Long Goodbye 1.2% —
+`idea-ilp-tiebreak-nondeterminism`); the acceptance facts (Consign/FoN in overlap; Damping
+Sphere/Defense Grid the stable scorer-only pair) hold across both optima.
+
+Tracked follow-ups (legitimate deferrals): the two scorer-only divergences above, the ILP
+tie-break, the winners-only creature-interaction cluster triage, regex/capability nits, and the
+strategic arcs (`idea-card-semantics-rules-layer`, `idea-archetype-sweep-backtest-loop`).

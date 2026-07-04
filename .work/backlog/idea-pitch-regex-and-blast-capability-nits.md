@@ -16,3 +16,8 @@ tags: [advisory, sideboard]
    permanents of one color — Hydroblast can never kill Chalice, yet would be credited as
    neutralizing an artifact linchpin. Latent (3 curated linchpin archetypes today); live risk as the
    linchpin set grows. Make capability credit color-conditional.
+
+3. **`_RE_COUNTER_COLORLESS` DOTALL looseness** (sideboard.py ~1275, Phase-8 review nit): the
+   `.*` with DOTALL could span unrelated sentences on a future card ("counter target <anything, any
+   distance> colorless spell"). Corpus-verified today: exactly 2/39,452 hits, both correct (Consign,
+   Ceremonious Rejection). Tighten to a single-sentence bound when touching this file.
