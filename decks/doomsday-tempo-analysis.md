@@ -57,3 +57,18 @@ Doomsday topped the online best-pick ranking (S*=0.580, thin coverage) as WHOLE-
 this stage's tempo camp is the closest build to the maintainer's Dimir shell (shared Tamiyo/Murktide/
 FoW/Brainstorm core). Stage 4 compares the optimized Dimir Tempo vs THIS list across both
 metas with the matchup matrix + positioning lenses.
+
+## Judgment-layer board revision (2026-07-04, same session)
+
+the maintainer flagged that the shipped boards carried the engine's raw 1-of hedge spread — the exact
+bias today's copy study documented — while the Dimir deliverable got a judgment layer. Fixed:
+both per-meta boards revised using the same discipline (mechanics first, winners as validation;
+n=97 field-scoped Doomsday winner boards, evolving): **4 Barrowgoyf** (plan-package/threshold
+class — winners' copy mode 4 at 78% adoption; the transform MEASUREMENT was unreliable, the
+transform PACKAGE is winners' standard), 2 FoN (pitch k_min=2, 97%/mode 2), 2 Consign, 2 Fatal
+Push (63%/mode 2), 2 Dauthi (54%/mode 2), 1 Long Goodbye, 1 Flusterstorm, 1 Brazen Borrower
+(online: 3rd Thoughtseize). Dropped engine hedges all sat <20% winner adoption (Veil 8%, Decay
+6%, Hydro 14%, Nihil 14%, Carpet 19%, Bitter 20%); Duress (29%) is the closest cut and the
+owned swap for Flusterstorm. Acquisition impact: +1 Barrowgoyf (owns 3), +1 Flusterstorm.
+The A/B and unowned-5 numbers in §Collection reality describe the retired engine-reference
+board; the deck files' headers are current.

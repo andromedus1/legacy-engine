@@ -1,13 +1,17 @@
-# DOOMSDAY TEMPO — local list (consensus subarchetype, 2026-07-04)
-# Maindeck: consensus over the mechanically-split TEMPO camp of Doomsday (variant rule:
-# mains Murktide/Tamiyo AND NOT Personal Tutor/One Ring; n=47 of 134 regime Doomsday decks —
-# EVOLVING tier per the canonical ladder (30-99); paper subset n=8 is speculative, so this is predominantly online-informed).
-# The old two-mode "transform" build is dead — this list defers to camp consensus throughout.
-# Board: engine-optimized vs the local field (smart+hedge; natural budget 5/15).
-# Overridden out: {'Defense Grid': 1} (sweep-confirmed); refills: [['Flusterstorm', 0.002390566237040403]].
-# Collection: 5 SB cards unowned (Abrupt Decay, Bitter Triumph, Carpet of Flowers, Flusterstorm,
-# Veil of Summer); maindeck needs a real acquisition (14 names incl. 1 Lion's Eye Diamond — the
-# tempo camp runs ONE, not the turbo camp's multiples). Owned-SB fallback in the analysis doc.
+# DOOMSDAY TEMPO — the local meta list (consensus subarchetype + judgment board, 2026-07-04)
+# Maindeck: consensus over the mechanically-split TEMPO camp of Doomsday (mains Murktide/Tamiyo,
+# no Personal Tutor/One Ring; n=47 of 134 regime decks, EVOLVING tier; paper subset n=8).
+# Board: JUDGMENT LAYER applied (same discipline as the Dimir board) over the engine reference:
+# copy-count study mechanics + winner validation (n=97 field-scoped Doomsday winner boards, evolving):
+#   4 Barrowgoyf — plan-package class (0-or-max, like threshold cards): the fair-mode pivot;
+#     winners' copy mode is 4 at 78% adoption (the old transform MEASUREMENT was unreliable;
+#     the transform PACKAGE is winners' standard)
+#   2 FoN (pitch k_min=2; 97%, mode 2) · 2 Consign (34/76 at 2; replicate scales one copy)
+#   2 Fatal Push (63%, mode 2) · 2 Dauthi (54%, mode 2) · 1 Long Goodbye · 1 Flusterstorm · 1 Brazen Borrower
+# Dropped from the engine reference (winner adoption <20%, coverage hedges): Veil 8%, Decay 6%,
+# Bitter Triumph 20%, Carpet 19%, Hydroblast 14%, Nihil 14%, Duress 29% (closest cut — owned
+# swap for Flusterstorm if not acquiring). Overridden out: Defense Grid (systematic FP).
+# Acquisition: +1 Barrowgoyf (own 3) +1 Flusterstorm (own 0) + the maindeck (~14 names, 1 LED).
 4 Brainstorm
 1 Cavern of Souls
 1 Consider
@@ -38,18 +42,11 @@
 3 Wasteland
 
 Sideboard
-1 Abrupt Decay
-1 Barrowgoyf
-1 Bitter Triumph
+4 Barrowgoyf
+2 Consign to Memory
+2 Dauthi Voidwalker
+2 Fatal Push
+2 Force of Negation
 1 Brazen Borrower
-1 Carpet of Flowers
-1 Consign to Memory
-1 Dauthi Voidwalker
-1 Duress
-1 Fatal Push
 1 Flusterstorm
-1 Force of Negation
-1 Hydroblast
 1 Long Goodbye
-1 Nihil Spellbomb
-1 Veil of Summer
