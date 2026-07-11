@@ -159,6 +159,55 @@ class TestDiscoverRun:
         assert "// verdict: FAIL" in result.output
         assert "no separable structure" in result.output
 
+    def test_rerun_echoes_honest_replacement_of_prior_staged_candidate(self, runner, tmp_path):
+        """Finding 3: re-running `discover run` for the same parent silently overwrote the
+        staged candidate before — must now echo what it replaced."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+
+        first = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert first.exit_code == 0, first.output
+        assert "// replaced prior staged candidate" not in first.output
+
+        second = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert second.exit_code == 0, second.output
+        assert "// replaced prior staged candidate for 'Doomsday'" in second.output
+        assert "generated_from=" in second.output
+        assert "camps=" in second.output
+
+    def test_different_parent_does_not_trigger_replacement_echo(self, runner, tmp_path):
+        """The replacement echo must fire only on a genuine same-parent overwrite, not whenever
+        something is staged."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+
+        first = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert first.exit_code == 0, first.output
+
+        # A second DB (distinct file, different parent archetype name) — first-ever stage for
+        # that parent, so no replacement should be reported.
+        db_path2 = _build_discovery_db(tmp_path / "second")
+        from legacy_engine.ingestion import store
+        con2 = store.connect(db_path2)
+        con2.execute("UPDATE decks SET archetype = 'Lands' WHERE archetype = 'Doomsday'")
+        con2.close()
+
+        second = runner.invoke(main, [
+            "discover", "run", "--archetype", "Lands",
+            "--db", db_path2, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert second.exit_code == 0, second.output
+        assert "// replaced prior staged candidate" not in second.output
+
 
 # ---------------------------------------------------------------------------
 # discover list
@@ -260,3 +309,109 @@ class TestDiscoverPromote:
         ])
         assert result.exit_code != 0
         assert "no staged split" in result.output
+
+
+# ---------------------------------------------------------------------------
+# discover apply
+# ---------------------------------------------------------------------------
+
+class TestDiscoverApply:
+    def _run_discover(self, runner, tmp_path) -> tuple[str, str]:
+        """discover run against the two-camp DB; return (db_path, staged_path)."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        run = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert run.exit_code == 0, run.output
+        return db_path, staged
+
+    def test_apply_labels_decks_and_leaves_status_candidate(self, runner, tmp_path):
+        db_path, staged = self._run_discover(runner, tmp_path)
+
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// camps:" in result.output
+        assert "deck(s) labeled from staged candidate for 'Doomsday'" in result.output
+        assert (
+            "// STAGED CANDIDATE labels applied to decks.variant — speculative provenance; "
+            "not promoted to the curated registry" in result.output
+        )
+
+        # Not a promotion: status stays candidate; curated registry untouched.
+        data = json.loads((tmp_path / "discovered.json").read_text())
+        assert data["splits"][0]["status"] == "candidate"
+
+        listed = runner.invoke(main, ["discover", "list", "--discovered-path", staged])
+        assert "[status: candidate]" in listed.output
+
+        # All 70 Doomsday decks resolve (2-camp split: positive rule + default complement).
+        import duckdb
+        con = duckdb.connect(db_path)
+        n_variant = con.execute(
+            "SELECT count(*) FROM decks WHERE archetype = 'Doomsday' AND variant IS NOT NULL"
+        ).fetchone()[0]
+        con.close()
+        assert n_variant == 70
+
+    def test_apply_with_no_staged_split_fails_loudly(self, runner, tmp_path):
+        db_path = _build_discovery_db(tmp_path)
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", str(tmp_path / "empty.json"),
+        ])
+        assert result.exit_code != 0
+        assert "no staged candidate split" in result.output
+
+    def test_promote_still_works_after_apply(self, runner, tmp_path):
+        db_path, staged = self._run_discover(runner, tmp_path)
+        applied = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert applied.exit_code == 0, applied.output
+
+        data = json.loads((tmp_path / "discovered.json").read_text())
+        camp = next(
+            c["name"] for c in data["splits"][0]["camps"] if not c["name"].startswith("non-")
+        )
+        registry = _curated_registry(tmp_path)
+        promoted = runner.invoke(main, [
+            "discover", "promote", "--archetype", "Doomsday", "--variant", camp,
+            "--discovered-path", staged, "--registry-path", registry,
+        ])
+        assert promoted.exit_code == 0, promoted.output
+
+        staged_data = json.loads((tmp_path / "discovered.json").read_text())
+        assert staged_data["splits"][0]["status"] == "promoted"
+
+    def test_apply_surfaces_provenance_in_report_matchups(self, runner, tmp_path, monkeypatch):
+        """End-to-end: discover run -> discover apply -> report matchups --split-variant shows
+        both the camp rows (from decks.variant) and the staged-candidate provenance note."""
+        db_path, staged = self._run_discover(runner, tmp_path)
+        applied = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert applied.exit_code == 0, applied.output
+
+        # report matchups reads the DEFAULT staging path (no CLI flag) — point it at our tmp
+        # staged file so the test stays hermetic (never touches the real project data dir).
+        monkeypatch.setattr(
+            "legacy_engine.config.DISCOVERED_VARIANTS_PATH", staged,
+        )
+
+        result = runner.invoke(main, [
+            "report", "matchups", "--db", db_path, "--all-time",
+            "--split-variant", "Doomsday",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// split-variant: Doomsday" in result.output
+        assert (
+            "// provenance: Doomsday has a STAGED (unpromoted) candidate split — variant "
+            "labels may be speculative-provenance" in result.output
+        )
