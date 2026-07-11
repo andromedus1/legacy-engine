@@ -6221,5 +6221,231 @@ def deck_buildable(deck_name: str, verbose: bool) -> None:
             click.echo(f"  − {card}: need {shortfall} more")
 
 
+# ── discover: data-driven subarchetype discovery ──
+@main.group()
+def discover() -> None:
+    """Discover, stage, and promote data-driven subarchetype splits."""
+
+
+@discover.command("run")
+@click.option("--archetype", required=True, help="Parent archetype to discover within (e.g. 'Doomsday').")
+@click.option("--since", default=None, help="Window start (YYYY-MM-DD, inclusive; default: full corpus).")
+@click.option(
+    "--reducer",
+    type=click.Choice(["svd", "umap"], case_sensitive=False),
+    default="svd",
+    show_default=True,
+    help="Dimensionality reduction before HDBSCAN (svd is deterministic; umap needs the "
+         "'discovery' extra installed).",
+)
+@click.option("--seed", type=int, default=0, show_default=True, help="RNG seed (reduction + bootstrap).")
+@click.option(
+    "--n-boot", type=int, default=50, show_default=True,
+    help="Bootstrap resamples for the Gate-A stability estimate.",
+)
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@click.option(
+    "--discovered-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Staging registry to write (defaults to data/variants/discovered.json).",
+)
+@_verbose
+def discover_run(
+    archetype: str,
+    since: str | None,
+    reducer: str,
+    seed: int,
+    n_boot: int,
+    db: str | None,
+    discovered_path: str | None,
+    verbose: bool,
+) -> None:
+    """Discover candidate subarchetype camps within a parent archetype.
+
+    Clusters the parent's flex-band mainboard compositions (HDBSCAN on a reduced TF-IDF
+    embedding), validates the split through both gates (bootstrap stability; both-camp
+    sample tier + signature divergence), and stages a PASSing split as a candidate in the
+    staging registry.  A FAILing split is still fully reported — never silently dropped —
+    it just isn't staged.
+
+    Example: legacy-engine discover run --archetype "Doomsday"
+    """
+    _setup_logging(verbose)
+    from functools import partial
+
+    from legacy_engine.analytics.discovery import discover_subarchetypes, reduce_dims
+    from legacy_engine.archetype.discovered import (
+        load_discovered,
+        record_from_split,
+        save_discovered,
+        stage_split,
+    )
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+    from legacy_engine.ingestion import store
+
+    reducer = reducer.lower()
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+        split = discover_subarchetypes(
+            con,
+            archetype,
+            since=since,
+            reducer=partial(reduce_dims, method=reducer),
+            seed=seed,
+            n_boot=n_boot,
+        )
+    finally:
+        con.close()
+
+    _print_discovery_report(split, since=since, reducer=reducer, seed=seed, n_boot=n_boot)
+
+    if not split.passed:
+        click.echo(
+            "// not staged: split failed validation — the report above is the complete, "
+            "honest result"
+        )
+        return
+
+    staging_path = discovered_path or str(DISCOVERED_VARIANTS_PATH)
+    from datetime import date
+
+    record = record_from_split(
+        split,
+        generated_from=f"discover run @ {date.today().isoformat()}",
+        params={
+            "since": since,
+            "reducer": reducer,
+            "seed": seed,
+            "n_boot": n_boot,
+        },
+    )
+    reg = load_discovered(staging_path)
+    save_discovered(stage_split(reg, record), staging_path)
+    click.echo(f"// staged candidate split for {archetype!r} -> {staging_path}")
+    click.echo("// next: `discover list` to inspect, `discover promote` to curate a camp")
+
+
+def _print_discovery_report(
+    split: "DiscoveredSplit",
+    *,
+    since: str | None,
+    reducer: str,
+    seed: int,
+    n_boot: int,
+) -> None:
+    """Render a DiscoveredSplit with full `// ` audit provenance (PASS or FAIL alike)."""
+    from legacy_engine.analytics.discovery import DiscoveredSplit  # noqa: F401
+
+    click.echo(f"\n=== Subarchetype Discovery: {split.parent!r} ===")
+    click.echo(f"// window: {since or 'full corpus'}{' ..' if since else ''}")
+    click.echo(f"// params: reducer={reducer} seed={seed} n_boot={n_boot}")
+    sil = f"{split.silhouette:.3f}" if split.silhouette is not None else "n/a"
+    click.echo(f"// stability: {split.stability:.3f}  silhouette (diagnostic only): {sil}")
+    click.echo(f"// noise decks (outlier brews, no camp): {split.n_noise}")
+
+    for camp in split.camps:
+        top = ", ".join(
+            f"{name} ({delta:+.2f})"
+            for name, delta in camp.signature_cards[:5]
+            if delta > 0
+        )
+        click.echo(f"  camp {camp.name}: n={camp.n} [{camp.tier}]  signature: {top or '(none)'}")
+
+    for reason in split.reasons:
+        click.echo(f"// {reason}")
+    click.echo(f"// verdict: {'PASS' if split.passed else 'FAIL'}")
+
+
+@discover.command("list")
+@click.option(
+    "--discovered-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Staging registry to read (defaults to data/variants/discovered.json).",
+)
+@_verbose
+def discover_list(discovered_path: str | None, verbose: bool) -> None:
+    """List staged candidate splits (and their promotion status)."""
+    _setup_logging(verbose)
+    from legacy_engine.archetype.discovered import load_discovered
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+
+    path = discovered_path or str(DISCOVERED_VARIANTS_PATH)
+    try:
+        reg = load_discovered(path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"// staging registry: {path}")
+    if not reg.splits:
+        click.echo("(no staged candidate splits — run `discover run --archetype X`)")
+        return
+
+    for split in reg.splits:
+        click.echo(
+            f"\n{split.parent}  [status: {split.status}]  stability={split.stability:.3f}"
+        )
+        click.echo(f"// generated: {split.generated_from}  params: {split.params}")
+        for camp in split.camps:
+            sig = ", ".join(camp.signature_cards[:3]) or "(none)"
+            click.echo(f"  - {camp.name}: n={camp.n} [{camp.tier}]  signature: {sig}")
+
+
+@discover.command("promote")
+@click.option("--archetype", required=True, help="Parent archetype of the staged split.")
+@click.option("--variant", required=True, help="Staged camp name to promote (see `discover list`).")
+@click.option(
+    "--discovered-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Staging registry to read/update (defaults to data/variants/discovered.json).",
+)
+@click.option(
+    "--registry-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Curated variant registry to append to (defaults to the shipped legacy.json).",
+)
+@_verbose
+def discover_promote(
+    archetype: str,
+    variant: str,
+    discovered_path: str | None,
+    registry_path: str | None,
+    verbose: bool,
+) -> None:
+    """Promote a staged camp into the curated variant registry.
+
+    Appends a ``VariantRule`` (InMainboard on the camp's top signature card) to the curated
+    registry and sets the complement camp as the parent's default tag.  Fails loudly on
+    unknown parent/camp or an already-promoted split — promotion is a deliberate, one-way
+    human decision, never automatic.
+
+    Example: legacy-engine discover promote --archetype "Doomsday" --variant "Murktide Regent"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.archetype.discovered import promote_split
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH, VARIANTS_REGISTRY_PATH
+
+    disc_path = discovered_path or str(DISCOVERED_VARIANTS_PATH)
+    reg_path = registry_path or str(VARIANTS_REGISTRY_PATH)
+    try:
+        rule = promote_split(archetype, variant, disc_path, reg_path)
+    except (ValueError, FileNotFoundError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    cond = rule.conditions[0]
+    click.echo(f"// promoted {archetype!r}/{variant!r} -> {reg_path}")
+    click.echo(f"  rule: {cond.type} {cond.cards}")
+    click.echo("// staged split marked status=promoted; re-run `label` to apply variant tags")
+
+
 if __name__ == "__main__":
     main()
