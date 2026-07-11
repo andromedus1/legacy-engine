@@ -288,7 +288,7 @@ def _bootstrap_stability(
         rng = np.random.default_rng(seed + b + 1)
         idx = rng.integers(0, n, size=n)
         Xb = Xred[idx]
-        boot_sample_labels = HDBSCAN(min_cluster_size=min_cluster_size).fit_predict(Xb)
+        boot_sample_labels = HDBSCAN(min_cluster_size=min_cluster_size, copy=True, allow_single_cluster=True).fit_predict(Xb)
 
         # Map bootstrap labels back onto original indices (first occurrence wins for repeats —
         # a resampled duplicate row gets an (essentially) identical cluster assignment anyway).
@@ -356,7 +356,16 @@ def cluster_and_validate(
 
     Xred = np.asarray(reducer(fm.X, seed=seed))
     min_cluster_size = max(30, round(0.10 * n))
-    base_labels = np.asarray(HDBSCAN(min_cluster_size=min_cluster_size).fit_predict(Xred))
+    # allow_single_cluster=True: HDBSCAN's default refuses to ever emit a single all-encompassing
+    # cluster (it always prefers noise over "no split"). A homogeneous parent with no real
+    # subarchetype structure should honestly report "one cluster, no split" rather than the
+    # less legible "100% noise" — so we allow it, and let Gate B's ">=2 camps" check (not
+    # HDBSCAN's own refusal) be the thing that rejects it.
+    base_labels = np.asarray(
+        HDBSCAN(
+            min_cluster_size=min_cluster_size, copy=True, allow_single_cluster=True,
+        ).fit_predict(Xred)
+    )
     n_noise = int(np.sum(base_labels == -1))
     unique_camps = sorted(int(c) for c in set(base_labels.tolist()) if c != -1)
 

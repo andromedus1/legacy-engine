@@ -13,10 +13,14 @@ import numpy as np
 import pytest
 
 from legacy_engine.analytics.discovery import (
+    Camp,
     DeckVector,
     build_feature_matrix,
+    cluster_and_validate,
+    discover_subarchetypes,
     reduce_dims,
 )
+from legacy_engine.confidence import tier_for_sample
 
 
 # ---------------------------------------------------------------------------
@@ -179,3 +183,281 @@ class TestReduceDims:
         monkeypatch.setattr(builtins, "__import__", _blocking_import)
         X = self._wide_matrix(n_rows=30, n_features=20)
         reduce_dims(X, method="svd", n_components=10, seed=0)
+
+
+# ---------------------------------------------------------------------------
+# Unit 3 — cluster_and_validate (the trickiest unit) + _gate_b_domain
+#
+# Four acceptance scenarios (per the parent feature's Implementation Units):
+#   (a) two well-separated hand-built camps (n>=30 each) -> passed=True, 2 camps, correct names.
+#   (b) one homogeneous blob -> 1 cluster, passed=False, reason "single cluster".
+#   (c) a 300/12 split -> passed=False, reason "camp below evolving floor".
+#   (d) deterministic across runs.
+#
+# Scenario (c) is tested directly against `_gate_b_domain` rather than through the full
+# cluster_and_validate/HDBSCAN pipeline: HDBSCAN's own `min_cluster_size` floor
+# (`max(30, round(0.10*n))`, see Unit 3 notes) makes it structurally impossible for HDBSCAN to
+# ever *form* a non-noise cluster smaller than 30 members — so the only way to exercise "a
+# formed camp that is below the evolving floor" is to hand-build Camp objects and drive the
+# domain gate directly. This mirrors the objective-search-split idiom of testing an internal
+# pure piece (like `_greedy_tune`) in isolation.
+# ---------------------------------------------------------------------------
+
+def _two_camp_decks(n_a: int = 35, n_b: int = 35) -> list[DeckVector]:
+    """Two well-separated camps sharing a ubiquitous core, split on two flex-card pairs.
+
+    Mirrors the brief's worked Doomsday example (bimodal signature cards, not just presence):
+    camp A runs "Card A1"/"Card A2" at ~4/~3 copies and never runs the B cards, camp B is the
+    mirror image. Small jitter (±1 copy) keeps rows non-identical without touching separation.
+    """
+    decks: list[DeckVector] = []
+    idx = 0
+    for i in range(n_a):
+        wobble = i % 2  # deterministic, no RNG needed for a fixture this clean
+        decks.append(DeckVector(
+            key=("t1", idx),
+            counts={"Core Land": 4, "Card A1": 4 - wobble, "Card A2": 3 + wobble},
+        ))
+        idx += 1
+    for i in range(n_b):
+        wobble = i % 2
+        decks.append(DeckVector(
+            key=("t1", idx),
+            counts={"Core Land": 4, "Card B1": 4 - wobble, "Card B2": 3 + wobble},
+        ))
+        idx += 1
+    return decks
+
+
+def _blob_decks(n: int = 70) -> list[DeckVector]:
+    """A single homogeneous parent — every deck plays the identical flex-band composition.
+
+    ``flex_hi=1.0`` is required at matrix-build time since these two cards are ubiquitous
+    (100% inclusion) by construction — there is deliberately no split signal anywhere.
+    """
+    return [
+        DeckVector(key=("t1", i), counts={"Core Land": 4, "Flex A": 3, "Flex B": 2})
+        for i in range(n)
+    ]
+
+
+class TestClusterAndValidateCleanSplit:
+    """Scenario (a): two well-separated camps -> passed=True, 2 camps, correct names."""
+
+    def test_passes_both_gates(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=30)
+        assert split.passed is True
+        assert len(split.camps) == 2
+        assert split.n_noise == 0
+
+    def test_camp_names_are_card_and_non_card(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=30)
+        names = sorted(c.name for c in split.camps)
+        assert len(names) == 2
+        card_name = next(n for n in names if not n.startswith("non-"))
+        assert f"non-{card_name}" in names
+
+    def test_camp_sizes_and_tiers(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=30)
+        sizes = sorted(c.n for c in split.camps)
+        assert sizes == [35, 35]
+        assert all(c.tier == "evolving" for c in split.camps)
+
+    def test_stability_high_and_gate_reasons_present(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=30)
+        assert split.stability >= 0.90
+        assert any("gate A stability" in r for r in split.reasons)
+        assert any("gate B" in r and "PASS" in r for r in split.reasons)
+
+    def test_double_dipping_guard_note_always_present(self):
+        """The reasons list always documents the validation guard, pass or fail."""
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=30)
+        assert any("double-dipping" in r for r in split.reasons)
+
+
+class TestClusterAndValidateBlob:
+    """Scenario (b): one homogeneous blob -> 1 cluster, passed=False, reason 'single cluster'."""
+
+    def test_single_cluster_fails(self):
+        decks = _blob_decks()
+        fm = build_feature_matrix(decks, flex_hi=1.0)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        assert split.passed is False
+        assert len(split.camps) == 1
+        assert any("single cluster" in r for r in split.reasons)
+
+    def test_no_flex_band_also_fails_honestly(self):
+        """A parent with <2 flex cards degrades before clustering is even attempted."""
+        decks = [
+            DeckVector(key=("t1", i), counts={"Core Land": 4})
+            for i in range(40)
+        ]
+        fm = build_feature_matrix(decks)  # default thresholds -> Core Land is ubiquitous, dropped
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        assert split.passed is False
+        assert split.camps == []
+        assert any("no separable structure" in r for r in split.reasons)
+
+
+class TestGateBDomainDirect:
+    """Scenario (c): a 300/12 split -> passed=False, reason 'camp below evolving floor'.
+
+    Tested directly against `_gate_b_domain` — see the module docstring above for why.
+    """
+
+    def _camp(self, name: str, n: int, sig: list[tuple[str, float]]) -> Camp:
+        return Camp(name=name, member_keys=[], signature_cards=sig, n=n, tier=tier_for_sample(n))
+
+    def test_below_floor_camp_fails_with_named_reason(self):
+        from legacy_engine.analytics.discovery import _gate_b_domain
+
+        big = self._camp("Big", 300, [("Tamiyo, Inquisitive Student", 2.72), ("Wasteland", 2.15)])
+        small = self._camp("Small", 12, [("Tamiyo, Inquisitive Student", -2.72), ("Wasteland", -2.15)])
+
+        ok, reasons = _gate_b_domain([big, small])
+        assert ok is False
+        assert any("below evolving floor" in r and "Small" in r for r in reasons)
+
+    def test_both_camps_above_floor_with_divergence_passes(self):
+        from legacy_engine.analytics.discovery import _gate_b_domain
+
+        a = self._camp("A", 50, [("Card X", 1.0), ("Card Y", 0.9)])
+        b = self._camp("B", 40, [("Card X", -1.0), ("Card Y", -0.9)])
+        ok, reasons = _gate_b_domain([a, b])
+        assert ok is True
+        assert all("FAIL" not in r for r in reasons)
+
+    def test_insufficient_signature_divergence_fails(self):
+        """Both camps clear the tier floor but neither shows >=2 cards at |delta|>=0.75."""
+        from legacy_engine.analytics.discovery import _gate_b_domain
+
+        a = self._camp("A", 50, [("Card X", 0.3)])
+        b = self._camp("B", 40, [("Card X", -0.3)])
+        ok, reasons = _gate_b_domain([a, b])
+        assert ok is False
+        assert any("flex card(s)" in r for r in reasons)
+
+    def test_fewer_than_two_camps_fails(self):
+        from legacy_engine.analytics.discovery import _gate_b_domain
+
+        ok, reasons = _gate_b_domain([self._camp("Only", 50, [("X", 1.0)])])
+        assert ok is False
+        assert any("fewer than 2 camps" in r for r in reasons)
+
+
+class TestClusterAndValidateDeterminism:
+    """Scenario (d): deterministic across runs given the same seed."""
+
+    def test_repeated_calls_identical(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split1 = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        split2 = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+
+        assert split1.passed == split2.passed
+        assert split1.stability == split2.stability
+        assert split1.n_noise == split2.n_noise
+        assert [c.name for c in split1.camps] == [c.name for c in split2.camps]
+        assert [c.n for c in split1.camps] == [c.n for c in split2.camps]
+
+    def test_different_seed_still_finds_the_same_structure(self):
+        """Determinism is about reproducibility, not brittleness to seed choice — a genuinely
+        well-separated split should pass under any seed, even if bootstrap details differ."""
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=7, n_boot=20)
+        assert split.passed is True
+        assert len(split.camps) == 2
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 — discover_subarchetypes (DB wrapper, hermetic in-memory DuckDB)
+# ---------------------------------------------------------------------------
+
+class TestDiscoverSubarchetypesDB:
+    """Hermetic: in-memory DuckDB seeded with a two-camp Doomsday-like pool."""
+
+    def _seeded_con(self):
+        from legacy_engine.ingestion import store
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        con.execute(
+            "INSERT INTO tournaments VALUES ('t1', 'T', '2026-01-01', NULL, 'Legacy', 'src', 'online')"
+        )
+
+        deck_rows = []
+        card_rows = []
+        idx = 0
+        for _ in range(35):
+            deck_rows.append(("t1", idx, "p", "W", "Doomsday", None))
+            card_rows.append(("t1", idx, "main", "Core Land", 4))
+            card_rows.append(("t1", idx, "main", "Card A1", 4))
+            card_rows.append(("t1", idx, "main", "Card A2", 3))
+            idx += 1
+        for _ in range(35):
+            deck_rows.append(("t1", idx, "p", "W", "Doomsday", None))
+            card_rows.append(("t1", idx, "main", "Core Land", 4))
+            card_rows.append(("t1", idx, "main", "Card B1", 4))
+            card_rows.append(("t1", idx, "main", "Card B2", 3))
+            idx += 1
+        # A single decoy deck of a DIFFERENT archetype must never leak into the pool.
+        deck_rows.append(("t1", idx, "other", "L", "Lands", None))
+        card_rows.append(("t1", idx, "main", "Dark Depths", 4))
+
+        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
+        con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
+        return con
+
+    def test_discover_subarchetypes_finds_the_split(self):
+        con = self._seeded_con()
+        try:
+            split = discover_subarchetypes(con, "Doomsday", seed=0, n_boot=20)
+        finally:
+            con.close()
+
+        assert split.parent == "Doomsday"
+        assert split.passed is True
+        assert len(split.camps) == 2
+        assert sorted(c.n for c in split.camps) == [35, 35]
+
+    def test_other_archetype_pool_not_included(self):
+        """The query only pulls the requested archetype's decks — verified indirectly: the
+        decoy 'Lands' deck's 'Dark Depths' never appears as a flex-band card for Doomsday."""
+        con = self._seeded_con()
+        try:
+            split = discover_subarchetypes(con, "Doomsday", seed=0, n_boot=20)
+        finally:
+            con.close()
+        all_sig_cards = {name for camp in split.camps for name, _ in camp.signature_cards}
+        assert "Dark Depths" not in all_sig_cards
+
+    def test_since_filter_narrows_pool(self):
+        """A `since` in the future excludes every deck -> empty pool -> honest empty result."""
+        con = self._seeded_con()
+        try:
+            split = discover_subarchetypes(con, "Doomsday", since="2099-01-01", seed=0, n_boot=5)
+        finally:
+            con.close()
+        assert split.passed is False
+        assert split.camps == []
+
+    def test_unknown_archetype_returns_empty_honest_result(self):
+        con = self._seeded_con()
+        try:
+            split = discover_subarchetypes(con, "Nonexistent Archetype", seed=0, n_boot=5)
+        finally:
+            con.close()
+        assert split.parent == "Nonexistent Archetype"
+        assert split.passed is False
+        assert split.camps == []
