@@ -60,15 +60,15 @@ finally:
 
 ## Call-Site Count
 
-~14 window-bearing commands follow this exact spine in `cli.py`:
+~15 `resolve_advisory_window` call sites (matchup-matrix advisory surfaces) follow this exact spine in `cli.py`:
 `report_meta` (×2 sub-paths), `report_matchups`, `report_tiers`, `report_gaps`,
-`report_subgroup`, `advise_positioning`, `advise_sideboard`, `advise_report` (×2),
-`advise_refresh`, `advise_acquire`, `generate_consensus`, `viz_meta`, `viz_matchups`.
+`advise_compare`, `advise_positioning`, `advise_sideboard`, `advise_report` (×2),
+`advise_refresh`, `advise_acquire`, `advise_whattoplay`, `viz_meta`, `viz_matchups`.
 
 ## Canonical Examples
 
 ```python
-# advise_positioning  (cli.py:2529)
+# advise_positioning  (cli.py:2752)
 con = store.connect(db) if db else store.connect()
 try:
     win = resolve_advisory_window(
@@ -82,7 +82,7 @@ try:
 finally:
     con.close()
 
-# advise_refresh  (cli.py:3666) — simpler form without build_advisory_inputs
+# advise_refresh  (cli.py:4152) — simpler form without build_advisory_inputs
 con = store.connect(db) if db else store.connect()
 try:
     _echo_data_freshness(con)

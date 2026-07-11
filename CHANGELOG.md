@@ -41,8 +41,8 @@ field-weighted scoring model, validated against real winning boards.
 
 ## Unreleased
 
-### epic-subarchetype-resolution (PRs #36-#38, 2026-07-11)
-- `discover run|list|promote` — data-driven subarchetype discovery within a parent archetype
+### epic-subarchetype-resolution + archetype-sweep backtest (PRs #35-#40, 2026-07)
+- `discover run|list|apply|promote` — data-driven subarchetype discovery within a parent archetype
   (flex-band TF-IDF → TruncatedSVD/UMAP → HDBSCAN, two-gate validation, auto-naming, staged
   candidates; promotion into the curated variant registry). Deps: scikit-learn (core),
   umap-learn (optional `discovery` extra).
@@ -51,6 +51,14 @@ field-weighted scoring model, validated against real winning boards.
 - `report cards --conditioned [--variant]` — archetype/camp-scoped card win-rate beside the
   marginal, with honest-degrade sign-conflict warnings; `report subgroup --winrates` adds
   per-camp W/L + win% + tier.
+- `discover apply` — staged candidate splits consumable by analytics as labeled-speculative
+  before promotion (cluster membership persisted in staged records; staged-provenance echo in
+  `--split-variant` reports).
+- `advise sweep` — batch backtest over every eligible archetype with ranked, root-cause-clustered
+  scorer-vs-winners divergence mining (+ `--json` copy-count histograms); en route: ILP
+  tie-break nondeterminism root-caused and fixed (sorted constraint construction).
+- Fixed: discover auto-naming could assign the same name to two distinct camps (real case: two
+  Sphere-led prison Lands builds) — names now disambiguate with the next signature card.
 - Fixed: variant resolution silently NULLed every color-prefixed archetype's variants
   (labeler keyed on base_archetype; registry parents are display labels).
 
