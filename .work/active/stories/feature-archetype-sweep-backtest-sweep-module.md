@@ -5,7 +5,7 @@ stage: done
 tags: [advisory, analytics]
 parent: feature-archetype-sweep-backtest
 depends_on: [feature-archetype-sweep-backtest-ilp-determinism, feature-archetype-sweep-backtest-copy-surfaces]
-release_binding: null
+release_binding: v0.3.0
 gate_origin: null
 created: 2026-07-04
 updated: 2026-07-04

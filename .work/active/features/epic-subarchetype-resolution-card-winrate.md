@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, honesty]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
-release_binding: null
+release_binding: v0.3.0
 gate_origin: null
 created: 2026-07-11
 updated: 2026-07-11
