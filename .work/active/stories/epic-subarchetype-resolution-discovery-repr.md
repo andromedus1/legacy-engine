@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, archetype]
 parent: epic-subarchetype-resolution-discovery
 depends_on: []
-release_binding: null
+release_binding: v0.3.0
 gate_origin: null
 created: 2026-07-11
 updated: 2026-07-11

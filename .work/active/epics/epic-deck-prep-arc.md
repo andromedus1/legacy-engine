@@ -5,7 +5,7 @@ stage: done
 tags: [advisory, analysis, dogfooding]
 parent: null
 depends_on: [feature-archetype-sweep-backtest]
-release_binding: null
+release_binding: v0.3.0
 gate_origin: null
 created: 2026-07-04
 updated: 2026-07-04
