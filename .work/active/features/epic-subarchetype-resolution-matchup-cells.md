@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-matchup-cells
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
@@ -160,3 +160,12 @@ All 5 units landed as designed; no deviations from this document.
 
 No product bugs were found. Full suite: 2691 passed, 1 xfailed (pre-existing, unrelated) — no
 regressions.
+
+## Review (2026-07-11)
+
+Fresh-context deep review of merged PR #37 (d3fa9f7): **APPROVE**. All 7 verification directives
+passed: byte-identical None path traced end-to-end (golden meaningful); both-sides label-split
+correct through the mirror branch (same-camp=mirror, cross-camp=directed); force-include scoped to
+the split archetype; adaptive horizon fallback literal-`[`-safe with no KeyError path; labeler
+display-key fix confirmed correct with no other base_archetype caller; hermeticity clean. 2 MINORs
+(stale fixture comment; missing camp-vs-camp test) — both fixed in PR #38's follow-up commit.

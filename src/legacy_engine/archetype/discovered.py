@@ -5,7 +5,10 @@ candidate splits are staged in ``data/variants/discovered.json`` (derived side �
 ``DISCOVERED_VARIANTS_PATH``) as ``DiscoveredSplitRecord``s with ``status: "candidate"``.
 ``promote_split`` converts a confirmed camp into a curated ``VariantRule`` appended to the
 package-shipped ``data/variants/legacy.json`` (+ a ``defaults`` complement) — discovery never
-silently rewrites the curated taxonomy.
+silently rewrites the curated taxonomy. ``apply_split`` is the labeled-speculative middle
+ground: it writes a staged (still-unpromoted) split's camps directly onto ``decks.variant`` so
+analytics can read them before a human confirms the split — the staged record's ``status``
+never changes and the curated registry is never touched.
 
 Loader shape follows the curated-json-resource-loader pattern (path-taking, validating,
 fail-fast citing the offending path), with one deliberate divergence: the staging file is a
@@ -21,7 +24,7 @@ from pathlib import Path
 
 from legacy_engine.analytics.discovery import DiscoveredSplit
 from legacy_engine.archetype.rules import Condition, _loads_lenient
-from legacy_engine.archetype.variants import load_variant_registry
+from legacy_engine.archetype.variants import load_variant_registry, resolve_variant
 from legacy_engine.models.variant import (
     DiscoveredCamp,
     DiscoveredRegistry,
@@ -80,6 +83,7 @@ def record_from_split(
             ][:TOP_SIGNATURE_CARDS],
             n=camp.n,
             tier=camp.tier,
+            member_keys=[tuple(k) for k in camp.member_keys],
         )
         for camp in split.camps
     ]
@@ -92,19 +96,25 @@ def record_from_split(
     )
 
 
-def stage_split(reg: DiscoveredRegistry, split: DiscoveredSplitRecord) -> DiscoveredRegistry:
+def stage_split(
+    reg: DiscoveredRegistry, split: DiscoveredSplitRecord
+) -> tuple[DiscoveredRegistry, DiscoveredSplitRecord | None]:
     """Upsert ``split`` into ``reg`` by ``parent`` (replace in place, else append).
 
-    Pure — returns a new registry, never mutates ``reg``.
+    Pure — returns ``(new_registry, replaced)``; ``reg`` is never mutated. ``replaced`` is the
+    record that previously occupied ``split.parent`` (``None`` on a fresh append) — callers use
+    it to surface an honest "you just overwrote a staged candidate" echo (``discover run``).
     """
     splits = list(reg.splits)
+    replaced: DiscoveredSplitRecord | None = None
     for i, existing in enumerate(splits):
         if existing.parent == split.parent:
+            replaced = existing
             splits[i] = split
             break
     else:
         splits.append(split)
-    return DiscoveredRegistry(version=reg.version, splits=splits)
+    return DiscoveredRegistry(version=reg.version, splits=splits), replaced
 
 
 def promote_split(
@@ -178,8 +188,139 @@ def promote_split(
     _write_variant_registry(new_registry, registry_path)
 
     promoted = split.model_copy(update={"status": "promoted"})
-    save_discovered(stage_split(disc, promoted), discovered_path)
+    new_disc, _replaced = stage_split(disc, promoted)
+    save_discovered(new_disc, discovered_path)
     return rule
+
+
+def apply_split(
+    con,
+    parent: str,
+    *,
+    discovered_path: Path | str | None = None,
+) -> int:
+    """Apply a staged (unpromoted) candidate split's camps directly onto ``decks.variant``.
+
+    The labeled-speculative analytics overlay from the epic's human-confirm-hook design
+    decision: an explicit, user-invoked action that lets analytics (``report matchups
+    --split-variant``, ``report cards --conditioned --variant``) read a staged split's camps
+    *before* a human confirms/promotes it, rather than forcing a promotion just to look.
+
+    Builds the SAME transient ``VariantRule`` set ``promote_split`` would install — each camp's
+    top over-represented signature card becomes an ``InMainboard`` condition, and (mirroring
+    ``promote_split`` exactly) a complement default is only added in the 2-camp case: the camp
+    with a signature card gets the explicit rule, the other camp becomes
+    ``defaults[parent]``. For 3+-camp splits every camp with a signature card gets its own rule
+    and no default is added (matching ``promote_split``'s ``len(other_camps) == 1`` check).
+
+    Resolves every deck currently labeled ``parent`` against this transient registry via
+    ``resolve_variant`` and writes ``decks.variant`` for decks that resolve to a camp name.
+    Decks that don't match any camp are left untouched — they stay whatever they were (normally
+    NULL) and surface honestly as ``[unlabeled]`` downstream; nothing is fabricated.
+
+    Does NOT touch the curated registry (``data/variants/legacy.json``) and does NOT change the
+    staged record's ``status`` — the candidate stays ``status: "candidate"``. This is an
+    explicit analytical overlay, not a taxonomy promotion.
+
+    Fail-fast ``ValueError`` on: no staged split for ``parent``; or no camp in the split has an
+    over-represented signature card to build a condition from (nothing could be applied).
+
+    Returns the count of decks labeled.
+    """
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+
+    path = discovered_path if discovered_path is not None else DISCOVERED_VARIANTS_PATH
+    disc = load_discovered(path)
+    split = next((s for s in disc.splits if s.parent == parent), None)
+    if split is None:
+        staged = ", ".join(sorted(s.parent for s in disc.splits)) or "(none)"
+        raise ValueError(
+            f"apply_split: no staged candidate split for parent {parent!r} in {path} "
+            f"(staged parents: {staged})"
+        )
+
+    camps = split.camps
+
+    # Membership path (preferred): label exactly the decks discovery clustered. This is the
+    # faithful overlay — noise decks stay NULL (surface as [unlabeled]) and overlapping
+    # signature staples cannot trip the rule-ambiguity fail-fast the way transient
+    # single-card rules can on a 3+-camp partition. Falls back to the transient-rules path
+    # only for records without membership (hand-edited/legacy staging files).
+    if all(c.member_keys is not None for c in camps) and any(c.member_keys for c in camps):
+        labeled = 0
+        for camp in camps:
+            for tid, idx in camp.member_keys or []:
+                # DuckDB UPDATE returns the affected-row count; archetype guard keeps a stale
+                # staged record from touching decks that were since relabeled off the parent.
+                (n_updated,) = con.execute(
+                    "UPDATE decks SET variant = ? "
+                    "WHERE tournament_id = ? AND deck_idx = ? AND archetype = ?",
+                    [camp.name, tid, idx, parent],
+                ).fetchone()
+                labeled += int(n_updated)
+        return labeled
+
+    rules: list[VariantRule] = []
+    defaults: dict[str, str] = {}
+    if len(camps) == 2:
+        with_sig = [c for c in camps if c.signature_cards]
+        if with_sig:
+            promoted_camp = with_sig[0]
+            other_camp = next(c for c in camps if c is not promoted_camp)
+            rules.append(
+                VariantRule(
+                    parent=parent,
+                    name=promoted_camp.name,
+                    conditions=[
+                        Condition(Type="InMainboard", Cards=[promoted_camp.signature_cards[0]])
+                    ],
+                )
+            )
+            defaults[parent] = other_camp.name
+    else:
+        for camp in camps:
+            if camp.signature_cards:
+                rules.append(
+                    VariantRule(
+                        parent=parent,
+                        name=camp.name,
+                        conditions=[Condition(Type="InMainboard", Cards=[camp.signature_cards[0]])],
+                    )
+                )
+
+    if not rules:
+        raise ValueError(
+            f"apply_split: no camp in the staged split for {parent!r} has an over-represented "
+            "signature card to build a condition from — nothing to apply"
+        )
+
+    registry = VariantRegistry(version="transient", variants=rules, defaults=defaults)
+
+    deck_keys = con.execute(
+        "SELECT tournament_id, deck_idx FROM decks WHERE archetype = ?", [parent]
+    ).fetchall()
+
+    labeled = 0
+    for tid, idx in deck_keys:
+        rows = con.execute(
+            "SELECT board, name, count FROM deck_cards WHERE tournament_id = ? AND deck_idx = ?",
+            [tid, idx],
+        ).fetchall()
+        mainboard: dict[str, int] = {}
+        sideboard: dict[str, int] = {}
+        for board, name, count in rows:
+            target = mainboard if board == "main" else sideboard
+            target[name] = target.get(name, 0) + count
+
+        variant = resolve_variant(parent, mainboard, sideboard, registry)
+        if variant is not None:
+            con.execute(
+                "UPDATE decks SET variant = ? WHERE tournament_id = ? AND deck_idx = ?",
+                [variant, tid, idx],
+            )
+            labeled += 1
+
+    return labeled
 
 
 def _write_variant_registry(reg: VariantRegistry, path: Path | str) -> None:
