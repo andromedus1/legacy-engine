@@ -749,6 +749,15 @@ def _print_venue_divergence(div: "VenueDivergence", *, top_n: int = 20) -> None:
     help="Head-to-head mode: archetype B (use with --a).",
 )
 @click.option(
+    "--split-variant",
+    "split_variant",
+    default=None,
+    help="Split this archetype's rows into decks.variant camps (e.g. 'Doomsday') — camp labels "
+         "read '<ARCHETYPE> [<variant>]', with unlabeled decks kept visible as '<ARCHETYPE> "
+         "[unlabeled]'. Camp rows are force-included regardless of --min-row-share. "
+         "--a/--b accept camp labels for head-to-head mode.",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -761,6 +770,7 @@ def report_matchups(
     min_row_share: float,
     archetype_a: str | None,
     archetype_b: str | None,
+    split_variant: str | None,
     db: str | None,
     since: str | None,
     until: str | None,
@@ -787,6 +797,11 @@ def report_matchups(
     con = store.connect(db) if db else store.connect()
     try:
         _echo_data_freshness(con)
+        if split_variant is not None:
+            click.echo(
+                f"// split-variant: {split_variant} (camps from decks.variant; "
+                "unlabeled residue shown)"
+            )
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -798,7 +813,10 @@ def report_matchups(
                 con, regime=regime, since=since, until=until, all_time=all_time, provenance=basis,
             )
             _echo_window(win)
-            inputs = build_advisory_inputs(con, win, provenance=basis, min_row_share=min_row_share)
+            inputs = build_advisory_inputs(
+                con, win, provenance=basis, min_row_share=min_row_share,
+                split_variant=split_variant,
+            )
             for line in inputs.audit:
                 click.echo(line)
             matrix = inputs.matrix

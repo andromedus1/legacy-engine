@@ -195,11 +195,17 @@ def build_matrix(
     min_row_share: float = 0.02,
     since: str | None = None,
     until: str | None = None,
+    split_variant: str | None = None,
 ) -> MatchupMatrix:
     """Build a ``MatchupMatrix`` from the DuckDB connection.
 
     ``since``/``until`` window the underlying matches by ``tournaments.date``
     (half-open ``[since, until)``); both ``None`` (default) = full corpus.
+
+    ``split_variant`` (opt-in, default ``None``): passed through to
+    ``compute_match_results`` so ``split_variant``'s decks are relabeled to their
+    ``decks.variant`` camp on both sides of a pairing (see ``effective_label``).
+    ``None`` is byte-identical to the pre-split behavior.
 
     Row inclusion: archetype ``a`` is included if its marginal involvement
     ``mr.archetypes[a].n / (2 * (decisive_matched + mirror_matches))`` ≥
@@ -211,11 +217,18 @@ def build_matrix(
     via this honest mirror-aware ratio; ``total_matches`` is the decisive-match
     headline and may legitimately be 0 for such a degenerate corpus.
 
+    When ``split_variant`` is set, its camp rows (labels starting with
+    ``f"{split_variant} ["``) are force-included regardless of ``min_row_share`` —
+    they are the entire point of the split — while every other row keeps the
+    normal floor.
+
     For included archetypes every ordered pair ``(a, b)`` with ``a != b`` gets
     a cell (n=0 if the pair was never observed), and ``(a, a)`` gets a mirror
     cell whose ``n`` comes from the additive ``MatchResults.mirror_n`` field.
     """
-    mr = compute_match_results(con, provenance=provenance, since=since, until=until)
+    mr = compute_match_results(
+        con, provenance=provenance, since=since, until=until, split_variant=split_variant,
+    )
     total_matches = mr.coverage.decisive_matched
 
     # ── Row inclusion ────────────────────────────────────────────────────────
@@ -225,10 +238,12 @@ def build_matrix(
     # which already credits mirrors to .n via +1 win and +1 loss per mirror.
     _denom_base = total_matches + mr.coverage.mirror_matches
     denom = 2 * _denom_base if _denom_base > 0 else 1
+    _force_prefix = f"{split_variant} [" if split_variant is not None else None
     included = sorted(
         arch
         for arch, rec in mr.archetypes.items()
         if rec.n / denom >= min_row_share
+        or (_force_prefix is not None and arch.startswith(_force_prefix))
     )
 
     # ── Populate cells ───────────────────────────────────────────────────────
@@ -291,12 +306,27 @@ class AdaptiveMatrix:
     cell_windows: dict[tuple[str, str], str | None]
 
 
+def _base_archetype(label: str, split_variant: str | None) -> str:
+    """Strip a variant-camp suffix so a camp label resolves to its parent's ban-affectedness horizon.
+
+    ``archetype_valid_since`` only knows plain ``decks.archetype`` values, never the synthetic
+    ``f"{split_variant} [{variant}]"`` camp labels ``effective_label`` produces. A camp label always
+    starts with ``f"{split_variant} ["`` (by construction), so stripping back to ``split_variant``
+    lets the adaptive matrix fall back to the parent archetype's horizon for every camp. Non-camp
+    labels (including everything when ``split_variant`` is ``None``) pass through unchanged.
+    """
+    if split_variant is not None and label.startswith(f"{split_variant} ["):
+        return split_variant
+    return label
+
+
 def build_adaptive_matrix(
     con,
     *,
     provenance: str | None = None,
     min_row_share: float = 0.02,
     affect_threshold: float = 0.25,
+    split_variant: str | None = None,
 ) -> AdaptiveMatrix:
     """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
 
@@ -307,27 +337,46 @@ def build_adaptive_matrix(
     marginals + mirror counts come from the full-corpus scan (stable); only per-cell data sourcing is
     windowed. Cost: one ``compute_match_results`` per distinct ``valid_since`` value (≤ #ban-dates),
     not per cell.
+
+    ``split_variant`` (opt-in, default ``None``): passed through to every
+    ``compute_match_results`` call so ``split_variant``'s camp rows are force-included (see
+    ``build_matrix``) and its labels use ``f"{split_variant} [{variant}]"``. Since
+    ``archetype_valid_since`` cannot look up a synthetic camp label, each camp's horizon is
+    resolved via its parent archetype (``_base_archetype``) before the lookup, then mapped back —
+    every camp of the same parent shares that parent's ``valid_since``. ``None`` is byte-identical
+    to the pre-split behavior (``_base_archetype`` is then the identity function).
     """
     from legacy_engine.analytics.affectedness import archetype_valid_since
 
     # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
-    full = compute_match_results(con, provenance=provenance)
+    full = compute_match_results(con, provenance=provenance, split_variant=split_variant)
     total_matches = full.coverage.decisive_matched
     _denom_base = total_matches + full.coverage.mirror_matches
     denom = 2 * _denom_base if _denom_base > 0 else 1
-    included = sorted(a for a, rec in full.archetypes.items() if rec.n / denom >= min_row_share)
-
-    # 2. Affectedness horizon per included archetype.
-    valid_since = archetype_valid_since(
-        con, included, provenance=provenance, affect_threshold=affect_threshold,
+    _force_prefix = f"{split_variant} [" if split_variant is not None else None
+    included = sorted(
+        a
+        for a, rec in full.archetypes.items()
+        if rec.n / denom >= min_row_share
+        or (_force_prefix is not None and a.startswith(_force_prefix))
     )
+
+    # 2. Affectedness horizon per included archetype — resolved via the parent archetype for camp
+    #    labels (archetype_valid_since only knows plain decks.archetype values).
+    base_archetypes = sorted({_base_archetype(a, split_variant) for a in included})
+    base_valid_since = archetype_valid_since(
+        con, base_archetypes, provenance=provenance, affect_threshold=affect_threshold,
+    )
+    valid_since = {a: base_valid_since[_base_archetype(a, split_variant)] for a in included}
 
     # 3. One scan per distinct valid_since (None reuses the full-corpus scan). s_ab is always one of
     #    these values (max of two members), so this set covers every cell window.
     mr_by_since = {None: full}
     for s in set(valid_since.values()):
         if s is not None and s not in mr_by_since:
-            mr_by_since[s] = compute_match_results(con, provenance=provenance, since=s)
+            mr_by_since[s] = compute_match_results(
+                con, provenance=provenance, since=s, split_variant=split_variant,
+            )
 
     # 4. Assemble: each cell from the scan at max(valid_since[a], valid_since[b]).
     cells: dict[tuple[str, str], MatchupCell] = {}
