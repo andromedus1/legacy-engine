@@ -16,7 +16,7 @@ decisions:
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
 created: 2026-05-29
-updated: 2026-06-13
+updated: 2026-07-11
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -40,7 +40,7 @@ Legacy deckbuilding and metagaming are largely experience- and forum-driven. Tie
 scattered "This Week in Legacy" articles; matchup knowledge lives in Discord and individual reps;
 "what should I play this weekend?" is answered by feel. There is no rigorous, reproducible way to:
 
-- Track the metagame from raw tournament results under a *consistent, auditable* archetype taxonomy
+- Track the metagame from raw tournament results under a *consistent, auditable* **two-level** archetype taxonomy — parent archetype plus data-driven subarchetype (camp) resolution, so decks that share a label but play differently are not pooled into one matchup row or one card-win-rate denominator
 - Compute matchup matrices and a deck's **expected win rate against the weighted field**
 - Recommend a sideboard package that maximally covers the expected field (hosers → targets)
 - Measure how fast and consistently a deck executes its plan (goldfish clock) and aggregate that into a **meta-speed distribution**
