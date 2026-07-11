@@ -410,13 +410,27 @@ def cluster_and_validate(
             n=len(camp_keys[b]), tier=tier_for_sample(len(camp_keys[b])),
         ))
     elif len(unique_camps) >= 3:
+        taken: set[str] = set()
         for idx, c in enumerate(unique_camps):
             other_keys = [k for cc, ks in camp_keys.items() if cc != c for k in ks]
             avg_c = _avg_copies(decks_by_key, camp_keys[c], fm.cards)
             avg_rest = _avg_copies(decks_by_key, other_keys, fm.cards)
             diffs_c = diff_compositions(avg_c, avg_rest)
-            positive = next((d for d in diffs_c if d.delta > 0), None)
-            name_c = positive.name if positive is not None else f"camp-{idx}"
+            positives = [d for d in diffs_c if d.delta > 0]
+            name_c = positives[0].name if positives else f"camp-{idx}"
+            # Distinct camps can share a top signature card (two prison Lands builds both led
+            # by Sphere of Resistance): a name collision would merge their decks.variant labels
+            # on apply, silently undoing the split the validator just certified. Disambiguate
+            # with the next positive signature card; deterministic numeric suffix as last resort.
+            if name_c in taken:
+                for d in positives[1:]:
+                    cand = f"{name_c} / {d.name}"
+                    if cand not in taken:
+                        name_c = cand
+                        break
+                else:
+                    name_c = f"{name_c} ({idx})"
+            taken.add(name_c)
             camps.append(Camp(
                 name=name_c, member_keys=camp_keys[c],
                 signature_cards=[(d.name, d.delta) for d in diffs_c],

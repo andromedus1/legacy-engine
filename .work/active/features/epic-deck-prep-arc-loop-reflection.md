@@ -5,7 +5,7 @@ stage: done
 tags: [analysis, process]
 parent: epic-deck-prep-arc
 depends_on: [epic-deck-prep-arc-comparison]
-release_binding: null
+release_binding: v0.3.0
 gate_origin: null
 created: 2026-07-04
 updated: 2026-07-04
