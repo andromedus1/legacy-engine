@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution
 kind: epic
-stage: drafting
+stage: implementing
 tags: [analytics, archetype]
 parent: null
 depends_on: []
@@ -89,28 +89,38 @@ Captured from `/epic-design --only-questions` (2026-07-11). Feature-design inher
   variant-conditioned card win-rate (discovery-first `depends_on` order). Each independently shippable
   and dogfoodable; the higher-value matchup-cells slice can land before card-win-rate.
 
-## Intended arc (for /epic-design to realize post-brief)
+## Decomposition
 
-Sketch only — decomposition, interfaces, and the discovery mechanism are `epic-design`'s job once the
-brief exists. Dependency order reflects discovery-first:
+Split by capability, discovery-first (the locked three-feature granularity). The discovery engine is
+the foundation feature that produces `decks.variant` labels; the two analytics consumers depend on it
+and parallelize after it lands. Not split by layer, and no manufactured refactor/test features. The two
+consumers share one "resolve a deck's variant" helper — whichever is designed first establishes it.
 
-1. **Subarchetype discovery engine** (research-gated core) — cluster/validate/name splits within a
-   parent at corpus scale, persist to `decks.variant`, with a human-confirm promotion hook. Absorbs
-   `idea-subarchetype-discovery` (this item).
-2. **Variant-conditioned matchup cells** — extend `match_results.py` / `matchup.py` with an optional
-   variant dimension on one side; speculative-tier honesty labels mandatory. `depends_on` #1.
-   Absorbs `idea-variant-conditioned-matchup-cells`.
-3. **Archetype/variant-conditioned card win-rate** — restrict the `compute_card_winrates` W/L
-   denominator to the archetype's (or camp's) own decks; emit an honest-degrade warning when a card's
-   marginal lift conflicts in sign with its within-archetype subgroup win-rate; surface subgroup win%
-   directly in `report subgroup`. `depends_on` #1. Absorbs `idea-archetype-conditioned-card-winrate`.
+### Child features
+
+- `epic-subarchetype-resolution-discovery` — the research-gated discovery engine (flex-band matrix →
+  reduce → HDBSCAN → two-gate validation → auto-name → `discover`/`promote` staging registry). depends on: `[]`
+- `epic-subarchetype-resolution-matchup-cells` — optional variant dimension on the subject side of the
+  matchup matrix (`(archetype,variant) × opponent`), opt-in flag, tier gates reused. depends on: `[epic-subarchetype-resolution-discovery]`
+- `epic-subarchetype-resolution-card-winrate` — archetype/variant-scoped card-winrate denominator +
+  honest-degrade sign-conflict warning + subgroup win% in `report subgroup`. depends on: `[epic-subarchetype-resolution-discovery]`
+
+### Decomposition risks
+
+- **Discovery is the big feature** (representation + reduction + clustering + two-gate validation +
+  naming + staging registry + two CLI leaves + new deps). If it exceeds one implement pass, feature-design
+  spawns child stories along the seams noted in its body — keep the clustering/validation logic DB-free
+  and unit-testable (objective-search-split pattern).
+- **Shared variant-read helper** across the two consumers — the first-designed consumer owns it; the
+  second reuses. Flagged so feature-design coordinates rather than duplicating.
+- **umap-learn/numba build weight** in CI — the discovery feature must confirm the CI image builds it;
+  fall back to sklearn TruncatedSVD-only reduction if numba proves unavailable (the brief supports either).
 
 ## Foundation-doc status
 
-VISION rolled forward (two-level taxonomy intent — method-independent). ARCHITECTURE / SPEC
-roll-forward is **deferred to post-brief `/epic-design`**: the discovery mechanism is research-pending,
-and per "research before design" the architecture must not commit to an unresearched clustering
-approach.
+VISION rolled forward at scope time (two-level taxonomy). ARCHITECTURE + SPEC rolled forward at this
+epic-design pass now that the method is decided — see the archetype/analytics discovery + variant-dimension
+additions and the subarchetype-resolution constraint.
 
 ## Next
 
