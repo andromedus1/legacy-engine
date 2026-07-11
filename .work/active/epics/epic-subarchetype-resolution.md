@@ -68,6 +68,27 @@ not a solution: `archetype/variants.py` (hand-authored card-presence registry, `
   whatever tier they land with mandatory honesty labels — consistent with the project's
   honest-degrade policy. No split is hidden for being thin, and none is silently blended away.
 
+## Design decisions
+
+Captured from `/epic-design --only-questions` (2026-07-11). Feature-design inherits these as fixed inputs.
+
+- **ML dependency appetite**: scikit-learn **+ umap-learn**. — sklearn supplies HDBSCAN (≥1.3),
+  TruncatedSVD, TF-IDF, and the validation indices; umap-learn adds the UMAP reduction the brief lists
+  as the richer embedding (accept the numba build weight). Both are net-new (numpy/scipy/pulp already
+  present).
+- **Human-confirm hook surface**: `discover` → **staging registry** → `promote`. — A discovery CLI
+  writes candidate splits to a staging registry (status: candidate) that analytics reads as
+  labeled-speculative; an explicit `promote` command moves a confirmed split into curated
+  `data/variants/legacy.json`. Mirrors the `report subgroup` / `report variants` surface. Discovery
+  never silently rewrites the curated taxonomy (epic's locked bar).
+- **Default analytics behavior**: **opt-in overlay**. — Parent-level output stays the default
+  everywhere; variant conditioning is explicit via a flag (like the existing `--by-variant` /
+  `--variant`). Default outputs stay byte-identical (gated-additive-augmentation + honest-degrade
+  ethos). No auto-splitting of the matrix as camps mature.
+- **Feature granularity**: **three features** — discovery engine → variant-conditioned matchup cells →
+  variant-conditioned card win-rate (discovery-first `depends_on` order). Each independently shippable
+  and dogfoodable; the higher-value matchup-cells slice can land before card-win-rate.
+
 ## Intended arc (for /epic-design to realize post-brief)
 
 Sketch only — decomposition, interfaces, and the discovery mechanism are `epic-design`'s job once the
