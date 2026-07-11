@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-discovery
 kind: feature
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-subarchetype-resolution
 depends_on: []
@@ -262,3 +262,15 @@ core; umap-learn optional extra (installed cleanly; lazy import; SVD default). 6
 full suite 2667 passed + 1 pre-existing xfail. Ground-truth validation: Doomsday PASSes with
 3 established camps (Tamiyo/Tempo n=239, Personal Tutor/Turbo n=417, Flow State n=172 — a camp
 the manual split had pooled), stability 0.980.
+
+## Review (2026-07-11)
+
+Fresh-context deep review of merged PR #36 (0fee3d0): **APPROVE**. Verified: gates as designed
+(min_samples mirrored into the Gate-A bootstrap; co-membership mask logic sound;
+label-permutation-invariant), honesty invariants (FAIL fully reported + never staged; tier labels
+end-to-end; guard note always present; promote fails fast, never overwrites), determinism, test
+integrity (no fakes; every CLI test pins --db/--discovered-path/--registry-path to tmp), pattern
+conformance. 3 MINOR notes (no fix required): bootstrap pair-mask includes the diagonal
+(self-pairs, ~negligible upward bias — exact fix is np.fill_diagonal(pair_mask, False));
+noise-dissolution excluded from stability per spec (awareness note); report-vs-staged
+signature-card ordering nit. Parked as idea-discovery-review-nits.
