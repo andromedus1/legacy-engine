@@ -358,6 +358,45 @@ class TestBuildAdaptiveMatrixSplitVariant:
 # ---------------------------------------------------------------------------
 
 
+class TestGoldenReportMatchupsDefault:
+    """Gate-tests F1 (v0.3.0): the no-flag `report matchups` body is pinned byte-for-byte —
+    the load-bearing gated-additive golden the feature prose promised. A pure formatting or
+    rounding regression to the default output must fail here, not slip past substring checks."""
+
+    _SECTION = (
+        "=== Matchup Matrix [{prov}] ===\n"
+        "Total decisive matches: {n}\n"
+        "Caveat: Matchup data is computed only from rounds-bearing events (Challenges + paper); "
+        "matchup-n is a separate, smaller sample than meta-share-n. Cells with n<30 are hidden.\n"
+    )
+    _GRID = (
+        "          Control               Doomsday            \n"
+        "----------------------------------------------------\n"
+        "Control   n=0 (mirror)          16.7% (n=36)        \n"
+        "Doomsday  83.3% (n=36)          n=0 (mirror)        \n"
+        "// window: full-corpus\n"
+    )
+    GOLDEN = (
+        _SECTION.format(prov="all", n=36) + _GRID + "\n"
+        + _SECTION.format(prov="online", n=36) + _GRID + "\n"
+        + _SECTION.format(prov="paper", n=0)
+        + "(no archetypes meet the row-inclusion threshold)\n"
+    )
+
+    def test_default_body_byte_identical(self, tmp_path):
+        from click.testing import CliRunner
+        from legacy_engine.cli import main
+        runner = CliRunner()
+        db = TestReportMatchupsSplitVariantCLI()._build_db(tmp_path)
+        result = runner.invoke(main, ["report", "matchups", "--db", db, "--all-time"])
+        assert result.exit_code == 0, result.output
+        body = result.output.split("\n\n", 1)[1]
+        assert body == self.GOLDEN, (
+            f"report matchups default output changed!\n--- expected ---\n{self.GOLDEN!r}\n"
+            f"--- got ---\n{body!r}"
+        )
+
+
 class TestReportMatchupsSplitVariantCLI:
     @pytest.fixture
     def runner(self):
