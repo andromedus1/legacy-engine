@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-discovery
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: epic-subarchetype-resolution
 depends_on: []
@@ -250,3 +250,15 @@ honest-degrade report even on FAIL (never silently drops a rejected split).
   ≤~35 dims, so this is seconds, offline. Fallback: expose `--n-boot`, allow lowering.
 - **HDBSCAN finds >2 camps** — design handles k≥2 (name each by top signature); Gate B applies per camp,
   so a spurious 3rd thin camp fails the tier check and the split is reported FAIL with the reason.
+
+## Implementation summary (2026-07-11)
+
+All 3 stories implemented and at review (repr 4056ef2, cluster b97ebb2, cli 2e849e2) + one
+orchestrator fix (651a441: min_samples decoupling + allow_single_cluster removal, caught by
+ground-truth dogfood at wave verification). Deliverables: analytics/discovery.py (pure DB-free
+core, Units 1-4), archetype/discovered.py + staging models + DISCOVERED_VARIANTS_PATH,
+`discover run|list|promote` CLI group with full audit-echo provenance. Deps: scikit-learn>=1.3
+core; umap-learn optional extra (installed cleanly; lazy import; SVD default). 61 new tests;
+full suite 2667 passed + 1 pre-existing xfail. Ground-truth validation: Doomsday PASSes with
+3 established camps (Tamiyo/Tempo n=239, Personal Tutor/Turbo n=417, Flow State n=172 — a camp
+the manual split had pooled), stability 0.980.
