@@ -25,3 +25,9 @@ updated: 2026-07-11
   copy-count surfaces)
 
 ## Gate runs
+- **gate-tests** (2026-07-11) — 7 findings (0 critical, 0 high, 3 medium, 4 low). Mediums drained:
+  F1/F2 pinned full-body goldens (PR #41), F3 spec reconciliation in the sweep feature body. Lows →
+  backlog (gate-tests-low-findings-v030). Verdict: bundle passes; every acceptance criterion covered.
+- **gate-cruft** (2026-07-11) — 3 findings (0 high, 2 medium, 1 low). Mediums drained: dead noqa'd
+  import + 3 test F401s (PR pending). Low (belt-and-braces except, keep-leaning) → backlog. Bundle
+  notably clean; all 15 src files ruff-clean.
