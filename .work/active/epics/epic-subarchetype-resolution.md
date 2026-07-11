@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution
 kind: epic
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: null
 depends_on: []
@@ -190,3 +190,15 @@ are implemented on `feat/discover-apply`:
    `apply` to the CLI diagram + the row's CLI-verbs mention.
 
 Suite 2725 → **2740** (+15 tests), all green (`.venv/bin/python -m pytest tests/ -q`).
+
+## Final completion review (2026-07-11)
+
+Cross-model (Codex via peeragent, effort=high) completion pass over the full epic bundle. Four
+findings, all closed in PR #39 (19eb391): (1) BLOCKING — the "analytics reads staged candidates as
+labeled-speculative" half of the human-confirm-hook decision was unimplemented → `discover apply` +
+membership persistence + staged-provenance echo in `--split-variant`; (2) `--conditioned --vs`
+silently ignored → loud rejection (opponent-conditioned values remain an open idea, honest scope);
+(3) silent same-parent staging overwrite → honest replaced-echo; (4) ARCHITECTURE module-placement
+drift → corrected to as-built. En route, the real-data 3-camp apply exposed the transient-rules
+ambiguity failure — fixed by labeling from exact cluster membership (Codex's own suggested remedy).
+Final suite 2742 passed + 1 pre-existing xfail. Epic complete.
