@@ -6579,7 +6579,6 @@ def _print_discovery_report(
     min_samples: int = 10,
 ) -> None:
     """Render a DiscoveredSplit with full `// ` audit provenance (PASS or FAIL alike)."""
-    from legacy_engine.analytics.discovery import DiscoveredSplit  # noqa: F401
 
     click.echo(f"\n=== Subarchetype Discovery: {split.parent!r} ===")
     click.echo(f"// window: {since or 'full corpus'}{' ..' if since else ''}")

@@ -11,13 +11,10 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
 from legacy_engine.analytics.match_results import (
     CardMatchupRecord,
     CardMarginalRecord,
-    CardWinRates,
-    MatchCoverage,
     compute_card_winrates,
     compute_match_results,
 )
