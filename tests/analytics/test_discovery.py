@@ -317,6 +317,26 @@ class TestClusterAndValidateBlob:
         assert any("no separable structure" in r for r in split.reasons)
 
 
+class TestCampNameCollision:
+    """Two distinct camps sharing a top signature card must get DISTINCT names —
+    a collision would merge their decks.variant labels on apply (bug found in the
+    2026-07-11 top-meta sweep: Lands produced two camps both named 'Sphere of
+    Resistance')."""
+
+    def test_shared_top_signature_disambiguates(self):
+        # three camps, two of which share the same top card but differ on the second
+        def deck(i, cards):
+            return DeckVector(key=("t", i), counts=cards)
+        camp_a = [deck(i, {"Sphere": 4, "Port": 4, "Shared": 2}) for i in range(40)]
+        camp_b = [deck(100 + i, {"Sphere": 4, "Tomb": 4, "Shared": 2}) for i in range(40)]
+        camp_c = [deck(200 + i, {"Once": 4, "Rumble": 4, "Shared": 2}) for i in range(40)]
+        decks = camp_a + camp_b + camp_c
+        fm = build_feature_matrix(decks, flex_lo=0.05, flex_hi=1.1)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=10)
+        names = [c.name for c in split.camps]
+        assert len(names) == len(set(names)), f"camp name collision: {names}"
+
+
 class TestGateBDomainDirect:
     """Scenario (c): a 300/12 split -> passed=False, reason 'camp below evolving floor'.
 
