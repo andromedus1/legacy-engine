@@ -39,7 +39,7 @@ field-weighted scoring model, validated against real winning boards.
 
 # Changelog
 
-## Unreleased
+## v0.3.0 (2026-07-11)
 
 ### epic-subarchetype-resolution + archetype-sweep backtest (PRs #35-#40, 2026-07)
 - `discover run|list|apply|promote` — data-driven subarchetype discovery within a parent archetype
