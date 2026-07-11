@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-card-winrate
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, honesty]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
@@ -109,3 +109,64 @@ gated-additive proof.
   cardinality-safe CTE pattern.
 - **Camp-conditioned cells will often be speculative** — expected; tier labels + thin notes carry
   the honesty (surface-labeled, never hidden).
+
+## Implementation notes
+
+Implemented as designed, Units 1–5, no deviations from the design decisions.
+
+- **Unit 1** (`analytics/match_results.py::compute_card_winrates`): added
+  `deck_archetype`/`deck_variant` kwargs. Only the deck→cards map query (the second query,
+  "Step 2") gained a `WHERE (? IS NULL OR d.archetype = ?) AND (? IS NULL OR d.variant = ?)`
+  guard; the attribution loop (Step 3) and match-resolution query (Step 1) are byte-identical
+  to before. Verified: a dedicated hermetic test (`TestArchetypeVariantConditioning` in
+  `tests/test_card_winrates.py`) builds a card played by both a strong archetype (3W/1L) and a
+  weak one (1W/6L) sharing an opponent pool, and confirms (a) `deck_archetype=None,
+  deck_variant=None` reproduces the unconditioned result exactly, (b) conditioning on the
+  strong archetype isolates its own 3W/1L, (c) conditioning on the weak archetype isolates its
+  own 1W/5L (the sixth loss belongs to a different Weak-Aggro deck not queried), (d) match
+  resolution/coverage counters are identical regardless of the filter, and (e) `deck_variant`
+  narrows further to a camp within the archetype.
+- **Unit 2** (`analytics/card_value.py::conflict_cards`): pure helper, matches `CardValue`
+  lists by card name, flags a strict sign disagreement (positive vs negative lift) as a
+  conflict; a lift of exactly `0.0` never conflicts (nothing to disagree with — avoids
+  manufacturing warnings from absent data). Sorted by descending divergence magnitude. 7 pure
+  tests in `tests/test_card_value.py::TestConflictCards`.
+- **Unit 3** (`cli.py`): `report cards --conditioned [--variant]`. `--conditioned` without
+  `--archetype` and `--variant` without `--conditioned` both raise `click.ClickException`.
+  New `_report_cards_conditioned` helper (mirrors the existing `_report_cards_contrast`
+  helper's shape) computes both the corpus-wide marginal and the archetype/variant-conditioned
+  marginal for the archetype's card list, prints both per-card, and emits the sign-conflict
+  line in the exact format specified in the design decision. Verified end-to-end against a
+  from-scratch Bauble-shaped fixture (Dimir Tempo camps A/B vs a Weak Aggro archetype sharing
+  Mishra's Bauble) in `tests/test_conditioned_card_winrate.py::TestReportCardsConditioned`:
+  the pooled marginal reads negative, the Dimir-Tempo-conditioned lift reads positive, the
+  sign-conflict line fires, and `--variant CampA` vs `--variant CampB` produce visibly
+  different conditioned rows.
+- **Unit 4** (`analytics/subgroup.py`): `SubgroupSplit` gained four optional fields
+  (`wins_with`/`n_matches_with`/`wins_without`/`n_matches_without`, default `None`) and
+  `subgroup_compositions(..., with_winrates: bool = False)`. When `True`, a new `_camp_winrates`
+  helper resolves decisive matches via the same `_DUP_UNIQ_CTE` cardinality-safe pattern
+  reused from `match_results.py` (same import precedent as `analytics/slot_test.py`),
+  classifies each hero-side match by with/without-signature-card camp membership, and excludes
+  archetype-level mirrors (both sides the same archetype) — identical convention to
+  `compute_match_results`/`compute_card_winrates`, not resolved at camp granularity. `cli.py`'s
+  `report subgroup` gained a `--winrates` flag; `_print_subgroup_report` renders per-camp win%,
+  match-n, tier, and a thin-sample note (distinct from the existing deck-count thin note, since
+  match-n and deck-n are different denominators). 8 tests in `tests/test_subgroup_winrates.py`
+  cover default-off, computed values, mirror exclusion, thin-tier flagging, and an
+  unrelated-to-composition-diffs invariant check.
+- **Unit 5 (golden tests)**: `tests/test_conditioned_card_winrate.py` pins the exact
+  `report cards` (no `--conditioned`) and `report subgroup` (no `--winrates`) output text for a
+  small hermetic corpus as a byte-identical regression floor, plus asserts no
+  conditioned/sign-conflict/win%/thin-win-rate vocabulary leaks into default output.
+
+No design flaws surfaced; no pre-existing bugs discovered. Byte-identical-default contract
+held throughout (confirmed via the golden tests, which were written against the pre-change
+CLI output before Units 1–4 were implemented, then re-run unchanged after implementation).
+
+**Test counts**: scoped (`test_card_winrates.py`, `test_card_value.py`, `test_subgroup.py`,
+`test_subgroup_winrates.py`, `test_conditioned_card_winrate.py`, `test_cli.py`,
+`test_recommendation_coverage_rest.py`) = 207 passed. Full suite
+(`pytest tests/ -q`) = 2724 passed, 1 xfailed (pre-existing, unrelated), 0 failed.
+
+Branch: `feat/conditioned-card-winrate`.
