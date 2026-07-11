@@ -24,8 +24,9 @@ from legacy_engine.models.base import LegacyEngineModel
 class VariantRule(LegacyEngineModel):
     """One sub-archetype variant definition.
 
-    ``parent`` must be an exact ``base_archetype`` string (no color prefix — the resolver matches
-    against ``base_archetype``).  ``conditions`` are evaluated via ``matcher.evaluate_condition``
+    ``parent`` must be the exact **display** archetype label as stored in ``decks.archetype``
+    (e.g. ``"Dimir Tempo"``, color prefix included where the label carries one) — the labeler
+    resolves variants against ``result.archetype``, not the internal rule ``base_archetype``.  ``conditions`` are evaluated via ``matcher.evaluate_condition``
     against the deck's mainboard/sideboard name sets — same vocabulary as archetype conditions.
     """
 

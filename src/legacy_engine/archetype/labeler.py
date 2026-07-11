@@ -63,7 +63,12 @@ def label_decks(
 
         if registry is not None:
             from legacy_engine.archetype.variants import resolve_variant
-            variant = resolve_variant(result.base_archetype, mainboard, sideboard, registry)
+            # Key variant resolution on the FINAL display label (result.archetype), not the
+            # internal rule name (base_archetype): registry parents are written against what
+            # consumers see in decks.archetype, and a color-prefixed base (e.g. 'Delver')
+            # spans multiple display archetypes — keying on it would smear one archetype's
+            # variant rules across its siblings.
+            variant = resolve_variant(result.archetype, mainboard, sideboard, registry)
         else:
             variant = None
 
