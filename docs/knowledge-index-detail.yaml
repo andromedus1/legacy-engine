@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-11T20:10:51Z'
+generated_at: '2026-07-11T21:17:33Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -267,7 +267,8 @@ documents:
       + what-to-play + field-read report + collection-aware acquire + refresh + primer),
       player-strength + history, and all deck generation modes 1+2+3+export (consensus
       baseline with --variant/--players/--strong, field-tuned decklist, gap-discovery,
-      deck doctor).
+      deck doctor), the archetype-sweep backtest (advise sweep), and data-driven subarchetype
+      resolution (discover run|list|apply|promote + opt-in variant overlays).
     - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); goldfish-validated
       candidate-validation remains deferred until goldfish/ ships. Gap-discovery (mode
       3) itself is built.

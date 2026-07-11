@@ -31,3 +31,9 @@ updated: 2026-07-11
 - **gate-cruft** (2026-07-11) — 3 findings (0 high, 2 medium, 1 low). Mediums drained: dead noqa'd
   import + 3 test F401s (PR pending). Low (belt-and-braces except, keep-leaning) → backlog. Bundle
   notably clean; all 15 src files ruff-clean.
+- **gate-docs** (2026-07-11) — 9 findings (root cause of 5: the #35 sweep never doc-rolled).
+  8 drained in one pass (ARCHITECTURE/SPEC/CHANGELOG/README/pattern anchors); 1 research-tier
+  no-edit. gate-docs-v030-drift → done.
+- **gate-patterns** (2026-07-11) — 2 new patterns codified (opt-in-analytics-overlay,
+  freshness-stripped-cli-body-golden); 3 pattern-doc inconsistencies fixed inline with the docs
+  drain (no code divergence). gate-patterns-v0.3.0 → done.

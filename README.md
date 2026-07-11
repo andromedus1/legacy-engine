@@ -52,6 +52,9 @@ pillar remains deferred:
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
 | Sideboard-scorer backtest (`advise backtest` — recommended vs top-finisher boards) | ✅ built |
+| Archetype-sweep backtest (`advise sweep` — batch divergence mining across all archetypes) | ✅ built |
+| Data-driven subarchetype discovery (`discover run|list|apply|promote` — HDBSCAN camps, two-gate validated, staged→promoted) | ✅ built |
+| Variant overlays, opt-in (`report matchups --split-variant` · `report cards --conditioned [--variant]` · `report subgroup --winrates`) | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
 | Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
 | Provenance-filtered advisory (`--provenance online|paper` on all advise leaves + report matchups/meta) | ✅ built |
@@ -150,6 +153,13 @@ legacy-engine advise report      --deck my.txt --venues online,paper  # cross-ve
 legacy-engine advise refresh     --deck my.txt   # per-venue tuned maindeck + sideboard + primer
 legacy-engine advise acquire     --collection binder.txt --archetype "Dimir Tempo"  # priced buy list
 legacy-engine advise backtest --archetype "Dimir Tempo" --field field.txt  # scorer's board vs top-finisher boards (empirical anchor, never pass/fail)
+legacy-engine advise sweep --field field.txt                    # batch backtest EVERY archetype; ranked scorer-vs-winners divergence clusters
+legacy-engine discover run --archetype "Doomsday"               # cluster a parent into camps (HDBSCAN, two-gate validated), stage as candidate
+legacy-engine discover apply --archetype "Doomsday"             # apply a staged split to decks.variant (labeled-speculative overlay)
+legacy-engine discover promote --archetype "Doomsday" --variant "Tamiyo, Inquisitive Student"  # curate a confirmed camp into the registry
+legacy-engine report matchups --split-variant "Doomsday" --a "Doomsday [Tamiyo, Inquisitive Student]" --b "Izzet Delver"  # camp-level matchup cells
+legacy-engine report cards --archetype "Dimir Tempo" --conditioned  # archetype-scoped card win-rate beside the marginal + sign-conflict warnings
+legacy-engine report subgroup --archetype "Doomsday" --signature "Murktide Regent" --winrates  # per-camp W/L + win% + tier
 # --field-scope/--no-field-scope (default ON) restricts top-finisher tournaments to those whose own
 #   metagame overlaps --field's archetypes; --no-field-scope reproduces the prior global sample
 # --my-deck NAME loads a saved UserDeck; --field FILE supplies a custom field
