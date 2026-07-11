@@ -1,7 +1,7 @@
 ---
 id: fix-variant-resolution-display-key
 kind: story
-stage: review
+stage: done
 tags: [archetype, bug]
 parent: epic-subarchetype-resolution-matchup-cells
 depends_on: []
