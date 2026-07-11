@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-discovery-repr
 kind: story
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-subarchetype-resolution-discovery
 depends_on: []
