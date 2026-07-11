@@ -78,3 +78,17 @@ Unit 4 hermetic with a seeded two-camp pool.
   DuckDB via `store.connect(":memory:")` for Unit 4 — no file-backed DB needed since Unit 4 has no
   CLI surface yet, that lands in `-cli`). 34 tests total in the file (17 from `-repr` + 17 new).
   Full suite (`pytest tests/ -q`) green: 2640 passed, 1 xfailed (pre-existing, unrelated).
+
+## Orchestrator fix (post-wave verification, 2026-07-11)
+
+Ground-truth dogfood (Doomsday, the brief's validated 292/878 split) initially returned
+single-cluster + 47% noise. Root cause: `min_samples` silently inherited
+`min_cluster_size` (117 at n=1170 — hyper-conservative density per the hdbscan docs) and
+`allow_single_cluster=True` introduced a root-cluster bias. Fix: decoupled `min_samples`
+(default 10, exposed as `--min-samples`, mirrored into the Gate-A bootstrap so stability
+stresses the same clusterer) and reverted to sklearn's `allow_single_cluster=False` (both
+k<2 outcomes report an honest "no separable structure" reason). Blob acceptance test
+updated to assert the honest-FAIL essence rather than the single-cluster mechanism.
+Post-fix dogfood: PASS — rediscovers the Tempo camp (n=239: Tamiyo +3.21, Wasteland
++2.07, Murktide +1.48) and Turbo camp (n=417: Personal Tutor +3.05), plus a third
+established Flow State camp (n=172) the manual split had pooled; stability 0.980.

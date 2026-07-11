@@ -6244,6 +6244,11 @@ def discover() -> None:
     help="Bootstrap resamples for the Gate-A stability estimate.",
 )
 @click.option(
+    "--min-samples", type=int, default=10, show_default=True,
+    help="HDBSCAN min_samples (density conservatism; decoupled from the camp-size floor — "
+         "larger values push more decks to noise).",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -6262,6 +6267,7 @@ def discover_run(
     reducer: str,
     seed: int,
     n_boot: int,
+    min_samples: int,
     db: str | None,
     discovered_path: str | None,
     verbose: bool,
@@ -6300,11 +6306,14 @@ def discover_run(
             reducer=partial(reduce_dims, method=reducer),
             seed=seed,
             n_boot=n_boot,
+            min_samples=min_samples,
         )
     finally:
         con.close()
 
-    _print_discovery_report(split, since=since, reducer=reducer, seed=seed, n_boot=n_boot)
+    _print_discovery_report(
+        split, since=since, reducer=reducer, seed=seed, n_boot=n_boot, min_samples=min_samples,
+    )
 
     if not split.passed:
         click.echo(
@@ -6339,13 +6348,14 @@ def _print_discovery_report(
     reducer: str,
     seed: int,
     n_boot: int,
+    min_samples: int = 10,
 ) -> None:
     """Render a DiscoveredSplit with full `// ` audit provenance (PASS or FAIL alike)."""
     from legacy_engine.analytics.discovery import DiscoveredSplit  # noqa: F401
 
     click.echo(f"\n=== Subarchetype Discovery: {split.parent!r} ===")
     click.echo(f"// window: {since or 'full corpus'}{' ..' if since else ''}")
-    click.echo(f"// params: reducer={reducer} seed={seed} n_boot={n_boot}")
+    click.echo(f"// params: reducer={reducer} seed={seed} n_boot={n_boot} min_samples={min_samples}")
     sil = f"{split.silhouette:.3f}" if split.silhouette is not None else "n/a"
     click.echo(f"// stability: {split.stability:.3f}  silhouette (diagnostic only): {sil}")
     click.echo(f"// noise decks (outlier brews, no camp): {split.n_noise}")

@@ -286,15 +286,23 @@ class TestClusterAndValidateCleanSplit:
 
 
 class TestClusterAndValidateBlob:
-    """Scenario (b): one homogeneous blob -> 1 cluster, passed=False, reason 'single cluster'."""
+    """Scenario (b): one homogeneous blob -> FAIL with an honest no-structure reason.
 
-    def test_single_cluster_fails(self):
+    With ``allow_single_cluster`` off (the sklearn default — the root-cluster bias it
+    introduces swallowed a validated real-world split), a homogeneous blob resolves to
+    either one dense cluster or all-noise depending on density; both are k<2 outcomes
+    and both must FAIL with a named "no separable structure" family reason.
+    """
+
+    def test_homogeneous_blob_fails_honestly(self):
         decks = _blob_decks()
         fm = build_feature_matrix(decks, flex_hi=1.0)
         split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
         assert split.passed is False
-        assert len(split.camps) == 1
-        assert any("single cluster" in r for r in split.reasons)
+        assert len(split.camps) <= 1  # k<2: one dense cluster or none (all noise)
+        assert any(
+            ("single cluster" in r) or ("no separable structure" in r) for r in split.reasons
+        )
 
     def test_no_flex_band_also_fails_honestly(self):
         """A parent with <2 flex cards degrades before clustering is even attempted."""

@@ -261,6 +261,7 @@ def _bootstrap_stability(
     base_labels: "np.ndarray",
     *,
     min_cluster_size: int,
+    min_samples: int,
     seed: int,
     n_boot: int,
 ) -> float:
@@ -288,7 +289,11 @@ def _bootstrap_stability(
         rng = np.random.default_rng(seed + b + 1)
         idx = rng.integers(0, n, size=n)
         Xb = Xred[idx]
-        boot_sample_labels = HDBSCAN(min_cluster_size=min_cluster_size, copy=True, allow_single_cluster=True).fit_predict(Xb)
+        # Mirror the base run's parameters exactly — Gate A must stress the same clusterer,
+        # or stability measures a different algorithm than the one that proposed the split.
+        boot_sample_labels = HDBSCAN(
+            min_cluster_size=min_cluster_size, min_samples=min_samples, copy=True,
+        ).fit_predict(Xb)
 
         # Map bootstrap labels back onto original indices (first occurrence wins for repeats —
         # a resampled duplicate row gets an (essentially) identical cluster assignment anyway).
@@ -322,6 +327,7 @@ def cluster_and_validate(
     stability_min: float = 0.90,
     min_delta: float = 0.75,
     min_sig_cards: int = 2,
+    min_samples: int = 10,
 ) -> DiscoveredSplit:
     """Cluster a parent archetype's flex-band matrix into validated, named camps.
 
@@ -356,14 +362,19 @@ def cluster_and_validate(
 
     Xred = np.asarray(reducer(fm.X, seed=seed))
     min_cluster_size = max(30, round(0.10 * n))
-    # allow_single_cluster=True: HDBSCAN's default refuses to ever emit a single all-encompassing
-    # cluster (it always prefers noise over "no split"). A homogeneous parent with no real
-    # subarchetype structure should honestly report "one cluster, no split" rather than the
-    # less legible "100% noise" — so we allow it, and let Gate B's ">=2 camps" check (not
-    # HDBSCAN's own refusal) be the thing that rejects it.
+    # min_samples is decoupled from min_cluster_size (sklearn defaults it to min_cluster_size,
+    # which at corpus scale — e.g. 117 for a 1170-deck parent — makes the density requirement so
+    # conservative that real camps dissolve into noise; hdbscan docs: larger min_samples => "more
+    # points will be declared as noise"). A small explicit default keeps camp *size* gated by
+    # min_cluster_size while letting density form. allow_single_cluster stays False (sklearn's
+    # default): the root-cluster bias it introduces swallowed a validated real-world split; a
+    # homogeneous parent honestly reports "no separable structure" via the k<2 branches below
+    # (all-noise or one dense cluster — both FAIL with a named reason).
     base_labels = np.asarray(
         HDBSCAN(
-            min_cluster_size=min_cluster_size, copy=True, allow_single_cluster=True,
+            min_cluster_size=min_cluster_size,
+            min_samples=min(min_samples, min_cluster_size),
+            copy=True,
         ).fit_predict(Xred)
     )
     n_noise = int(np.sum(base_labels == -1))
@@ -420,7 +431,8 @@ def cluster_and_validate(
     # len(unique_camps) == 0 -> camps stays [] (all noise).
 
     stability = _bootstrap_stability(
-        Xred, base_labels, min_cluster_size=min_cluster_size, seed=seed, n_boot=n_boot,
+        Xred, base_labels, min_cluster_size=min_cluster_size,
+        min_samples=min(min_samples, min_cluster_size), seed=seed, n_boot=n_boot,
     )
 
     silhouette: float | None = None
@@ -439,7 +451,7 @@ def cluster_and_validate(
     )
 
     if len(unique_camps) == 0:
-        reasons.append("no clusters found: all decks labeled noise")
+        reasons.append("no separable structure: no dense clusters found (all decks labeled noise)")
         passed = False
     elif len(unique_camps) == 1:
         reasons.append("single cluster: no separable structure (need >=2 camps)")
