@@ -244,6 +244,19 @@ class TestReportCardsConditioned:
         assert result.exit_code != 0
         assert "--variant requires --conditioned" in result.output
 
+    def test_conditioned_rejects_vs_loudly(self, runner, sign_conflict_db_path):
+        """Completion-review finding: --conditioned + --vs used to silently ignore --vs
+        (opponent-specific conditioned values aren't implemented) — must fail loud instead."""
+        result = runner.invoke(
+            main,
+            [
+                "report", "cards", "--archetype", "Dimir Tempo", "--conditioned",
+                "--vs", "Weak Aggro", "--db", sign_conflict_db_path,
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--conditioned does not support --vs yet" in result.output
+
     def test_conditioned_exits_zero_and_shows_both_lifts(self, runner, sign_conflict_db_path):
         result = runner.invoke(
             main,

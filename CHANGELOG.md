@@ -39,6 +39,21 @@ field-weighted scoring model, validated against real winning boards.
 
 # Changelog
 
+## Unreleased
+
+### epic-subarchetype-resolution (PRs #36-#38, 2026-07-11)
+- `discover run|list|promote` — data-driven subarchetype discovery within a parent archetype
+  (flex-band TF-IDF → TruncatedSVD/UMAP → HDBSCAN, two-gate validation, auto-naming, staged
+  candidates; promotion into the curated variant registry). Deps: scikit-learn (core),
+  umap-learn (optional `discovery` extra).
+- `report matchups --split-variant <ARCH>` — opt-in camp-level matchup cells reusing the
+  existing shrinkage + tier honesty gates; unlabeled residue always visible.
+- `report cards --conditioned [--variant]` — archetype/camp-scoped card win-rate beside the
+  marginal, with honest-degrade sign-conflict warnings; `report subgroup --winrates` adds
+  per-camp W/L + win% + tier.
+- Fixed: variant resolution silently NULLed every color-prefixed archetype's variants
+  (labeler keyed on base_archetype; registry parents are display labels).
+
 ## v0.1.0
 
 Maiden release. A local-first MTG Legacy analytics engine: ingest tournament data, classify

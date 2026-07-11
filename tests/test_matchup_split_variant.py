@@ -413,3 +413,106 @@ class TestReportMatchupsSplitVariantCLI:
         result = runner.invoke(main, ["report", "matchups", "--help"])
         assert result.exit_code == 0
         assert "--split-variant" in result.output
+
+    def test_split_flag_with_no_staged_candidate_adds_no_provenance_line(self, runner, tmp_path, monkeypatch):
+        """No staged candidate for the split parent (the normal case) -> no provenance echo;
+        the flagged path stays additive-only, never spuriously flags a confirmed/curated split."""
+        db_path = self._build_db(tmp_path)
+        monkeypatch.setattr(
+            "legacy_engine.config.DISCOVERED_VARIANTS_PATH", str(tmp_path / "no-such-file.json"),
+        )
+        result = runner.invoke(
+            main,
+            ["report", "matchups", "--db", db_path, "--all-time", "--split-variant", "Doomsday"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// provenance:" not in result.output
+
+    def test_split_flag_with_staged_candidate_adds_provenance_line(self, runner, tmp_path, monkeypatch):
+        """Finding 1: a STAGED (unpromoted) candidate split for the flagged parent must surface
+        an honest speculative-provenance note after the existing split-variant audit line."""
+        from legacy_engine.archetype.discovered import save_discovered
+        from legacy_engine.models.variant import DiscoveredCamp, DiscoveredRegistry, DiscoveredSplitRecord
+
+        db_path = self._build_db(tmp_path)
+        staged = tmp_path / "discovered.json"
+        save_discovered(
+            DiscoveredRegistry(
+                version="1",
+                splits=[
+                    DiscoveredSplitRecord(
+                        parent="Doomsday",
+                        generated_from="test",
+                        params={},
+                        camps=[
+                            DiscoveredCamp(name="Murktide", signature_cards=["Lion's Eye Diamond"], n=32, tier="evolving"),
+                            DiscoveredCamp(name="non-Murktide", signature_cards=[], n=1, tier="speculative"),
+                        ],
+                        stability=0.95,
+                    )
+                ],
+            ),
+            staged,
+        )
+        monkeypatch.setattr("legacy_engine.config.DISCOVERED_VARIANTS_PATH", str(staged))
+
+        result = runner.invoke(
+            main,
+            ["report", "matchups", "--db", db_path, "--all-time", "--split-variant", "Doomsday"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// split-variant: Doomsday" in result.output
+        assert (
+            "// provenance: Doomsday has a STAGED (unpromoted) candidate split — variant "
+            "labels may be speculative-provenance" in result.output
+        )
+
+    def test_promoted_staged_record_adds_no_provenance_line(self, runner, tmp_path, monkeypatch):
+        """A staged record that has already been promoted (status != candidate) is no longer
+        speculative — must not echo the staged-provenance note."""
+        from legacy_engine.archetype.discovered import save_discovered
+        from legacy_engine.models.variant import DiscoveredCamp, DiscoveredRegistry, DiscoveredSplitRecord
+
+        db_path = self._build_db(tmp_path)
+        staged = tmp_path / "discovered.json"
+        save_discovered(
+            DiscoveredRegistry(
+                version="1",
+                splits=[
+                    DiscoveredSplitRecord(
+                        parent="Doomsday",
+                        generated_from="test",
+                        params={},
+                        camps=[
+                            DiscoveredCamp(name="Murktide", signature_cards=["Lion's Eye Diamond"], n=32, tier="evolving"),
+                        ],
+                        stability=0.95,
+                        status="promoted",
+                    )
+                ],
+            ),
+            staged,
+        )
+        monkeypatch.setattr("legacy_engine.config.DISCOVERED_VARIANTS_PATH", str(staged))
+
+        result = runner.invoke(
+            main,
+            ["report", "matchups", "--db", db_path, "--all-time", "--split-variant", "Doomsday"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// provenance:" not in result.output
+
+    def test_provenance_check_never_breaks_report_on_malformed_registry(self, runner, tmp_path, monkeypatch):
+        """The provenance lookup wraps in try/except any — a corrupt staging file must never
+        break `report matchups`."""
+        db_path = self._build_db(tmp_path)
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not valid json")
+        monkeypatch.setattr("legacy_engine.config.DISCOVERED_VARIANTS_PATH", str(bad))
+
+        result = runner.invoke(
+            main,
+            ["report", "matchups", "--db", db_path, "--all-time", "--split-variant", "Doomsday"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// split-variant: Doomsday" in result.output

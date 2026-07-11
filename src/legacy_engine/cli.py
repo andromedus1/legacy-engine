@@ -802,6 +802,25 @@ def report_matchups(
                 f"// split-variant: {split_variant} (camps from decks.variant; "
                 "unlabeled residue shown)"
             )
+            try:
+                from legacy_engine.archetype.discovered import load_discovered
+                from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+
+                disc = load_discovered(DISCOVERED_VARIANTS_PATH)
+                staged = next(
+                    (
+                        s for s in disc.splits
+                        if s.parent == split_variant and s.status == "candidate"
+                    ),
+                    None,
+                )
+                if staged is not None:
+                    click.echo(
+                        f"// provenance: {split_variant} has a STAGED (unpromoted) candidate "
+                        "split — variant labels may be speculative-provenance"
+                    )
+            except Exception:
+                pass
         bases: list[str | None]
         if provenance == "all":
             bases = [None, "online", "paper"]
@@ -1715,6 +1734,11 @@ def report_cards(
         raise click.ClickException("--variant requires --conditioned.")
     if conditioned and archetype is None:
         raise click.ClickException("--conditioned requires --archetype.")
+    if conditioned and opponent is not None:
+        raise click.ClickException(
+            "--conditioned does not support --vs yet (opponent-specific conditioned values are "
+            "a tracked follow-up); drop one of the flags"
+        )
 
     if conditioned:
         _report_cards_conditioned(
@@ -6421,7 +6445,7 @@ def deck_buildable(deck_name: str, verbose: bool) -> None:
 # ── discover: data-driven subarchetype discovery ──
 @main.group()
 def discover() -> None:
-    """Discover, stage, and promote data-driven subarchetype splits."""
+    """Discover, stage, apply, and promote data-driven subarchetype splits."""
 
 
 @discover.command("run")
@@ -6533,7 +6557,14 @@ def discover_run(
         },
     )
     reg = load_discovered(staging_path)
-    save_discovered(stage_split(reg, record), staging_path)
+    new_reg, replaced = stage_split(reg, record)
+    save_discovered(new_reg, staging_path)
+    if replaced is not None:
+        camp_names = ", ".join(c.name for c in replaced.camps)
+        click.echo(
+            f"// replaced prior staged candidate for {archetype!r} "
+            f"(was: generated_from={replaced.generated_from!r}, camps={camp_names})"
+        )
     click.echo(f"// staged candidate split for {archetype!r} -> {staging_path}")
     click.echo("// next: `discover list` to inspect, `discover promote` to curate a camp")
 
@@ -6652,6 +6683,66 @@ def discover_promote(
     click.echo(f"// promoted {archetype!r}/{variant!r} -> {reg_path}")
     click.echo(f"  rule: {cond.type} {cond.cards}")
     click.echo("// staged split marked status=promoted; re-run `label` to apply variant tags")
+
+
+@discover.command("apply")
+@click.option("--archetype", required=True, help="Parent archetype with a staged candidate split.")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@click.option(
+    "--discovered-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Staging registry to read (defaults to data/variants/discovered.json).",
+)
+@_verbose
+def discover_apply(
+    archetype: str,
+    db: str | None,
+    discovered_path: str | None,
+    verbose: bool,
+) -> None:
+    """Apply a staged (unpromoted) candidate split's camps directly onto decks.variant.
+
+    A labeled-speculative analytics overlay: resolves the SAME transient variant rules
+    `discover promote` would install (top signature card per camp; a complement default in the
+    2-camp case) against every deck currently labeled --archetype, and writes matching decks'
+    decks.variant. Non-matching decks are left untouched — they surface honestly as
+    '<ARCHETYPE> [unlabeled]' via `report matchups --split-variant`. Does NOT touch the curated
+    registry and does NOT promote the staged record — it stays status: candidate.
+
+    Example: legacy-engine discover apply --archetype "Doomsday"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.archetype.discovered import apply_split, load_discovered
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+    from legacy_engine.ingestion import store
+
+    disc_path = discovered_path or str(DISCOVERED_VARIANTS_PATH)
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        try:
+            disc = load_discovered(disc_path)
+            split = next((s for s in disc.splits if s.parent == archetype), None)
+            camp_names = ", ".join(c.name for c in split.camps) if split is not None else None
+            n_labeled = apply_split(con, archetype, discovered_path=disc_path)
+        except (ValueError, FileNotFoundError) as exc:
+            raise click.ClickException(str(exc)) from exc
+    finally:
+        con.close()
+
+    if camp_names:
+        click.echo(f"// camps: {camp_names}")
+    click.echo(f"// {n_labeled} deck(s) labeled from staged candidate for {archetype!r}")
+    click.echo(
+        "// STAGED CANDIDATE labels applied to decks.variant — speculative provenance; "
+        "not promoted to the curated registry"
+    )
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ import pytest
 from legacy_engine.analytics.discovery import Camp, DiscoveredSplit
 from legacy_engine.archetype.discovered import (
     TOP_SIGNATURE_CARDS,
+    apply_split,
     load_discovered,
     promote_split,
     record_from_split,
@@ -157,9 +158,10 @@ class TestRecordFromSplit:
 class TestStageSplit:
     def test_append_new_parent(self):
         reg = DiscoveredRegistry(version="1", splits=[])
-        out = stage_split(reg, _split_record())
+        out, replaced = stage_split(reg, _split_record())
         assert len(out.splits) == 1
         assert reg.splits == []   # purity: input untouched
+        assert replaced is None   # fresh append, nothing replaced
 
     def test_upsert_replaces_same_parent_in_place(self):
         reg = DiscoveredRegistry(
@@ -167,14 +169,18 @@ class TestStageSplit:
             splits=[_split_record(parent="Doomsday"), _split_record(parent="Lands")],
         )
         newer = _split_record(parent="Doomsday", stability=0.99)
-        out = stage_split(reg, newer)
+        out, replaced = stage_split(reg, newer)
         assert [s.parent for s in out.splits] == ["Doomsday", "Lands"]
         assert out.splits[0].stability == 0.99
+        assert replaced is not None
+        assert replaced.parent == "Doomsday"
+        assert replaced.stability == 0.97   # the prior record, not the new one
 
     def test_different_parents_coexist(self):
         reg = DiscoveredRegistry(version="1", splits=[_split_record(parent="Doomsday")])
-        out = stage_split(reg, _split_record(parent="Lands"))
+        out, replaced = stage_split(reg, _split_record(parent="Lands"))
         assert [s.parent for s in out.splits] == ["Doomsday", "Lands"]
+        assert replaced is None
 
 
 # ---------------------------------------------------------------------------
@@ -273,3 +279,158 @@ class TestPromoteSplit:
         registry = load_variant_registry(reg_path)
         assert [v.name for v in registry.for_parent("Dimir Tempo")] == ["Bauble"]
         assert [v.name for v in registry.for_parent("Doomsday")] == ["Murktide Regent"]
+
+
+# ---------------------------------------------------------------------------
+# apply_split
+# ---------------------------------------------------------------------------
+
+def _con_with_doomsday_decks():
+    """In-memory DB: two 'Doomsday' decks (one w/ Murktide Regent, one without) + one
+    'Control' deck — the Control deck is the untouched-by-apply control."""
+    from legacy_engine.ingestion import store
+
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    con.execute(
+        "INSERT INTO tournaments VALUES ('t1', 'T', '2026-01-01', NULL, 'Legacy', 'src', 'online')"
+    )
+    decks = [
+        ("t1", 0, "p0", "1st", "Doomsday", None),
+        ("t1", 1, "p1", "2nd", "Doomsday", None),
+        ("t1", 2, "p2", "3rd", "Control", None),
+    ]
+    cards = [
+        ("t1", 0, "main", "Murktide Regent", 3),
+        ("t1", 0, "main", "Brainstorm", 4),
+        ("t1", 1, "main", "Dark Ritual", 4),
+        ("t1", 2, "main", "Swords to Plowshares", 4),
+    ]
+    con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", decks)
+    con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", cards)
+    return con
+
+
+class TestApplySplit:
+    def _staged(self, tmp_path, split: DiscoveredSplitRecord | None = None) -> str:
+        disc_path = str(tmp_path / "discovered.json")
+        save_discovered(
+            DiscoveredRegistry(version="1", splits=[split or _split_record()]), disc_path
+        )
+        return disc_path
+
+    def test_applies_camp_labels_without_promoting_or_touching_curated_registry(self, tmp_path):
+        con = _con_with_doomsday_decks()
+        disc_path = self._staged(tmp_path)
+
+        n = apply_split(con, "Doomsday", discovered_path=disc_path)
+        assert n == 2   # both Doomsday decks resolve: positive rule + default complement
+
+        rows = dict(
+            con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+        )
+        assert rows[0] == "Murktide Regent"
+        assert rows[1] == "non-Murktide Regent"
+        assert rows[2] is None   # Control deck untouched — different archetype
+
+        # Not a promotion: staged record status is unchanged.
+        disc = load_discovered(disc_path)
+        assert disc.splits[0].status == "candidate"
+        con.close()
+
+    def test_membership_path_labels_exact_members_and_leaves_noise_null(self, tmp_path):
+        """Regression (found dogfooding the real Doomsday 3-camp split): camps whose
+        signature staples OVERLAP (a deck runs both camps' top cards) tripped
+        resolve_variant's ambiguity fail-fast under the transient-rules path. With
+        member_keys persisted, apply labels by exact cluster membership instead —
+        overlap is irrelevant and noise decks stay NULL ([unlabeled] downstream)."""
+        con = _con_with_doomsday_decks()
+        split = _split_record(camps=[
+            # overlapping signatures: both camps' top cards appear in deck 0
+            _camp_record(
+                name="Tamiyo, Inquisitive Student",
+                signature_cards=["Tamiyo, Inquisitive Student"],
+                member_keys=[("t1", 0)],
+            ),
+            _camp_record(
+                name="Personal Tutor",
+                signature_cards=["Personal Tutor"],
+                member_keys=[("t1", 1)],
+            ),
+            _camp_record(
+                name="Flow State",
+                signature_cards=["Flow State"],
+                member_keys=[],   # a camp whose members were all elsewhere (edge)
+            ),
+        ])
+        # make deck 0 run BOTH top cards — the exact ambiguity trigger
+        con.execute(
+            "INSERT INTO deck_cards VALUES ('t1', 0, 'main', 'Tamiyo, Inquisitive Student', 4)"
+        )
+        con.execute(
+            "INSERT INTO deck_cards VALUES ('t1', 0, 'main', 'Personal Tutor', 1)"
+        )
+        disc_path = self._staged(tmp_path, split=split)
+
+        n = apply_split(con, "Doomsday", discovered_path=disc_path)
+        assert n == 2
+
+        rows = dict(
+            con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+        )
+        assert rows[0] == "Tamiyo, Inquisitive Student"   # membership, not rule matching
+        assert rows[1] == "Personal Tutor"
+        assert rows[2] is None                            # Control untouched
+        con.close()
+
+    def test_membership_path_archetype_guard_skips_relabeled_decks(self, tmp_path):
+        """A stale staged record whose member deck was since relabeled off the parent
+        must not touch that deck (the UPDATE carries an archetype guard)."""
+        con = _con_with_doomsday_decks()
+        split = _split_record(camps=[
+            _camp_record(name="A", signature_cards=["Murktide Regent"], member_keys=[("t1", 0)]),
+            _camp_record(name="B", signature_cards=["Dark Ritual"], member_keys=[("t1", 1)]),
+        ])
+        con.execute("UPDATE decks SET archetype='Reanimator' WHERE tournament_id='t1' AND deck_idx=1")
+        disc_path = self._staged(tmp_path, split=split)
+
+        n = apply_split(con, "Doomsday", discovered_path=disc_path)
+        assert n == 1   # only deck 0 still belongs to the parent
+        rows = dict(
+            con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+        )
+        assert rows[0] == "A"
+        assert rows[1] is None
+        con.close()
+
+    def test_no_staged_split_fails_fast(self, tmp_path):
+        con = _con_with_doomsday_decks()
+        disc_path = str(tmp_path / "empty.json")
+        with pytest.raises(ValueError, match="no staged candidate split for parent 'Doomsday'"):
+            apply_split(con, "Doomsday", discovered_path=disc_path)
+        con.close()
+
+    def test_no_signature_card_anywhere_fails_fast(self, tmp_path):
+        con = _con_with_doomsday_decks()
+        split = _split_record(camps=[
+            _camp_record(signature_cards=[]),
+            _camp_record(name="other", signature_cards=[]),
+        ])
+        disc_path = self._staged(tmp_path, split=split)
+        with pytest.raises(ValueError, match="nothing to apply"):
+            apply_split(con, "Doomsday", discovered_path=disc_path)
+        con.close()
+
+    def test_promote_still_works_after_apply(self, tmp_path):
+        """apply_split doesn't flip status, so promote_split can still run afterward."""
+        con = _con_with_doomsday_decks()
+        disc_path = self._staged(tmp_path)
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+        con.close()
+
+        reg_path = _curated_registry_file(tmp_path)
+        rule = promote_split("Doomsday", "Murktide Regent", disc_path, reg_path)
+        assert rule.name == "Murktide Regent"
+
+        disc = load_discovered(disc_path)
+        assert disc.splits[0].status == "promoted"
