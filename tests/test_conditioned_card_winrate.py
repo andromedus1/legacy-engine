@@ -121,6 +121,41 @@ class TestGoldenReportCardsDefault:
 class TestGoldenReportSubgroupDefault:
     """`report subgroup` without --winrates must render exactly as it did pre-feature."""
 
+    GOLDEN = (
+        "=== Subgroup Diff: 'Control' split on \"Mishra's Bauble\" (mainboard) ===\n"
+        "  with-subgroup:    n=2  [speculative]\n"
+        "  without-subgroup: n=0  [speculative]\n"
+        "  // \u26a0 thin subgroup(s) — one or both subgroups have n < 30 (speculative tier); "
+        "deltas are present-and-honest, not hidden, but treat magnitudes as unreliable\n"
+        "\n"
+        "  Card                                  with-avg  without-avg     delta\n"
+        "  ----------------------------------------------------------------------\n"
+        "  Brainstorm                               4.000        0.000  +  4.000\n"
+        "  Mishra's Bauble                          1.000        0.000  +  1.000\n"
+        "\n"
+        "  NOTE: presence-correlational only — not a causal attribution. Use this to identify "
+        "candidate signature cards for the variant registry.\n"
+    )
+
+    def test_default_body_byte_identical(self, runner, golden_db_path):
+        """Gate-tests F2 (v0.3.0): pin the full default body (the feature prose promised a
+        byte-identical golden; the prior checks were substring/negative-only)."""
+        result = runner.invoke(
+            main,
+            [
+                "report", "subgroup",
+                "--archetype", "Control", "--signature", "Mishra's Bauble",
+                "--since", "2025-01-01", "--until", "2027-01-01",
+                "--db", golden_db_path,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        body = result.output.split("\n\n", 1)[1]
+        assert body == self.GOLDEN, (
+            f"report subgroup default output changed!\n--- expected ---\n{self.GOLDEN!r}\n"
+            f"--- got ---\n{body!r}"
+        )
+
     def test_no_winrate_lines_by_default(self, runner, golden_db_path):
         result = runner.invoke(
             main,
