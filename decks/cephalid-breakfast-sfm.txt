@@ -1,0 +1,50 @@
+# CEPHALID BREAKFAST — Stoneforge camp consensus (2026-07-06)
+# Maindeck + board: consensus over the SFM camp of Cephalid breakfast (mains Stoneforge Mystic;
+# the two-style builds surfaced by the floor/multi-modal analysis): n=42 of 136 regime decks
+# (since 2025-11-10), EVOLVING tier. Modal copy-counts assemble a clean 60/15 — no judgment
+# swaps needed; this camp is remarkably consensual (14 of 16 maindeck names at 100% presence).
+# Board validated against the winner subset (5-0 or top8, n=11): Consign/FoN/Needle 100%,
+# Surgical 91%, Flusterstorm 91%, StP 82%, Lantern 82%, Serenity 73%, Lavinia 55% (flex tail).
+# Dropped sub-consensus hedges: Hydroblast 29%, Brazen Borrower 26%, Ghost Vacuum (27% of winners).
+# NOTE: no reps yet — engine-consensus build, not a tuned personal list. Matchup cells are
+# nearly all SPECULATIVE tier (cov30 = 6%); primer wr numbers are priors, not measurements.
+# Acquisition (vs inventory 2026-07-06): 48 cards / 25 names ≈ $1,422; = 2 Tundra $557 +
+# 1 Underground Sea $370 + everything else ≈ $495. Blue core (BS/Ponder/FoW/Tamiyo/Consign/
+# FoN/Surgical/Needle) already owned. Only ONE USea vs the four the Dimir/Doomsday gaps carry.
+4 Brainstorm
+1 Cabal Therapy
+4 Cephalid Illusionist
+1 Dread Return
+4 Flooded Strand
+4 Force of Will
+2 Island
+1 Kaldra Compleat
+1 Marsh Flats
+1 Meticulous Archive
+4 Misty Rainforest
+3 Narcomoeba
+3 Nomads en-Kor
+1 Orim's Chant
+1 Plains
+4 Ponder
+2 Prismatic Ending
+2 Shuko
+3 Stoneforge Mystic
+2 Swords to Plowshares
+4 Tamiyo, Inquisitive Student
+1 Thassa's Oracle
+2 Tundra
+1 Undercity Sewers
+1 Underground Sea
+3 Urza's Saga
+
+Sideboard
+3 Consign to Memory
+1 Flusterstorm
+3 Force of Negation
+1 Lavinia, Azorius Renegade
+1 Pithing Needle
+1 Serenity
+1 Soul-Guide Lantern
+2 Surgical Extraction
+2 Swords to Plowshares

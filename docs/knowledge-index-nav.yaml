@@ -1,30 +1,30 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-07-04T22:22:42Z'
+generated_at: '2026-07-11T16:29:10Z'
 generated_from: frontmatter
-total_docs: 24
+total_docs: 25
 by_kind:
   planning: 6
-  research: 18
+  research: 19
 recent:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   kind: planning
-  updated: '2026-07-04'
+  updated: '2026-07-11'
 - path: docs/SPEC.md
   title: 'Spec: legacy-engine'
   kind: planning
-  updated: '2026-07-04'
+  updated: '2026-07-11'
+- path: docs/VISION.md
+  title: 'Vision: legacy-engine'
+  kind: planning
+  updated: '2026-07-11'
 - path: docs/analysis/meta-deck-analysis-loop.md
   title: The meta-deck analysis loop
   kind: planning
   updated: '2026-07-04'
 - path: docs/PRINCIPLES.md
   title: 'Principles: legacy-engine'
-  kind: planning
-  updated: '2026-06-13'
-- path: docs/VISION.md
-  title: 'Vision: legacy-engine'
   kind: planning
   updated: '2026-06-13'
 - path: docs/briefs/ingestion-archetype-contracts/campaign.md

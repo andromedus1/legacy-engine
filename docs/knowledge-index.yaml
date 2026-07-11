@@ -1,14 +1,14 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-07-04T22:22:42Z'
+generated_at: '2026-07-11T16:29:10Z'
 generated_from: frontmatter
-total_docs: 24
+total_docs: 25
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-07-04'
+  updated: '2026-07-11'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four
@@ -26,7 +26,7 @@ documents:
   title: 'Vision: legacy-engine'
   type: north-star
   kind: planning
-  updated: '2026-06-13'
+  updated: '2026-07-11'
   consumer_hint: Read first — the why and what of legacy-engine. Vision, problem,
     principles pointer, and the four-pillar domain model for the Legacy analytics
     platform.
@@ -49,7 +49,7 @@ documents:
   title: 'Spec: legacy-engine'
   type: spec
   kind: planning
-  updated: '2026-07-04'
+  updated: '2026-07-11'
   consumer_hint: Read when scoping what to build — the capabilities, domain entities,
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).
@@ -222,6 +222,17 @@ documents:
   consumer_hint: How should the sideboard solver decide how many copies to commit
     and how to spend leftover slots? Read before designing the two-stage core+hedge
     sideboard rework (epic-sideboard-core-and-hedge).
+- path: docs/briefs/subarchetype-discovery.md
+  title: 'Brief: Data-Driven Subarchetype Discovery'
+  type: brief
+  kind: research
+  updated: '2026-07-11'
+  research_method: /brief
+  blocks_phase: epic-subarchetype-resolution
+  consumer_hint: How do you discover play-pattern subarchetypes WITHIN a flat parent
+    label at corpus scale, decide which splits are real vs sampling noise, and feed
+    a variant dimension into the matchup matrix + card win-rate without breaking the
+    confidence-tier honesty gates? Read before designing epic-subarchetype-resolution.
 - path: docs/briefs/ingestion-archetype-contracts/parent.md
   title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
   type: program-parent
