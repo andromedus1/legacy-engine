@@ -33,7 +33,7 @@ decisions:
 
 # Architecture: legacy-engine
 
-*Last updated: 2026-07-03* (rolled forward to present implementation)
+*Last updated: 2026-07-11* (rolled forward to present implementation)
 
 > How the system is built. For *what* and *why*, see [VISION.md](VISION.md) and [SPEC.md](SPEC.md).
 > For decision heuristics, see [PRINCIPLES.md](PRINCIPLES.md). For what to build when, the roadmap/epics
@@ -55,7 +55,7 @@ observed → label → analytics → advisory arc.
 │  · label · report (meta|matchups|tiers|trends|cards|gaps|subgroup|variants|      │
 │    new-cards|speculate|prices|affectedness)                                       │
 │  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire|compare| │
-│    backtest)                                                                      │
+│    backtest|sweep)                                                                 │
 │  · identify (suggest|strong|track)                                               │
 │  · generate (consensus|tune|doctor) · export (deck) · viz (deck|meta|matchups|   │
 │    trends|tiers)  [later: goldfish]                                               │
@@ -198,6 +198,7 @@ without a schema rewrite. CLI-first; no web UI (deferred to its own research).
 | `primer.py` | Plain-speak per-matchup primer: given the sideboard's `MatchupPlan` list, generates a human-readable explanation of each OUT/IN swap and why. When `plan.degraded=True` (no per-card data), labels the block reasoning-based and suppresses fabricated numbers. | — |
 | `refresh.py` | `run_refresh` + `render_refresh_result`: full deck-tuning refresh per venue — field-tuned maindeck + sideboard + primer in one call. Exposed via `advise refresh`. | — |
 | `backtest.py` | Board backtest: compares `recommend_sideboard`'s output for an archetype/field against the sideboards top-finishing decks of that archetype actually ran in a comparable window (top-quartile-by-standings-rank). `--field-scope/--no-field-scope` (default ON) restricts the top-finisher sample to tournaments whose own metagame overlaps `--field`'s archetypes by at least `_FIELD_OVERLAP_MIN` (excludes off-meta events, e.g. graveyard-heavy tech vs a Boulder field); honest-degrade banner when field-scope excludes every candidate tournament, with `--no-field-scope` as the diagnostic escape hatch back to the prior global sample. Never emits pass/fail — reports overlap / scorer-only / winners-only with a named confounds caveat (self-selected + metagame-lagged). Exposed via `advise backtest`. | — |
+| `sweep.py` | Batch archetype-sweep backtest: runs `backtest_board` for every eligible archetype (deck-count floor) against one shared field, aggregates per-archetype divergences (scorer_only / winners_only) into ranked, root-cause-clustered findings with per-archetype tier gating; divergence-as-diagnostic — clusters are engine-error-map input, never auto-calibrated back into scores. `--json` emits copy-count histograms. Own windowing (not the advisory-window block; no `--provenance`). Exposed via `advise sweep`. | — |
 
 ### `models/` — shared Pydantic types
 `Card`, `Decklist`, `Deck`, `TournamentResult`, `Round`, `Standing`, `Archetype`, `ArchetypeRule`,
@@ -304,7 +305,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
   - `seed cards|cache|rules|banlist|prices`
   - `refresh all|cards`
   - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices|affectedness`
-  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare|backtest`
+  - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare|backtest|sweep`
   - `identify suggest|strong|track`
   - `generate consensus|tune|doctor` (`tune --discover` adds gap-discovery; `consensus --variant/--players/--strong`)
   - `export deck`

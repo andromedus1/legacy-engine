@@ -7,7 +7,7 @@ summary: |
   Every provenance, window, degradation, and operational status line in the CLI is emitted
   as a "//" comment prefix to stdout so it is visually distinguishable from data rows,
   grep-able from scripts, and never confused with the analytical output it annotates.
-  59 uses in cli.py alone; the convention is also followed in ingestion and generation
+  94 uses in cli.py alone; the convention is also followed in ingestion and generation
   surfaces that emit advisory-style output.
 decisions:
   - "Use the '// ' prefix for every non-data line: window headers, data-freshness lines, classification results, fallback banners, legality notes, staleness advisories."
@@ -63,17 +63,17 @@ click.echo("// data as of: (empty corpus)")
 click.echo(f"// data as of {max_date} ({deck_count} decks)")
 click.echo(f"// ⚠ newest event is {age} days old — data may be stale (run `refresh`)")
 
-# advise_sideboard classification  (cli.py:2510)
+# advise_sideboard classification  (cli.py:3058)
 click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
 
-# generate_tune objective  (cli.py:4125)
+# generate_tune objective  (cli.py:5166)
 click.echo(f"// Δvalue = {tuned.value_after - tuned.value_before:+.4f}")
 click.echo(f"// [FALLBACK] {tuned.reason}")
 ```
 
 ## Total Uses
 
-59 `click.echo("// ...)` call sites in `cli.py` as of 2026-06-14. The pattern
+94 `click.echo("// ...)` call sites in `cli.py` as of 2026-07-11. The pattern
 also appears in `advisory/refresh.py`'s `render_refresh_result` for the multi-venue
 output surface.
 
