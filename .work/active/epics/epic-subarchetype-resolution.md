@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: null
 depends_on: []
@@ -134,3 +134,23 @@ both-camp evolving tier + signature divergence), the double-dipping guard, and t
 
 Ready for `/epic-design` to decompose into the three features (discovery engine → variant-conditioned
 matchup cells → archetype/variant-conditioned card win-rate).
+
+## Completion summary (2026-07-11)
+
+All three features shipped, merged, and review-approved in one autopilot run:
+
+| PR | Feature | Verdict |
+|---|---|---|
+| #36 (0fee3d0) | discovery engine (`discover run\|list\|promote`) | APPROVE (3 minors parked) |
+| #37 (d3fa9f7) | variant-conditioned matchup cells (`--split-variant`) + display-key labeler fix | APPROVE (2 minors fixed in #38) |
+| #38 (7b94243) | conditioned card win-rate + sign-conflict + subgroup win% | APPROVE (2 minors noted) |
+
+Suite 2604 → **2725** (+121 tests). Ground-truth validations: Doomsday rediscovered its validated
+Tempo/Turbo camps + a third established Flow State camp (stability 0.980); Dimir Tempo [Bauble]
+54.3% (n=43 evolving) vs [non-Bauble] 61.8% (n=282 established) vs Show&Tell; Mishra's Bauble
+marginal −0.018 vs within-archetype +0.014 with sign-conflict honest-degrade lines firing.
+Bonus fixes en route: HDBSCAN min_samples/root-bias parameterization (caught by ground-truth
+dogfood); variant-resolution display-key bug that had silently NULLed every color-prefixed
+archetype's variants. Foundation docs rolled forward (SPEC capability → [Built]; ARCHITECTURE CLI
+diagram + discovery.py row + opt-in variant overlays). Deps added: scikit-learn (core), umap-learn
+(optional `discovery` extra).

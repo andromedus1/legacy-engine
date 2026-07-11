@@ -60,12 +60,14 @@ observed → label → analytics → advisory arc.
 │  · generate (consensus|tune|doctor) · export (deck) · viz (deck|meta|matchups|   │
 │    trends|tiers)  [later: goldfish]                                               │
 │  · collection (import|show|status|rebuild) · deck (save|load|list|show|          │
-│    versions|buildable)                                                            │
+│    versions|buildable) · discover (run|list|promote)                              │
 │                                                                                   │
 │  Cross-cutting flags: --since/--until/--regime/--all-time (ban-regime windowing)  │
 │  --my-deck (load a saved UserDeck by name) · report meta: --venues/--by-variant  │
 │  generate consensus: --variant/--players/--strong                                 │
 │  --provenance online|paper (all advise leaves + report matchups/meta)             │
+│  variant overlays (opt-in): report matchups --split-variant · report cards        │
+│    --conditioned [--variant] · report subgroup --winrates                          │
 │  advise positioning: --list-granular (opt-in S_granular deck-as-cards overlay)    │
 └───┬──────────┬───────────┬────────────┬───────────────┬─────────────────────────┘
     │          │           │            │               │
