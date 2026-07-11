@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-card-winrate
 kind: feature
-stage: review
+stage: done
 tags: [analytics, honesty]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
@@ -170,3 +170,14 @@ CLI output before Units 1–4 were implemented, then re-run unchanged after impl
 (`pytest tests/ -q`) = 2724 passed, 1 xfailed (pre-existing, unrelated), 0 failed.
 
 Branch: `feat/conditioned-card-winrate`.
+
+## Review (2026-07-11)
+
+Fresh-context deep review of merged PR #38 (7b94243): **APPROVE**. Verified: gated-additive goldens
+are pinned full-body comparisons; no-fan-out invariant holds under conditioning (filter restricts
+only the deck→cards map; attribution loop untouched; no cross-archetype leakage — proven 3W/1L vs
+4W/6L); conflict_cards strict-sign logic with zero-lift guard; subgroup win% honors all
+compute_match_results conventions (mirrors/byes/draws/ambiguous excluded; Σn test); honest-degrade
+lines always show both magnitudes; hermeticity clean; 84+31 tests green. 2 MINORs noted, no fix
+required (window-resolution pattern parity with the sibling path; sign-conflict lines print past
+--min-tier suppression — deliberate honesty).

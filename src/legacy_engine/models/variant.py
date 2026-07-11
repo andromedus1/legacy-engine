@@ -63,6 +63,12 @@ class DiscoveredCamp(LegacyEngineModel):
     signature_cards: list[str] = Field(default_factory=list)
     n: int
     tier: str
+    # Exact cluster membership from discovery — (tournament_id, deck_idx) per member deck.
+    # apply_split labels by membership when present (signature-card rules cannot reproduce a
+    # 3+-camp partition: real camps share staples, so single-card presence rules overlap and
+    # trip resolve_variant's ambiguity fail-fast). None on hand-edited/legacy staging files,
+    # which fall back to the transient-rules path.
+    member_keys: list[tuple[str, int]] | None = None
 
 
 class DiscoveredSplitRecord(LegacyEngineModel):

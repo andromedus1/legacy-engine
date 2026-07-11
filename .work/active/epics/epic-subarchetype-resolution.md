@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: null
 depends_on: []
@@ -134,3 +134,59 @@ both-camp evolving tier + signature divergence), the double-dipping guard, and t
 
 Ready for `/epic-design` to decompose into the three features (discovery engine → variant-conditioned
 matchup cells → archetype/variant-conditioned card win-rate).
+
+## Completion summary (2026-07-11)
+
+All three features shipped, merged, and review-approved in one autopilot run:
+
+| PR | Feature | Verdict |
+|---|---|---|
+| #36 (0fee3d0) | discovery engine (`discover run\|list\|promote`) | APPROVE (3 minors parked) |
+| #37 (d3fa9f7) | variant-conditioned matchup cells (`--split-variant`) + display-key labeler fix | APPROVE (2 minors fixed in #38) |
+| #38 (7b94243) | conditioned card win-rate + sign-conflict + subgroup win% | APPROVE (2 minors noted) |
+
+Suite 2604 → **2725** (+121 tests). Ground-truth validations: Doomsday rediscovered its validated
+Tempo/Turbo camps + a third established Flow State camp (stability 0.980); Dimir Tempo [Bauble]
+54.3% (n=43 evolving) vs [non-Bauble] 61.8% (n=282 established) vs Show&Tell; Mishra's Bauble
+marginal −0.018 vs within-archetype +0.014 with sign-conflict honest-degrade lines firing.
+Bonus fixes en route: HDBSCAN min_samples/root-bias parameterization (caught by ground-truth
+dogfood); variant-resolution display-key bug that had silently NULLed every color-prefixed
+archetype's variants. Foundation docs rolled forward (SPEC capability → [Built]; ARCHITECTURE CLI
+diagram + discovery.py row + opt-in variant overlays). Deps added: scikit-learn (core), umap-learn
+(optional `discovery` extra).
+
+## Completion-review follow-ups (2026-07-11)
+
+A completion review of the epic surfaced four gaps closing the last acceptance item (the
+Human-confirm hook design decision's "analytics reads as labeled-speculative" clause). All four
+are implemented on `feat/discover-apply`:
+
+1. **`discover apply` (the substantive gap)** — the staging registry could be inspected
+   (`discover list`) but not actually *consumed* as labeled-speculative without promoting it
+   first, contradicting the design decision. Added `apply_split(con, parent, *,
+   discovered_path=None)` in `archetype/discovered.py`: builds the same transient `VariantRule`
+   set `promote_split` would install (top signature card per camp; complement default only in
+   the 2-camp case) and resolves every deck currently labeled `parent` against it, writing
+   `decks.variant` for matches only — non-matching decks stay NULL (`[unlabeled]`, honest). Does
+   NOT touch the curated registry and does NOT flip the staged record's `status` — it stays
+   `candidate`. New CLI leaf `discover apply --archetype X [--db] [--discovered-path]` with
+   `// ` audit lines including an explicit `STAGED CANDIDATE ... speculative provenance; not
+   promoted` banner. `report matchups --split-variant X` now also echoes `// provenance: X has a
+   STAGED (unpromoted) candidate split — variant labels may be speculative-provenance` when the
+   default staging registry holds a candidate record for `X` (wrapped in try/except so a corrupt
+   or absent registry never breaks the report; no-flag path stays byte-identical).
+2. **`report cards --conditioned --vs` silently ignored `--vs`** — now fails loud with a
+   `click.ClickException` naming `--vs` as a tracked follow-up (opponent-specific conditioned
+   values aren't implemented) rather than quietly dropping the flag. The follow-up itself stays
+   tracked, not implemented here — this closes only the silent-drop honesty gap.
+3. **`stage_split` silently overwrote a same-parent staged candidate** — `stage_split` now
+   returns `(new_registry, replaced_record_or_None)` (all callers updated); `discover run` echoes
+   `// replaced prior staged candidate for '<parent>' (was: generated_from=<...>,
+   camps=<names>)` only on a genuine same-parent overwrite, never on a fresh append or a
+   different parent.
+4. **ARCHITECTURE.md drift** — the discovery module row mis-stated its home as a bare
+   `discovery.py` under `archetype/`; corrected to name both `analytics/discovery.py` (pure
+   clustering core) and `archetype/discovered.py` (staging/promotion/apply, as-built), and added
+   `apply` to the CLI diagram + the row's CLI-verbs mention.
+
+Suite 2725 → **2740** (+15 tests), all green (`.venv/bin/python -m pytest tests/ -q`).
