@@ -97,16 +97,21 @@ def test_idempotent_relabel():
 # In the test RULES fixture, matching "Tempo" (the variant of "Delver") gives
 # base_archetype="Tempo" (not "Dimir Tempo" — that's the color-prefixed display label).
 # The variant registry keys on base_archetype, so parent="Tempo" is correct here.
+# Registry parents are the FINAL display label (decks.archetype), not the internal rule
+# base name — the shipped registry always used display labels ("Dimir Tempo"), but this
+# fixture used the base name ("Tempo"), which masked a production bug where the labeler
+# resolved against base_archetype and silently NULLed every color-prefixed archetype's
+# variant (Smallpox worked only because its base == display).
 _VARIANT_REGISTRY = VariantRegistry(
     version="test",
     variants=[
         VariantRule(
-            parent="Tempo",
+            parent="Dimir Tempo",
             name="Daze Variant",
             conditions=[Condition(type="InMainboard", cards=["Daze"])],
         ),
         VariantRule(
-            parent="Tempo",
+            parent="Dimir Tempo",
             name="non-Daze",
             conditions=[Condition(type="DoesNotContain", cards=["Daze"])],
         ),

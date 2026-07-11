@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-discovery-cli
 kind: story
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-subarchetype-resolution-discovery
 depends_on: [epic-subarchetype-resolution-discovery-cluster]

@@ -250,6 +250,28 @@ class CardWinRates:
 
 
 # ---------------------------------------------------------------------------
+# Variant label-split (epic-subarchetype-resolution-matchup-cells)
+# ---------------------------------------------------------------------------
+
+
+def effective_label(
+    archetype: str | None, variant: str | None, split_variant: str | None
+) -> str | None:
+    """Return the row/cell label for a deck, applying an optional single-archetype label-split.
+
+    ``split_variant`` is the ONE archetype (if any) whose ``decks.variant`` camps should be
+    resolved separately.  When ``archetype == split_variant`` this returns the camp label
+    ``f"{archetype} [{variant or 'unlabeled'}]"`` — a ``NULL`` variant becomes the visible
+    ``"unlabeled"`` residue camp rather than disappearing.  In every other case (``split_variant``
+    is ``None``, or ``archetype`` doesn't match it, or ``archetype`` is ``None``) this returns
+    ``archetype`` unchanged — the identity path that keeps the no-flag output byte-identical.
+    """
+    if archetype is None or split_variant is None or archetype != split_variant:
+        return archetype
+    return f"{archetype} [{variant or 'unlabeled'}]"
+
+
+# ---------------------------------------------------------------------------
 # Unit 4: Join query + accumulator
 # ---------------------------------------------------------------------------
 
@@ -268,11 +290,12 @@ dup AS (
 -- uniq_decks: one row per (tournament_id, normalized-player), collapsing any
 -- duplicate deck rows so the rounds LEFT JOIN stays cardinality-safe.  For
 -- unique players this is identical to the raw decks row; for duplicates we
--- return one arbitrary archetype — but those rows are flagged by the dup CTE
--- and dropped before the archetype is ever used.
+-- return one arbitrary archetype/variant — but those rows are flagged by the
+-- dup CTE and dropped before either is ever used.
 uniq_decks AS (
     SELECT tournament_id, lower(trim(player)) AS norm,
-           ANY_VALUE(archetype) AS archetype
+           ANY_VALUE(archetype) AS archetype,
+           ANY_VALUE(variant) AS variant
     FROM decks
     GROUP BY tournament_id, lower(trim(player))
 )\
@@ -283,6 +306,7 @@ WITH
 {_DUP_UNIQ_CTE}
 SELECT t.provenance, r.player1, r.player2, r.result,
        d1.archetype AS arch1, d2.archetype AS arch2,
+       d1.variant AS var1, d2.variant AS var2,
        (du1.norm IS NOT NULL) AS amb1,
        (du2.norm IS NOT NULL) AS amb2
 FROM rounds r
@@ -304,6 +328,7 @@ WHERE (? IS NULL OR t.provenance = ?)
 def compute_match_results(
     con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
     since: str | None = None, until: str | None = None,
+    split_variant: str | None = None,
 ) -> MatchResults:
     """Join rounds→archetype labels, parse results, accumulate directed + marginal tallies.
 
@@ -316,6 +341,13 @@ def compute_match_results(
     Only rounds-bearing events contribute (Leagues have no rounds), so this
     aggregate's n is the matchup-n population — strictly separate from the
     metashare deck-count n.
+
+    ``split_variant`` (opt-in): when set to an archetype name, any deck whose
+    ``archetype`` equals it is relabeled to its ``decks.variant`` camp via
+    ``effective_label`` — on BOTH sides of every pairing — before any tallying
+    happens, so mirror/marginal/directed-cell logic below operates on camp labels
+    as if they were ordinary archetypes.  ``None`` (the default) leaves every label
+    unchanged (byte-identical to the pre-split behavior).
 
     Mirror matches (``arch1 == arch2``) are **not** written to directed
     ``matchups`` cells; their count is carried in
@@ -332,8 +364,10 @@ def compute_match_results(
         _JOIN_SQL, [provenance, provenance, since, since, until, until]
     ).fetchall()
 
-    for _prov, _p1, p2, result, arch1, arch2, amb1, amb2 in rows:
+    for _prov, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
         cov.total_pairings += 1
+        arch1 = effective_label(arch1, var1, split_variant)
+        arch2 = effective_label(arch2, var2, split_variant)
 
         # ── #7 Blank-opponent bye: not a real pairing ───────────────────────
         # A bye row has an empty/None player2; classifying it here prevents the
