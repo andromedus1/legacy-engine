@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-04T22:22:42Z'
+generated_at: '2026-07-11T16:03:47Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -1244,6 +1244,57 @@ documents:
       a swing-floor, or operator-tunable. No evidence forces one; recommend operator-tunable
       with a tier-aware default and surface the marginal-coverage curve so the human
       can see the knee.'
+  docs/briefs/subarchetype-discovery.md:
+    summary: 'Curates the method for full-unsupervised, statistically-self-validating
+      subarchetype discovery for
+
+      legacy-engine. Grounds representation, distance, clustering-algorithm, and validation
+      choices in the
+
+      real corpus (within a parent the effective vocabulary is ~120-260 cards, stratified
+      into a
+
+      ubiquitous core / a ~20-30-card flex band where splits live / a rare noise tail)
+      and in the closest
+
+      MTG prior art (Lucky Paper''s Jaccard→UMAP→HDBSCAN pipeline). Specifies how
+      a variant dimension keys
+
+      into the matchup matrix and per-card win-rate while preserving the Beta-Binomial
+      shrinkage + tier gates.
+
+      '
+    key_findings:
+    - Within a single parent archetype the effective feature space is small (~120-260
+      distinct main cards, not the ~40k global oracle) and stratifies into ubiquitous
+      core (no signal) / ~20-30 flex cards (all the split signal) / a long rare tail
+      (noise) — cluster on the flex band, not raw card-space.
+    - 'The closest production precedent (Lucky Paper''s Commander/Cube Map) matches
+      the recommended shape: deck-card matrix → Jaccard distance → UMAP reduction
+      → HDBSCAN (self-determines k, labels noise) → human-readable validation; recommend
+      TruncatedSVD/LSA or UMAP to ~10-50 dims first because HDBSCAN degrades past
+      ~50-100 dims.'
+    - Copy counts carry real signal (the validated Doomsday split is bimodal on Tamiyo
+      3.70 vs 0.98 copies), so prefer count/TF-IDF representations + cosine/Bray-Curtis
+      over pure binary presence where the split is a quantity difference.
+    - A discovered split is 'real' only if it clears BOTH statistical gates (resampling
+      stability >0.9 / prediction strength >0.8; internal indices as a weak secondary)
+      AND the domain gate the engine already trusts (both camps reach evolving+ sample
+      tier; large signature-card inclusion/copy divergence).
+    - Naive significance testing on clustered data is the double-dipping trap — type
+      I error is extremely inflated even across independent datasets; validate on
+      a held-out split or selective-inference test, never a plain t-test on the same
+      data used to form the clusters.
+    - A statistical cluster-count criterion can disagree with the human-intuitive
+      archetype count (an MDL criterion picked 3 clusters where 5 was 'obvious');
+      because color identity is the loudest low-dimensional signal, drop color-defining
+      lands/duals so splits key on strategy — clustering within an already-color-fixed
+      parent largely pre-empts this.
+    - 'Integration: match_results.py keys on decks.archetype only; add an OPTIONAL
+      variant dimension on one side of a cell (subject_variant × opponent_parent),
+      reusing the existing Beta-Binomial shrinkage + speculative/evolving/established
+      gates unchanged — every split cell surfaces at its own honest tier, never hidden,
+      never blended.'
   docs/briefs/ingestion-archetype-contracts/parent.md:
     summary: 'Synthesizes a 7-specialist deep-research campaign into one buildable
       design for legacy-engine''s

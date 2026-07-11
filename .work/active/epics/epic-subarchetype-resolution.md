@@ -2,13 +2,14 @@
 id: epic-subarchetype-resolution
 kind: epic
 stage: drafting
-tags: [analytics, archetype, needs-brief]
+tags: [analytics, archetype]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
 updated: 2026-07-11
+brief: docs/briefs/subarchetype-discovery.md
 ---
 
 # Subarchetype resolution
@@ -92,7 +93,13 @@ approach.
 
 ## Next
 
-`[needs-brief]` → run `/research-pipeline:brief` (subarchetype discovery: clustering methods, cluster
-validation, auto-naming, and how a variant dimension keys into the matchup matrix + card-win-rate
-without breaking the confidence-tier honesty gates; feed it with `/scout` + `/research`). Then
-`/epic-design` decomposes into the three features above.
+Brief **written** and attested: `docs/briefs/subarchetype-discovery.md` (ARD citation chain clean;
+15 source-direct attestations under `.research/attestation/`, corpus
+`.research/reference/subarchetype-discovery/`). It locks the method — flex-band representation,
+TF-IDF/count + cosine/Bray-Curtis, HDBSCAN-primary (self-determines k, labels noise) on a
+reduced embedding, two-gate validation (resampling stability >0.9 / prediction strength >0.8 **and**
+both-camp evolving tier + signature divergence), the double-dipping guard, and the optional
+`(archetype, variant) × opponent` matchup-cell key that reuses the existing tier gates unchanged.
+
+Ready for `/epic-design` to decompose into the three features (discovery engine → variant-conditioned
+matchup cells → archetype/variant-conditioned card win-rate).
