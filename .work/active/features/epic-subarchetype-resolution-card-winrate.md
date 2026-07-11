@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-card-winrate
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, honesty]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
@@ -60,3 +60,52 @@ From the parent epic's `## Design decisions` (fixed inputs — do not re-ask):
   both magnitudes shown). Add tests proving: (a) archetype-scoped denominator differs from marginal on
   the Bauble case; (b) sign-conflict warning fires when signs disagree; (c) baseline marginal output
   unchanged. Hermetic CLI tests pass `--db <tmp>`.
+
+## Design decisions
+
+Resolved with judgment under autopilot:
+- **Conditioning mechanism**: `compute_card_winrates(..., deck_archetype: str | None = None,
+  deck_variant: str | None = None)` — the attribution loop is untouched; only the deck→cards map
+  (query b) filters to decks matching the archetype (and camp when given). Default `None/None` is
+  byte-identical (gated-additive).
+- **CLI surface**: `report cards --archetype X --conditioned [--variant NAME]` — opt-in flag; the
+  default `report cards` path is unchanged. Conditioned mode prints BOTH numbers per card
+  (marginal + archetype-conditioned) and emits the honest-degrade line
+  `// sign conflict: <card> marginal <±x> vs within-<X> <±y> — archetype-specific keep/cut calls
+  must not use the marginal alone` whenever the two lifts disagree in sign. Both magnitudes always
+  shown; nothing auto-corrected (divergence-as-diagnostic).
+- **Sign-conflict helper**: pure `conflict_cards(marginal: list[CardValue], conditioned:
+  list[CardValue]) -> list[tuple[str, float, float]]` in `analytics/card_value.py` — unit-testable
+  without DB.
+- **Subgroup win%**: `SubgroupSplit` gains optional fields (`wins_with/n_matches_with/
+  wins_without/n_matches_without`, default `None`) + `subgroup_compositions(..., with_winrates:
+  bool = False)`; `report subgroup` prints per-camp win% + match-n + tier when computed, with the
+  thin-sample note. Default off → existing output byte-identical, existing tests untouched.
+- **Variant source**: `decks.variant` (labeler-populated; display-label contract per
+  fix-variant-resolution-display-key). Reuses the matchup-cells plumbing conventions; no new
+  label rewriting needed here (deck-side filter, not cell relabeling).
+
+## Implementation Units
+
+1. `compute_card_winrates(..., deck_archetype=None, deck_variant=None)` — filter the deck-map query
+   by archetype/variant (`analytics/match_results.py`). Byte-identical default.
+2. `conflict_cards(...)` pure helper (`analytics/card_value.py`).
+3. `report cards --conditioned [--variant]` + honest-degrade sign-conflict lines + audit-echo
+   provenance (`cli.py`); `--conditioned` without `--archetype` → ClickException.
+4. `subgroup_compositions(..., with_winrates=False)` + optional SubgroupSplit fields + per-camp
+   win% in `report subgroup` output (`analytics/subgroup.py`, `cli.py`).
+5. Tests (hermetic, `--db <tmp>`): (a) default `report cards` + `report subgroup` byte-identical
+   goldens; (b) the Bauble-shaped scenario — a card in one strong + one weak archetype where the
+   marginal lift is negative but the within-archetype lift is positive → conditioned mode shows
+   both and the sign-conflict line fires; (c) `--variant` narrows the denominator; (d) subgroup
+   win% correctness + thin note.
+
+## Testing
+Pure tests for `conflict_cards`; hermetic CLI/DB tests per Unit 5. Goldens are the load-bearing
+gated-additive proof.
+
+## Risks
+- **Subgroup win% join cost** — bounded: restricted to one archetype's decks; reuses the
+  cardinality-safe CTE pattern.
+- **Camp-conditioned cells will often be speculative** — expected; tier labels + thin notes carry
+  the honesty (surface-labeled, never hidden).
