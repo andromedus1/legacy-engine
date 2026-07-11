@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-dead-imports-v030
 kind: story
-stage: implementing
+stage: review
 tags: [cleanup]
 parent: null
 depends_on: []
@@ -26,3 +26,6 @@ Medium (ruff-verifiable; zero runtime use confirmed)
 
 ## Removal
 Delete cli.py:6582; `ruff check --select F401 --fix tests/test_card_winrates.py`. Surgical only.
+
+## Implementation notes (2026-07-11)
+Both removals applied: cli.py dead noqa'd import deleted; 3 test F401s ruff-fixed. ruff clean; scoped tests green.
