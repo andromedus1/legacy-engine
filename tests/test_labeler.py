@@ -94,9 +94,6 @@ def test_idempotent_relabel():
 # ---------------------------------------------------------------------------
 
 # Minimal variant registry.
-# In the test RULES fixture, matching "Tempo" (the variant of "Delver") gives
-# base_archetype="Tempo" (not "Dimir Tempo" — that's the color-prefixed display label).
-# The variant registry keys on base_archetype, so parent="Tempo" is correct here.
 # Registry parents are the FINAL display label (decks.archetype), not the internal rule
 # base name — the shipped registry always used display labels ("Dimir Tempo"), but this
 # fixture used the base name ("Tempo"), which masked a production bug where the labeler

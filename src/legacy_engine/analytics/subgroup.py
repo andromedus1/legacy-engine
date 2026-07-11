@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import duckdb
 
+from legacy_engine.analytics.match_results import _DUP_UNIQ_CTE, parse_match_result
 from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
 
 
@@ -46,6 +47,14 @@ class SubgroupSplit:
     tier_with: ConfidenceLevel
     tier_without: ConfidenceLevel
     thin: bool          # True when either subgroup is below the speculative floor (n < 30)
+
+    # Optional per-camp match win-rate (epic-subarchetype-resolution-card-winrate).
+    # None unless subgroup_compositions(..., with_winrates=True) was requested — default
+    # off keeps this byte-identical to the pre-existing composition-only result.
+    wins_with: int | None = None          # with-camp decisive match wins
+    n_matches_with: int | None = None     # with-camp decisive matches (wins + losses)
+    wins_without: int | None = None       # without-camp decisive match wins
+    n_matches_without: int | None = None  # without-camp decisive matches (wins + losses)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +96,7 @@ def subgroup_compositions(
     since: str | None = None,
     until: str | None = None,
     provenance: str | None = None,
+    with_winrates: bool = False,
 ) -> SubgroupSplit:
     """Split ``archetype``'s in-window decks on presence of ``signature_card`` in ``board``.
 
@@ -97,6 +107,13 @@ def subgroup_compositions(
     The query does a single pass: partition the archetype's deck pool by whether the deck
     contains ``signature_card`` in ``board``, then aggregate per-card total counts per
     subgroup and divide by the subgroup size to get average copies per deck.
+
+    ``with_winrates`` (opt-in, epic-subarchetype-resolution-card-winrate): when ``True``, also
+    computes each camp's decisive match win-rate (``wins_with``/``n_matches_with``/
+    ``wins_without``/``n_matches_without``) via a second, cardinality-safe pass over ``rounds``
+    — the W/L split that actually decides a keep/cut, which previously had to be computed by
+    hand from the composition diff alone. ``False`` (the default) skips this pass entirely and
+    leaves those four fields ``None`` — byte-identical to the pre-existing behaviour.
     """
     from legacy_engine.generation.consensus import _latest_regime_window
 
@@ -204,6 +221,13 @@ def subgroup_compositions(
     tier_wo = tier_for_sample(n_without)
     thin = tier_w == "speculative" or tier_wo == "speculative"
 
+    wins_with = n_matches_with = wins_without = n_matches_without = None
+    if with_winrates:
+        wins_with, n_matches_with, wins_without, n_matches_without = _camp_winrates(
+            con, archetype, signature_card, board=board,
+            since=since, until=until, provenance=provenance,
+        )
+
     return SubgroupSplit(
         archetype=archetype,
         signature_card=signature_card,
@@ -214,4 +238,135 @@ def subgroup_compositions(
         tier_with=tier_w,
         tier_without=tier_wo,
         thin=thin,
+        wins_with=wins_with,
+        n_matches_with=n_matches_with,
+        wins_without=wins_without,
+        n_matches_without=n_matches_without,
     )
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 — per-camp match win-rate (opt-in; epic-subarchetype-resolution-card-winrate)
+# ---------------------------------------------------------------------------
+
+# All of the archetype's decks in-window, keyed by (tournament_id, normalized player).
+_ARCHETYPE_PLAYERS_SQL = """
+SELECT DISTINCT d.tournament_id, lower(trim(d.player)) AS norm
+FROM decks d
+JOIN tournaments t ON t.id = d.tournament_id
+WHERE d.archetype = ?
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date <  ?)
+"""
+
+# The subset of the archetype's decks that run the signature card on the given board.
+_ARCHETYPE_WITH_SIGNATURE_SQL = """
+SELECT DISTINCT d.tournament_id, lower(trim(d.player)) AS norm
+FROM decks d
+JOIN tournaments t ON t.id = d.tournament_id
+JOIN deck_cards dc ON dc.tournament_id = d.tournament_id AND dc.deck_idx = d.deck_idx
+WHERE d.archetype = ?
+  AND dc.name = ? AND dc.board = ?
+  AND (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date <  ?)
+"""
+
+# Decisive-match resolution restricted to pairings where at least one side is the requested
+# archetype. Reuses _DUP_UNIQ_CTE verbatim (SSOT, same cardinality-safe guards as
+# match_results.compute_card_winrates / analytics.slot_test).
+_CAMP_RESOLVE_SQL = f"""
+WITH
+{_DUP_UNIQ_CTE}
+SELECT r.tournament_id,
+       lower(trim(r.player1)) AS p1,
+       lower(trim(r.player2)) AS p2,
+       r.result,
+       d1.archetype AS a1,
+       d2.archetype AS a2,
+       (du1.norm IS NOT NULL) AS amb1,
+       (du2.norm IS NOT NULL) AS amb2
+FROM rounds r
+JOIN tournaments t ON t.id = r.tournament_id
+LEFT JOIN uniq_decks d1 ON d1.tournament_id = r.tournament_id AND d1.norm = lower(trim(r.player1))
+LEFT JOIN uniq_decks d2 ON d2.tournament_id = r.tournament_id AND d2.norm = lower(trim(r.player2))
+LEFT JOIN dup du1 ON du1.tournament_id = r.tournament_id AND du1.norm = lower(trim(r.player1))
+LEFT JOIN dup du2 ON du2.tournament_id = r.tournament_id AND du2.norm = lower(trim(r.player2))
+WHERE (? IS NULL OR t.provenance = ?)
+  AND (? IS NULL OR t.date >= ?)
+  AND (? IS NULL OR t.date <  ?)
+  AND (d1.archetype = ? OR d2.archetype = ?)
+"""
+
+
+def _camp_winrates(
+    con: duckdb.DuckDBPyConnection,
+    archetype: str,
+    signature_card: str,
+    *,
+    board: str,
+    since: str | None,
+    until: str | None,
+    provenance: str | None,
+) -> tuple[int, int, int, int]:
+    """Compute (wins_with, n_matches_with, wins_without, n_matches_without) for the camp split.
+
+    A decisive match is attributed to whichever camp (with/without the signature card) the
+    ``archetype`` hero deck belongs to. Matches where BOTH sides are ``archetype`` are excluded
+    as an archetype-level mirror — identical to the mirror-exclusion convention in
+    ``match_results.compute_match_results``/``compute_card_winrates`` — rather than resolved at
+    camp granularity, which this feature does not attempt.
+    """
+    all_rows = con.execute(
+        _ARCHETYPE_PLAYERS_SQL,
+        [archetype, provenance, provenance, since, since, until, until],
+    ).fetchall()
+    all_players = {(tid, norm) for tid, norm in all_rows}
+
+    with_rows = con.execute(
+        _ARCHETYPE_WITH_SIGNATURE_SQL,
+        [archetype, signature_card, board, provenance, provenance, since, since, until, until],
+    ).fetchall()
+    with_players = {(tid, norm) for tid, norm in with_rows}
+    without_players = all_players - with_players
+
+    resolve_rows = con.execute(
+        _CAMP_RESOLVE_SQL,
+        [provenance, provenance, since, since, until, until, archetype, archetype],
+    ).fetchall()
+
+    wins_with = losses_with = wins_without = losses_without = 0
+    for tid, p1, p2, result, a1, a2, amb1, amb2 in resolve_rows:
+        if not (p2 and p2.strip()):
+            continue  # bye
+        if amb1 or amb2:
+            continue  # ambiguous normalized name
+        if a1 is None or a2 is None:
+            continue  # unmatched
+        if a1 == a2:
+            continue  # archetype-level mirror — excluded, matches project convention
+        outcome = parse_match_result(result)
+        if outcome is None or outcome.winner is None:
+            continue  # bye/forfeit/draw
+
+        if a1 == archetype:
+            hero_key, hero_won = (tid, p1), outcome.winner == "p1"
+        elif a2 == archetype:
+            hero_key, hero_won = (tid, p2), outcome.winner == "p2"
+        else:
+            continue  # neither side is the requested archetype (shouldn't reach here given WHERE)
+
+        if hero_key in with_players:
+            if hero_won:
+                wins_with += 1
+            else:
+                losses_with += 1
+        elif hero_key in without_players:
+            if hero_won:
+                wins_without += 1
+            else:
+                losses_without += 1
+        # else: hero deck not in either bucket (no deck_cards rows to classify it) — skip.
+
+    return wins_with, wins_with + losses_with, wins_without, wins_without + losses_without

@@ -16,8 +16,10 @@ from legacy_engine.analytics.card_value import (
     card_value_marginal,
     card_value_matchup,
     card_values_vs,
+    conflict_cards,
 )
 from legacy_engine.analytics.match_results import compute_card_winrates
+from legacy_engine.confidence import tier_for_sample
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +255,66 @@ class TestCardValueFrozen:
         cv = card_value_marginal(r, "Brainstorm", "main")
         with pytest.raises((AttributeError, TypeError)):
             cv.n = 999  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Class TestConflictCards — pure helper, Unit 2 of
+# epic-subarchetype-resolution-card-winrate.  No DB access.
+# ---------------------------------------------------------------------------
+
+
+def _cv(card: str, lift: float, n: int = 50) -> CardValue:
+    """Minimal hand-built CardValue for conflict_cards tests (board/opponent don't matter here)."""
+    return CardValue(
+        card=card, board="main", opponent=None,
+        p_raw=0.5 + lift, p_shrunk=0.5 + lift, prior_mean=0.5, lift=lift,
+        n=n, tier=tier_for_sample(n),
+    )
+
+
+class TestConflictCards:
+    def test_sign_conflict_detected(self):
+        """Marginal negative, conditioned positive → flagged as a conflict."""
+        marginal = [_cv("Mishra's Bauble", -0.040)]
+        conditioned = [_cv("Mishra's Bauble", 0.080)]
+        conflicts = conflict_cards(marginal, conditioned)
+        assert conflicts == [("Mishra's Bauble", -0.040, 0.080)]
+
+    def test_same_sign_no_conflict(self):
+        """Both positive (or both negative) → no conflict."""
+        marginal = [_cv("Brainstorm", 0.020)]
+        conditioned = [_cv("Brainstorm", 0.080)]
+        assert conflict_cards(marginal, conditioned) == []
+
+    def test_zero_lift_never_conflicts(self):
+        """A lift of exactly 0.0 (no data / even prior) never conflicts, on either side."""
+        marginal = [_cv("Unseen Card", 0.0), _cv("Another Card", -0.05)]
+        conditioned = [_cv("Unseen Card", 0.05), _cv("Another Card", 0.0)]
+        assert conflict_cards(marginal, conditioned) == []
+
+    def test_card_missing_from_conditioned_is_skipped(self):
+        """A card present in marginal but absent from conditioned is skipped, not flagged."""
+        marginal = [_cv("Ghost Card", -0.10)]
+        conditioned: list[CardValue] = []
+        assert conflict_cards(marginal, conditioned) == []
+
+    def test_both_magnitudes_preserved_never_corrected(self):
+        """Both the marginal AND conditioned lift are returned verbatim — never averaged/blended."""
+        marginal = [_cv("X", -0.040)]
+        conditioned = [_cv("X", 0.597)]
+        conflicts = conflict_cards(marginal, conditioned)
+        assert len(conflicts) == 1
+        card, marg_lift, cond_lift = conflicts[0]
+        assert card == "X"
+        assert marg_lift == -0.040
+        assert cond_lift == 0.597
+
+    def test_sorted_by_descending_divergence_magnitude(self):
+        """Larger |marginal - conditioned| divergences come first."""
+        marginal = [_cv("Small", -0.01), _cv("Large", -0.30)]
+        conditioned = [_cv("Small", 0.02), _cv("Large", 0.30)]
+        conflicts = conflict_cards(marginal, conditioned)
+        assert [c[0] for c in conflicts] == ["Large", "Small"]
+
+    def test_empty_inputs_return_empty(self):
+        assert conflict_cards([], []) == []
