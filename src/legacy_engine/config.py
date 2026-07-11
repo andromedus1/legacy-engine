@@ -17,6 +17,10 @@ RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData rules
 BANLIST_DIR = DATA_DIR / "banlist"    # dated WotC B&R snapshots
 DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
 
+# Discovered-variant staging registry (derived side — written by `discover run`, read by
+# `discover list`/`discover promote`; never hand-curated, unlike VARIANTS_REGISTRY_PATH).
+DISCOVERED_VARIANTS_PATH = DATA_DIR / "variants" / "discovered.json"
+
 # Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
 PACKAGE_DATA_DIR = Path(__file__).parent / "data"
 VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
