@@ -1,7 +1,7 @@
 ---
 id: gate-cruft-dead-imports-v030
 kind: story
-stage: review
+stage: done
 tags: [cleanup]
 parent: null
 depends_on: []

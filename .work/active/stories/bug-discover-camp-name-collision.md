@@ -1,7 +1,7 @@
 ---
 id: bug-discover-camp-name-collision
 kind: story
-stage: review
+stage: done
 tags: [analytics, bug]
 parent: null
 depends_on: []
@@ -32,3 +32,8 @@ Fixed in analytics/discovery.py ≥3-camp naming: collision disambiguates with t
 signature card ("Sphere of Resistance / Ancient Tomb"), deterministic "(idx)" suffix as last
 resort. Regression test (TestCampNameCollision) + verified on the real Lands split. Bound to
 v0.3.0 (defect in the release bundle's own feature, found during release-window dogfooding).
+
+## Review (2026-07-11)
+Fix merged in PR #40 (41cc6e6) with regression test; verified on the real Lands case
+("Sphere of Resistance / Ancient Tomb" disambiguation) and re-verified by the post-fix
+Doomsday re-sweep. Full suite green. Done.
