@@ -487,6 +487,8 @@ def compute_card_winrates(
     provenance: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    deck_archetype: str | None = None,
+    deck_variant: str | None = None,
 ) -> CardWinRates:
     """Compute per-card win-rate aggregates (presence-correlational, not causal).
 
@@ -505,6 +507,14 @@ def compute_card_winrates(
     collation that DuckDB uses for VARCHAR date columns in this schema).
 
     ``provenance`` filters to ``"online"``/``"paper"``; ``None`` = all.
+
+    ``deck_archetype``/``deck_variant`` (opt-in, epic-subarchetype-resolution-card-winrate):
+    restrict the deck→cards map (query b) to decks whose ``archetype`` (and, when given,
+    ``variant``) match — the attribution loop itself is UNCHANGED.  A resolved match still
+    requires both sides to resolve to a labeled deck as before; only the *cards* attributed
+    are scoped to the requested archetype/camp, so a card's win-rate reflects that archetype's
+    own decks rather than every archetype that plays it.  Both ``None`` (the default) is
+    byte-identical to the pre-conditioning query (no filter applied).
     """
     cov = MatchCoverage()
     matchup: dict[tuple[str, str, str], CardMatchupRecord] = {}
@@ -580,6 +590,12 @@ def compute_card_winrates(
     # Fetch deck_cards joined to decks for all relevant (tournament_id, norm) pairs.
     # board values from deck_cards are already "main"/"side" (see store.py), but we
     # normalise defensively via _BOARD_NORM.
+    #
+    # deck_archetype/deck_variant (opt-in): restrict this map to decks matching the
+    # requested archetype/camp.  Decks that don't match simply contribute no rows, so
+    # the Step 3 attribution loop below sees empty card lists for them — the loop
+    # itself never changes.  Both None (the default) leaves the WHERE a no-op via the
+    # "? IS NULL OR ..." guard, byte-identical to the unconditioned query.
     deck_cards_rows = con.execute(
         """
         SELECT dc.tournament_id,
@@ -589,7 +605,10 @@ def compute_card_winrates(
         FROM deck_cards dc
         JOIN decks d ON d.tournament_id = dc.tournament_id
                     AND d.deck_idx = dc.deck_idx
-        """
+        WHERE (? IS NULL OR d.archetype = ?)
+          AND (? IS NULL OR d.variant = ?)
+        """,
+        [deck_archetype, deck_archetype, deck_variant, deck_variant],
     ).fetchall()
 
     # deck_map[(tournament_id, norm)] = list of (board, card_name)

@@ -152,6 +152,42 @@ def card_value_matchup(
     )
 
 
+def conflict_cards(
+    marginal: list[CardValue], conditioned: list[CardValue]
+) -> list[tuple[str, float, float]]:
+    """Find cards whose marginal lift sign disagrees with a conditioned lift's sign.
+
+    ``marginal`` and ``conditioned`` are two ``CardValue`` lists for the same card set (board
+    held constant) — typically the corpus-wide marginal from ``card_value_marginal(r, ...)``
+    vs an archetype/variant-restricted marginal computed from a ``deck_archetype``/
+    ``deck_variant``-conditioned ``CardWinRates`` (epic-subarchetype-resolution-card-winrate).
+    Matched by ``card`` name; a card missing from ``conditioned`` is skipped (nothing to
+    compare).
+
+    A **conflict** is a strict sign disagreement: one lift positive, the other negative. A
+    lift of exactly ``0.0`` (no observations in that slice, or a genuinely even prior) never
+    conflicts — there is nothing to disagree with, and flagging it would manufacture a warning
+    out of absent data.
+
+    Returns ``(card, marginal_lift, conditioned_lift)`` tuples sorted by descending
+    ``abs(marginal_lift - conditioned_lift)`` so the largest divergences surface first.
+
+    Pure / no DB access — unit-testable with hand-built ``CardValue`` lists. This never
+    resolves the conflict or picks a "correct" number (divergence-as-diagnostic): both
+    magnitudes are always returned together for the caller to display honestly.
+    """
+    conditioned_by_card = {cv.card: cv for cv in conditioned}
+    conflicts: list[tuple[str, float, float]] = []
+    for mcv in marginal:
+        ccv = conditioned_by_card.get(mcv.card)
+        if ccv is None:
+            continue
+        if (mcv.lift > 0 and ccv.lift < 0) or (mcv.lift < 0 and ccv.lift > 0):
+            conflicts.append((mcv.card, mcv.lift, ccv.lift))
+    conflicts.sort(key=lambda t: -abs(t[1] - t[2]))
+    return conflicts
+
+
 def card_values_vs(
     r: CardWinRates,
     cards: list[str],

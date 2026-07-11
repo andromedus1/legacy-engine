@@ -682,3 +682,189 @@ class TestCardWinRatesStructure:
     def test_card_marginal_record_n_property(self):
         rec = CardMarginalRecord(card="X", board="main", wins=7, losses=3)
         assert rec.n == 10
+
+
+# ---------------------------------------------------------------------------
+# Class TestArchetypeVariantConditioning — Unit 1 of
+# epic-subarchetype-resolution-card-winrate.  deck_archetype/deck_variant restrict
+# the deck->cards map only; the attribution loop and match resolution are untouched.
+# ---------------------------------------------------------------------------
+
+
+class TestArchetypeVariantConditioning:
+    """Bauble-shaped scenario: a card played by a strong archetype AND a weak archetype.
+
+    Mishra's Bauble is run by both "Dimir Tempo" (wins most of its matches) and
+    "Weak Aggro" (loses most of its matches). The unconditioned marginal pools both,
+    which can read negative overall even though Dimir Tempo's own Bauble decks win
+    far more than they lose — the cross-archetype-contamination bug this feature fixes.
+    """
+
+    def _load_bauble_split(self, con):
+        """Dimir Tempo (strong, Bauble) vs Weak Aggro (weak, Bauble) vs a neutral opponent pool."""
+        from legacy_engine.ingestion import store
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        # Dimir Tempo: 3 Bauble decks, each wins vs a distinct opponent (Opp1..Opp3).
+        dt_wins = [("dt1", "opp1"), ("dt2", "opp2"), ("dt3", "opp3")]
+        # Dimir Tempo: 1 Bauble deck loses (keeps the within-archetype signal non-trivial).
+        dt_losses = [("dt4", "opp4")]
+        # Weak Aggro: 1 Bauble deck wins, 5 lose — drags the pooled marginal down.
+        wa_wins = [("wa1", "opp5")]
+        wa_losses = [("wa2", "opp6"), ("wa3", "opp7"), ("wa4", "opp8"), ("wa5", "opp9"), ("wa6", "opp10")]
+
+        decks = []
+        rounds = []
+        for hero, opp in dt_wins:
+            decks.append({"Player": hero, "Result": "1st",
+                           "Mainboard": [{"Count": 1, "CardName": "Mishra's Bauble"}], "Sideboard": []})
+            decks.append({"Player": opp, "Result": "2nd",
+                           "Mainboard": [{"Count": 4, "CardName": "Filler"}], "Sideboard": []})
+            rounds.append({"Player1": hero, "Player2": opp, "Result": "2-0"})
+        for hero, opp in dt_losses:
+            decks.append({"Player": hero, "Result": "3rd",
+                           "Mainboard": [{"Count": 1, "CardName": "Mishra's Bauble"}], "Sideboard": []})
+            decks.append({"Player": opp, "Result": "4th",
+                           "Mainboard": [{"Count": 4, "CardName": "Filler"}], "Sideboard": []})
+            rounds.append({"Player1": opp, "Player2": hero, "Result": "2-0"})
+        for hero, opp in wa_wins:
+            decks.append({"Player": hero, "Result": "5th",
+                           "Mainboard": [{"Count": 1, "CardName": "Mishra's Bauble"}], "Sideboard": []})
+            decks.append({"Player": opp, "Result": "6th",
+                           "Mainboard": [{"Count": 4, "CardName": "Filler"}], "Sideboard": []})
+            rounds.append({"Player1": hero, "Player2": opp, "Result": "2-0"})
+        for hero, opp in wa_losses:
+            decks.append({"Player": hero, "Result": "7th",
+                           "Mainboard": [{"Count": 1, "CardName": "Mishra's Bauble"}], "Sideboard": []})
+            decks.append({"Player": opp, "Result": "8th",
+                           "Mainboard": [{"Count": 4, "CardName": "Filler"}], "Sideboard": []})
+            rounds.append({"Player1": opp, "Player2": hero, "Result": "2-0"})
+
+        raw = {
+            "Tournament": {
+                "Name": "Bauble Split", "Date": "2026-06-01",
+                "Uri": "https://www.mtgo.com/decklist/bauble-split-2026-06-01",
+                "Formats": "Legacy",
+            },
+            "Decks": decks,
+            "Rounds": rounds,
+            "Standings": [],
+        }
+        tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        dt_players = [h for h, _ in dt_wins + dt_losses]
+        wa_players = [h for h, _ in wa_wins + wa_losses]
+        opp_players = [o for _, o in dt_wins + dt_losses + wa_wins + wa_losses]
+        con.execute(
+            "UPDATE decks SET archetype = 'Dimir Tempo' WHERE tournament_id = ? AND player = ANY(?)",
+            [tid, dt_players],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Weak Aggro' WHERE tournament_id = ? AND player = ANY(?)",
+            [tid, wa_players],
+        )
+        con.execute(
+            "UPDATE decks SET archetype = 'Opponent Pool' WHERE tournament_id = ? AND player = ANY(?)",
+            [tid, opp_players],
+        )
+        return tid
+
+    def test_default_none_none_is_byte_identical_to_unconditioned(self, make_rounds_corpus):
+        """deck_archetype=None, deck_variant=None (the default) reproduces the unconditioned result."""
+        con, _ = make_rounds_corpus(n_repeats=3)
+        r_default = compute_card_winrates(con)
+        r_explicit_none = compute_card_winrates(con, deck_archetype=None, deck_variant=None)
+        assert r_default.matchup == r_explicit_none.matchup
+        assert r_default.marginal == r_explicit_none.marginal
+        con.close()
+
+    def test_conditioned_marginal_pools_only_the_named_archetype(self):
+        """deck_archetype='Dimir Tempo' attributes ONLY Dimir Tempo's Bauble decks."""
+        con = _con()
+        self._load_bauble_split(con)
+
+        r_all = compute_card_winrates(con)
+        r_dt = compute_card_winrates(con, deck_archetype="Dimir Tempo")
+
+        bauble_all = r_all.marginal[("Mishra's Bauble", "main")]
+        bauble_dt = r_dt.marginal[("Mishra's Bauble", "main")]
+
+        # Pooled: 4 wins (3 DT + 1 WA), 6 losses (1 DT + 5 WA) — the contaminated number.
+        assert bauble_all.wins == 4
+        assert bauble_all.losses == 6
+
+        # Conditioned on Dimir Tempo only: 3 wins, 1 loss — the honest within-archetype number.
+        assert bauble_dt.wins == 3
+        assert bauble_dt.losses == 1
+
+        con.close()
+
+    def test_conditioned_on_weak_archetype_flips_the_picture(self):
+        """deck_archetype='Weak Aggro' isolates the weak side: 1 win, 5 losses."""
+        con = _con()
+        self._load_bauble_split(con)
+
+        r_wa = compute_card_winrates(con, deck_archetype="Weak Aggro")
+        bauble_wa = r_wa.marginal[("Mishra's Bauble", "main")]
+        assert bauble_wa.wins == 1
+        assert bauble_wa.losses == 5
+        con.close()
+
+    def test_marginal_lift_negative_conditioned_lift_positive(self):
+        """The sign-conflict fixture: marginal lift < 0, Dimir-Tempo-conditioned lift > 0."""
+        from legacy_engine.analytics.card_value import card_value_marginal
+
+        con = _con()
+        self._load_bauble_split(con)
+
+        r_all = compute_card_winrates(con)
+        r_dt = compute_card_winrates(con, deck_archetype="Dimir Tempo")
+
+        cv_marginal = card_value_marginal(r_all, "Mishra's Bauble", "main")
+        cv_conditioned = card_value_marginal(r_dt, "Mishra's Bauble", "main")
+
+        assert cv_marginal.lift < 0, f"expected a negative pooled lift, got {cv_marginal.lift}"
+        assert cv_conditioned.lift > 0, f"expected a positive within-Dimir-Tempo lift, got {cv_conditioned.lift}"
+        con.close()
+
+    def test_match_resolution_unaffected_by_conditioning(self):
+        """The attribution loop's match resolution (coverage) is identical regardless of the filter —
+        only the deck->cards map (which cards get credited) changes, per the design contract."""
+        con = _con()
+        self._load_bauble_split(con)
+
+        r_all = compute_card_winrates(con)
+        r_dt = compute_card_winrates(con, deck_archetype="Dimir Tempo")
+
+        assert r_all.coverage.decisive_matched == r_dt.coverage.decisive_matched
+        assert r_all.coverage.total_pairings == r_dt.coverage.total_pairings
+        con.close()
+
+    def test_deck_variant_further_restricts_within_archetype(self):
+        """deck_variant narrows the denominator further to a camp within the archetype."""
+        con = _con()
+        tid = self._load_bauble_split(con)
+        # Split Dimir Tempo's own decks into two camps via decks.variant.
+        con.execute(
+            "UPDATE decks SET variant = 'CampA' WHERE tournament_id = ? AND player IN ('dt1', 'dt2')",
+            [tid],
+        )
+        con.execute(
+            "UPDATE decks SET variant = 'CampB' WHERE tournament_id = ? AND player IN ('dt3', 'dt4')",
+            [tid],
+        )
+
+        r_camp_a = compute_card_winrates(con, deck_archetype="Dimir Tempo", deck_variant="CampA")
+        bauble_a = r_camp_a.marginal.get(("Mishra's Bauble", "main"))
+        assert bauble_a is not None
+        # CampA = dt1 (win), dt2 (win) → 2 wins, 0 losses.
+        assert bauble_a.wins == 2
+        assert bauble_a.losses == 0
+
+        r_camp_b = compute_card_winrates(con, deck_archetype="Dimir Tempo", deck_variant="CampB")
+        bauble_b = r_camp_b.marginal.get(("Mishra's Bauble", "main"))
+        assert bauble_b is not None
+        # CampB = dt3 (win), dt4 (loss) → 1 win, 1 loss.
+        assert bauble_b.wins == 1
+        assert bauble_b.losses == 1
+
+        con.close()

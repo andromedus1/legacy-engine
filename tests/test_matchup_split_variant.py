@@ -161,6 +161,27 @@ class TestComputeMatchResultsSplitVariant:
         assert res.matchups[("Control", "Doomsday [Murktide]")].losses == 32
         con.close()
 
+    def test_cross_camp_pairing_is_directed_cell_not_mirror(self):
+        """Two camps of the SAME parent are distinct effective labels: their pairing must
+        produce directed cells, not count as a mirror (review follow-up, PR #37)."""
+        con = _con()
+        tid = _build_camp_corpus(con)
+        # p0 (Doomsday [Murktide]) beats p1 (Doomsday [Painter]) 2-0
+        con.execute(
+            "INSERT INTO rounds VALUES (?, ?, 'p0', 'p1', '2-0')",
+            [tid, 9900],
+        )
+        res = compute_match_results(con, split_variant="Doomsday")
+        assert res.matchups[("Doomsday [Murktide]", "Doomsday [Painter]")].wins == 1
+        assert res.matchups[("Doomsday [Painter]", "Doomsday [Murktide]")].losses == 1
+        # not credited as a mirror for either camp label
+        assert res.mirror_n.get("Doomsday [Murktide]", 0) == 0
+        assert res.mirror_n.get("Doomsday [Painter]", 0) == 0
+        # UNSPLIT run: the same pairing IS a parent-label mirror (both sides 'Doomsday')
+        res_unsplit = compute_match_results(con)
+        assert res_unsplit.mirror_n.get("Doomsday", 0) >= 1
+        con.close()
+
     def test_split_variant_no_op_when_archetype_absent(self):
         """split_variant naming an archetype that doesn't appear in the corpus is a no-op."""
         con = _con()

@@ -1519,10 +1519,139 @@ def _report_cards_contrast(
         con.close()
 
 
+def _report_cards_conditioned(
+    *,
+    archetype: str | None,
+    variant: str | None,
+    board: str,
+    min_tier: str,
+    since: str | None,
+    until: str | None,
+    db: str | None,
+) -> None:
+    """Archetype/variant-conditioned card win-rate (the `report cards --conditioned` path).
+
+    Restricts the win-rate denominator to ``archetype``'s (or ``archetype``+``variant``'s) own
+    decks and prints BOTH the corpus-wide marginal lift and the conditioned lift per card, plus
+    an honest-degrade sign-conflict line whenever the two disagree in sign — divergence-as-
+    diagnostic, never auto-corrected (epic-subarchetype-resolution-card-winrate).
+    """
+    from legacy_engine.analytics.card_value import card_value_marginal, conflict_cards
+    from legacy_engine.analytics.match_results import compute_card_winrates
+    from legacy_engine.generation.consensus import card_frequencies
+    from legacy_engine.ingestion import store
+
+    if not archetype:
+        raise click.ClickException("--conditioned requires --archetype.")
+
+    _TIER_ORDER = {"speculative": 0, "evolving": 1, "established": 2}
+    min_tier_rank = _TIER_ORDER[min_tier.lower()]
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con)
+
+        # Resolve the effective window ONCE so the card list and both win-rate slices share it
+        # (mirrors the non-conditioned path above).
+        if since is None and until is None:
+            from legacy_engine.generation.consensus import _latest_regime_window
+            effective_since, effective_until = _latest_regime_window()
+        else:
+            effective_since, effective_until = since, until
+
+        r_marginal = compute_card_winrates(con, since=effective_since, until=effective_until)
+        r_conditioned = compute_card_winrates(
+            con, since=effective_since, until=effective_until,
+            deck_archetype=archetype, deck_variant=variant,
+        )
+
+        card_freqs = card_frequencies(
+            con, archetype, board=board, since=effective_since, until=effective_until
+        )
+        cards = [cf.name for cf in card_freqs]
+        if not cards:
+            click.echo(f"No cards found for archetype={archetype!r} board={board!r} in the given window.")
+            return
+
+        camp_label = f"{archetype} [{variant}]" if variant else archetype
+
+        marginal_values = [card_value_marginal(r_marginal, c, board) for c in cards]
+        conditioned_values = [card_value_marginal(r_conditioned, c, board) for c in cards]
+        conditioned_by_card = {cv.card: cv for cv in conditioned_values}
+
+        tier_label = "all" if min_tier == "speculative" else f">= {min_tier}"
+        click.echo(
+            f"\n=== Card Win-Rates [board={board}, conditioned={camp_label!r}, tier={tier_label}] ==="
+        )
+        click.echo("NOTE: presence-correlational — NOT causal. See registered 75, not game-by-game play.")
+        window_label = (
+            f"{effective_since or 'start'} → {effective_until or 'now'}"
+            if (effective_since or effective_until)
+            else "all dates"
+        )
+        click.echo(
+            f"Window: {window_label}  |  decisive matches (corpus): {r_marginal.coverage.decisive_matched}  "
+            f"|  decisive matches ({camp_label}): {r_conditioned.coverage.decisive_matched}"
+        )
+        click.echo(
+            f"{'Card':<35}  {'n_marg':>6}  {'lift_marg':>9}  "
+            f"{'n_cond':>6}  {'lift_cond':>9}  {'tier_cond':<12}"
+        )
+        click.echo("-" * 92)
+
+        suppressed = 0
+        printed = 0
+        for mcv in sorted(marginal_values, key=lambda cv: cv.card):
+            ccv = conditioned_by_card.get(mcv.card)
+            if ccv is None:
+                continue
+            tier_rank = _TIER_ORDER[ccv.tier]
+            if tier_rank < min_tier_rank:
+                suppressed += 1
+                continue
+            click.echo(
+                f"{mcv.card:<35}  {mcv.n:>6}  {mcv.lift:>+9.3f}  "
+                f"{ccv.n:>6}  {ccv.lift:>+9.3f}  {ccv.tier:<12}"
+            )
+            printed += 1
+
+        if suppressed > 0:
+            click.echo(
+                f"\n  {suppressed} row(s) below {min_tier!r} gate (conditioned tier) — suppressed "
+                f"(use --min-tier speculative to show all). Data present; not fabricated."
+            )
+        if printed == 0 and suppressed == 0:
+            click.echo("(no card data for the specified slice)")
+
+        conflicts = conflict_cards(marginal_values, conditioned_values)
+        for conflict_card, marg_lift, cond_lift in conflicts:
+            click.echo(
+                f"// sign conflict: {conflict_card} marginal {marg_lift:+.3f} vs "
+                f"within-{camp_label} {cond_lift:+.3f} — archetype-specific keep/cut calls "
+                f"must not use the marginal alone"
+            )
+    finally:
+        con.close()
+
+
 @report.command("cards")
 @click.option("--archetype", default=None, help="Restrict to cards an archetype plays (via card_frequencies).")
 @click.option("--vs", "opponent", default=None, help="Show per-matchup value vs this opponent; else shows marginal.")
 @click.option("--board", default="main", show_default=True, help="Board to query: main or side.")
+@click.option(
+    "--conditioned",
+    is_flag=True,
+    default=False,
+    help="Restrict the win-rate denominator to --archetype's (or --variant's) own decks; "
+    "shows BOTH the corpus-wide marginal lift and the conditioned lift per card, plus a "
+    "sign-conflict warning when they disagree (requires --archetype).",
+)
+@click.option(
+    "--variant",
+    default=None,
+    help="With --conditioned: narrow further to this camp/variant label (decks.variant). "
+    "Requires --conditioned.",
+)
 @click.option(
     "--min-tier",
     type=click.Choice(["speculative", "evolving", "established"], case_sensitive=False),
@@ -1555,6 +1684,8 @@ def report_cards(
     archetype: str | None,
     opponent: str | None,
     board: str,
+    conditioned: bool,
+    variant: str | None,
     min_tier: str,
     since: str | None,
     until: str | None,
@@ -1571,8 +1702,26 @@ def report_cards(
     With --contrast, instead shows the matchup-conditioned sideboard-slot test: for an
     --archetype vs --vs opponent, the WITH-card vs WITHOUT-card win-rate (on --board),
     with Wilson CIs and a Fisher's-exact significance test on the difference.
+
+    With --conditioned, instead shows the archetype-scoped win-rate: --archetype's (or
+    --variant camp's) own decks only, alongside the corpus-wide marginal, with an honest
+    sign-conflict warning when the two disagree (a card can read as a "cut" in the pooled
+    marginal while being a genuine "keep" within one archetype — see
+    epic-subarchetype-resolution-card-winrate).
     """
     _setup_logging(verbose)
+
+    if variant is not None and not conditioned:
+        raise click.ClickException("--variant requires --conditioned.")
+    if conditioned and archetype is None:
+        raise click.ClickException("--conditioned requires --archetype.")
+
+    if conditioned:
+        _report_cards_conditioned(
+            archetype=archetype, variant=variant, board=board, min_tier=min_tier,
+            since=since, until=until, db=db,
+        )
+        return
 
     if contrast:
         # This is the *sideboard*-slot test — default --board to "side" for the contrast path
@@ -1699,6 +1848,13 @@ def report_cards(
     help="Filter to online or paper events (default: all).",
 )
 @click.option(
+    "--winrates",
+    is_flag=True,
+    default=False,
+    help="Also compute each camp's decisive match win-rate (with-subgroup vs without-subgroup) — "
+    "the W/L split that actually decides a keep/cut, not just the copy-count deltas.",
+)
+@click.option(
     "--db",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
@@ -1712,6 +1868,7 @@ def report_subgroup(
     since: str | None,
     until: str | None,
     provenance: str | None,
+    winrates: bool,
     db: str | None,
     verbose: bool,
 ) -> None:
@@ -1720,6 +1877,10 @@ def report_subgroup(
     Shows the avg-copies difference between decks with vs without the signature card,
     sorted by |delta|.  This is the validated discovery tool for identifying sub-archetype
     variants worth registering.
+
+    With --winrates, also shows each camp's decisive match win-rate + match-n + tier (with a
+    thin-sample note) — the W/L split that decides a keep/cut, which otherwise has to be
+    computed by hand from the composition diff alone.
 
     Example: legacy-engine report subgroup --archetype "Dimir Tempo" --signature "Mishra's Bauble"
     """
@@ -1738,6 +1899,7 @@ def report_subgroup(
             since=since,
             until=until,
             provenance=provenance,
+            with_winrates=winrates,
         )
     finally:
         con.close()
@@ -1748,6 +1910,7 @@ def report_subgroup(
 def _print_subgroup_report(split: "SubgroupSplit") -> None:
     """Render a SubgroupSplit as a labeled diff table."""
     from legacy_engine.analytics.subgroup import SubgroupSplit  # noqa: F401
+    from legacy_engine.confidence import tier_for_sample
 
     click.echo(
         f"\n=== Subgroup Diff: {split.archetype!r} split on {split.signature_card!r} "
@@ -1759,6 +1922,22 @@ def _print_subgroup_report(split: "SubgroupSplit") -> None:
     click.echo(
         f"  without-subgroup: n={split.n_without}  [{split.tier_without}]"
     )
+
+    if split.wins_with is not None:
+        # with_winrates=True was requested (n_matches_with/without are set together).
+        n_mw = split.n_matches_with or 0
+        n_mwo = split.n_matches_without or 0
+        wr_with = f"{split.wins_with / n_mw:.3f}" if n_mw else "n/a"
+        wr_without = f"{split.wins_without / n_mwo:.3f}" if n_mwo else "n/a"
+        tier_mw = tier_for_sample(n_mw)
+        tier_mwo = tier_for_sample(n_mwo)
+        click.echo(f"  with-subgroup win%:    {wr_with}  (matches n={n_mw})  [{tier_mw}]")
+        click.echo(f"  without-subgroup win%: {wr_without}  (matches n={n_mwo})  [{tier_mwo}]")
+        if tier_mw == "speculative" or tier_mwo == "speculative":
+            click.echo(
+                "  // ⚠ thin win-rate sample(s) — match-n below 30 (speculative tier); "
+                "win% is present-and-honest, not hidden, but treat the magnitude as unreliable"
+            )
 
     if split.thin:
         click.echo(
