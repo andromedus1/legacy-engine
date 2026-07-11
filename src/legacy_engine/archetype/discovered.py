@@ -83,6 +83,7 @@ def record_from_split(
             ][:TOP_SIGNATURE_CARDS],
             n=camp.n,
             tier=camp.tier,
+            member_keys=[tuple(k) for k in camp.member_keys],
         )
         for camp in split.camps
     ]
@@ -238,9 +239,29 @@ def apply_split(
             f"(staged parents: {staged})"
         )
 
+    camps = split.camps
+
+    # Membership path (preferred): label exactly the decks discovery clustered. This is the
+    # faithful overlay — noise decks stay NULL (surface as [unlabeled]) and overlapping
+    # signature staples cannot trip the rule-ambiguity fail-fast the way transient
+    # single-card rules can on a 3+-camp partition. Falls back to the transient-rules path
+    # only for records without membership (hand-edited/legacy staging files).
+    if all(c.member_keys is not None for c in camps) and any(c.member_keys for c in camps):
+        labeled = 0
+        for camp in camps:
+            for tid, idx in camp.member_keys or []:
+                # DuckDB UPDATE returns the affected-row count; archetype guard keeps a stale
+                # staged record from touching decks that were since relabeled off the parent.
+                (n_updated,) = con.execute(
+                    "UPDATE decks SET variant = ? "
+                    "WHERE tournament_id = ? AND deck_idx = ? AND archetype = ?",
+                    [camp.name, tid, idx, parent],
+                ).fetchone()
+                labeled += int(n_updated)
+        return labeled
+
     rules: list[VariantRule] = []
     defaults: dict[str, str] = {}
-    camps = split.camps
     if len(camps) == 2:
         with_sig = [c for c in camps if c.signature_cards]
         if with_sig:

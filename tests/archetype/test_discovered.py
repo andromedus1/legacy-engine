@@ -338,6 +338,71 @@ class TestApplySplit:
         assert disc.splits[0].status == "candidate"
         con.close()
 
+    def test_membership_path_labels_exact_members_and_leaves_noise_null(self, tmp_path):
+        """Regression (found dogfooding the real Doomsday 3-camp split): camps whose
+        signature staples OVERLAP (a deck runs both camps' top cards) tripped
+        resolve_variant's ambiguity fail-fast under the transient-rules path. With
+        member_keys persisted, apply labels by exact cluster membership instead —
+        overlap is irrelevant and noise decks stay NULL ([unlabeled] downstream)."""
+        con = _con_with_doomsday_decks()
+        split = _split_record(camps=[
+            # overlapping signatures: both camps' top cards appear in deck 0
+            _camp_record(
+                name="Tamiyo, Inquisitive Student",
+                signature_cards=["Tamiyo, Inquisitive Student"],
+                member_keys=[("t1", 0)],
+            ),
+            _camp_record(
+                name="Personal Tutor",
+                signature_cards=["Personal Tutor"],
+                member_keys=[("t1", 1)],
+            ),
+            _camp_record(
+                name="Flow State",
+                signature_cards=["Flow State"],
+                member_keys=[],   # a camp whose members were all elsewhere (edge)
+            ),
+        ])
+        # make deck 0 run BOTH top cards — the exact ambiguity trigger
+        con.execute(
+            "INSERT INTO deck_cards VALUES ('t1', 0, 'main', 'Tamiyo, Inquisitive Student', 4)"
+        )
+        con.execute(
+            "INSERT INTO deck_cards VALUES ('t1', 0, 'main', 'Personal Tutor', 1)"
+        )
+        disc_path = self._staged(tmp_path, split=split)
+
+        n = apply_split(con, "Doomsday", discovered_path=disc_path)
+        assert n == 2
+
+        rows = dict(
+            con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+        )
+        assert rows[0] == "Tamiyo, Inquisitive Student"   # membership, not rule matching
+        assert rows[1] == "Personal Tutor"
+        assert rows[2] is None                            # Control untouched
+        con.close()
+
+    def test_membership_path_archetype_guard_skips_relabeled_decks(self, tmp_path):
+        """A stale staged record whose member deck was since relabeled off the parent
+        must not touch that deck (the UPDATE carries an archetype guard)."""
+        con = _con_with_doomsday_decks()
+        split = _split_record(camps=[
+            _camp_record(name="A", signature_cards=["Murktide Regent"], member_keys=[("t1", 0)]),
+            _camp_record(name="B", signature_cards=["Dark Ritual"], member_keys=[("t1", 1)]),
+        ])
+        con.execute("UPDATE decks SET archetype='Reanimator' WHERE tournament_id='t1' AND deck_idx=1")
+        disc_path = self._staged(tmp_path, split=split)
+
+        n = apply_split(con, "Doomsday", discovered_path=disc_path)
+        assert n == 1   # only deck 0 still belongs to the parent
+        rows = dict(
+            con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+        )
+        assert rows[0] == "A"
+        assert rows[1] is None
+        con.close()
+
     def test_no_staged_split_fails_fast(self, tmp_path):
         con = _con_with_doomsday_decks()
         disc_path = str(tmp_path / "empty.json")
