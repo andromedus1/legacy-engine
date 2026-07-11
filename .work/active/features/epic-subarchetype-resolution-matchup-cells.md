@@ -1,7 +1,7 @@
 ---
 id: epic-subarchetype-resolution-matchup-cells
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-subarchetype-resolution
 depends_on: [epic-subarchetype-resolution-discovery]
@@ -112,3 +112,51 @@ golden check is the load-bearing test (gated-additive contract).
   tested.
 - **Sub-2% camp rows flooding the full matrix print** — only the split archetype is force-included;
   bounded by its own camp count.
+
+## Implementation notes
+
+All 5 units landed as designed; no deviations from this document.
+
+- **Unit 1** — `effective_label(archetype, variant, split_variant)` in `match_results.py`: identity
+  unless `archetype == split_variant`, in which case `f"{archetype} [{variant or 'unlabeled'}]"`.
+  Exported from `legacy_engine.analytics`.
+- **Unit 2** — `compute_match_results(..., split_variant=None)`. `_JOIN_SQL` now selects
+  `d1.variant`/`d2.variant` unconditionally (the shared `uniq_decks` CTE gained
+  `ANY_VALUE(variant) AS variant`, used only by `_JOIN_SQL` — `_CARD_WINRATES_SQL`'s query is
+  untouched by the extra CTE column). Both sides' labels pass through `effective_label` right after
+  unpacking each row, before the bye/ambiguous/mirror/decisive branching — so mirror-detection,
+  marginals, and directed cells all key on the post-split label. `split_variant=None` makes
+  `effective_label` the identity, so every downstream value is unchanged.
+- **Unit 3** — `build_matrix(..., split_variant=None)` and `build_adaptive_matrix(...,
+  split_variant=None)` pass `split_variant` straight through to `compute_match_results`, and both
+  add `_force_prefix = f"{split_variant} ["` to the row-inclusion predicate (`... or
+  arch.startswith(_force_prefix)`) so camp rows bypass `min_row_share`. For the adaptive horizon, a
+  new pure helper `_base_archetype(label, split_variant)` strips a matching camp label back to the
+  parent archetype before calling `archetype_valid_since` (which only knows plain
+  `decks.archetype` values), then the resulting `valid_since` is broadcast back to every camp of
+  that parent. `split_variant=None` makes `_base_archetype` the identity, so `build_adaptive_matrix`'s
+  no-flag path is byte-identical (verified: the `archetype_valid_since` call site now runs over
+  `sorted({_base_archetype(a, None) for a in included})`, which reduces to `included` itself since
+  it was already a sorted, deduplicated list).
+- **Unit 4** — `report matchups --split-variant <ARCHETYPE>` (threaded through
+  `advisory.window.build_advisory_inputs`, which every other `build_advisory_inputs` call site
+  leaves at its new `split_variant=None` default). Prints `// split-variant: <arch> (camps from
+  decks.variant; unlabeled residue shown)` once per invocation, right after the data-freshness
+  echo, only when the flag is passed. `--a`/`--b` (head-to-head) needed no code change — camp
+  labels are just archetype strings once they're in `matrix.archetypes`, and `lookup_head_to_head`
+  already does a plain dict lookup.
+- **Unit 5** — new test file `tests/test_matchup_split_variant.py` (24 tests, existing test files
+  untouched). One shared single-tournament corpus (`_build_camp_corpus`, rounds repeated against 4
+  deck rows — same technique as `test_matchup.py`'s `_LARGE` fixture) gives three Doomsday camps
+  (Murktide n=32/evolving, Painter n=1/below the 2% floor, NULL-variant "unlabeled" n=3) vs a
+  Control opponent, covering (a) the golden no-flag/byte-identical check — asserted both at the
+  `build_matrix` level and at the CLI text level (no bracketed label or audit line leaks in without
+  the flag, even though `decks.variant` is populated in the DB) — (b) parent-row-absent/camp-rows
+  correct n+tier, (c) the unlabeled residue row, and (d) force-include below `min_row_share` (plus a
+  negative case: an unrelated non-split fringe archetype pair stays excluded — force-include is
+  scoped to the split archetype only). (e) reuses `test_adaptive_regime.py`'s Entomb-ban two-regime
+  pattern with the Doomsday archetype relabeled to carry a variant, confirming the camp inherits the
+  parent's `valid_since` and its windowed cell is a strict post-ban subset of the full-corpus cell.
+
+No product bugs were found. Full suite: 2691 passed, 1 xfailed (pre-existing, unrelated) — no
+regressions.

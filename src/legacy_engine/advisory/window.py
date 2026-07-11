@@ -150,17 +150,24 @@ def build_advisory_inputs(
     *,
     provenance: str | None = None,
     min_row_share: float = 0.02,
+    split_variant: str | None = None,
 ):
     """Build the matchup matrix (+ field window + audit) per the resolved window mode.
 
     - ``adaptive`` → ``build_adaptive_matrix`` + field over the current ban regime.
     - ``uniform``  → ``build_matrix`` over ``win.since/until``; field shares that same window.
     - ``full``     → full-corpus matrix + full-corpus field.
+
+    ``split_variant`` (opt-in, default ``None``) passes through to the matrix builder so
+    ``split_variant``'s decks are relabeled to their ``decks.variant`` camps; ``None`` is
+    byte-identical to the pre-split behavior.
     """
     from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
 
     if win.mode == "adaptive":
-        adaptive = build_adaptive_matrix(con, provenance=provenance, min_row_share=min_row_share)
+        adaptive = build_adaptive_matrix(
+            con, provenance=provenance, min_row_share=min_row_share, split_variant=split_variant,
+        )
         cur_since, cur_until = resolve_regime("current")
         return AdvisoryInputs(
             matrix=adaptive.matrix,
@@ -171,6 +178,6 @@ def build_advisory_inputs(
 
     matrix = build_matrix(
         con, provenance=provenance, min_row_share=min_row_share,
-        since=win.since, until=win.until,
+        since=win.since, until=win.until, split_variant=split_variant,
     )
     return AdvisoryInputs(matrix=matrix, field_since=win.since, field_until=win.until, audit=())
