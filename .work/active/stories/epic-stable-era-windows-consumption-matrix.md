@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-consumption-matrix
 kind: story
-stage: review
+stage: done
 tags: [analytics, advisory]
 parent: epic-stable-era-windows-consumption
 depends_on: [epic-stable-era-windows-consumption-adapter]
