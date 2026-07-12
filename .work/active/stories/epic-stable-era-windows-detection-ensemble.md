@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-detection-ensemble
 kind: story
-stage: review
+stage: done
 tags: [analytics, methodology]
 parent: epic-stable-era-windows-detection
 depends_on: [epic-stable-era-windows-detection-detectors, epic-stable-era-windows-detection-bocpd]
