@@ -175,8 +175,14 @@ def build_entity_series(
     provenance: str | None = None,
     min_entity_decks: int = 100,
     min_camp_decks: int = 30,
+    force_bucket_weeks: int | None = None,
 ) -> dict[str, EntitySeries]:
     """Build every qualifying entity's bucketed series from three batched DuckDB scans.
+
+    ``force_bucket_weeks`` overrides the density-adaptive bucket width for every entity —
+    the drift alarm uses ``force_bucket_weeks=1`` because it is a RECENCY instrument: a 4-week
+    entity's density-adaptive bucketing can leave a whole ban cliff inside the incomplete
+    trailing bucket, invisible to any complete-bucket tail check (the Candelabra/Tron case).
 
     ``min_entity_decks`` (default 100, the established-tier floor) gates parent archetypes;
     ``min_camp_decks`` (default 30, the evolving-tier floor) gates camp entities — both exposed
@@ -343,7 +349,7 @@ def build_entity_series(
     for entity in sorted(entity_parent):
         weekly_counts = [entity_week_decks[entity].get(w, 0) for w in canonical_weeks]
         median_weekly = statistics.median(weekly_counts) if weekly_counts else 0.0
-        bucket_weeks = _bucket_weeks_for(median_weekly)
+        bucket_weeks = force_bucket_weeks or _bucket_weeks_for(median_weekly)
 
         chunks = [
             canonical_weeks[i:i + bucket_weeks]
