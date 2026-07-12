@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-detection-series
 kind: story
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-stable-era-windows-detection
 depends_on: []
