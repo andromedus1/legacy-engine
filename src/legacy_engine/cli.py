@@ -844,13 +844,21 @@ def report_matchups(
                 cell = lookup_head_to_head(matrix, archetype_a, archetype_b)
                 _print_head_to_head(matrix, archetype_a, archetype_b, cell)
             else:
-                _print_matchup_matrix(matrix)
+                _print_matchup_matrix(matrix, split_variant=split_variant)
     finally:
         con.close()
 
 
-def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matchup.MatchupMatrix
-    """Render a matchup matrix as a labeled text table."""
+def _print_matchup_matrix(matrix, *, split_variant: str | None = None) -> None:  # type: legacy_engine.analytics.matchup.MatchupMatrix
+    """Render a matchup matrix as a labeled text table.
+
+    ``split_variant`` (opt-in, default ``None``): when set, appends one audit-echo line per
+    non-mirror cell touching a camp row (``f"{split_variant} ["`` label) naming its hierarchical
+    ``prior_source`` (epic-stable-era-windows-shrinkage, Unit 3 AC "camp rows show prior
+    labels") — the shrunk%|raw% grid cells themselves are unchanged, since the honesty carrier
+    (triple-display) already covers the estimate; this only surfaces WHAT the shrunk number was
+    anchored to. ``None`` is byte-identical to the pre-epic rendering (no lines added).
+    """
     from legacy_engine.analytics.metashare import _is_never_other
 
     basis_label = matrix.provenance if matrix.provenance else "all"
@@ -876,6 +884,9 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
     click.echo(header)
     click.echo("-" * len(header))
 
+    _camp_prefix = f"{split_variant} [" if split_variant is not None else None
+    prior_lines: list[str] = []
+
     for row_arch in archetypes:
         row_label = f"{row_arch} {_UNCLASSIFIED_MARKER}" if _is_never_other(row_arch) else row_arch
         row_parts = [row_label.ljust(row_label_width)]
@@ -895,10 +906,21 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
                 else:
                     part = "n/a"
             row_parts.append(part.ljust(col_width))
+            if (
+                _camp_prefix is not None
+                and cell is not None
+                and not cell.is_mirror
+                and row_arch.startswith(_camp_prefix)
+                and cell.prior_source is not None
+            ):
+                prior_lines.append(f"// prior: {row_arch} vs {col_arch}: {cell.prior_source}")
         click.echo("  ".join(row_parts))
 
     if has_unclassified:
         click.echo(_UNCLASSIFIED_FOOTNOTE)
+
+    for line in prior_lines:
+        click.echo(line)
 
 
 def _print_head_to_head(
@@ -932,6 +954,8 @@ def _print_head_to_head(
     click.echo(f"    n              = {cell.n}")
     click.echo(f"    wins           = {cell.wins}")
     click.echo(f"    tier           = {cell.tier}")
+    if cell.prior_source is not None:
+        click.echo(f"    prior          = {cell.prior_source}")
 
     if not cell.display:
         click.echo(

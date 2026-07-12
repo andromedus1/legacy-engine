@@ -466,6 +466,73 @@ class TestBuildDeckDashboard:
         assert len(dash.tiles) == 6
 
 
+class TestDeckDashboardEraAwareWindows:
+    """epic-stable-era-windows-mixed-horizon-consumers: Tile B (matchup spread) is era-aware
+    (`build_adaptive_matrix`) while meta-share/positioning/trends resolve via the single
+    ban-regime window (`resolve_regime`). Neither is reconciled to the other — each must be
+    labeled with its own basis (never silently blended) — and both tiles honest-degrade to
+    identical output when there is no era data at all."""
+
+    def test_seeded_era_diverges_from_ban_regime_window_and_is_labeled(self, make_rounds_corpus):
+        """A seeded entity_eras row for Control changes Tile B's per-opponent window (via
+        build_adaptive_matrix) to the era date, while the primer's field-basis window stays the
+        ban-regime window (`regime='all-time'` -> full corpus) — a genuine divergence — and the
+        primer text explicitly names BOTH horizon sources (labels the difference)."""
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+        from legacy_engine.viz.deck_dashboard import build_deck_dashboard
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        try:
+            era_since = "2025-12-25"  # arbitrary date the real banlist would not produce
+            write_entity_eras(
+                con,
+                {"Control": EntityEras(entity="Control", stable_since=era_since, boundaries=(), inherited_from_parent=False)},
+                {}, {},
+                run_meta={
+                    "provenance": None, "alpha": 0.05, "run_at": "2026-07-12T00:00:00+00:00",
+                    "post_boundary_decks": {}, "parent": {"Control": "Control"},
+                },
+            )
+            dash = build_deck_dashboard(con, "Control", regime="all-time", seed=42)
+        finally:
+            con.close()
+
+        matchup_spec = next(t for t in dash.tiles if t.title == "Matchup Spread").spec
+        rows = matchup_spec["data"]["values"]
+        combo_row = next(r for r in rows if r["opponent"] == "Combo")
+        # Tile B picked up the era-aware window (not the full-corpus ban-regime window).
+        assert combo_row["window"] == era_since
+
+        primer_html = dash.tiles[0].html
+        # field basis names the ban-regime window (regime='all-time' -> full corpus / earliest)
+        assert "ban-regime" in primer_html
+        # AND explicitly documents that Tile B uses its own, potentially-differing horizon.
+        assert "per-entity era-aware horizon" in primer_html
+        assert "may legitimately differ" in primer_html
+
+    def test_byte_identical_without_era_data(self, make_rounds_corpus):
+        """No entity_eras table at all -> Tile B's windows are exactly the pre-epic ban-only
+        `archetype_valid_since` fallback (full corpus for an unaffected pair) — proven by
+        comparing against a direct build_adaptive_matrix call, not by re-checking a constant."""
+        from legacy_engine.analytics.matchup import build_adaptive_matrix
+        from legacy_engine.viz.deck_dashboard import build_deck_dashboard
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        try:
+            dash = build_deck_dashboard(con, "Control", regime="all-time", seed=42)
+            matchup_spec = next(t for t in dash.tiles if t.title == "Matchup Spread").spec
+            rows = matchup_spec["data"]["values"]
+            combo_row = next(r for r in rows if r["opponent"] == "Combo")
+
+            adaptive = build_adaptive_matrix(con)
+            expected_window = adaptive.cell_windows.get(("Control", "Combo")) or "full corpus"
+            assert combo_row["window"] == expected_window
+            assert all(h.source == "ban-only" for h in adaptive.horizon_meta.values())
+        finally:
+            con.close()
+
+
 def test_trends_tile_capped_to_top_k_with_subject(make_rounds_corpus):
     """Readability fix: dashboard trends tile is limited to top-K lines + the subject deck."""
     from legacy_engine.viz.deck_dashboard import build_deck_dashboard, _TRENDS_TOP_K

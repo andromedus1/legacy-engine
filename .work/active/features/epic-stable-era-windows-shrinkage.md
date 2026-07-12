@@ -1,14 +1,14 @@
 ---
 id: epic-stable-era-windows-shrinkage
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, methodology]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-consumption]
 release_binding: null
 gate_origin: null
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-12
 ---
 
 # Hierarchical cell shrinkage: parent-anchored + cross-era priors as default
@@ -139,3 +139,14 @@ data.
   records in the split pass — assert, don't clamp silently).
 - **Chained shrinkage compounds** — the marginal′ anchor moves every cell slightly; the goldens
   quantify the shift and the raw/n-identical property bounds the blast radius.
+
+## Closing note (2026-07-12)
+
+All three items shipped, each its own commit on `feature/stable-era-shrinkage`:
+`epic-stable-era-windows-shrinkage-hierarchy` (Units 1+2), `epic-stable-era-windows-shrinkage-goldens`
+(Unit 3), `epic-stable-era-windows-mixed-horizon-consumers` (Unit 4). Full detail — files touched,
+worked-example numbers, golden diff, per-item test counts — lives in each story's own
+"Implementation notes" section. Full suite green throughout (`.venv/bin/python -m pytest -q`,
+final state 2950 passed / 1 pre-existing xfail). No production bugs found or parked. LCO
+subtraction's `assert >= 0` is structurally unreachable on real data (documented in
+`_camp_hierarchy_inputs`'s docstring) rather than force-tripped by a test.

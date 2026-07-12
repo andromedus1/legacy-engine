@@ -3540,7 +3540,7 @@ class SideboardPackage:
     value_informed: bool = False
     plan_window: tuple[str | None, str | None] = (None, None)
     # --- Additive fields (regime-windowing-consistency) ---
-    plan_window_label: str = ""                              # "" = not set; "adaptive (per-opponent ban-aware)" in adaptive mode
+    plan_window_label: str = ""                              # "" = not set; "adaptive (per-opponent era-aware)" in adaptive mode (epic-stable-era-windows-mixed-horizon-consumers: resolved via analytics.eras.consume.era_horizons, the same adapter build_adaptive_matrix uses — honest-degrades to the pre-epic ban-only archetype_valid_since window when there is no era data)
     plan_windows: dict[str, tuple[str | None, str | None]] = dc_field(default_factory=dict)  # per-opponent audit
     # --- Additive fields (feature-collection-aware-engine) ---
     # owned: annotation for each recommended card (empty dict → not collection-aware).
@@ -3816,8 +3816,16 @@ def recommend_sideboard(
     plan_window_label: str = ""
     computed_adaptive_windows: dict[str, tuple[str | None, str | None]] | None = None
 
-    # Fix B: build per-opponent adaptive windows (ban-aware, mirrors build_adaptive_matrix).
-    # Pool each opponent's window back to max(valid_since[deck_arch], valid_since[opp]).
+    # Fix B: build per-opponent adaptive windows, resolved via the SAME era-horizon adapter
+    # build_adaptive_matrix uses (epic-stable-era-windows-mixed-horizon-consumers): one horizon
+    # source per recommendation, rather than this surface staying on the pre-epic ban-only
+    # `archetype_valid_since` while the slot-ROI matrix below (`build_adaptive_matrix`) already
+    # reads era-aware `stable_since` horizons. `era_horizons` honest-degrades to the identical
+    # `archetype_valid_since` ban-only fallback when `entity_eras` has no data at all (its
+    # ban-only branch calls the very same function with the same arguments — see
+    # `analytics.eras.consume.era_horizons`), so this is BYTE-IDENTICAL to the pre-epic behavior
+    # until `eras run` actually populates era data. Pool each opponent's window back to
+    # max(valid_since[deck_arch], valid_since[opp]).
     # Only computed when:
     #   - adaptive=True and archetype is set, AND
     #   - no explicit since/until was passed by the caller (same rule as resolve_advisory_window:
@@ -3838,9 +3846,10 @@ def recommend_sideboard(
             for arch, _ in sorted(field.shares.items(), key=lambda kv: kv[1], reverse=True)
         ][:_top_k]
         try:
-            from legacy_engine.analytics.affectedness import archetype_valid_since as _avs
+            from legacy_engine.analytics.eras.consume import era_horizons
             all_archetypes_to_check = list({archetype, *_top_opponents})
-            valid_since_map = _avs(con, all_archetypes_to_check)
+            horizon_meta, _era_audit = era_horizons(con, all_archetypes_to_check)
+            valid_since_map = {a: h.since for a, h in horizon_meta.items()}
             deck_valid_since = valid_since_map.get(archetype)
 
             computed_adaptive_windows = {}
@@ -3855,7 +3864,7 @@ def recommend_sideboard(
                 computed_adaptive_windows[archetype] = (deck_valid_since, None)
 
             plan_window = (None, None)  # no single uniform window in adaptive mode
-            plan_window_label = "adaptive (per-opponent ban-aware)"
+            plan_window_label = "adaptive (per-opponent era-aware)"
             log.debug(
                 "recommend_sideboard: adaptive windows for %d opponents (deck_arch=%s, valid_since=%s)",
                 len(_top_opponents), archetype, deck_valid_since,

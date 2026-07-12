@@ -9,6 +9,9 @@ Units covered:
 - Unit 2: Stats primitives — ``wilson_or_jeffreys_ci``, ``beta_binomial_shrink``
 - Unit 4: Cell builder — ``build_cell``, ``build_mirror_cell``
 - Unit 5: Matrix builder — ``MatchupMatrix``, ``build_matrix``
+- epic-stable-era-windows-shrinkage Units 1+2: hierarchical + cross-era cell prior —
+  ``_cell_prior``, ``_camp_hierarchy_inputs`` (Unit 1); ``build_adaptive_matrix``'s
+  ``_cross_era_prior`` (Unit 2)
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from legacy_engine.models.matchup import MatchupCell
 
 if TYPE_CHECKING:
     from legacy_engine.analytics.eras.consume import EraHorizon
+    from legacy_engine.analytics.match_results import MatchResults
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -110,23 +114,47 @@ def beta_binomial_shrink(
 # ---------------------------------------------------------------------------
 
 
-def build_cell(archetype_a: str, archetype_b: str, wins: int, n: int) -> MatchupCell:
+def build_cell(
+    archetype_a: str,
+    archetype_b: str,
+    wins: int,
+    n: int,
+    *,
+    prior_mean: float = 0.5,
+    prior_source: str | None = None,
+) -> MatchupCell:
     """Build a directed ``MatchupCell`` for ``archetype_a`` vs ``archetype_b``.
 
     Computes raw win-rate, shrunk estimate, CI, tier, and display flag in one
     place so consumers (charts, advisory) never re-derive the gate logic.
-    Both ``p_raw`` and ``p_shrunk`` are always populated when ``n > 0`` (the
-    brief forbids showing shrinkage without the raw number).
+    ``p_raw`` is always populated when ``n > 0`` (the brief forbids showing
+    shrinkage without the raw number — but the ``display`` gate, not ``p_raw``
+    presence, is what hides speculative cells from the UI).
+
+    ``prior_mean``/``prior_source`` (epic-stable-era-windows-shrinkage, additive default
+    ``prior_mean=0.5``/``prior_source=None`` — byte-identical to the pre-hierarchy flat prior
+    for any caller that doesn't pass one): the Beta prior ``p_shrunk`` shrinks toward, and its
+    human-readable provenance label. ``build_matrix``/``build_adaptive_matrix`` always pass an
+    explicit hierarchical prior (see ``_cell_prior``); direct callers (tests, other consumers
+    building hand-made cells) keep the flat-0.5 default.
+
+    ``n == 0``: ``p_raw``/``ci_low``/``ci_high`` stay ``None`` (no observations — an honest "no
+    data" for the raw record), but ``p_shrunk`` becomes ``prior_mean`` itself (design decision:
+    "n=0 cells return the prior mean with the source label" — never ``None``-only, since the
+    prior IS the model's best belief absent data). This is never shown as a confident number to
+    users because ``display`` is already ``False`` for ``n < 30`` (which includes ``n == 0``);
+    the raw-must-travel-with-shrunk honesty rule is enforced at the ``display`` gate, not by
+    hiding ``p_shrunk``.
     """
     tier = tier_for_sample(n)
     display = n >= DISPLAY_GATE_N
     if n > 0:
         p_raw: float | None = wins / n
-        p_shrunk: float | None = beta_binomial_shrink(wins, n)
+        p_shrunk: float | None = beta_binomial_shrink_to(wins, n, prior_mean=prior_mean)
         ci_low, ci_high = wilson_or_jeffreys_ci(wins, n)
     else:
         p_raw = None
-        p_shrunk = None
+        p_shrunk = prior_mean
         ci_low, ci_high = (None, None)
     return MatchupCell(
         archetype_a=archetype_a,
@@ -140,6 +168,8 @@ def build_cell(archetype_a: str, archetype_b: str, wins: int, n: int) -> Matchup
         tier=tier,
         is_mirror=False,
         display=display,
+        prior_mean=prior_mean,
+        prior_source=prior_source,
     )
 
 
@@ -163,6 +193,121 @@ def build_mirror_cell(archetype: str, n: int) -> MatchupCell:
         is_mirror=True,
         display=n >= DISPLAY_GATE_N,
     )
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical + cross-era cell prior (epic-stable-era-windows-shrinkage, Units 1+2)
+# ---------------------------------------------------------------------------
+
+
+def _camp_hierarchy_inputs(
+    mr: "MatchResults",
+    labels: "list[str]",
+    split_variant: str | None,
+) -> "tuple[dict[str, float], dict[tuple[str, str], tuple[int, int]], dict[str, str]]":
+    """Derive one window's hierarchy inputs (marginals, LCO parent cells, camp_of) from ``mr``.
+
+    Everything is computed from the SAME ``MatchResults`` scan the cells themselves are drawn
+    from (never a different/wider window) so the prior stays internally consistent with the data
+    it anchors — using a full-corpus marginal to shrink a truncated post-era cell would silently
+    reintroduce the stale-era mixing this epic exists to remove.
+
+    ``marginals``: ``label -> shrunk marginal WR`` (``beta_binomial_shrink`` toward 0.5, strength
+    ``SHRINK_STRENGTH``) for every label in ``labels`` PLUS — when ``split_variant`` is set — the
+    parent archetype itself (``split_variant``, which never appears in ``labels`` once split,
+    since its row is replaced by camp rows). The parent's raw wins/losses are the exact sum over
+    every camp sibling's own ``ArchetypeRecord`` in ``mr.archetypes`` (a camp label always starts
+    ``f"{split_variant} ["`` — this includes camps below the row-inclusion floor, since
+    ``compute_match_results`` tallies every label regardless of inclusion): because a match
+    between two DIFFERENT camps of the same split is a directed win/loss pair at the camp level
+    but a mirror (+1 win AND +1 loss to the SAME label) at the unsplit parent level, summing wins
+    and losses separately across all camp siblings reproduces the unsplit parent's marginal
+    exactly, with zero extra DB scans.
+
+    ``parent_cells_lco``: ``(camp_label, opponent) -> (lco_wins, lco_n)`` for every camp sibling
+    of ``split_variant`` against every OTHER label in ``labels`` that is not itself a sibling camp
+    (a camp-vs-camp pairing has no meaningful unsplit "parent cell" — it was a mirror pre-split —
+    so it is simply absent here; ``_cell_prior`` falls back to the marginal chain for it). Parent
+    totals vs ``opponent`` are the sum of every sibling's ``(sibling, opponent)`` tally in
+    ``mr.matchups``; LCO = parent totals minus the camp's own tally. Asserted ``>= 0`` (never
+    silently clamped) — a negative result would mean camp counts aren't a true partition of the
+    parent's, a data-integrity bug worth crashing loudly on.
+
+    ``camp_of``: ``label -> _base_archetype(label, split_variant)`` for every label in ``labels``.
+    """
+    marginals: dict[str, float] = {}
+    for label in labels:
+        rec = mr.archetypes.get(label)
+        w, n = (rec.wins, rec.n) if rec is not None else (0, 0)
+        marginals[label] = beta_binomial_shrink(w, n)
+
+    camp_of = {label: _base_archetype(label, split_variant) for label in labels}
+
+    parent_cells_lco: dict[tuple[str, str], tuple[int, int]] = {}
+    if split_variant is not None:
+        camp_prefix = f"{split_variant} ["
+        siblings = sorted(a for a in mr.archetypes if a.startswith(camp_prefix))
+        if siblings:
+            p_wins = sum(mr.archetypes[s].wins for s in siblings)
+            p_losses = sum(mr.archetypes[s].losses for s in siblings)
+            marginals[split_variant] = beta_binomial_shrink(p_wins, p_wins + p_losses)
+
+            sibling_set = set(siblings)
+            for opponent in labels:
+                if opponent in sibling_set:
+                    continue  # camp-vs-camp: no unsplit parent-cell reference (see docstring)
+                parent_wins = sum(
+                    mr.matchups[(s, opponent)].wins
+                    for s in siblings if (s, opponent) in mr.matchups
+                )
+                parent_n = sum(
+                    mr.matchups[(s, opponent)].n
+                    for s in siblings if (s, opponent) in mr.matchups
+                )
+                for camp in siblings:
+                    tally = mr.matchups.get((camp, opponent))
+                    camp_wins = tally.wins if tally is not None else 0
+                    camp_n = tally.n if tally is not None else 0
+                    lco_wins = parent_wins - camp_wins
+                    lco_n = parent_n - camp_n
+                    assert lco_wins >= 0 and lco_n >= 0, (
+                        f"LCO subtraction went negative for {camp!r} vs {opponent!r}: "
+                        f"parent=({parent_wins},{parent_n}) camp=({camp_wins},{camp_n}) — "
+                        "camp counts are not a partition of the parent's"
+                    )
+                    parent_cells_lco[(camp, opponent)] = (lco_wins, lco_n)
+
+    return marginals, parent_cells_lco, camp_of
+
+
+def _cell_prior(
+    subject: str,
+    opponent: str,
+    *,
+    marginals: "dict[str, float]",
+    parent_cells_lco: "dict[tuple[str, str], tuple[int, int]]",
+    camp_of: "dict[str, str]",
+) -> tuple[float, str]:
+    """Resolve the hierarchical prior (mean, source label) for the directed cell ``subject`` vs
+    ``opponent`` (epic-stable-era-windows-shrinkage's cell-prior chain).
+
+    Camp cell (``camp_of[subject] != subject``) WITH a leave-camp-out parent reference: shrinks
+    toward that LCO-parent cell (itself shrunk toward the parent archetype's own shrunk marginal)
+    — source ``"parent cell (leave-camp-out)"``. Every other case (a plain, non-split archetype
+    cell; or a camp cell with no LCO reference, e.g. a camp-vs-sibling-camp pairing) shrinks
+    toward the subject's OWN shrunk marginal — source ``"marginal"``.
+
+    Pure — no DB access; ``marginals``/``parent_cells_lco``/``camp_of`` are the precomputed
+    outputs of ``_camp_hierarchy_inputs`` over one window's ``MatchResults``.
+    """
+    base = camp_of.get(subject, subject)
+    if base != subject:
+        lco = parent_cells_lco.get((subject, opponent))
+        if lco is not None:
+            lco_wins, lco_n = lco
+            lco_shrunk = beta_binomial_shrink_to(lco_wins, lco_n, prior_mean=marginals[base])
+            return lco_shrunk, "parent cell (leave-camp-out)"
+    return marginals[subject], "marginal"
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +374,13 @@ def build_matrix(
     For included archetypes every ordered pair ``(a, b)`` with ``a != b`` gets
     a cell (n=0 if the pair was never observed), and ``(a, a)`` gets a mirror
     cell whose ``n`` comes from the additive ``MatchResults.mirror_n`` field.
+
+    Every non-mirror cell's ``prior_mean``/``prior_source`` come from the hierarchical cell-prior
+    chain (epic-stable-era-windows-shrinkage): a split-variant camp cell shrinks toward its
+    leave-camp-out parent cell (itself shrunk toward the parent's own shrunk marginal); every
+    other cell shrinks toward the subject archetype's own shrunk marginal. See ``_cell_prior``/
+    ``_camp_hierarchy_inputs``. (No cross-era prior here — that only applies in
+    ``build_adaptive_matrix``, which alone carries per-entity horizon provenance.)
     """
     mr = compute_match_results(
         con, provenance=provenance, since=since, until=until, split_variant=split_variant,
@@ -250,6 +402,10 @@ def build_matrix(
         or (_force_prefix is not None and arch.startswith(_force_prefix))
     )
 
+    # ── Hierarchical cell prior (epic-stable-era-windows-shrinkage, Unit 1) ─────
+    # Computed once from this same `mr` scan — see `_camp_hierarchy_inputs`.
+    marginals, parent_cells_lco, camp_of = _camp_hierarchy_inputs(mr, included, split_variant)
+
     # ── Populate cells ───────────────────────────────────────────────────────
     cells: dict[tuple[str, str], MatchupCell] = {}
 
@@ -260,12 +416,19 @@ def build_matrix(
         for b in included:
             if a == b:
                 continue
+            prior_mean, prior_source = _cell_prior(
+                a, b, marginals=marginals, parent_cells_lco=parent_cells_lco, camp_of=camp_of,
+            )
             tally = mr.matchups.get((a, b))
             if tally is not None:
-                cells[(a, b)] = build_cell(a, b, tally.wins, tally.n)
+                cells[(a, b)] = build_cell(
+                    a, b, tally.wins, tally.n, prior_mean=prior_mean, prior_source=prior_source,
+                )
             else:
                 # Unobserved pair — emit n=0 cell to keep matrix rectangular
-                cells[(a, b)] = build_cell(a, b, 0, 0)
+                cells[(a, b)] = build_cell(
+                    a, b, 0, 0, prior_mean=prior_mean, prior_source=prior_source,
+                )
 
     return MatchupMatrix(
         cells=cells,
@@ -373,6 +536,11 @@ def build_adaptive_matrix(
     camps, when a camp clears its OWN detection floor, get their own horizon instead — see
     ``era_horizons``). ``None`` is byte-identical to the pre-split behavior (``_base_archetype``
     is then the identity function).
+
+    Every non-mirror cell's ``prior_mean``/``prior_source`` (epic-stable-era-windows-shrinkage)
+    come from the hierarchical chain (``_cell_prior`` over that cell's OWN window bucket — see
+    ``_camp_hierarchy_inputs``), further overridden by the cross-era prior when a thin (``n<100``)
+    cell's window was truncated at an era (not ban-only) boundary — see ``_cross_era_prior``.
     """
     # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
     full = compute_match_results(con, provenance=provenance, split_variant=split_variant)
@@ -410,6 +578,63 @@ def build_adaptive_matrix(
                 con, provenance=provenance, since=s, split_variant=split_variant,
             )
 
+    # 3b. Hierarchical cell prior inputs (Unit 1), one per distinct since bucket — reuses the
+    # scans above (zero extra compute_match_results calls). Each bucket's marginals/LCO parent
+    # cells are derived from ITS OWN windowed MatchResults (see _camp_hierarchy_inputs), so a
+    # truncated post-boundary cell is never anchored to a wider/stale-era population.
+    hierarchy_by_since = {
+        s: _camp_hierarchy_inputs(mr, included, split_variant) for s, mr in mr_by_since.items()
+    }
+
+    # 3c. Cross-era prior (Unit 2). Lazily populated per distinct PRE-boundary date — computed
+    # only for boundaries actually used below by a thin (n<100) era-sourced cell, never for every
+    # date up front. `pre_mr_cache`/`pre_hierarchy_cache` batch by boundary date so a boundary
+    # shared by many cells costs exactly one extra `compute_match_results` + one hierarchy-inputs
+    # pass, never one per cell.
+    pre_mr_cache: "dict[str, MatchResults]" = {}
+    pre_hierarchy_cache: dict = {}
+
+    def _era_sourced_boundary(a: str, b: str, s_ab: str) -> bool:
+        """True when `s_ab` is the horizon of an era/era-parent-sourced entity (not ban-only).
+
+        `s_ab` is `max(valid_since[a], valid_since[b])`; the entity that contributed it (one or
+        both, when both sides truncate to the same date) determines whether this is an era
+        boundary or merely a ban-only one. Ban-only-truncated cells never get a cross-era prior
+        (there is no "pre-disturbance" era to compute — the ban regime IS the whole known history
+        for that horizon source).
+        """
+        return any(
+            valid_since[x] == s_ab and horizon_meta.get(x) is not None
+            and horizon_meta[x].source in ("era", "era-parent")
+            for x in (a, b)
+        )
+
+    def _cross_era_prior(a: str, b: str, boundary: str) -> tuple[float, str]:
+        """The pre-boundary hierarchical value for (a, b) — the cross-era prior mean + label.
+
+        Computes (once per distinct `boundary`, cached) the SAME directed cell over the
+        PRE-boundary window `[None, boundary)`, then shrinks it per the normal hierarchy chain
+        using PRE-boundary marginals/LCO cells (never the post-boundary or full-corpus ones —
+        the whole point is an honest "what this matchup looked like before the disturbance").
+        """
+        if boundary not in pre_mr_cache:
+            pre_mr_cache[boundary] = compute_match_results(
+                con, provenance=provenance, until=boundary, split_variant=split_variant,
+            )
+            pre_hierarchy_cache[boundary] = _camp_hierarchy_inputs(
+                pre_mr_cache[boundary], included, split_variant,
+            )
+        pre_mr = pre_mr_cache[boundary]
+        pre_marginals, pre_lco, pre_camp_of = pre_hierarchy_cache[boundary]
+        pre_tally = pre_mr.matchups.get((a, b))
+        pre_wins, pre_n = (pre_tally.wins, pre_tally.n) if pre_tally is not None else (0, 0)
+        pre_prior_mean, pre_source = _cell_prior(
+            a, b, marginals=pre_marginals, parent_cells_lco=pre_lco, camp_of=pre_camp_of,
+        )
+        cross_era_mean = beta_binomial_shrink_to(pre_wins, pre_n, prior_mean=pre_prior_mean)
+        label = f"pre-disturbance value (window < {boundary}); hierarchy: {pre_source}"
+        return cross_era_mean, label
+
     # 4. Assemble: each cell from the scan at max(valid_since[a], valid_since[b]).
     cells: dict[tuple[str, str], MatchupCell] = {}
     cell_windows: dict[tuple[str, str], str | None] = {}
@@ -421,8 +646,23 @@ def build_adaptive_matrix(
             if a == b:
                 continue
             s_ab = max(valid_since[a] or "", valid_since[b] or "") or None
-            tally = mr_by_since[s_ab].matchups.get((a, b))
-            cells[(a, b)] = build_cell(a, b, tally.wins, tally.n) if tally else build_cell(a, b, 0, 0)
+            mr_ab = mr_by_since[s_ab]
+            marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
+            tally = mr_ab.matchups.get((a, b))
+            wins, n = (tally.wins, tally.n) if tally is not None else (0, 0)
+            prior_mean, prior_source = _cell_prior(
+                a, b, marginals=marginals, parent_cells_lco=parent_cells_lco, camp_of=camp_of,
+            )
+            # Cross-era prior (Unit 2): a thin (n<100) cell truncated at an era (not ban-only)
+            # boundary shrinks toward its own pre-disturbance value instead of the hierarchy mean
+            # — the more specific, more honest prior for a young post-boundary era. Wins over the
+            # hierarchy prior when both apply (per the locked design decision); the label carries
+            # both.
+            if s_ab is not None and n < 100 and _era_sourced_boundary(a, b, s_ab):
+                prior_mean, prior_source = _cross_era_prior(a, b, s_ab)
+            cells[(a, b)] = build_cell(
+                a, b, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+            )
             cell_windows[(a, b)] = s_ab
 
     matrix = MatchupMatrix(

@@ -42,6 +42,19 @@ class MatchupCell(LegacyEngineModel):
     display
         ``False`` when ``n < 30`` (speculative gate): the rate should be hidden
         and rendered as "n=X, insufficient" rather than a confident number.
+    prior_mean
+        The Beta prior mean ``p_shrunk`` was shrunk toward (epic-stable-era-windows-shrinkage's
+        hierarchical cell prior). ``0.5`` (the flat legacy prior) with ``prior_source is None``
+        for a caller that didn't supply one (additive default — ``build_cell``'s pre-hierarchy
+        signature). ``None`` only on directly-constructed mirror/hand-built cells that omit it.
+    prior_source
+        Human-readable label for what ``prior_mean`` came from: ``"marginal"`` (the subject
+        archetype's own shrunk marginal WR), ``"parent cell (leave-camp-out)"`` (a split-variant
+        camp cell shrunk toward its parent archetype's LCO cell), or
+        ``"pre-disturbance value (window < <date>); hierarchy: <source>"`` (the cross-era prior,
+        ``build_adaptive_matrix`` only — wins over the hierarchy source when both apply). ``None``
+        when the cell was built with the flat legacy prior (no hierarchy label to show) or left
+        unset by a direct constructor call.
     """
 
     archetype_a: str
@@ -55,3 +68,5 @@ class MatchupCell(LegacyEngineModel):
     tier: ConfidenceLevel  # tier_for_sample(n)
     is_mirror: bool = False  # mirror → p fixed 0.5, no CI
     display: bool = True  # False when n<30 (speculative gate): hide rate, show "n=X, insufficient"
+    prior_mean: float | None = None  # what p_shrunk was shrunk toward (additive)
+    prior_source: str | None = None  # "marginal" | "parent cell (leave-camp-out)" | cross-era label
