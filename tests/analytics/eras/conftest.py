@@ -246,21 +246,32 @@ def composition_rebalance_series() -> EntitySeries:
 
 @pytest.fixture
 def make_null_candidates():
-    """Seeded synthetic `CandidateBoundary` noise for `n_entities` entities (1-2 candidates each),
-    p-values drawn from `[0.02, 1.0)` — representative of a 199-permutation scheme's smallest
-    achievable p (`1/200 = 0.005`), so the floor is not artificially generous. Bypasses the real
-    detectors entirely (see `stationary_fleet_series` for the detector-integration null) — this
-    is the fast, purely-statistical BH-FDR null test."""
-    def _make(n_entities: int = 20, seed: int = 0) -> list[CandidateBoundary]:
+    """Seeded synthetic `CandidateBoundary` noise, 1-2 candidates per entity, p-values drawn from
+    `[0.02, 1.0)` — representative of a 199-permutation scheme's smallest achievable p
+    (`1/200 = 0.005`), so the floor is not artificially generous. Bypasses the real detectors
+    entirely (see `stationary_fleet_series` for the detector-integration null) — this is the
+    fast, purely-statistical BH-FDR null test.
+
+    Dates are drawn from a 30-week window (`weeks 0-29` off `2026-01-05`) matching
+    `stable_nonevent_series`/`stationary_fleet_series`'s own bucket grid, so callers can pair this
+    generator's candidates with those series (bucket-distance lookups resolve exactly rather than
+    falling back to a day-based estimate).
+    """
+    def _make(
+        n_entities: int = 20, seed: int = 0, entity_names: list[str] | None = None,
+    ) -> list[CandidateBoundary]:
+        names = entity_names if entity_names is not None else [
+            f"Null{i:03d}" for i in range(n_entities)
+        ]
         rng = np.random.default_rng(seed)
         out: list[CandidateBoundary] = []
-        for i in range(n_entities):
+        for name in names:
             n_cands = int(rng.integers(1, 3))  # 1 or 2 candidates
             for _ in range(n_cands):
                 p = float(rng.uniform(0.02, 1.0))
-                wk = int(rng.integers(0, 40))
+                wk = int(rng.integers(0, 30))
                 out.append(CandidateBoundary(
-                    entity=f"Null{i:03d}",
+                    entity=name,
                     date=(date(2026, 1, 5) + timedelta(weeks=wk)).isoformat(),
                     signal="share",
                     magnitude=float(rng.uniform(0.01, 0.1)),
