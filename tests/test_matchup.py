@@ -377,14 +377,30 @@ class TestCellBuilder:
         assert cell.ci_high is not None
 
     def test_n0_cell_p_raw_none(self):
-        """n==0 → p_raw/p_shrunk/ci_low/ci_high all None."""
+        """n==0 → p_raw/ci_low/ci_high None (no observations).
+
+        p_shrunk is the prior_mean itself (epic-stable-era-windows-shrinkage design decision:
+        "n=0 cells return the prior mean with the source label" — never None-only, since the
+        prior IS the model's best belief absent data). This is never shown to users as a
+        confident number because display is already False for n<30 (which includes n==0); the
+        raw-must-travel-with-shrunk rule is enforced at the display gate, not by hiding p_shrunk.
+        With the default flat prior (no hierarchy prior_mean passed), p_shrunk == 0.5.
+        """
         cell = build_cell("D", "L", 0, 0)
         assert cell.p_raw is None
-        assert cell.p_shrunk is None
+        assert cell.p_shrunk == pytest.approx(0.5)
         assert cell.ci_low is None
         assert cell.ci_high is None
         assert cell.display is False
         assert cell.tier == "speculative"
+
+    def test_n0_cell_returns_explicit_prior_mean_with_source(self):
+        """n==0 with an explicit hierarchical prior → p_shrunk == prior_mean, source carried."""
+        cell = build_cell("D", "L", 0, 0, prior_mean=0.453, prior_source="parent cell (leave-camp-out)")
+        assert cell.p_raw is None
+        assert cell.p_shrunk == pytest.approx(0.453)
+        assert cell.prior_mean == pytest.approx(0.453)
+        assert cell.prior_source == "parent cell (leave-camp-out)"
 
     def test_display_gate_n29_false(self):
         """n=29 → display=False (just below gate)."""
