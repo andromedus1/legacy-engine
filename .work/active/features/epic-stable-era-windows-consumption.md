@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-consumption
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-era-ledger]

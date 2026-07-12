@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-consumption-consensus
 kind: story
-stage: review
+stage: done
 tags: [analytics, generation]
 parent: epic-stable-era-windows-consumption
 depends_on: [epic-stable-era-windows-consumption-matrix]
