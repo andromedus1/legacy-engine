@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-era-ledger-store
 kind: story
-stage: review
+stage: done
 tags: [analytics, ingestion]
 parent: epic-stable-era-windows-era-ledger
 depends_on: []
