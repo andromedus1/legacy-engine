@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-discovery-gate
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, archetype]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-era-ledger]
@@ -51,3 +51,51 @@ this feature — that is the post-epic dogfooding payoff.
 - `docs/ARCHITECTURE.md` — analytics/discovery.py + archetype/discovered.py (discover
   run|list|apply|promote).
 - Patterns: honest-degrade-marker (Gate C label), confidence-metadata.
+
+## Design decisions
+
+Resolved with judgment under autopilot (2026-07-12):
+
+- **Gate C FLAGS, never fails.** A statistically-valid split whose camps' date distributions
+  separate strongly carries `temporal_mixing=True` + reason "camps may be list generations" —
+  surfaced-and-labeled per the epic's honesty convention (the absorbed idea said "flag/fail";
+  flagging preserves the audit trail and lets `discover apply` refuse or warn downstream).
+- **Deck dates ride the existing pool query** (t.date already joined); `DeckVector` gains an
+  optional `date: str | None = None` field (additive, frozen-safe). Gate C compares per-camp
+  date distributions: median-date gap ≥ 120 days OR a two-sample separation heuristic.
+- **Era-aware default pool**: `discover run`'s default window becomes the parent's
+  `entity_era_window` (stable_since / full-when-undisturbed / ban-regime fallback) instead of
+  the full corpus; `--since` and a new `--all-pool` flag override. Pool window echoed.
+- **Per-camp %current + median date** computed against the parent's era window and persisted on
+  staged records (additive staging fields) + rendered in `discover run`/`list` output.
+
+## Implementation Units
+
+### Unit 1: dates + Gate C in the pure core
+**File**: `src/legacy_engine/analytics/discovery.py`
+**Story**: `epic-stable-era-windows-discovery-gate-core`
+`DeckVector.date: str | None = None`; pool query selects `t.date`. `cluster_and_validate` gains
+Gate C: per-camp median date, pairwise max median gap, `temporal_mixing: bool`, reason string;
+`DiscoveredSplit` (and its camp records) gain `median_date`, `pct_current` (fraction of camp
+decks ≥ a `current_since` param, None-safe), `temporal_mixing`, `temporal_note` — all additive
+with defaults so existing constructors/tests stay green.
+**AC**: synthetic two-generation fixture (old camp median 2025-06, new camp 2026-05) flags with
+the exact label; a contemporaneous split does not flag; existing discovery tests untouched-green.
+
+### Unit 2: era-default window + surfacing + staging persistence
+**Files**: `src/legacy_engine/cli.py` (discover leaves), `src/legacy_engine/archetype/discovered.py`
+**Story**: `epic-stable-era-windows-discovery-gate-surface`
+`discover run` default `since` = `entity_era_window(con, archetype)` with `// pool window:` echo
+(+ `--all-pool` to restore full corpus); camp lines render `median <date> · <pct>% current` and
+the Gate C warning; staged candidate records persist the new fields (additive JSON keys, old
+records load fine); `discover list` renders them when present.
+**AC**: hermetic CLI tests (--db tmp): era-windowed default vs --all-pool; Gate C label rendered;
+staged round-trip with new fields; old staged records still load.
+
+## Implementation Order
+1. Unit 1 (core) 2. Unit 2 (surface)
+
+## Risks
+- **Gate C threshold** (120-day median gap) is a heuristic: pin it as a named constant with the
+  synthetic fixtures as calibration source; a real two-sample test can replace it later without
+  API change.
