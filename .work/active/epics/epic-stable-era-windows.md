@@ -1,0 +1,120 @@
+---
+id: epic-stable-era-windows
+kind: epic
+stage: drafting
+tags: [analytics, methodology, ingestion, needs-brief]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-11
+updated: 2026-07-11
+---
+
+# Per-entity stable-era detection → maximal solid windows everywhere
+
+## Brief
+
+**Andrew's framing (2026-07-11, verbatim intent):** when we look for deck matchups, look across
+card-release and ban notices to identify STABLE ERAS per archetype and subarchetype — grab the
+longest-running package of data that's in the entity's CURRENT era, where "current era" is a
+per-archetype-and-subarchetype definition. Need a way to assess whether an archetype was DISTURBED:
+play-rate shifts, win-rate shifts, cards directly removed by ban, cards suddenly appearing via
+release. It's like the subarchetype clustering, but subarchetypes OVER TIME — and matchup
+comparisons then use this to grab the biggest possible window of solid data.
+
+**Why this is the right generalization (unifies four open threads, three of them absorbed here):**
+- `build_adaptive_matrix` already does per-archetype windows but ONLY from ban-affectedness
+  (`valid_since`) — it is blind to RELEASE-driven disturbance (Flow State rebuilt Doomsday/Izzet/
+  Dimir with no ban; the 07-11 era audit showed camps ARE list generations).
+- The era-cluster confound (absorbed idea-discovery-temporal-gate): clustering an 18-month pool lets
+  new-card signatures date-stamp clusters — 27/46 ranked camps were TIME clusters, and
+  best-build-ranking.html is a historical lens. Detect each entity's change-points FIRST, then
+  discover camps within stable windows (camps over time = the change-points).
+- The banlist announcement lag (absorbed bug-banlist-regime-gap): the regime table ended 2026-05-18
+  and missed the 2026-06-29 Candelabra of Tawnos ban; the corpus fingerprint was unmistakable
+  (Tron 59/wk → 1). Per-entity disturbance detection from the CORPUS ITSELF catches what
+  announcement feeds miss, automatically.
+- Thin post-disturbance cells (absorbed idea-hierarchical-cell-shrinkage): the short windows this
+  epic creates need a better prior than flat 0.5 — hierarchical shrinkage supplies it.
+
+## Strategic decisions (locked at scope, 2026-07-11)
+
+- **bug-banlist-regime-gap: absorbed entirely.** No standalone registration fix; the epic's
+  corpus-fingerprint detection layer supersedes manual regime registration, and the Candelabra ban
+  (Tron collapse fingerprint, ~2 days post-ban data) is the epic's first ground-truth validation
+  case. Regime-table currency (rules pin refresh / `seed banlist` flow) is handled inside the epic.
+- **idea-hierarchical-cell-shrinkage: absorbed as a child feature.** One epic owns both: era windows
+  create the thin-cell problem, hierarchical priors solve it, consumers eat ONE all-cells-shift
+  rollout instead of two. Full scope: camp cell → leave-camp-out parent cell → marginal → 0.5 chain
+  per the two-level-empirical-bayes pattern, PLUS the cross-era prior (a new-era cell shrinks toward
+  its own pre-disturbance value, labeled). Design must resolve double-counting (leave-camp-out
+  parent estimates) and consumer impact.
+- **stable_since is the NEW DEFAULT horizon, honest degrade.** Replaces `valid_since` as the
+  adaptive-matrix horizon everywhere; every cell carries its detected window + named trigger
+  ("window since 2026-06-20: Flow State adoption jump"); falls back to current ban-only behavior
+  when detection is thin or uncertain. Self-healing banlist lag only works if it's the default path.
+- **Scope reach: ALL regime-windowed surfaces.** Replace the advisory-window-resolution block
+  (~15 call sites) AND the `_latest_regime_window` consensus/card-frequency family with per-entity
+  era resolution — consensus decklists, card-frequency reports, and discovery gain stable-era
+  windowing too (eliminates the 07-11 hand-windowing of consensus to current camps). Discovery
+  gains the temporal gate / stable-window default. Field composition semantics (global field windows
+  to the current global regime per analysis-statistical-context-gates) must be reconciled in
+  epic-design: the field is a cross-entity distribution and may keep a global-era definition derived
+  from the union of per-entity disturbances.
+
+## Disturbance signals to detect (change-point detection on per-entity weekly series)
+
+1. composition drift: distance between adjacent windows' consensus vectors / card-inclusion
+   distributions (the same flex-band representation discovery already builds) — a jump = new era;
+2. cards vanishing (ban: presence → 0 overnight) and cards appearing (release: 0 → adopted);
+3. play-rate share shifts (Tron 59/wk → 1) and win-rate shifts (regime-scoped marginals);
+4. cross-check against known ban/release dates (labels for detected change-points, not the source
+   of truth) — and the inverse: a detected cliff with no known announcement should prompt a
+   banlist-currency check (the absorbed drift-alarm idea), honest-degrading the windowing until
+   confirmed.
+
+## Consumption
+
+`stable_since(entity) = last change-point`; matchup cells source over
+`[max(stable_since(a), stable_since(b)), now]` — the adaptive-matrix mechanism with a better
+horizon function. Honesty: every cell carries its detected window + the triggering disturbance;
+thin post-disturbance windows degrade honestly (hierarchical prior + labels) rather than silently
+pooling across a break.
+
+## Absorbed items (full context preserved above; original bodies in git history)
+
+- `idea-discovery-temporal-gate` — per-regime/stable-window discovery default, temporal-mixing
+  Gate C (camp date-distribution separation → "camps may be list generations" degrade), per-camp
+  %current + median date in the discover report. Downstream: re-run discovery per stable era and
+  re-rank best-build.
+- `bug-banlist-regime-gap` — regime table ends 2026-05-18; missed Candelabra (2026-06-29); rules
+  pin stale, `data/banlist/` flow never re-run this cycle. Becomes the epic's validation case +
+  the drift-alarm signal (week-over-week collapse ≥70% → banlist-currency check).
+- `idea-hierarchical-cell-shrinkage` — shrink camp cells toward the SHRUNK parent cell (not flat
+  0.5), parents toward their marginal; e.g. Lands[Sphere/Tomb] vs S&T raw 31.2 n=16 displays 40.3
+  today, ~38 under a parent-anchored prior. Cross-era: new-era cells shrink toward their own
+  pre-disturbance value, labeled.
+
+## Research gate
+
+`[needs-brief]` — change-point detection methods (offline change-point detection on short weekly
+count/composition series: PELT/BinSeg/Bayesian online CPD/CUSUM etc.), method selection for
+mixed signal types (composition distance, presence cliffs, rate shifts), small-sample behavior,
+and false-positive control across ~50 archetypes × camps. Same attested-brief pipeline as
+docs/briefs/subarchetype-discovery.md. Brief before epic-design.
+
+## Prior art in-repo
+
+advisory-window-resolution-block (~15 call sites), `analytics/affectedness.py` (ban horizons —
+the mechanism being generalized), `analytics/discovery.py` flex-band representation (reuse for
+composition distance), matchup.py `build_adaptive_matrix` (the consumption seam),
+`beta_binomial_shrink_to` + two-level-empirical-bayes pattern (the shrinkage primitive), the
+era-audit's median-date/%current diagnostics (decks/best-deck-era-audit.html — the manual version
+of this epic).
+
+## Post-epic payoff (dogfooding, not in-scope)
+
+Re-run best deck / best call on stable-era windows and compare against
+decks/best-deck-era-audit.html's verdicts (Lands [Sphere/Ancient Tomb] best deck; Dimir Tempo
+[Barrowgoyf] best owned call).
