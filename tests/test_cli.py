@@ -477,8 +477,8 @@ class TestFieldConsistency:
         unknown_row = next(ln for ln in out.splitlines() if ln.startswith("Unknown"))
         assert "Unknown ‡" in unknown_row
         assert out.count("unclassified — not positionable") == 1
-        # numeric cells unaffected
-        assert "(n=100)" in out
+        # numeric cells unaffected — triple display carries shrunk|raw and n
+        assert "n=100" in out and "|" in out
 
 
 # ---------------------------------------------------------------------------
