@@ -1,7 +1,7 @@
 ---
 id: fix-shrinkage-triple-display
 kind: story
-stage: review
+stage: done
 tags: [analytics, honesty]
 parent: null
 depends_on: []
@@ -26,3 +26,6 @@ everywhere a matchup estimate prints.
 - viz matchup-row tooltip gains "Win rate (raw)".
 - Goldens updated — and the fixture itself vindicated the change: the old golden displayed 16.7%
   where the raw record was 2.8% (1-35).
+
+## Review (2026-07-11)
+Merged CI-green; goldens updated to the new contract; the fixture's 1-35 cell displayed-as-16.7% case is the canonical proof. Done.
