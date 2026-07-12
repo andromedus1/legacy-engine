@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-11T21:17:33Z'
+generated_at: '2026-07-12T01:23:43Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -151,6 +151,11 @@ documents:
       matchups are first-class, unlike edh-engine's 4-player goldfish framing.
     - Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped
       by date for historical analysis.
+    - 'Per-entity stable eras: every per-archetype/per-camp statistic windows to the
+      entity''s own detected stable era (change-point detection on composition/play-rate/win-rate
+      — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint
+      detection self-heals banlist announcement lag; every windowed figure names its
+      window and triggering disturbance.'
     related:
     - slug: docs/SPEC.md
       relationship: refines
@@ -442,6 +447,68 @@ documents:
       clustering) confirms decklist co-occurrence alone yields strong similarity,
       but is archetype-confounded — which is exactly why our role/color gating + value-transfer-by-role
       is the honest layer on top.
+  docs/briefs/change-point-detection.md:
+    summary: 'Curates change-point detection methods for legacy-engine''s per-entity
+      stable-era detection.
+
+      Grounds the method choice in the real corpus (weekly series of 30-130 points;
+      mid-tier archetypes
+
+      at 2-8 decks/week; camps at 2-12/week; two measured ground-truth disturbances
+      — the Candelabra ban
+
+      cliff and the one-week Flow State adoption step) and in the CPD literature:
+      signal-typed detector
+
+      ensemble (presence rules for cliffs/ramps, kernel/energy CPD for composition
+      drift, Beta-Binomial
+
+      models for shares/win-rates), PELT + penalty as the offline segmenter, BOCPD/CUSUM
+      for the online
+
+      drift alarm, permutation p-values + BH-FDR + min-segment floors for fleet-level
+      false-positive
+
+      control, and the ban/release ledger as the calibration ground truth.
+
+      '
+    key_findings:
+    - 'This corpus''s disturbances are LOUD: Flow State went 0%→90-95% inclusion in
+      ONE week across three archetypes, and the Candelabra ban collapsed Tron 59→1
+      decks/week in two — simple per-card presence rules (release ramp, ban cliff)
+      detect the sharpest era boundaries with ~1-2 weeks latency; generic CPD is only
+      needed for the gradual composition-drift residual.'
+    - 'Never trust CPD defaults: on real-world benchmarks the trivial zero-changepoint
+      detector outperforms many published methods at default parameters, and textbook
+      penalties (AIC/BIC) are calibrated to correctly-specified models and ''lack
+      robustness … in the presence of model mis-specification'' — calibrate the penalty
+      against the project''s own labeled ban/release ledger.'
+    - 'The penalty IS the false-positive knob (''adding a changepoint always reduces
+      the overall cost''); across ~50-150 entity series, use per-change-point permutation
+      p-values (E-Divisive''s #{q_r ≥ q_0}/(R+1)) corrected with Benjamini-Hochberg
+      FDR, plus a minimum-segment floor tied to the engine''s sample tiers (E-Divisive''s
+      own default is min.size=30 observations).'
+    - 'Weekly counts are too small for normal-approximation monitoring (NIST: Poisson
+      normal approx needs mean ≥5; mid-tier archetypes run 2-8 decks/week) — use share-of-field
+      proportions and exact Beta-Binomial/Poisson-Gamma likelihoods (BOCPD), never
+      raw-count z-scores; guard the partial trailing week, which drops EVERY entity''s
+      raw count.'
+    - 'Composition drift is a multivariate distribution change on the discovery flex-band
+      vectors: kernel-cost CPD (''can be combined with any kernel … not just R^d-valued
+      signals'') or energy-statistic E-Divisive (''able to detect any type of distributional
+      change'') both fit; PELT gives exact penalized segmentation at trivial cost
+      on 30-130-point series.'
+    - No Python BOCPD package ships count-data likelihoods (the reference implementation
+      has only StudentT/MultivariateT — verified against source); the Poisson-Gamma/Beta-Binomial
+      conjugate recursions must be implemented in-project as a small module (scipy
+      is already a core dep); ruptures is the offline dependency to add — it has no
+      Poisson cost either, so count signals route through proportions or a custom
+      cost.
+    - 'Known ban/release dates are labels and priors, never the source of truth: snap
+      detected change points to announcements within a tolerance to NAME the trigger;
+      a detected cliff with NO matching announcement is the drift alarm (banlist-currency
+      check) — the mechanism that would have caught Candelabra 2 days after the ban
+      instead of 6 weeks later.'
   docs/briefs/deck-generation-and-moxfield.md:
     summary: 'Unblocks the deferred deck-generation pillar. Two halves: (1) the Moxfield
       integration path — there is
