@@ -102,6 +102,74 @@ class TestBuildAdaptiveMatrix:
         con.close()
 
 
+class TestEraAwareDefaultFallback:
+    """epic-stable-era-windows-consumption Unit 2: with no `entity_eras` table at all, the new
+    default era-aware path (`era_horizons`) must produce a BYTE-IDENTICAL matrix to the pre-epic
+    `archetype_valid_since`-only path — proven by computing both paths on the same corpus and
+    comparing full cell dicts, not by comparing a dict to itself."""
+
+    def test_byte_identical_fallback_no_eras_table(self):
+        from legacy_engine.analytics.affectedness import archetype_valid_since
+
+        con = _build_two_regime_corpus(pre_n=10, post_n=10)
+
+        # "Old path": horizons computed exactly as the pre-epic implementation did internally
+        # (archetype_valid_since over the included archetypes), passed in explicitly so the
+        # matrix builder bypasses era_horizons entirely.
+        old_horizons = archetype_valid_since(con, ["Control", "Reanimator"])
+        old = build_adaptive_matrix(con, min_row_share=0.0, horizons=old_horizons)
+
+        # "New path": the default (no `horizons` kwarg) on a connection with NO `entity_eras`
+        # table at all -> era_horizons degrades every entity to "ban-only", which internally
+        # calls the very same archetype_valid_since with the same arguments.
+        new = build_adaptive_matrix(con, min_row_share=0.0)
+
+        assert new.valid_since == old.valid_since
+        assert new.cell_windows == old.cell_windows
+        assert new.matrix.cells == old.matrix.cells
+        assert new.matrix.archetypes == old.matrix.archetypes
+        assert new.matrix.total_matches == old.matrix.total_matches
+        assert new.matrix.provenance == old.matrix.provenance
+        # Confirm horizon_meta was genuinely populated via era_horizons (not silently skipped) —
+        # every entity resolved through the whole-path ban-only degrade.
+        assert new.horizon_meta and all(h.source == "ban-only" for h in new.horizon_meta.values())
+        con.close()
+
+    def test_explicit_horizons_bypass_era_horizons_and_report_no_meta(self):
+        con = _build_two_regime_corpus(pre_n=5, post_n=5)
+        adaptive = build_adaptive_matrix(
+            con, min_row_share=0.0,
+            horizons={"Reanimator": "2025-11-10", "Control": None},
+        )
+        assert adaptive.horizon_meta == {}
+        assert adaptive.valid_since == {"Reanimator": "2025-11-10", "Control": None}
+        con.close()
+
+    def test_default_path_resolves_via_persisted_era_when_present(self):
+        """A seeded entity_eras row changes valid_since relative to the ban-only fallback,
+        proving the default path actually consults the store (not just always falling through)."""
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        con = _build_two_regime_corpus(pre_n=5, post_n=5)
+        eras = {
+            "Control": EntityEras(entity="Control", stable_since="2025-08-01", boundaries=(), inherited_from_parent=False),
+        }
+        write_entity_eras(
+            con, eras, {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-11T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Control": "Control"},
+            },
+        )
+        adaptive = build_adaptive_matrix(con, min_row_share=0.0)
+        assert adaptive.valid_since["Control"] == "2025-08-01"
+        assert adaptive.horizon_meta["Control"].source == "era"
+        # Reanimator has no entity_eras row -> still ban-only fallback for that entity alone.
+        assert adaptive.horizon_meta["Reanimator"].source == "ban-only"
+        con.close()
+
+
 class TestWindowMode:
     def test_default_is_adaptive(self, make_rounds_corpus):
         con, _ = make_rounds_corpus(n_repeats=1)

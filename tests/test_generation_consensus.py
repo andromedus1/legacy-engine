@@ -37,7 +37,13 @@ import pytest
 from click.testing import CliRunner
 
 from legacy_engine.cli import main
-from legacy_engine.generation.consensus import CardFreq, _fill_board, build_consensus, card_frequencies
+from legacy_engine.generation.consensus import (
+    CardFreq,
+    _fill_board,
+    build_consensus,
+    card_frequencies,
+    entity_era_window,
+)
 from legacy_engine.generation.models import GeneratedDeck
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
@@ -398,6 +404,27 @@ class TestGenerateConsensusCLI:
         assert "Consensus deck: Delver" in result.output
         assert "Maindeck: 60" in result.output
 
+    def test_strong_echoes_era_aware_window_audit_line(self, tmp_path):
+        """generate consensus --strong: no --since/--until -> the era-aware window echo fires
+        for the player-strength window resolution too (this hermetic test DB has no
+        `entity_eras` table -> exact pre-epic fallback, label 'ban regime')."""
+        db_path = tmp_path / "strong.duckdb"
+        import duckdb as _duckdb
+        file_con = _duckdb.connect(str(db_path))
+        store.init_schema(file_con)
+        delver_raw = _build_delver_tournament()
+        store.load_tournament(file_con, parse_cache_item(delver_raw, "MTGO"))
+        file_con.execute("UPDATE decks SET archetype = 'Delver'")
+        file_con.close()
+
+        runner = self._runner()
+        result = runner.invoke(
+            main, ["generate", "consensus", "--archetype", "Delver", "--strong", "--db", str(db_path)]
+        )
+        # This fixture has zero rounds, so no player clears the strength gate (nonzero exit is
+        # expected) — what this test proves is that the window audit line fired BEFORE that.
+        assert "// window: since 2026-05-18 (ban regime)" in result.output
+
     def test_unknown_archetype_exits_nonzero(self, tmp_path):
         """generate consensus exits non-zero for an unknown archetype."""
         db_path = tmp_path / "empty.duckdb"
@@ -493,6 +520,77 @@ class TestCrossBoardDedupeTopupRegression:
         deck = build_consensus(con, "DupBoard")
         assert sum(deck.maindeck.values()) == 60, deck.maindeck
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# entity_era_window — epic-stable-era-windows-consumption Unit 4
+# ---------------------------------------------------------------------------
+
+class TestEntityEraWindow:
+    def test_no_era_data_is_exact_pre_epic_fallback(self, con):
+        """No `entity_eras` table at all -> byte-identical to `_latest_regime_window()`."""
+        from legacy_engine.generation.consensus import _latest_regime_window
+
+        expected_since, expected_until = _latest_regime_window()
+        since, until, label = entity_era_window(con, "Delver")
+        assert (since, until) == (expected_since, expected_until)
+        assert label == "ban regime"
+
+    def test_undisturbed_entity_widens_to_full_corpus(self, con):
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        write_entity_eras(
+            con,
+            {"Delver": EntityEras(entity="Delver", stable_since=None, boundaries=(), inherited_from_parent=False)},
+            {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-11T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Delver": "Delver"},
+            },
+        )
+        since, until, label = entity_era_window(con, "Delver")
+        assert (since, until) == (None, None)
+        assert label == "undisturbed — full corpus"
+
+    def test_disturbed_entity_truncates_at_stable_since_with_trigger(self, con):
+        from legacy_engine.analytics.eras.attribution import Attribution
+        from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        boundary = EraBoundary(date="2026-05-25", signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False)
+        eras = {"Delver": EntityEras(entity="Delver", stable_since="2026-05-25", boundaries=(boundary,), inherited_from_parent=False)}
+        attributions = {("Delver", "2026-05-25"): Attribution(kind="release", card="Murktide Regent", detail="release: Murktide Regent adoption (2026-05-25)")}
+        write_entity_eras(
+            con, eras, attributions, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-11T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Delver": "Delver"},
+            },
+        )
+        since, until, label = entity_era_window(con, "Delver")
+        assert since == "2026-05-25"
+        assert until is None
+        assert label == "release: Murktide Regent adoption (2026-05-25)"
+
+    def test_build_consensus_widens_when_undisturbed(self, con):
+        """build_consensus's default window widens to full corpus for an undisturbed entity —
+        the epic's headline consumer-side payoff for the consensus family."""
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        write_entity_eras(
+            con,
+            {"Delver": EntityEras(entity="Delver", stable_since=None, boundaries=(), inherited_from_parent=False)},
+            {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-11T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Delver": "Delver"},
+            },
+        )
+        deck = build_consensus(con, "Delver")
+        assert deck.window == (None, None)
+        assert deck.sample_n == 10  # unchanged corpus, just a wider (here: unbounded) window
 
 
 # ---------------------------------------------------------------------------

@@ -1576,10 +1576,12 @@ def _report_cards_conditioned(
         _echo_data_freshness(con)
 
         # Resolve the effective window ONCE so the card list and both win-rate slices share it
-        # (mirrors the non-conditioned path above).
+        # (mirrors the non-conditioned path above). Era-aware: this archetype's own stable_since
+        # horizon (entity_era_window), not a global ban-regime window.
         if since is None and until is None:
-            from legacy_engine.generation.consensus import _latest_regime_window
-            effective_since, effective_until = _latest_regime_window()
+            from legacy_engine.generation.consensus import entity_era_window
+            effective_since, effective_until, window_label = entity_era_window(con, archetype)
+            click.echo(f"// window: since {effective_since or 'full corpus'} ({window_label})")
         else:
             effective_since, effective_until = since, until
 
@@ -1781,9 +1783,17 @@ def report_cards(
         # ban regime; compute_card_winrates treats None as the full corpus — so
         # we must pin both sides to the same window or an --archetype report
         # would scope the card list to one window and the values to another.
+        # Era-aware when a single archetype scopes the report: that entity's own
+        # stable_since horizon; the global (no --archetype) report keeps the
+        # global ban-regime window (a cross-entity surface has no single era).
         if since is None and until is None:
-            from legacy_engine.generation.consensus import _latest_regime_window
-            effective_since, effective_until = _latest_regime_window()
+            if archetype is not None:
+                from legacy_engine.generation.consensus import entity_era_window
+                effective_since, effective_until, window_label = entity_era_window(con, archetype)
+                click.echo(f"// window: since {effective_since or 'full corpus'} ({window_label})")
+            else:
+                from legacy_engine.generation.consensus import _latest_regime_window
+                effective_since, effective_until = _latest_regime_window()
         else:
             effective_since, effective_until = since, until
 
@@ -2058,6 +2068,9 @@ def report_variants(
     con = store.connect(db) if db else store.connect()
     try:
         _echo_data_freshness(con)
+        # Deliberately NOT era-windowed: this is a cross-parent summary over the whole
+        # registry — no single entity's era scopes it; the global ban-regime window is the
+        # honest cross-entity basis (epic-stable-era-windows-consumption Unit 4 decision).
         since, until = _latest_regime_window()
 
         # Collect all parents in scope.
@@ -3473,7 +3486,10 @@ def advise_sweep(
     try:
         # Window: explicit flags win; both-unset resolves to the current ban regime
         # (echoed below) — the sweep is a current-meta diagnostic by default, unlike the
-        # deliberately unwindowed single-archetype backtest.
+        # deliberately unwindowed single-archetype backtest. Deliberately NOT era-windowed:
+        # the sweep batches EVERY archetype against ONE shared field window; per-entity era
+        # windows would give each backtest a different basis and break cross-archetype
+        # comparability (epic-stable-era-windows-consumption Unit 4 decision).
         eff_since, eff_until = since, until
         window_label = "explicit"
         if eff_since is None and eff_until is None:
@@ -4333,6 +4349,9 @@ def identify_strong(
     eff_since = since
     eff_until = until
     if eff_since is None and eff_until is None:
+        # Deliberately NOT era-windowed: player strength is not an archetype entity —
+        # per-entity eras don't apply; the current ban regime is the right recency basis
+        # (epic-stable-era-windows-consumption Unit 4 decision).
         eff_since, eff_until = _latest_regime_window()
 
     alias_map = load_alias_map()
@@ -4762,13 +4781,14 @@ def generate_consensus(
                 compute_player_records,
                 strong_player_set,
             )
-            from legacy_engine.generation.consensus import _latest_regime_window
+            from legacy_engine.generation.consensus import entity_era_window
 
-            # Use the same window as the consensus query.
+            # Use the same (era-aware) window as the consensus query.
             eff_since = since
             eff_until = until
             if eff_since is None and eff_until is None:
-                eff_since, eff_until = _latest_regime_window()
+                eff_since, eff_until, window_label = entity_era_window(con, archetype)
+                click.echo(f"// window: since {eff_since or 'full corpus'} ({window_label})")
 
             records = compute_player_records(
                 con,
@@ -5073,12 +5093,13 @@ def generate_tune(
                 compute_player_records,
                 strong_player_set,
             )
-            from legacy_engine.generation.consensus import _latest_regime_window
+            from legacy_engine.generation.consensus import entity_era_window
 
             eff_since_s = since
             eff_until_s = until
             if eff_since_s is None and eff_until_s is None:
-                eff_since_s, eff_until_s = _latest_regime_window()
+                eff_since_s, eff_until_s, window_label_s = entity_era_window(con, resolved_archetype)
+                click.echo(f"// window: since {eff_since_s or 'full corpus'} ({window_label_s})")
 
             records = compute_player_records(
                 con,
@@ -5357,22 +5378,6 @@ def generate_doctor(
     deck_text = Path(deck).read_text()
     main_counts, side_counts = _parse_decklist(deck_text)
 
-    # Resolve the effective window in the CLI layer so the orchestrator always receives
-    # explicit dates (never the (None, None) that would trigger _latest_regime_window() again).
-    #   --all-time     → full corpus: (None, None) — but we pass all_time=True to the builder
-    #   --since/--until → explicit window (passed through as-is)
-    #   neither flag   → latest ban-regime: resolve here, same as generate consensus
-    if all_time:
-        effective_since: str | None = None
-        effective_until: str | None = None
-    elif since is not None or until is not None:
-        effective_since = since
-        effective_until = until
-    else:
-        # Default: latest ban-regime — same SSOT as generate consensus.
-        from legacy_engine.generation.consensus import _latest_regime_window
-        effective_since, effective_until = _latest_regime_window()
-
     con = store.connect(db) if db else store.connect()
     try:
         _echo_data_freshness(con)
@@ -5382,6 +5387,24 @@ def generate_doctor(
             result = _classify_deck(con, main_counts, side_counts)
             resolved_archetype = result.archetype
             click.echo(f"// Classified archetype: {resolved_archetype} (kind={result.kind})")
+
+        # Resolve the effective window in the CLI layer so the orchestrator always receives
+        # explicit dates (never the (None, None) that would re-trigger a default-window lookup).
+        # Resolved AFTER resolved_archetype is known so the default branch can use THIS
+        # archetype's own era-aware horizon (entity_era_window).
+        #   --all-time     → full corpus: (None, None) — but we pass all_time=True to the builder
+        #   --since/--until → explicit window (passed through as-is)
+        #   neither flag   → this archetype's stable_since horizon, same SSOT as generate consensus
+        if all_time:
+            effective_since: str | None = None
+            effective_until: str | None = None
+        elif since is not None or until is not None:
+            effective_since = since
+            effective_until = until
+        else:
+            from legacy_engine.generation.consensus import entity_era_window
+            effective_since, effective_until, window_label = entity_era_window(con, resolved_archetype)
+            click.echo(f"// window: since {effective_since or 'full corpus'} ({window_label})")
 
         boards_to_run: list[str]
         if board == "both":
@@ -5398,7 +5421,16 @@ def generate_doctor(
                 since=effective_since,
                 until=effective_until,
                 board=b,
-                apply_default_window=not all_time,
+                # The CLI has ALWAYS already resolved the effective window by this point (via
+                # --all-time, explicit --since/--until, or the era-aware entity_era_window
+                # default) — apply_default_window=False so build_deck_doctor_report never
+                # re-resolves internally. This matters now that the era-aware default can
+                # itself legitimately produce (None, None) for an undisturbed entity (full
+                # corpus): with apply_default_window=`not all_time` that (None, None) would
+                # have been silently re-interpreted as "resolve internally" and overwritten
+                # with the ban-only regime window, defeating the undisturbed-widens-to-
+                # full-corpus behavior specifically for this command.
+                apply_default_window=False,
             )
             _render_deck_doctor(report, min_tier=min_tier)
     finally:

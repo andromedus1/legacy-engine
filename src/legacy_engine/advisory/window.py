@@ -135,13 +135,40 @@ class AdvisoryInputs:
     audit: tuple[str, ...]
 
 
-def _adaptive_audit(valid_since: dict[str, str | None]) -> tuple[str, ...]:
-    """One compact line naming ban-affected archetypes + their valid_since (others = full corpus)."""
-    affected = sorted((a, s) for a, s in valid_since.items() if s is not None)
-    if not affected:
-        return ("// adaptive: no archetype ban-affected — all cells use full corpus",)
-    parts = "; ".join(f"{a} since {s}" for a, s in affected)
-    return (f"// adaptive: per-cell windows — {parts}; all others full-corpus",)
+def _adaptive_audit(
+    horizon_meta: "dict[str, object]", audit_preamble: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Audit lines naming every disturbed entity + its trigger, counting ban-only entities, and
+    noting undisturbed entities fall back to full corpus — plus one ``// ⚠`` line per
+    alarm-flagged entity (alarms never truncate; they only add lines) and the whole-path
+    no-era-data degrade preamble when present. ``horizon_meta`` values are
+    ``analytics.eras.consume.EraHorizon`` (typed loosely here to avoid a hard import at module
+    load; ``window.py`` already imports the matrix builder lazily inside ``build_advisory_inputs``
+    for the same reason).
+    """
+    named = sorted(
+        (a, h.since, h.trigger) for a, h in horizon_meta.items()
+        if h.source in ("era", "era-parent") and h.since is not None
+    )
+    n_ban_only = sum(1 for h in horizon_meta.values() if h.source == "ban-only")
+
+    if not named and not n_ban_only:
+        lines: tuple[str, ...] = ("// adaptive: no entity disturbed — all cells use full corpus",)
+    else:
+        parts = [
+            f"{a} since {since}" + (f" ({trigger})" if trigger else "")
+            for a, since, trigger in named
+        ]
+        if n_ban_only:
+            noun = "entity" if n_ban_only == 1 else "entities"
+            parts.append(f"{n_ban_only} {noun} ban-only")
+        summary = "; ".join(parts) + "; all others full-corpus"
+        lines = (f"// adaptive: per-entity era windows — {summary}",)
+
+    alarm_lines = tuple(
+        f"// ⚠ {a}: {h.alarm}" for a, h in sorted(horizon_meta.items()) if h.alarm
+    )
+    return audit_preamble + lines + alarm_lines
 
 
 def build_advisory_inputs(
@@ -154,7 +181,10 @@ def build_advisory_inputs(
 ):
     """Build the matchup matrix (+ field window + audit) per the resolved window mode.
 
-    - ``adaptive`` → ``build_adaptive_matrix`` + field over the current ban regime.
+    - ``adaptive`` → ``build_adaptive_matrix`` (era-aware per-entity horizons) + the
+      detection-derived global field era (``analytics.eras.consume.resolve_field_era`` —
+      ``max(current ban-regime start, latest accepted boundary among >=2% field-share
+      entities)``, self-healing to the ban-regime start on a thin resulting window).
     - ``uniform``  → ``build_matrix`` over ``win.since/until``; field shares that same window.
     - ``full``     → full-corpus matrix + full-corpus field.
 
@@ -162,18 +192,21 @@ def build_advisory_inputs(
     ``split_variant``'s decks are relabeled to their ``decks.variant`` camps; ``None`` is
     byte-identical to the pre-split behavior.
     """
+    from legacy_engine.analytics.eras.consume import resolve_field_era
     from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
 
     if win.mode == "adaptive":
         adaptive = build_adaptive_matrix(
             con, provenance=provenance, min_row_share=min_row_share, split_variant=split_variant,
         )
-        cur_since, cur_until = resolve_regime("current")
+        field_since, field_label = resolve_field_era(con, provenance=provenance)
+        audit = _adaptive_audit(adaptive.horizon_meta, adaptive.audit_preamble)
+        audit = (*audit, f"// field: since {field_since or 'open'} ({field_label})")
         return AdvisoryInputs(
             matrix=adaptive.matrix,
-            field_since=cur_since,
-            field_until=cur_until,
-            audit=_adaptive_audit(adaptive.valid_since),
+            field_since=field_since,
+            field_until=None,
+            audit=audit,
         )
 
     matrix = build_matrix(
