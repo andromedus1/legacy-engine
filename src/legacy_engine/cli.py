@@ -1617,8 +1617,12 @@ def _report_cards_conditioned(
             deck_archetype=archetype, deck_variant=variant,
         )
 
+        # Scope the displayed card universe to the same pool as the conditioned stats:
+        # with --variant the frequencies come from the camp's decks, not the parent's,
+        # so the card list and the camp-scoped win rates describe one population.
         card_freqs = card_frequencies(
-            con, archetype, board=board, since=effective_since, until=effective_until
+            con, archetype, board=board, since=effective_since, until=effective_until,
+            variant=variant,
         )
         cards = [cf.name for cf in card_freqs]
         if not cards:
