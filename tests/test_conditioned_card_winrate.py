@@ -455,3 +455,53 @@ class TestReportSubgroupWinrates:
         )
         assert result.exit_code == 0, result.output
         assert "win%" not in result.output
+
+
+def test_conditioned_variant_scopes_card_universe_to_the_camp(runner, tmp_path):
+    """Codex completion-review follow-up: with --variant, the DISPLAYED card list must come
+    from the camp's own decks (the same population as the camp-scoped win rates) — a card
+    played only by the OTHER camp must not appear in the report."""
+    decks = [
+        _deck("a1", [_card("Campa Signature", 4)]),
+        _deck("a2", [_card("Campa Signature", 4)]),
+        _deck("b1", [_card("Campb Signature", 4)]),
+        _deck("b2", [_card("Campb Signature", 4)]),
+        _deck("o1", [_card("Filler")]),
+        _deck("o2", [_card("Filler")]),
+    ]
+    rounds = [
+        {"Player1": "a1", "Player2": "o1", "Result": "2-0"},
+        {"Player1": "b1", "Player2": "o2", "Result": "2-0"},
+    ]
+    raw = {
+        "Tournament": {
+            "Name": "Universe Scope", "Date": "2026-06-01",
+            "Uri": "https://test.com/universe-scope", "Formats": "Legacy",
+        },
+        "Decks": decks, "Rounds": rounds, "Standings": [],
+    }
+    db_path = tmp_path / "universe_scope.duckdb"
+    con = store.connect(str(db_path))
+    tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+    con.execute(
+        "UPDATE decks SET archetype = 'Testarch', variant = 'CampA' "
+        "WHERE tournament_id = ? AND player = ANY(?)", [tid, ["a1", "a2"]],
+    )
+    con.execute(
+        "UPDATE decks SET archetype = 'Testarch', variant = 'CampB' "
+        "WHERE tournament_id = ? AND player = ANY(?)", [tid, ["b1", "b2"]],
+    )
+    con.execute(
+        "UPDATE decks SET archetype = 'Opponent Pool' "
+        "WHERE tournament_id = ? AND player = ANY(?)", [tid, ["o1", "o2"]],
+    )
+    con.close()
+
+    result = runner.invoke(
+        main,
+        ["report", "cards", "--db", str(db_path), "--archetype", "Testarch",
+         "--conditioned", "--variant", "CampA", "--board", "main"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Campa Signature" in result.output
+    assert "Campb Signature" not in result.output
