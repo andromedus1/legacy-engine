@@ -150,6 +150,37 @@ class TestRecordFromSplit:
         assert [c.n for c in record.camps] == [40, 120]
         assert [c.tier for c in record.camps] == ["evolving", "established"]
 
+    def test_carries_gate_c_temporal_fields(self):
+        """epic-stable-era-windows-discovery-gate Unit 2: median_date/pct_current per camp and
+        the split-level temporal_mixing/temporal_note ride the record additively."""
+        camp_a = Camp(
+            name="Murktide Regent", member_keys=[("t1", 0)], signature_cards=[("X", 1.0)],
+            n=40, tier="evolving", median_date="2025-06-01", pct_current=0.1,
+        )
+        camp_b = Camp(
+            name="non-Murktide Regent", member_keys=[("t1", 1)], signature_cards=[("X", -1.0)],
+            n=120, tier="established", median_date="2026-05-01", pct_current=0.9,
+        )
+        split = DiscoveredSplit(
+            parent="Doomsday", camps=[camp_a, camp_b], n_noise=3,
+            stability=0.95, silhouette=0.8, passed=True, reasons=["ok"],
+            temporal_mixing=True, temporal_note="camps may be list generations",
+        )
+        record = record_from_split(split, generated_from="t", params={})
+        assert record.temporal_mixing is True
+        assert record.temporal_note == "camps may be list generations"
+        assert [c.median_date for c in record.camps] == ["2025-06-01", "2026-05-01"]
+        assert [c.pct_current for c in record.camps] == [0.1, 0.9]
+
+    def test_gate_c_fields_default_absent_on_untouched_split(self):
+        """The pre-epic call shape (no Gate C fields on the DiscoveredSplit/Camp) still
+        produces a valid record — additive-defaults contract."""
+        record = record_from_split(self._split(), generated_from="t", params={})
+        assert record.temporal_mixing is False
+        assert record.temporal_note is None
+        assert all(c.median_date is None for c in record.camps)
+        assert all(c.pct_current is None for c in record.camps)
+
 
 # ---------------------------------------------------------------------------
 # stage_split

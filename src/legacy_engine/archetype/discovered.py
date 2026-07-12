@@ -74,6 +74,8 @@ def record_from_split(
 
     Each camp keeps only its top ``TOP_SIGNATURE_CARDS`` *over-represented* cards (positive
     delta vs the rest) — the first is what promotion turns into an ``InMainboard`` condition.
+    Gate C's per-camp ``median_date``/``pct_current`` and the split-level ``temporal_mixing``/
+    ``temporal_note`` ride along additively (epic-stable-era-windows-discovery-gate Unit 2).
     """
     camps = [
         DiscoveredCamp(
@@ -84,6 +86,8 @@ def record_from_split(
             n=camp.n,
             tier=camp.tier,
             member_keys=[tuple(k) for k in camp.member_keys],
+            median_date=camp.median_date,
+            pct_current=camp.pct_current,
         )
         for camp in split.camps
     ]
@@ -93,6 +97,8 @@ def record_from_split(
         params=params,
         camps=camps,
         stability=split.stability,
+        temporal_mixing=split.temporal_mixing,
+        temporal_note=split.temporal_note,
     )
 
 
