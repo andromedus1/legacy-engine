@@ -48,8 +48,12 @@ _ATTRIBUTION_TOLERANCE_DAYS: int = 14
 # 0.5 sits with wide margin either side of that gap.
 # ---------------------------------------------------------------------------
 _ALARM_BAR: float = 0.5
-_ALARM_SHARE_FLOOR: float = 0.02      # entities below 2% field share are never alarm-eligible
+_ALARM_SHARE_FLOOR: float = 0.02      # entities below 2% RECENT field share are never alarm-eligible
 _ALARM_RECENT_BUCKETS: int = 3        # "recent" = the last N complete buckets
+_ALARM_SHARE_WINDOW_BUCKETS: int = 8  # the share-floor gate is computed over this recent window,
+                                      # not corpus lifetime — a deck that ROSE recently (Tron) is
+                                      # exactly the one whose collapse the alarm exists to catch,
+                                      # and its lifetime share dilutes below any sensible floor
 _ALARM_MIN_COMPLETE_BUCKETS: int = 4  # below this, bucket 0's cold-start p_change=1.0 (bocpd.py
                                        # module docstring) could leak into the "recent" window
 
@@ -200,7 +204,14 @@ def compute_drift_alarms(
         total_trials = float(trials.sum())
         if total_trials <= 0:
             continue
-        share = float(successes.sum() / total_trials)
+        # Share floor over the RECENT window (pre-collapse inclusive), never corpus lifetime:
+        # gate on the max of the recent-window share and the last-window share so a freshly
+        # risen deck qualifies while a long-dead one does not.
+        recent_succ = successes[-_ALARM_SHARE_WINDOW_BUCKETS:]
+        recent_tri = trials[-_ALARM_SHARE_WINDOW_BUCKETS:]
+        if float(recent_tri.sum()) <= 0:
+            continue
+        share = float(recent_succ.sum() / recent_tri.sum())
         if share < _ALARM_SHARE_FLOOR:
             continue
 
@@ -268,7 +279,12 @@ def run_eras(
         tolerance_days=_ATTRIBUTION_TOLERANCE_DAYS, corpus_first_seen=corpus_first_seen,
     )
 
-    alarms = compute_drift_alarms(series, eras, attributions)
+    # The alarm is a RECENCY instrument: evaluate it on WEEKLY buckets regardless of each
+    # entity's density-adaptive detection width — a 4-week entity's whole collapse can sit
+    # inside the incomplete trailing detection bucket (the Candelabra/Tron case), invisible
+    # to any complete-bucket tail check at that granularity.
+    alarm_series = build_entity_series(con, provenance=provenance, force_bucket_weeks=1)
+    alarms = compute_drift_alarms(alarm_series, eras, attributions)
 
     run_at = datetime.now(timezone.utc).isoformat()
     post_boundary_decks = {
