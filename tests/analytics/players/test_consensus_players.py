@@ -25,6 +25,7 @@ from legacy_engine.generation.consensus import (
 )
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +111,11 @@ def _build_strong_deck(player: str) -> dict:
     return _make_deck_raw(player, main)
 
 
-def _build_corpus(date: str = "2026-05-25") -> dict:
+def _build_corpus(date: str | None = None) -> dict:
     """Build 10-deck tournament: 8 field players + 2 strong players."""
     decks = [_build_field_deck(f"field{i}") for i in range(8)]
     decks += [_build_strong_deck("bosh95"), _build_strong_deck("mengucci")]
-    return _make_tournament("Test Challenge", date, decks)
+    return _make_tournament("Test Challenge", date or in_current_regime(7), decks)
 
 
 @pytest.fixture
@@ -295,7 +296,7 @@ class TestRegimeSafety:
         """Corpus with two regimes:
 
         Regime 1 (2025-01-15 — pre current regime): bosh95 runs OldCard (4 copies).
-        Regime 2 (2026-05-25 — current regime): bosh95 runs NewCard (4 copies).
+        Regime 2 (ledger-derived current-regime date): bosh95 runs NewCard (4 copies).
         Other cards are shared core so 60-card constraint is met.
         """
         core_small = [
@@ -325,11 +326,11 @@ class TestRegimeSafety:
         ]
         old_t = _make_tournament("OldRegimeEvent", "2025-01-15", old_decks)
 
-        # Current regime (2026-05-25 — post latest ban event):
+        # Current regime (post latest confirmed ban):
         new_decks = [_make_regime_deck("bosh95", "NewCard")] + [
             _make_regime_deck(f"current{i}", "NewCard") for i in range(4)
         ]
-        new_t = _make_tournament("NewRegimeEvent", "2026-05-25", new_decks)
+        new_t = _make_tournament("NewRegimeEvent", in_current_regime(7), new_decks)
 
         c = store.connect(":memory:")
         store.init_schema(c)

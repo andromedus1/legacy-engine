@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from legacy_engine.advisory.report import _parse_decklist
+from tests.conftest import in_current_regime
 from legacy_engine.cli import main
 from legacy_engine.generation.export import ExportFormat, format_decklist, moxfield_import_block
 
@@ -326,7 +327,7 @@ class TestExportDeckCLI:
         from legacy_engine.ingestion import store
         from legacy_engine.ingestion.cache import parse_cache_item
 
-        # Minimal 10-deck Delver fixture in the current regime (2026-05-25).
+        # Minimal 10-deck Delver fixture in the current regime (ledger-derived date).
         def _card(name: str, count: int = 4) -> dict:
             return {"CardName": name, "Count": count}
 
@@ -351,7 +352,7 @@ class TestExportDeckCLI:
             })
         raw = {
             "Tournament": {
-                "Name": "Delver T", "Date": "2026-05-25",
+                "Name": "Delver T", "Date": in_current_regime(7),
                 "Uri": "https://www.mtgo.com/decklist/delver-t", "Formats": "Legacy",
             },
             "Decks": decks, "Rounds": [], "Standings": [],

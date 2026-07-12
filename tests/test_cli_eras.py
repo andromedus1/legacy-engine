@@ -3,8 +3,10 @@
 House style: file-backed hermetic DuckDB via a `_build_eras_db(tmp_path) -> str` builder,
 every `runner.invoke` pinned to `--db <that path>` — never the default DB. `eras confirm` is
 tested against a tmp COPY of the shipped events.json via `--events-path` — the real shipped file
-is never touched by these tests (Candelabra's actual registration is a separate, later,
-dogfooding-pass action, not part of this test suite).
+is never touched by these tests. TestErasConfirm registers a SYNTHETIC event (not a real card)
+because Candelabra of Tawnos's confirmation is now itself a permanent row in the shipped
+events.json (dogfooding registered it 2026-06-29), so a tmp copy of the real ledger already
+contains it.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from legacy_engine.cli import main
 from legacy_engine.config import BAN_EVENTS_PATH
 from legacy_engine.ingestion import store as _store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 # Same implanted-cliff shape as tests/analytics/eras/test_run.py's DB corpus (kept independent —
 # CLI tests can't import fixtures across the tests/analytics/eras/ package boundary, so a minimal
@@ -161,6 +164,21 @@ class TestErasExplain:
 
 
 class TestErasConfirm:
+    """`eras confirm` is exercised against a SYNTHETIC event, not the real Candelabra of Tawnos
+    ban — that ban is itself now a real, permanent row in the shipped `events.json` (this test
+    module's own docstring notes Candelabra's registration was a later dogfooding action), so a
+    tmp copy of the shipped ledger already contains it and re-confirming it would just hit the
+    duplicate-event guard. The synthetic card/date are derived from the ledger's own last event
+    (`in_current_regime`, tests/conftest.py) so they never collide with real entries and never
+    go stale as the ledger grows further.
+    """
+
+    _CONFIRM_CARD = "Hypothetical Test-Only Ban Card"
+    _CONFIRM_REASON = "synthetic reason for the eras-confirm CLI test suite"
+
+    def _confirm_date(self) -> str:
+        return in_current_regime(30)
+
     def _tmp_events_copy(self, tmp_path):
         dest = tmp_path / "events_copy.json"
         shutil.copy(BAN_EVENTS_PATH, dest)
@@ -168,27 +186,29 @@ class TestErasConfirm:
 
     def test_confirm_appends_and_echoes_healed_regime(self, tmp_path, runner):
         events_path = self._tmp_events_copy(tmp_path)
+        confirm_date = self._confirm_date()
         result = runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", confirm_date, self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         assert result.exit_code == 0, result.output
-        assert "registered: Candelabra of Tawnos banned 2026-06-29" in result.output
+        assert f"registered: {self._CONFIRM_CARD} banned {confirm_date}" in result.output
         assert "regime healed" in result.output
-        assert "2026-06-29" in result.output
+        assert confirm_date in result.output
 
     def test_confirm_round_trips_through_a_fresh_load(self, tmp_path, runner):
         from legacy_engine.ingestion.banlist import load_ban_events
 
         events_path = self._tmp_events_copy(tmp_path)
+        confirm_date = self._confirm_date()
         before = load_ban_events(events_path)
         runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", confirm_date, self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         after = load_ban_events(events_path)
         assert len(after) == len(before) + 1
-        assert (date(2026, 6, 29), "Candelabra of Tawnos", "Tron 4x growth engine") in after
+        assert (date.fromisoformat(confirm_date), self._CONFIRM_CARD, self._CONFIRM_REASON) in after
 
     def test_confirm_heals_regime_windows_once_ban_events_is_refreshed(self, tmp_path, runner, monkeypatch):
         # regime_windows() reads analytics.trends's OWN captured BAN_EVENTS reference (bound at
@@ -199,26 +219,29 @@ class TestErasConfirm:
         from legacy_engine.ingestion.banlist import load_ban_events
 
         events_path = self._tmp_events_copy(tmp_path)
+        confirm_date = self._confirm_date()
         runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", confirm_date, self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         refreshed = load_ban_events(events_path)
         monkeypatch.setattr(trends, "BAN_EVENTS", refreshed)
 
         windows = trends.regime_windows()
-        assert any(w.since == date(2026, 6, 29) for w in windows), (
-            f"no regime window opens at 2026-06-29 after refresh: {[w.since for w in windows]}"
+        expected = date.fromisoformat(confirm_date)
+        assert any(w.since == expected for w in windows), (
+            f"no regime window opens at {confirm_date} after refresh: {[w.since for w in windows]}"
         )
 
     def test_duplicate_event_raises_clean_click_exception(self, tmp_path, runner):
         events_path = self._tmp_events_copy(tmp_path)
+        confirm_date = self._confirm_date()
         runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", confirm_date, self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         result = runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", confirm_date, self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         assert result.exit_code != 0
@@ -239,7 +262,7 @@ class TestErasConfirm:
         real_before = load_ban_events(BAN_EVENTS_PATH)
         events_path = self._tmp_events_copy(tmp_path)
         runner.invoke(main, [
-            "eras", "confirm", "2026-06-29", "Candelabra of Tawnos", "Tron 4x growth engine",
+            "eras", "confirm", self._confirm_date(), self._CONFIRM_CARD, self._CONFIRM_REASON,
             "--events-path", str(events_path),
         ])
         real_after = load_ban_events(BAN_EVENTS_PATH)

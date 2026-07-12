@@ -43,6 +43,23 @@ def _con():
     return con
 
 
+def in_current_regime(days_after: int = 7) -> str:
+    """ISO date guaranteed inside the CURRENT ban regime, whatever the ledger's last event is.
+
+    Hermetic fixtures that mean "a tournament in the current regime" must derive their date
+    from the ledger — hardcoded dates go stale every time `eras confirm` registers a new ban
+    (the Candelabra registration broke 58 tests dated 2026-06-01). Call with a distinct
+    `days_after` per fixture that needs multiple current-regime dates in a known relative
+    order (e.g. `in_current_regime(7)` before `in_current_regime(8)`).
+    """
+    from datetime import timedelta
+
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    last_ban_date = max(event_date for event_date, _card, _reason in BAN_EVENTS)
+    return (last_ban_date + timedelta(days=days_after)).isoformat()
+
+
 def _make_field(shares: dict[str, float]) -> FieldDistribution:
     """Build a FieldDistribution from raw shares (normalizes automatically)."""
     return build_custom_field(shares)
