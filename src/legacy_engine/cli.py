@@ -6749,5 +6749,227 @@ def discover_apply(
     )
 
 
+# ── eras: stable-era detection, persistence, attribution, drift alarm ──
+@main.group()
+def eras() -> None:
+    """Detect, persist, and explain per-entity stable eras (stable_since) and B&R drift."""
+
+
+@eras.command("run")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_provenance_opt
+@click.option(
+    "--alpha", type=float, default=0.05, show_default=True,
+    help="Benjamini-Hochberg FDR alpha for the fleet-wide era-boundary screen.",
+)
+@_verbose
+def eras_run(db: str | None, provenance: str | None, alpha: float, verbose: bool) -> None:
+    """Run the offline era-detection pass: series -> detectors -> ensemble -> attribution ->
+    drift alarm -> persisted store (`entity_eras`). Sibling of `label`/`discover run` — a
+    full-corpus recompute every call, never incremental.
+
+    Example: legacy-engine eras run
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.eras.run import run_eras
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        _echo_data_freshness(con, provenance=provenance)
+        result = run_eras(con, provenance=provenance, alpha=alpha)
+    finally:
+        con.close()
+
+    click.echo(f"// eras run: {result.n_entities} entities analyzed (alpha={alpha})")
+    if result.n_entities == 0:
+        click.echo("(no qualifying entities — corpus too thin, unlabeled, or empty)")
+        return
+
+    for entity in sorted(result.summaries):
+        s = result.summaries[entity]
+        since = s.stable_since or "full history"
+        tag = " [inherited from parent]" if s.inherited_from_parent else ""
+        click.echo(
+            f"  {entity}: stable since {since}{tag}  "
+            f"({s.n_accepted}/{s.n_boundaries} boundaries accepted)"
+        )
+
+    if result.alarms:
+        for entity in sorted(result.alarms):
+            click.echo(f"// ⚠ {entity}: {result.alarms[entity].note}")
+    else:
+        click.echo("// no drift alarms")
+
+
+@eras.command("list")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def eras_list(db: str | None, verbose: bool) -> None:
+    """List every persisted entity's stable_since, trigger, and confidence tier.
+
+    Example: legacy-engine eras list
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.eras.store import read_entity_eras
+    from legacy_engine.confidence import tier_for_sample
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        rows = read_entity_eras(con)
+    finally:
+        con.close()
+
+    if not rows:
+        click.echo("(no era data — run `eras run` first)")
+        return
+
+    click.echo(f"// {len(rows)} entities")
+    for entity in sorted(rows):
+        r = rows[entity]
+        since = r.stable_since or "full history"
+        trigger = "(full history — no boundary)"
+        if r.stable_since is not None:
+            triggering = next((b for b in r.boundaries if b.date == r.stable_since), None)
+            if triggering is not None and triggering.attribution is not None:
+                trigger = triggering.attribution.detail
+            else:
+                trigger = "(boundary detail unavailable)"
+        tier = tier_for_sample(r.post_boundary_decks)
+        tag = " [inherited from parent]" if r.inherited_from_parent else ""
+        alarm_tag = "  ⚠ alarm" if r.alarm_fired else ""
+        click.echo(
+            f"{entity}: stable since {since}{tag}  trigger: {trigger}  "
+            f"[{tier}, n={r.post_boundary_decks}]{alarm_tag}"
+        )
+
+
+@eras.command("explain")
+@click.argument("entity")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def eras_explain(entity: str, db: str | None, verbose: bool) -> None:
+    """Walk one entity's full boundary derivation — signals, magnitude, p-value, BH verdict,
+    floor, and attribution. The `explain_valid_since` analog for detected eras.
+
+    Example: legacy-engine eras explain "Tron"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.eras.store import read_entity_eras
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        rows = read_entity_eras(con)
+    finally:
+        con.close()
+
+    if entity not in rows:
+        raise click.ClickException(
+            f"unknown entity {entity!r} — run `eras run` first, or check `eras list`"
+        )
+
+    r = rows[entity]
+    click.echo(f"=== {entity} — era derivation ===")
+    inherited_note = "  [inherited from parent]" if r.inherited_from_parent else ""
+    click.echo(f"// parent: {r.parent}{inherited_note}")
+    click.echo(f"// stable since: {r.stable_since or 'full history'}")
+    click.echo(
+        f"// run: provenance={r.run_provenance or 'combined'} alpha={r.run_alpha} at {r.run_at}"
+    )
+
+    if not r.boundaries:
+        click.echo("(no candidate boundaries detected)")
+    for b in r.boundaries:
+        if b.bh_accepted and not b.floor_rejected:
+            verdict = "ACCEPTED"
+        elif b.bh_accepted:
+            verdict = "FLOOR-REJECTED"
+        else:
+            verdict = "BH-REJECTED"
+        click.echo(f"\n  {b.date}  [{verdict}]  p={b.pvalue:.4f}")
+        if b.attribution is not None:
+            click.echo(f"    attribution: {b.attribution.detail}")
+        for sig in b.signals:
+            trigger_note = f"  (trigger: {sig.trigger_card})" if sig.trigger_card else ""
+            click.echo(
+                f"    signal {sig.signal}: magnitude={sig.magnitude:.4f} "
+                f"p={sig.pvalue:.4f}{trigger_note}"
+            )
+            click.echo(f"      evidence: {sig.evidence}")
+
+    if r.alarm_fired:
+        click.echo(f"\n// ⚠ {r.alarm_note}")
+
+
+@eras.command("confirm")
+@click.argument("event_date")
+@click.argument("card")
+@click.argument("reason")
+@click.option(
+    "--events-path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Curated ban-events JSON to append to (defaults to the shipped events.json).",
+)
+@_verbose
+def eras_confirm(event_date: str, card: str, reason: str, events_path: str | None, verbose: bool) -> None:
+    """Register a human-confirmed B&R event — the drift-alarm confirmation loop's write path.
+
+    Appends (DATE, CARD, REASON) to the curated ban-events JSON. Every BAN_EVENTS consumer
+    (`banlist_as_of`/`current_banlist`, `analytics.trends.regime_windows`,
+    `analytics.affectedness`) heals on its NEXT import of `ingestion.banlist` — BAN_EVENTS is
+    bound once at import, so a long-running process must be restarted (or the module reloaded)
+    to see the update; a fresh CLI invocation always does.
+
+    Example: legacy-engine eras confirm 2026-06-29 "Candelabra of Tawnos" "Tron 4x growth engine"
+    """
+    _setup_logging(verbose)
+    from datetime import date as _date
+
+    from legacy_engine.config import BAN_EVENTS_PATH
+    from legacy_engine.ingestion.banlist import append_ban_event
+
+    try:
+        parsed_date = _date.fromisoformat(event_date)
+    except ValueError as exc:
+        raise click.ClickException(
+            f"invalid DATE {event_date!r} (expected YYYY-MM-DD)"
+        ) from exc
+
+    path = events_path or str(BAN_EVENTS_PATH)
+    try:
+        updated = append_ban_event(parsed_date, card, reason, path=path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"// registered: {card} banned {parsed_date.isoformat()} — {reason}")
+    click.echo(f"// events file: {path} ({len(updated)} total events)")
+
+    prior_dates = [d for d, _c, _r in updated if d < parsed_date]
+    since_label = max(prior_dates).isoformat() if prior_dates else "baseline"
+    click.echo(
+        f"// regime healed: [{since_label} .. {parsed_date.isoformat()}) closes; "
+        f"new regime opens at {parsed_date.isoformat()}"
+    )
+    click.echo("// re-run `eras run` (and any windowed report) to pick up the healed regime")
+
+
 if __name__ == "__main__":
     main()
