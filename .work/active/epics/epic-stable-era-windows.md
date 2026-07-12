@@ -2,7 +2,7 @@
 id: epic-stable-era-windows
 kind: epic
 stage: drafting
-tags: [analytics, methodology, ingestion, needs-brief]
+tags: [analytics, methodology, ingestion]
 parent: null
 depends_on: []
 release_binding: null
@@ -98,11 +98,11 @@ pooling across a break.
 
 ## Research gate
 
-`[needs-brief]` — change-point detection methods (offline change-point detection on short weekly
-count/composition series: PELT/BinSeg/Bayesian online CPD/CUSUM etc.), method selection for
-mixed signal types (composition distance, presence cliffs, rate shifts), small-sample behavior,
-and false-positive control across ~50 archetypes × camps. Same attested-brief pipeline as
-docs/briefs/subarchetype-discovery.md. Brief before epic-design.
+CLEARED 2026-07-11 — attested brief written: `docs/briefs/change-point-detection.md`
+(12 source-direct attestations in `.research/attestation/`, corpus
+`.research/reference/change-point-detection/`; citation-lint clean 57 resolved/0 broken/0 thin;
+adversarial source-support read APPROVED after 3 revisions — composed-estimate removed, two
+citations re-anchored). Read the brief before epic-design.
 
 ## Prior art in-repo
 
