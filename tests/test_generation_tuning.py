@@ -61,6 +61,7 @@ from legacy_engine.generation.tuning import (
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.banlist import current_banlist
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -140,11 +141,12 @@ def _build_tune_delver_tournament() -> dict:
 
         decks.append(_make_deck_raw(f"player{i}", main, side))
 
+    tune_date = in_current_regime(7)
     return {
         "Tournament": {
             "Name": "Tune Legacy Challenge",
-            "Date": "2026-05-25",
-            "Uri": "https://www.mtgo.com/decklist/tune-legacy-challenge-2026-05-25",
+            "Date": tune_date,
+            "Uri": f"https://www.mtgo.com/decklist/tune-legacy-challenge-{tune_date}",
             "Formats": "Legacy",
         },
         "Decks": decks,
