@@ -409,6 +409,110 @@ class TestClusterAndValidateDeterminism:
 
 
 # ---------------------------------------------------------------------------
+# Gate C — temporal mixing (epic-stable-era-windows-discovery-gate Unit 1)
+#
+# Two calibration fixtures pin _TEMPORAL_GAP_DAYS = 120 (see the constant's docstring):
+#   - a two-generation split (old camp median ~2025-06, new camp median ~2026-05) FLAGS.
+#   - a contemporaneous split (both camps dated within the same ~30-day window) does NOT flag.
+# ---------------------------------------------------------------------------
+
+def _dated_two_camp_decks(
+    dates_a: list[str], dates_b: list[str],
+) -> list[DeckVector]:
+    """``_two_camp_decks``' well-separated fixture, but every deck also carries a date.
+
+    ``dates_a``/``dates_b`` are cycled over each camp's decks (35 each) so any list length
+    works; a single-date list stamps every deck in that camp with the same date.
+    """
+    decks: list[DeckVector] = []
+    idx = 0
+    for i in range(35):
+        wobble = i % 2
+        decks.append(DeckVector(
+            key=("t1", idx),
+            counts={"Core Land": 4, "Card A1": 4 - wobble, "Card A2": 3 + wobble},
+            date=dates_a[i % len(dates_a)],
+        ))
+        idx += 1
+    for i in range(35):
+        wobble = i % 2
+        decks.append(DeckVector(
+            key=("t1", idx),
+            counts={"Core Land": 4, "Card B1": 4 - wobble, "Card B2": 3 + wobble},
+            date=dates_b[i % len(dates_b)],
+        ))
+        idx += 1
+    return decks
+
+
+class TestClusterAndValidateGateC:
+    def test_two_generation_split_flags_temporal_mixing(self):
+        """Old camp median 2025-06, new camp median 2026-05 (~334d apart) -> FLAG."""
+        decks = _dated_two_camp_decks(
+            dates_a=["2025-06-01"], dates_b=["2026-05-01"],
+        )
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+
+        assert split.passed is True  # Gate C never fails a statistically-valid split
+        assert split.temporal_mixing is True
+        assert split.temporal_note == "camps may be list generations"
+        assert any("gate C temporal" in r and "FLAG" in r for r in split.reasons)
+        for camp in split.camps:
+            assert camp.median_date in {"2025-06-01", "2026-05-01"}
+
+    def test_contemporaneous_split_does_not_flag(self):
+        """Both camps dated within the same ~30-day window -> no flag."""
+        decks = _dated_two_camp_decks(
+            dates_a=["2026-06-01", "2026-06-10"], dates_b=["2026-06-05", "2026-06-15"],
+        )
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+
+        assert split.passed is True
+        assert split.temporal_mixing is False
+        assert split.temporal_note is None
+        assert any(
+            "gate C temporal" in r and "no temporal mixing" in r for r in split.reasons
+        )
+
+    def test_undated_decks_report_insufficient_data_honestly(self):
+        """No dates at all -> Gate C can't compare, and says so rather than fabricating a gap."""
+        decks = _two_camp_decks()  # DeckVector.date defaults to None
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+
+        assert split.temporal_mixing is False
+        assert split.temporal_note is None
+        assert all(c.median_date is None for c in split.camps)
+        assert any(
+            "gate C temporal" in r and "insufficient dated decks" in r for r in split.reasons
+        )
+
+    def test_pct_current_none_without_current_since(self):
+        decks = _dated_two_camp_decks(dates_a=["2026-06-01"], dates_b=["2026-06-05"])
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        assert all(c.pct_current is None for c in split.camps)
+
+    def test_pct_current_computed_against_current_since(self):
+        """One camp entirely before current_since, the other entirely on/after it."""
+        decks = _dated_two_camp_decks(dates_a=["2026-01-01"], dates_b=["2026-06-10"])
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20, current_since="2026-06-01")
+
+        pct_by_camp = {c.median_date: c.pct_current for c in split.camps}
+        assert pct_by_camp["2026-01-01"] == pytest.approx(0.0)
+        assert pct_by_camp["2026-06-10"] == pytest.approx(1.0)
+
+    def test_existing_hand_built_camp_and_split_constructors_still_work(self):
+        """Additive-defaults contract: old call shapes (no temporal kwargs) stay green."""
+        camp = Camp(name="X", member_keys=[], signature_cards=[], n=40, tier="evolving")
+        assert camp.median_date is None
+        assert camp.pct_current is None
+
+
+# ---------------------------------------------------------------------------
 # Unit 4 — discover_subarchetypes (DB wrapper, hermetic in-memory DuckDB)
 # ---------------------------------------------------------------------------
 
@@ -489,3 +593,50 @@ class TestDiscoverSubarchetypesDB:
         assert split.parent == "Nonexistent Archetype"
         assert split.passed is False
         assert split.camps == []
+
+    def test_tournament_date_rides_the_pool_query_into_gate_c(self):
+        """t.date joins onto every deck row -> DeckVector.date -> Gate C median/flag."""
+        from legacy_engine.ingestion import store
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        con.execute(
+            "INSERT INTO tournaments VALUES ('old', 'Old', '2025-06-01', NULL, "
+            "'Legacy', 'src', 'online')"
+        )
+        con.execute(
+            "INSERT INTO tournaments VALUES ('new', 'New', '2026-05-01', NULL, "
+            "'Legacy', 'src', 'online')"
+        )
+        deck_rows = []
+        card_rows = []
+        idx = 0
+        for _ in range(35):
+            deck_rows.append(("old", idx, "p", "W", "Doomsday", None))
+            card_rows += [
+                ("old", idx, "main", "Core Land", 4),
+                ("old", idx, "main", "Card A1", 4),
+                ("old", idx, "main", "Card A2", 3),
+            ]
+            idx += 1
+        idx = 0
+        for _ in range(35):
+            deck_rows.append(("new", idx, "p", "W", "Doomsday", None))
+            card_rows += [
+                ("new", idx, "main", "Core Land", 4),
+                ("new", idx, "main", "Card B1", 4),
+                ("new", idx, "main", "Card B2", 3),
+            ]
+            idx += 1
+        con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
+        con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
+
+        try:
+            split = discover_subarchetypes(con, "Doomsday", seed=0, n_boot=20)
+        finally:
+            con.close()
+
+        assert split.passed is True
+        assert split.temporal_mixing is True
+        assert split.temporal_note == "camps may be list generations"
+        assert {c.median_date for c in split.camps} == {"2025-06-01", "2026-05-01"}
