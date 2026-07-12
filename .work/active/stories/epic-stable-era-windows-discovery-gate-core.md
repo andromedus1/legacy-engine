@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-discovery-gate-core
 kind: story
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-stable-era-windows-discovery-gate
 depends_on: []

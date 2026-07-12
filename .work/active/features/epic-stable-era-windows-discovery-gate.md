@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-discovery-gate
 kind: feature
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-era-ledger]
