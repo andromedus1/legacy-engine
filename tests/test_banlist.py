@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
-from legacy_engine.ingestion.banlist import banlist_as_of, current_banlist, validate_deck
+import pytest
+
+from legacy_engine.ingestion.banlist import (
+    BAN_EVENTS,
+    append_ban_event,
+    banlist_as_of,
+    current_banlist,
+    load_ban_events,
+    validate_deck,
+)
 from legacy_engine.models.banlist import CATEGORY_BANNED_NAMES
 
 
@@ -179,3 +189,102 @@ class TestTypeLineInjection:
         """Default call (no type_line_of arg) must not crash."""
         errors = validate_deck({"Island": 60})
         assert not any("not Legacy-legal" in e for e in errors)
+
+
+class TestLoadBanEvents:
+    """Unit A — curated-JSON BAN_EVENTS loader (epic-stable-era-windows-era-ledger-store)."""
+
+    def _write(self, tmp_path, events: list[dict]) -> "object":
+        path = tmp_path / "events.json"
+        path.write_text(json.dumps({"events": events}), encoding="utf-8")
+        return path
+
+    def test_shipped_events_match_the_original_hardcoded_twelve(self):
+        # BAN_EVENTS (bound from the shipped JSON at import) must still carry exactly the
+        # original 12 dated events, verbatim — including the non-ASCII card name.
+        assert len(BAN_EVENTS) == 12
+        assert (date(2022, 1, 1), "Ragavan, Nimble Pilferer",
+                "Format-warping UR Delver engine") in BAN_EVENTS
+        assert (date(2026, 5, 18), "Undercity Informer",
+                "De-power MH3 Oops All Spells") in BAN_EVENTS
+        assert any(card == "Troll of Khazad-dûm" for _d, card, _r in BAN_EVENTS)
+
+    def test_loader_sorts_by_date_then_card_regardless_of_file_order(self, tmp_path):
+        path = self._write(tmp_path, [
+            {"date": "2025-01-01", "card": "Zeta", "reason": "r1"},
+            {"date": "2024-01-01", "card": "Alpha", "reason": "r2"},
+        ])
+        events = load_ban_events(path)
+        assert events == (
+            (date(2024, 1, 1), "Alpha", "r2"),
+            (date(2025, 1, 1), "Zeta", "r1"),
+        )
+
+    def test_missing_file_raises_file_not_found(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_ban_events(tmp_path / "nope.json")
+
+    def test_non_list_events_key_fails_fast_citing_path(self, tmp_path):
+        path = tmp_path / "events.json"
+        path.write_text(json.dumps({"events": "not-a-list"}), encoding="utf-8")
+        with pytest.raises(ValueError, match=str(path)):
+            load_ban_events(path)
+
+    def test_bad_date_fails_fast(self, tmp_path):
+        path = self._write(tmp_path, [{"date": "not-a-date", "card": "X", "reason": "r"}])
+        with pytest.raises(ValueError, match="not-a-date"):
+            load_ban_events(path)
+
+    def test_missing_card_fails_fast(self, tmp_path):
+        path = self._write(tmp_path, [{"date": "2024-01-01", "reason": "r"}])
+        with pytest.raises(ValueError, match="card"):
+            load_ban_events(path)
+
+    def test_duplicate_date_card_pair_fails_fast(self, tmp_path):
+        path = self._write(tmp_path, [
+            {"date": "2024-01-01", "card": "X", "reason": "r1"},
+            {"date": "2024-01-01", "card": "X", "reason": "r2"},
+        ])
+        with pytest.raises(ValueError, match="duplicate"):
+            load_ban_events(path)
+
+
+class TestAppendBanEvent:
+    """The `eras confirm` write path — Candelabra's real registration lands through this."""
+
+    def test_append_to_absent_file_creates_it(self, tmp_path):
+        path = tmp_path / "sub" / "events.json"
+        result = append_ban_event(date(2026, 6, 29), "Candelabra of Tawnos", "Tron 4x growth engine", path=path)
+        assert result == ((date(2026, 6, 29), "Candelabra of Tawnos", "Tron 4x growth engine"),)
+        assert path.exists()
+
+    def test_append_round_trips_through_load(self, tmp_path):
+        path = tmp_path / "events.json"
+        append_ban_event(date(2026, 1, 1), "Alpha", "r1", path=path)
+        append_ban_event(date(2026, 2, 1), "Beta", "r2", path=path)
+        events = load_ban_events(path)
+        assert events == (
+            (date(2026, 1, 1), "Alpha", "r1"),
+            (date(2026, 2, 1), "Beta", "r2"),
+        )
+
+    def test_append_keeps_file_sorted_by_date(self, tmp_path):
+        path = tmp_path / "events.json"
+        append_ban_event(date(2026, 6, 1), "Late", "r1", path=path)
+        result = append_ban_event(date(2026, 1, 1), "Early", "r2", path=path)
+        assert [c for _d, c, _r in result] == ["Early", "Late"]
+
+    def test_duplicate_date_and_card_rejected(self, tmp_path):
+        path = tmp_path / "events.json"
+        append_ban_event(date(2026, 1, 1), "Alpha", "r1", path=path)
+        with pytest.raises(ValueError, match="already has an event"):
+            append_ban_event(date(2026, 1, 1), "Alpha", "r2", path=path)
+
+    def test_non_ascii_card_name_round_trips_verbatim(self, tmp_path):
+        path = tmp_path / "events.json"
+        append_ban_event(date(2026, 1, 1), "Troll of Khazad-dûm", "reason", path=path)
+        events = load_ban_events(path)
+        assert events[0][1] == "Troll of Khazad-dûm"
+        # And the file itself carries the literal UTF-8 character (ensure_ascii=False).
+        raw = path.read_text(encoding="utf-8")
+        assert "Khazad-dûm" in raw
