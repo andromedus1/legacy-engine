@@ -451,11 +451,23 @@ def build_deck_dashboard(
 
     # Primer HTML — surface the field basis (current ban-regime window + sample) so the
     # thin-window caveat behind positioning/meta-share is visible.
+    # epic-stable-era-windows-mixed-horizon-consumers: Tile B (matchup spread) and this
+    # meta-share/positioning basis intentionally use TWO DIFFERENT horizon sources — Tile B
+    # pools each opponent to its own per-entity era-aware window (`build_adaptive_matrix` /
+    # `analytics.eras.consume.era_horizons`, per-row via `cell_windows`), while this field basis
+    # is the single resolved ban-regime window (`analytics.trends.resolve_regime`). They are
+    # NOT reconciled — labeling the divergence honestly (never silently blended) is the
+    # deliberate choice here (divergence-as-diagnostic-surface), since meta-share/positioning are
+    # corpus-composition concepts (a ban-regime window) while a matchup cell's honest window is
+    # per-entity-disturbance (an era window); a byte-identical fallback to the ban-regime-only
+    # windows on both tiles holds whenever `entity_eras` carries no data.
     _since_lbl = cur_since or "earliest"
     field_basis = (
         f"Field basis: meta-share & positioning weighted over the {regime} ban-regime "
         f"window (since {_since_lbl}; {meta.total_decks} decks) — banned-out decks correctly fall away, "
-        f"but a young regime is a thin field (watch data_coverage)."
+        f"but a young regime is a thin field (watch data_coverage). Matchup spread (Tile B) instead "
+        "windows each opponent to its own per-entity era-aware horizon (see each row's window) — "
+        "the two tiles' windows may legitimately differ; each is labeled with its own basis, never blended."
     )
     primer_html = _primer_summary(
         archetype, meta, matchup_rows, ranking, subj, field_basis=field_basis

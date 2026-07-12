@@ -361,7 +361,17 @@ class TestBuildAdaptiveMatrixSplitVariant:
 class TestGoldenReportMatchupsDefault:
     """Gate-tests F1 (v0.3.0): the no-flag `report matchups` body is pinned byte-for-byte —
     the load-bearing gated-additive golden the feature prose promised. A pure formatting or
-    rounding regression to the default output must fail here, not slip past substring checks."""
+    rounding regression to the default output must fail here, not slip past substring checks.
+
+    Re-pinned for epic-stable-era-windows-shrinkage (Unit 3): the hierarchical cell prior
+    replaces the flat-0.5 prior for every cell, so the shrunk% halves of this 2-archetype grid
+    move (Control's own marginal is entirely self-referential in this fixture — its single
+    opponent IS its whole marginal — so its cell's prior pulls harder than flat 0.5 did: a known,
+    documented, accepted EB simplification the project already ships in `card_value.py`'s own
+    two-level chain). ``_GRID_PRE_HIERARCHY`` is kept alongside the new ``_GRID`` so
+    ``test_repin_only_shrunk_values_moved_raw_n_identical`` can prove, mechanically, that this
+    re-pin changed ONLY the shrunk%/prior_source halves — raw% and n= are byte-identical.
+    """
 
     _SECTION = (
         "=== Matchup Matrix [{prov}] ===\n"
@@ -369,13 +379,24 @@ class TestGoldenReportMatchupsDefault:
         "Caveat: Matchup data is computed only from rounds-bearing events (Challenges + paper); "
         "matchup-n is a separate, smaller sample than meta-share-n. Cells with n<30 are hidden.\n"
     )
-    _GRID = (
+    # Pre-epic-stable-era-windows-shrinkage golden (flat-0.5 prior) — retained ONLY so the re-pin
+    # diff can be mechanically verified below; not used as an expectation anywhere else.
+    _GRID_PRE_HIERARCHY = (
         "Cells: shrunk%|raw% n=matches — the raw record always travels with the estimate; "
         "small n is pulled toward 50%.\n"
         "          Control               Doomsday            \n"
         "----------------------------------------------------\n"
         "Control   n=0 (mirror)          17%|3% n=36         \n"
         "Doomsday  83%|97% n=36          n=0 (mirror)        \n"
+        "// window: full-corpus\n"
+    )
+    _GRID = (
+        "Cells: shrunk%|raw% n=matches — the raw record always travels with the estimate; "
+        "small n is pulled toward 50%.\n"
+        "          Control               Doomsday            \n"
+        "----------------------------------------------------\n"
+        "Control   n=0 (mirror)          7%|3% n=36          \n"
+        "Doomsday  93%|97% n=36          n=0 (mirror)        \n"
         "// window: full-corpus\n"
     )
     GOLDEN = (
@@ -397,6 +418,22 @@ class TestGoldenReportMatchupsDefault:
             f"report matchups default output changed!\n--- expected ---\n{self.GOLDEN!r}\n"
             f"--- got ---\n{body!r}"
         )
+
+    def test_repin_only_shrunk_values_moved_raw_n_identical(self):
+        """Mechanical proof the re-pin is honest: every cell's raw%/n= token is byte-identical
+        between the pre-hierarchy and post-hierarchy goldens; only the shrunk% token (and the
+        fact that they now differ) changed."""
+        import re
+
+        cell_re = re.compile(r"(?P<shrunk>\d+)%\|(?P<raw>\d+)% n=(?P<n>\d+)")
+        old_cells = cell_re.findall(self._GRID_PRE_HIERARCHY)
+        new_cells = cell_re.findall(self._GRID)
+        assert old_cells and new_cells
+        assert len(old_cells) == len(new_cells)
+        for (old_shrunk, old_raw, old_n), (new_shrunk, new_raw, new_n) in zip(old_cells, new_cells):
+            assert (old_raw, old_n) == (new_raw, new_n), "raw%/n must be byte-identical across the re-pin"
+        # The whole point of the re-pin: at least one cell's shrunk% actually moved.
+        assert [s for s, _, _ in old_cells] != [s for s, _, _ in new_cells]
 
 
 class TestReportMatchupsSplitVariantCLI:
@@ -436,6 +473,23 @@ class TestReportMatchupsSplitVariantCLI:
         assert "Doomsday [Painter]" in result.output
         assert "Doomsday [unlabeled]" in result.output
 
+    def test_split_flag_camp_rows_show_prior_labels(self, runner, tmp_path):
+        """Unit 3 AC (epic-stable-era-windows-shrinkage): --split-variant camp rows surface their
+        hierarchical prior_source as a grep-able `// prior: <camp> vs <opponent>: <source>` line —
+        the LCO-parent chain for the real (non-split) opponent, the marginal fallback for a
+        cross-camp pairing."""
+        db_path = self._build_db(tmp_path)
+        result = runner.invoke(
+            main,
+            ["report", "matchups", "--db", db_path, "--all-time", "--split-variant", "Doomsday"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// prior: Doomsday [Murktide] vs Control: parent cell (leave-camp-out)" in result.output
+        assert "// prior: Doomsday [Murktide] vs Doomsday [Painter]: marginal" in result.output
+        # No-flag output never gets these audit lines (byte-identical to pre-epic rendering).
+        no_flag = runner.invoke(main, ["report", "matchups", "--db", db_path, "--all-time"])
+        assert "// prior:" not in no_flag.output
+
     def test_head_to_head_accepts_camp_label(self, runner, tmp_path):
         db_path = self._build_db(tmp_path)
         result = runner.invoke(
@@ -448,6 +502,7 @@ class TestReportMatchupsSplitVariantCLI:
         )
         assert result.exit_code == 0, result.output
         assert "Head-to-Head" in result.output
+        assert "prior          = parent cell (leave-camp-out)" in result.output
         assert "n              = 32" in result.output
 
     def test_help_documents_split_variant(self, runner):
