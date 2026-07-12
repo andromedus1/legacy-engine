@@ -285,7 +285,7 @@ class TestDiscoverRunEraDefault:
             "--db", db_path, "--discovered-path", staged, "--n-boot", "10", "--all-pool",
         ])
         assert result.exit_code == 0, result.output
-        assert "// pool window: full corpus (--all-pool)" in result.output
+        assert "// pool window: full corpus (--all-pool); % current vs " in result.output
         assert "// verdict: PASS" in result.output
         assert (tmp_path / "discovered.json").exists()
 
@@ -355,8 +355,9 @@ class TestDiscoverGateCSurfacing:
         assert "// ⚠ temporal mixing: camps may be list generations" in result.output
         assert "median 2025-06-01" in result.output
         assert "median 2026-05-01" in result.output
-        # --all-pool -> current_since is None -> pct_current honestly omitted (no "% current").
-        assert "% current" not in result.output
+        # --all-pool pools the full corpus but %current stays anchored to the entity's ERA
+        # since (ban-regime fallback here) — the documented diagnostic (Unit 2 design decision).
+        assert "% current" in result.output
 
     def test_list_renders_the_same_gate_c_fields(self, runner, tmp_path):
         db_path = _build_two_generation_db(tmp_path)

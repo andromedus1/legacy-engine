@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-discovery-gate
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-era-ledger]
@@ -99,3 +99,11 @@ staged round-trip with new fields; old staged records still load.
 - **Gate C threshold** (120-day median gap) is a heuristic: pin it as a named constant with the
   synthetic fixtures as calibration source; a real two-sample test can replace it later without
   API change.
+
+## Implementation summary + review (2026-07-12)
+
+2 stories (commits e3ccbae core, ecc719f surface), +17 tests then review fixes; suite 2928+1xfail.
+Fresh-context review: APPROVE. Findings fixed in-tree: --all-pool now anchors %current to the
+entity's ERA since (the documented diagnostic — code had silently omitted it); empty windowed
+pool gets an explicit `// ⚠ pool excludes every deck` line + `// pool: N decks` count (honest
+empty-pool vs no-structure distinction); undisturbed echo de-awkwarded.

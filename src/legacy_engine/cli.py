@@ -6574,22 +6574,49 @@ def discover_run(
 
         if since is not None:
             effective_since = since
+            current_since = since
         elif all_pool:
+            # Full-corpus pool, but %current stays anchored to the entity's ERA since —
+            # that's the diagnostic value of --all-pool: cluster everything, then see how
+            # current each camp is relative to the live era (design decision, Unit 2).
+            from legacy_engine.generation.consensus import entity_era_window
+
             effective_since = None
-            click.echo("// pool window: full corpus (--all-pool)")
+            current_since, _until, window_label = entity_era_window(con, archetype)
+            click.echo(
+                f"// pool window: full corpus (--all-pool); % current vs "
+                f"{current_since or 'full corpus'} ({window_label})"
+            )
         else:
             from legacy_engine.generation.consensus import entity_era_window
 
             effective_since, _until, window_label = entity_era_window(con, archetype)
+            current_since = effective_since
+            if effective_since is None:
+                click.echo(f"// pool window: full corpus ({window_label})")
+            else:
+                click.echo(f"// pool window: since {effective_since} ({window_label})")
+
+        pool_n = con.execute(
+            """
+            SELECT count(*) FROM decks d JOIN tournaments t ON t.id = d.tournament_id
+            WHERE d.archetype = ? AND (? IS NULL OR t.date >= ?)
+            """,
+            [archetype, effective_since, effective_since],
+        ).fetchone()[0]
+        click.echo(f"// pool: {pool_n} decks")
+        if pool_n == 0:
             click.echo(
-                f"// pool window: since {effective_since or 'full corpus'} ({window_label})"
+                "// ⚠ the resolved pool window excludes every deck of this archetype — "
+                "widen with --since or --all-pool (the FAIL below reflects an empty pool, "
+                "not unstructured decks)"
             )
 
         split = discover_subarchetypes(
             con,
             archetype,
             since=effective_since,
-            current_since=effective_since,
+            current_since=current_since,
             reducer=partial(reduce_dims, method=reducer),
             seed=seed,
             n_boot=n_boot,
