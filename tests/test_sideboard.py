@@ -3335,6 +3335,78 @@ class TestAdaptiveWindowSideboard:
             )
         con_thin.close()
 
+    def test_adaptive_windows_resolve_via_era_horizons(self, make_rounds_corpus, monkeypatch):
+        """epic-stable-era-windows-mixed-horizon-consumers: the per-opponent adaptive windows
+        now resolve through the SAME era-horizon adapter (`analytics.eras.consume.era_horizons`)
+        the slot-ROI matrix (`build_adaptive_matrix`) already uses — not the pre-epic ban-only
+        `archetype_valid_since` alone. A seeded `entity_eras` row for Control (a date the real
+        banlist would never produce) must show up in `plan_windows["Combo"]`, proving the new
+        code path actually consults the era ledger rather than only affectedness."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        era_since = "2025-12-25"  # an arbitrary date the real banlist would not produce
+        write_entity_eras(
+            con,
+            {"Control": EntityEras(entity="Control", stable_since=era_since, boundaries=(), inherited_from_parent=False)},
+            {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-12T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Control": "Control"},
+            },
+        )
+
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy", archetype="Control", adaptive=True,
+        )
+        assert pkg.plan_window_label == "adaptive (per-opponent era-aware)"
+        # Combo has no era row of its own -> max(Control's era_since, None) == era_since.
+        assert pkg.plan_windows.get("Combo") == (era_since, None)
+        con.close()
+
+    def test_adaptive_windows_byte_identical_without_era_data(self, make_rounds_corpus, monkeypatch):
+        """No `entity_eras` table at all -> era_horizons degrades every archetype to its
+        ban-only `archetype_valid_since` horizon (the exact pre-epic behavior) — proven by
+        comparing against a direct `archetype_valid_since` call on the same archetypes, not by
+        comparing a result to itself."""
+        import legacy_engine.advisory.sideboard as _sb_mod
+        from legacy_engine.analytics.affectedness import archetype_valid_since
+
+        def _patched_fvt(con_arg, field_arg):
+            return {arch: frozenset({"combo"}) for arch in field_arg.shares}
+        def _patched_dvt(con_arg, maindeck_arg):
+            return frozenset()
+        monkeypatch.setattr(_sb_mod, "field_vulnerability_tags", _patched_fvt)
+        monkeypatch.setattr(_sb_mod, "vulnerability_tags_for_deck", _patched_dvt)
+
+        con, _ = make_rounds_corpus(n_repeats=15)
+        field = self._field()
+        maindeck = {"Brainstorm": 4, "Island": 56}
+
+        pkg = recommend_sideboard(
+            con, field, maindeck, solver="greedy", archetype="Control", adaptive=True,
+        )
+        old_valid_since = archetype_valid_since(con, ["Control", "Combo"])
+        control_since = old_valid_since.get("Control")
+        combo_since = old_valid_since.get("Combo")
+        expected_combo_window = (
+            (max(s for s in (control_since, combo_since) if s is not None), None)
+            if control_since or combo_since else (None, None)
+        )
+        assert pkg.plan_windows.get("Combo") == expected_combo_window
+        con.close()
+
 
 # ---------------------------------------------------------------------------
 # TestArchetypeEmpiricalRecommendations
