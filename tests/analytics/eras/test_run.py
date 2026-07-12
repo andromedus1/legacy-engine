@@ -23,8 +23,14 @@ from datetime import date, timedelta
 import pytest
 
 from legacy_engine.analytics.eras.attribution import Attribution
+from legacy_engine.analytics.eras.detect import CandidateBoundary
 from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
-from legacy_engine.analytics.eras.run import compute_drift_alarms, run_eras
+from legacy_engine.analytics.eras.run import (
+    _corpus_first_seen,
+    _trigger_cards_from_presence_adopt,
+    compute_drift_alarms,
+    run_eras,
+)
 from legacy_engine.analytics.eras.store import read_entity_eras
 
 # ---------------------------------------------------------------------------
@@ -256,3 +262,176 @@ class TestRunErasEndToEnd:
         # above), which is the documented fallback behavior.
         result, _rows = run_result_and_rows
         assert result.n_entities == 3  # the run completed without error despite no release data
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 (completion review) — corpus-first-seen release-attribution fallback
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerCardsFromPresenceAdopt:
+    """`_trigger_cards_from_presence_adopt` — pure, no DB (objective-search-split's own "pure
+    loop over a plain dict" half; this is the extraction step that FEEDS the batched query)."""
+
+    def test_collects_presence_adopt_trigger_cards_across_entities(self):
+        sig_a = CandidateBoundary(
+            entity="A", date="2026-04-20", signal="presence-adopt", magnitude=0.9,
+            pvalue=0.01, evidence="...", trigger_card="Flow State",
+        )
+        sig_b = CandidateBoundary(
+            entity="B", date="2026-05-01", signal="presence-adopt", magnitude=0.8,
+            pvalue=0.01, evidence="...", trigger_card="Fresh Tech",
+        )
+        eras = {
+            "A": EntityEras(
+                entity="A", stable_since="2026-04-20",
+                boundaries=(EraBoundary(date="2026-04-20", signals=(sig_a,), pvalue=0.01, bh_accepted=True, floor_rejected=False),),
+                inherited_from_parent=False,
+            ),
+            "B": EntityEras(
+                entity="B", stable_since="2026-05-01",
+                boundaries=(EraBoundary(date="2026-05-01", signals=(sig_b,), pvalue=0.01, bh_accepted=True, floor_rejected=False),),
+                inherited_from_parent=False,
+            ),
+        }
+        assert _trigger_cards_from_presence_adopt(eras) == {"Flow State", "Fresh Tech"}
+
+    def test_ignores_non_adopt_signals_and_no_trigger_card(self):
+        share_sig = CandidateBoundary(
+            entity="A", date="2026-04-20", signal="share", magnitude=0.5,
+            pvalue=0.01, evidence="...", trigger_card=None,
+        )
+        eras = {
+            "A": EntityEras(
+                entity="A", stable_since="2026-04-20",
+                boundaries=(EraBoundary(date="2026-04-20", signals=(share_sig,), pvalue=0.01, bh_accepted=True, floor_rejected=False),),
+                inherited_from_parent=False,
+            ),
+        }
+        assert _trigger_cards_from_presence_adopt(eras) == set()
+
+    def test_empty_eras_yields_empty_set(self):
+        assert _trigger_cards_from_presence_adopt({}) == set()
+
+
+class TestCorpusFirstSeen:
+    """`_corpus_first_seen` — one batched query for the whole trigger-card set's earliest corpus
+    appearance (objective-search-split style). Hermetic in-memory DB, never the default DB."""
+
+    def _con(self):
+        from legacy_engine.ingestion import store
+        from legacy_engine.ingestion.cache import parse_cache_item
+
+        con = store.connect(":memory:")
+
+        def _load(name: str, iso_date: str, card: str) -> None:
+            raw = {
+                "Tournament": {
+                    "Name": name, "Date": iso_date,
+                    "Uri": f"https://example.com/{name}", "Formats": "Legacy",
+                },
+                "Decks": [
+                    {"Player": "p1", "Mainboard": [{"Count": 1, "CardName": card}], "Sideboard": []},
+                ],
+                "Rounds": [], "Standings": [],
+            }
+            store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+
+        # "Fresh Tech" first appears 2026-04-20 (an earlier stray mention would be a bug if this
+        # were NOT the min — the second load is a LATER date, proving MIN is taken correctly).
+        _load("wk1", "2026-04-20", "Fresh Tech")
+        _load("wk2", "2026-04-27", "Fresh Tech")
+        # "Ancient Staple" has been around much longer.
+        _load("wk0", "2020-01-01", "Ancient Staple")
+        _load("wk1b", "2026-04-20", "Ancient Staple")
+        return con
+
+    def test_returns_min_date_per_card(self):
+        con = self._con()
+        out = _corpus_first_seen(con, {"Fresh Tech", "Ancient Staple"})
+        assert out["Fresh Tech"] == date(2026, 4, 20)
+        assert out["Ancient Staple"] == date(2020, 1, 1)
+        con.close()
+
+    def test_omits_cards_not_in_the_corpus(self):
+        con = self._con()
+        out = _corpus_first_seen(con, {"Never Printed"})
+        assert out == {}
+        con.close()
+
+    def test_empty_card_set_short_circuits_without_querying(self):
+        con = self._con()
+        out = _corpus_first_seen(con, set())
+        assert out == {}
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 end-to-end: a real Flow-State-shaped corpus (S1 presence-adopt) attributes as
+# "release" via the corpus-first-seen fallback, since the synthetic `cards` table (like the real
+# one, pre-this-feature) carries no release-date column.
+# ---------------------------------------------------------------------------
+
+# Weekly (total_decks, decks_running_flow_state) — the real "Doomsday" ground-truth #2 fixture
+# (docs/briefs/change-point-detection.md §1, frozen 2026-07-11; see conftest.py's
+# `flow_state_series`). Flow State first appears in week 12 (2026-04-20) and is adopted almost
+# immediately by nearly every deck — the release-driven "no ban, no valid_since change" case
+# Finding 1 exists to fix.
+_FLOW_STATE_START = date(2026, 1, 26)
+_FLOW_STATE_WEEKLY = [
+    (3, 0), (23, 0), (7, 0), (16, 0), (6, 0), (22, 0), (8, 0), (10, 0), (15, 0), (15, 0),
+    (20, 0), (15, 0), (19, 18), (22, 21), (21, 20), (15, 14), (17, 16), (29, 27), (13, 12),
+    (22, 21), (20, 20), (27, 14), (6, 2),
+]
+_FLOW_STATE_ADOPT_DATE = "2026-04-20"  # week index 12 -- the first week Flow State appears
+
+
+def _build_flow_state_corpus(con) -> None:
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.cache import parse_cache_item
+
+    for i, (total, with_card) in enumerate(_FLOW_STATE_WEEKLY):
+        monday = _FLOW_STATE_START + timedelta(weeks=i)
+        decks: list[dict] = []
+        for j in range(total):
+            mainboard = (
+                [{"Count": 1, "CardName": "Flow State"}] if j < with_card
+                else [{"Count": 4, "CardName": "Filler Card"}]
+            )
+            decks.append({"Player": f"dd_{i}_{j}", "Mainboard": mainboard, "Sideboard": []})
+        raw = {
+            "Tournament": {
+                "Name": f"Week {i}", "Date": monday.isoformat(),
+                "Uri": f"https://example.com/flow-week-{i}", "Formats": "Legacy",
+            },
+            "Decks": decks, "Rounds": [], "Standings": [],
+        }
+        tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+        con.execute("UPDATE decks SET archetype = 'Doomsday' WHERE tournament_id = ?", [tid])
+
+
+class TestFlowStateReleaseAttributionEndToEnd:
+    """`run_eras` end-to-end: a real S1 presence-adopt boundary (no ban nearby, no schema
+    release-date column) attributes as "release" via the corpus-first-seen fallback — the exact
+    gap Finding 1 fixes (a real adoption boundary was mislabeling as "unattributed disturbance")."""
+
+    def test_flow_state_boundary_attributes_release_via_corpus_first_seen(self):
+        from legacy_engine.ingestion import store
+
+        con = store.connect(":memory:")
+        _build_flow_state_corpus(con)
+        result = run_eras(con, seed=0)
+        rows = read_entity_eras(con)
+        con.close()
+
+        boundary = next(
+            (b for b in rows["Doomsday"].boundaries if b.date == _FLOW_STATE_ADOPT_DATE), None,
+        )
+        assert boundary is not None, (
+            f"no boundary at {_FLOW_STATE_ADOPT_DATE}: {[b.date for b in rows['Doomsday'].boundaries]}"
+        )
+        assert boundary.attribution is not None
+        assert boundary.attribution.kind == "release"
+        assert boundary.attribution.card == "Flow State"
+        assert "first corpus appearance 2026-04-20" in boundary.attribution.detail
+        assert result.n_entities == 1

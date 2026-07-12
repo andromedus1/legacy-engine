@@ -613,21 +613,18 @@ class TestWindowEchoRegimeConsistency:
         assert "window:" in result.output
         assert "sample_n=" in result.output
 
-    def test_generate_consensus_echoes_uniform_label(self, runner, db_with_corpus):
-        """generate consensus must label its window as uniform / current-regime."""
+    def test_generate_consensus_echoes_honest_explicit_window_label(self, runner, db_with_corpus):
+        """generate consensus with an explicit --since must label the window honestly as an
+        explicit override — NOT the stale hardcoded "uniform current-regime" claim (completion-
+        review Finding 2: the audit line must name the actual basis, since --since here isn't
+        necessarily the current ban regime)."""
         result = runner.invoke(
             main,
             ["generate", "consensus", "--archetype", "Control",
              "--db", db_with_corpus, "--since", "2026-01-01"],
         )
         assert result.exit_code == 0, result.output
-        # The window echo must mention 'uniform' or 'current-regime' or 'deck composition'
-        output_lower = result.output.lower()
-        assert (
-            "uniform" in output_lower
-            or "current-regime" in output_lower
-            or "deck composition" in output_lower
-        ), f"Expected current-regime window label; output:\n{result.output}"
+        assert "// window: since 2026-01-01 (explicit window)" in result.output
 
     def test_generate_tune_echoes_window_divergence(self, runner, db_with_corpus, tmp_path):
         """generate tune must state the window divergence between list and matchup math."""

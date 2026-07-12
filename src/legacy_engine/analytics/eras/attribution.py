@@ -14,7 +14,14 @@ fixture documents.
 
 **Release check**: only for a boundary carrying its own S1 `presence-adopt` signal (the only
 signal type that names a `trigger_card`) whose set release date (an injected `releases` mapping)
-falls within tolerance of the boundary date.
+falls within tolerance of the boundary date. When `releases` has no entry at all for the trigger
+card (the common case: the `cards` table carries no release-date column, so `run.py`'s default
+`releases` source is empty), a `corpus_first_seen` mapping (the card's earliest corpus
+appearance — `run.py`'s batched fallback query) fills the gap: an S1 adoption boundary that lines
+up with the card's first appearance in the corpus attributes as `"release"` too, honestly noting
+the date is a first-appearance proxy rather than an authoritative release date. The injected/
+schema `releases` source always wins outright when it names the card — the fallback only ever
+fires on a missing entry, never overriding a present-but-out-of-tolerance one.
 
 Neither check matching -> `"unattributed disturbance — possible unregistered B&R change"`, the
 raw material `run.compute_drift_alarms` surfaces loudly for high-share entities.
@@ -94,6 +101,7 @@ def _attribute_one(
     ban_events: tuple[tuple[date, str, str], ...],
     releases: dict[str, date],
     tolerance_days: int,
+    corpus_first_seen: dict[str, date] | None = None,
 ) -> Attribution:
     nearest = _nearest_ban_event(ban_events, boundary_date, tolerance_days)
     if nearest is not None:
@@ -121,14 +129,21 @@ def _attribute_one(
         if sig.signal != "presence-adopt" or not sig.trigger_card:
             continue
         release_date = releases.get(sig.trigger_card)
+        fallback_note: str | None = None
+        if release_date is None and corpus_first_seen:
+            first_seen = corpus_first_seen.get(sig.trigger_card)
+            if first_seen is not None:
+                release_date = first_seen
+                fallback_note = f"first corpus appearance {first_seen.isoformat()}"
         if release_date is None:
             continue
         if abs((release_date - boundary_date).days) <= tolerance_days:
-            return Attribution(
-                kind="release",
-                card=sig.trigger_card,
-                detail=f"release: {sig.trigger_card} adoption ({release_date.isoformat()})",
+            detail = (
+                f"release: {sig.trigger_card} adoption ({fallback_note})"
+                if fallback_note is not None
+                else f"release: {sig.trigger_card} adoption ({release_date.isoformat()})"
             )
+            return Attribution(kind="release", card=sig.trigger_card, detail=detail)
 
     return Attribution(
         kind="unattributed",
@@ -144,10 +159,15 @@ def attribute_boundaries(
     releases: dict[str, date],
     series: dict[str, EntitySeries],
     tolerance_days: int = 14,
+    corpus_first_seen: dict[str, date] | None = None,
 ) -> dict[tuple[str, str], Attribution]:
     """Attribute every boundary in every entity's `EntityEras.boundaries` — accepted or not, the
     full audit trail (mirrors `explain_valid_since`'s per-event derivation walk, which shows every
-    ban event regardless of whether it ultimately moved `valid_since`)."""
+    ban event regardless of whether it ultimately moved `valid_since`).
+
+    ``corpus_first_seen`` (optional; ``None``/empty = no-op, byte-identical to the pre-fallback
+    behavior) is the release check's corpus-first-seen fallback — see module docstring.
+    """
     out: dict[tuple[str, str], Attribution] = {}
     for entity, entity_eras in eras.items():
         s = series.get(entity)
@@ -156,5 +176,6 @@ def attribute_boundaries(
             out[(entity, boundary.date)] = _attribute_one(
                 boundary, boundary_date, s,
                 ban_events=ban_events, releases=releases, tolerance_days=tolerance_days,
+                corpus_first_seen=corpus_first_seen,
             )
     return out

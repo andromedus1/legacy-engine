@@ -79,27 +79,40 @@ def _latest_regime_window() -> tuple[str | None, str | None]:
     return since, until
 
 
-def entity_era_window(con: duckdb.DuckDBPyConnection, archetype: str) -> tuple[str | None, str | None, str]:
+def entity_era_window(
+    con: duckdb.DuckDBPyConnection, archetype: str, *, variant: str | None = None,
+) -> tuple[str | None, str | None, str]:
     """Era-aware default window for one archetype's consensus/card-frequency generation
     (epic-stable-era-windows-consumption Unit 4 — the consensus/card-frequency family's own
     default, distinct from `analytics.eras.consume.era_horizons`'s ban-only-via-
     `archetype_valid_since` fallback used by the adaptive MATCHUP matrix).
 
-    Resolution:
-      - Absent entirely from `entity_eras` (never analyzed — no era run has covered this
-        archetype, or the table itself is missing/empty) -> the EXACT pre-epic fallback:
-        `_latest_regime_window()`, byte-for-byte identical to today's behavior; label =
-        ``"ban regime"``.
-      - Present with a `stable_since` date -> ``[stable_since, now)``; label = the winning
-        boundary's attribution trigger (a ban:/release:/unattributed detail).
-      - Present with `stable_since=None` (analyzed, undisturbed) -> full corpus (``None, None``)
-        — undisturbed composition IS solid (S2-checked); label = ``"undisturbed — full corpus"``.
+    Resolution order (mirrors `analytics.eras.consume.era_horizons`'s camp -> parent ->
+    fallback convention):
+      1. ``variant`` supplied and the camp label ``f"{archetype} [{variant}]"`` has its own
+         `entity_eras` row -> use THAT row (a camp can be disturbed/stable independently of
+         its parent archetype).
+      2. The parent ``archetype`` label has its own row -> use it (the pre-camp-awareness
+         behavior; also the path when ``variant`` is ``None``).
+      3. Absent entirely from `entity_eras` (never analyzed — no era run has covered this
+         archetype/camp, or the table itself is missing/empty) -> the EXACT pre-epic fallback:
+         `_latest_regime_window()`, byte-for-byte identical to today's behavior; label =
+         ``"ban regime"``.
+
+    Once a row is found (camp or parent), it resolves the same way:
+      - `stable_since` set -> ``[stable_since, now)``; label = the winning boundary's
+        attribution trigger (a ban:/release:/unattributed detail).
+      - `stable_since=None` (analyzed, undisturbed) -> full corpus (``None, None``) —
+        undisturbed composition IS solid (S2-checked); label = ``"undisturbed — full corpus"``.
 
     Returns ``(since, until, label)``; ``until`` is always ``None`` (open-ended: "now").
     """
     from legacy_engine.analytics.eras.store import read_entity_eras
 
-    stored = read_entity_eras(con).get(archetype)
+    stored_map = read_entity_eras(con)
+    stored = stored_map.get(f"{archetype} [{variant}]") if variant else None
+    if stored is None:
+        stored = stored_map.get(archetype)
     if stored is None:
         since, until = _latest_regime_window()
         return since, until, "ban regime"
@@ -176,7 +189,7 @@ def card_frequencies(
         ``inclusion_pct=0.8, modal_count=4``.
     """
     if since is None and until is None:
-        since, until, _window_label = entity_era_window(con, archetype)
+        since, until, _window_label = entity_era_window(con, archetype, variant=variant)
 
     # Resolve the player filter into a flat set of normalized handles.
     # When players is None, player_handles stays None (no SQL predicate).
@@ -395,7 +408,7 @@ def build_consensus(
     """
     # Resolve the effective window.
     if since is None and until is None:
-        effective_since, effective_until, _window_label = entity_era_window(con, archetype)
+        effective_since, effective_until, _window_label = entity_era_window(con, archetype, variant=variant)
     else:
         effective_since, effective_until = since, until
 
