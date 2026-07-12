@@ -306,6 +306,18 @@ class TestReportCardsConditioned:
         assert "lift_marg" in result.output
         assert "lift_cond" in result.output
 
+    def test_default_window_echoes_era_aware_audit_line(self, runner, sign_conflict_db_path):
+        """epic-stable-era-windows-consumption Unit 4: no --since/--until -> the era-aware
+        `entity_era_window` default fires and echoes a `// window: since ... (...)` line. This
+        hermetic test DB has no `entity_eras` table, so the label is the exact pre-epic
+        fallback ("ban regime")."""
+        result = runner.invoke(
+            main,
+            ["report", "cards", "--archetype", "Dimir Tempo", "--conditioned", "--db", sign_conflict_db_path],
+        )
+        assert result.exit_code == 0, result.output
+        assert "// window: since 2026-05-18 (ban regime)" in result.output
+
     def test_sign_conflict_line_fires_for_bauble(self, runner, sign_conflict_db_path):
         """The core scenario: pooled marginal negative, Dimir-Tempo-conditioned positive."""
         result = runner.invoke(
