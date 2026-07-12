@@ -14,9 +14,12 @@ from click.testing import CliRunner
 
 from legacy_engine.advisory.window import (
     WindowResolution,
+    _adaptive_audit,
     _count_rounds,
+    build_advisory_inputs,
     resolve_advisory_window,
 )
+from legacy_engine.analytics.eras.consume import EraHorizon
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
 
@@ -180,4 +183,80 @@ class TestMetashareDocRot:
         # Must succeed and return a valid MetaShareReport.
         report = compute_metashare(con, definition="wrw", since="2026-01-01")
         assert report.definition == "wrw"
+        con.close()
+
+
+# ---------------------------------------------------------------------------
+# epic-stable-era-windows-consumption Unit 3 — trigger-carrying adaptive audit + field era
+# ---------------------------------------------------------------------------
+
+
+class TestAdaptiveAudit:
+    def test_no_disturbance_no_ban_only(self):
+        lines = _adaptive_audit({"Control": EraHorizon(since=None, source="era", trigger=None, alarm=None)})
+        assert lines == ("// adaptive: no entity disturbed — all cells use full corpus",)
+
+    def test_named_entity_carries_trigger(self):
+        horizon_meta = {
+            "Doomsday": EraHorizon(
+                since="2026-04-20", source="era",
+                trigger="release: Flow State adoption (2026-04-20)", alarm=None,
+            ),
+            "Control": EraHorizon(since=None, source="era", trigger=None, alarm=None),
+        }
+        lines = _adaptive_audit(horizon_meta)
+        assert len(lines) == 1
+        assert lines[0] == (
+            "// adaptive: per-entity era windows — Doomsday since 2026-04-20 "
+            "(release: Flow State adoption (2026-04-20)); all others full-corpus"
+        )
+
+    def test_ban_only_entities_are_counted_not_named(self):
+        horizon_meta = {
+            "A": EraHorizon(since="2025-11-10", source="ban-only", trigger="ban: valid_since 2025-11-10", alarm=None),
+            "B": EraHorizon(since=None, source="ban-only", trigger=None, alarm=None),
+            "C": EraHorizon(since=None, source="era", trigger=None, alarm=None),
+        }
+        lines = _adaptive_audit(horizon_meta)
+        assert lines == ("// adaptive: per-entity era windows — 2 entities ban-only; all others full-corpus",)
+
+    def test_alarm_lines_append_never_truncate(self):
+        horizon_meta = {
+            "Tron": EraHorizon(since=None, source="era", trigger=None, alarm="unattributed disturbance (p_change=0.970)"),
+            "Control": EraHorizon(since=None, source="era", trigger=None, alarm=None),
+        }
+        lines = _adaptive_audit(horizon_meta)
+        assert len(lines) == 2
+        assert lines[0] == "// adaptive: no entity disturbed — all cells use full corpus"
+        assert lines[1] == "// ⚠ Tron: unattributed disturbance (p_change=0.970)"
+
+    def test_audit_preamble_prepended_verbatim(self):
+        lines = _adaptive_audit(
+            {"X": EraHorizon(since=None, source="ban-only", trigger=None, alarm=None)},
+            audit_preamble=("// eras: no era data — ban-only horizons; run `eras run`",),
+        )
+        assert lines[0] == "// eras: no era data — ban-only horizons; run `eras run`"
+        assert lines[1] == "// adaptive: per-entity era windows — 1 entities ban-only; all others full-corpus"
+
+
+class TestBuildAdvisoryInputsFieldEra:
+    def test_adaptive_mode_uses_resolve_field_era(self, make_rounds_corpus):
+        con, _ = make_rounds_corpus(n_repeats=1)
+        win = resolve_advisory_window(con)
+        assert win.mode == "adaptive"
+        inputs = build_advisory_inputs(con, win)
+        from legacy_engine.analytics.trends import resolve_regime
+        expected_since, _ = resolve_regime("current")
+        assert inputs.field_since == expected_since
+        assert inputs.field_until is None
+        assert any(line.startswith("// field: since") for line in inputs.audit)
+        con.close()
+
+    def test_uniform_mode_field_shares_the_window(self, make_rounds_corpus):
+        con, _ = make_rounds_corpus(n_repeats=50)
+        win = resolve_advisory_window(con, since="2026-01-01", until="2026-02-01", thin_floor=0)
+        inputs = build_advisory_inputs(con, win)
+        assert inputs.field_since == "2026-01-01"
+        assert inputs.field_until == "2026-02-01"
+        assert inputs.audit == ()
         con.close()
