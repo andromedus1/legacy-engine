@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-consumption
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-era-ledger]
@@ -168,3 +168,13 @@ move and why before re-pinning.
 - **Full-history widening for undisturbed entities changes established numbers** (cells gain
   pre-regime data where no disturbance was detected): this is the epic's INTENDED semantics —
   every such cell's window is auditable via cell_windows + explain.
+
+## Implementation summary (2026-07-12)
+
+3 stories on `feature/stable-era-consumption` (commits 8297a0c adapter, 64ccf76 matrix+window,
+5d6b681 consensus family — last finished inline after two agent API failures). Suite 2911+1xfail.
+Key as-builts: eras/consume.py (EraHorizon resolution era→parent→ban-only + resolve_field_era);
+build_adaptive_matrix(horizons=...) with proven byte-identical empty-eras fallback; _adaptive_audit
+carries triggers + alarms + degrade preamble; entity_era_window inside consensus.py defaults + the
+two single-archetype cli sites; three cross-entity sites kept on the global regime with documented
+rationale; goldens unchanged on hermetic DBs (fallback path).
