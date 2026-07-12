@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-12T01:23:43Z'
+generated_at: '2026-07-12T17:36:09Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -87,6 +87,16 @@ documents:
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
+    - 'STABLE ERAS: analytics/eras/ detects per-entity (archetype AND camp) era boundaries
+      from the corpus itself (S1 presence cliffs/ramps, S2 composition CPD via ruptures,
+      S3 share shifts, S4 WR corroboration; fleet BH-FDR + 30-deck era floor), persists
+      them (entity_eras table + eras run|list|explain|confirm CLI, ban/release/unattributed
+      attribution, BOCPD drift alarm), and stable_since replaces ban-only valid_since
+      as the DEFAULT horizon everywhere (adaptive matrix, advisory window + detection-derived
+      global field era, consensus/card-frequency, era-default discovery pools with
+      Gate C temporal-mixing). Matchup cells shrink toward hierarchical priors (camp
+      → leave-camp-out parent′ → marginal′ → 0.5; thin post-boundary cells toward
+      their own pre-disturbance value, labeled).'
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo
@@ -302,6 +312,13 @@ documents:
     - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
+    - 'STABLE ERAS: per-entity era boundaries detected from the corpus (change-point
+      ensemble + fleet FDR + era floors), persisted with attribution and a drift alarm
+      (eras run|list|explain|confirm), and consumed as the DEFAULT window everywhere
+      (adaptive matrix, detection-derived global field era, consensus/card-frequency,
+      era-default discovery pools with Gate C); matchup cells carry hierarchical +
+      cross-era priors with prior_source labels. Byte-identical ban-only fallback
+      when no era data exists.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on

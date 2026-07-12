@@ -594,6 +594,99 @@ class TestEntityEraWindow:
 
 
 # ---------------------------------------------------------------------------
+# entity_era_window(variant=...) — completion-review Finding 3 (camp-aware windows)
+# ---------------------------------------------------------------------------
+
+class TestEntityEraWindowVariantAware:
+    """`entity_era_window`'s camp-first resolution order: camp's own row -> parent's row ->
+    ban-regime fallback (mirrors `analytics.eras.consume.era_horizons`'s convention)."""
+
+    def test_camp_with_own_stable_since_wins_over_undisturbed_parent(self, con):
+        """A camp entity ("Delver [Turbo]") with its OWN disturbed era must win over its
+        parent's undisturbed (full-corpus) row — the parent's row must NOT shadow the camp's."""
+        from legacy_engine.analytics.eras.attribution import Attribution
+        from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        boundary = EraBoundary(
+            date="2026-05-20", signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False,
+        )
+        eras = {
+            "Delver": EntityEras(
+                entity="Delver", stable_since=None, boundaries=(), inherited_from_parent=False,
+            ),
+            "Delver [Turbo]": EntityEras(
+                entity="Delver [Turbo]", stable_since="2026-05-20", boundaries=(boundary,),
+                inherited_from_parent=False,
+            ),
+        }
+        attributions = {
+            ("Delver [Turbo]", "2026-05-20"): Attribution(
+                kind="ban", card="Some Card", detail="ban: Some Card (2026-05-20)",
+            ),
+        }
+        write_entity_eras(
+            con, eras, attributions, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-12T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Delver": "Delver", "Delver [Turbo]": "Delver"},
+            },
+        )
+        since, until, label = entity_era_window(con, "Delver", variant="Turbo")
+        assert since == "2026-05-20"
+        assert until is None
+        assert label == "ban: Some Card (2026-05-20)"
+
+        # The parent (no variant) resolution is unaffected — still undisturbed/full corpus.
+        parent_since, parent_until, parent_label = entity_era_window(con, "Delver")
+        assert (parent_since, parent_until) == (None, None)
+        assert parent_label == "undisturbed — full corpus"
+
+    def test_camp_absent_falls_back_to_parent_era(self, con):
+        """No "Delver [Bauble]" row -> falls back to the parent "Delver" row's own era."""
+        from legacy_engine.analytics.eras.attribution import Attribution
+        from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
+        from legacy_engine.analytics.eras.store import write_entity_eras
+
+        boundary = EraBoundary(
+            date="2026-05-15", signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False,
+        )
+        eras = {
+            "Delver": EntityEras(
+                entity="Delver", stable_since="2026-05-15", boundaries=(boundary,),
+                inherited_from_parent=False,
+            ),
+        }
+        attributions = {
+            ("Delver", "2026-05-15"): Attribution(
+                kind="release", card="Murktide Regent",
+                detail="release: Murktide Regent adoption (2026-05-15)",
+            ),
+        }
+        write_entity_eras(
+            con, eras, attributions, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-12T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Delver": "Delver"},
+            },
+        )
+        since, until, label = entity_era_window(con, "Delver", variant="Bauble")
+        assert since == "2026-05-15"
+        assert until is None
+        assert label == "release: Murktide Regent adoption (2026-05-15)"
+
+    def test_camp_and_parent_both_absent_is_unchanged_ban_regime_fallback(self, con):
+        """No `entity_eras` rows at all (camp or parent) -> the exact pre-epic ban-regime
+        fallback, byte-identical whether or not `variant` is passed."""
+        from legacy_engine.generation.consensus import _latest_regime_window
+
+        expected_since, expected_until = _latest_regime_window()
+        since, until, label = entity_era_window(con, "Delver", variant="Bauble")
+        assert (since, until) == (expected_since, expected_until)
+        assert label == "ban regime"
+
+
+# ---------------------------------------------------------------------------
 # Variant consumer regression — gated-additive contract for build_consensus
 # ---------------------------------------------------------------------------
 

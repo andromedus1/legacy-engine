@@ -1604,7 +1604,9 @@ def _report_cards_conditioned(
         # horizon (entity_era_window), not a global ban-regime window.
         if since is None and until is None:
             from legacy_engine.generation.consensus import entity_era_window
-            effective_since, effective_until, window_label = entity_era_window(con, archetype)
+            effective_since, effective_until, window_label = entity_era_window(
+                con, archetype, variant=variant,
+            )
             click.echo(f"// window: since {effective_since or 'full corpus'} ({window_label})")
         else:
             effective_since, effective_until = since, until
@@ -4787,6 +4789,20 @@ def generate_consensus(
 
     con = store.connect(db) if db else store.connect()
     try:
+        # Resolve the effective window ONCE, up front — shared by the optional --strong
+        # player-window resolution, the consensus query itself, and the audit line below, so
+        # all three agree on the SAME basis (fix: the audit line used to hardcode "regime
+        # current ... uniform current-regime window" even when the window actually came from
+        # this archetype's own era-aware horizon, or from an explicit --since/--until).
+        if since is None and until is None:
+            from legacy_engine.generation.consensus import entity_era_window
+            effective_since, effective_until, window_label = entity_era_window(
+                con, archetype, variant=variant,
+            )
+        else:
+            effective_since, effective_until, window_label = since, until, "explicit window"
+        click.echo(f"// window: since {effective_since or 'full corpus'} ({window_label})")
+
         # Resolve the player filter.
         alias_map = load_alias_map()
         player_set: set[str] | None = None
@@ -4805,20 +4821,13 @@ def generate_consensus(
                 compute_player_records,
                 strong_player_set,
             )
-            from legacy_engine.generation.consensus import entity_era_window
 
-            # Use the same (era-aware) window as the consensus query.
-            eff_since = since
-            eff_until = until
-            if eff_since is None and eff_until is None:
-                eff_since, eff_until, window_label = entity_era_window(con, archetype)
-                click.echo(f"// window: since {eff_since or 'full corpus'} ({window_label})")
-
+            # Use the same (already-resolved) window as the consensus query.
             records = compute_player_records(
                 con,
                 alias_map=alias_map,
-                since=eff_since,
-                until=eff_until,
+                since=effective_since,
+                until=effective_until,
             )
             player_set = strong_player_set(
                 records,
@@ -4828,7 +4837,7 @@ def generate_consensus(
             )
             click.echo(
                 f"// --strong: {len(player_set)} strong player(s) found for window "
-                f"[{eff_since or 'open'}, {eff_until or 'current'})"
+                f"[{effective_since or 'open'}, {effective_until or 'current'})"
             )
             if not player_set:
                 raise click.ClickException(
@@ -4840,8 +4849,8 @@ def generate_consensus(
         deck = build_consensus(
             con,
             archetype,
-            since=since,
-            until=until,
+            since=effective_since,
+            until=effective_until,
             provenance=provenance,
             variant=variant,
             players=player_set,
@@ -4862,14 +4871,8 @@ def generate_consensus(
     if player_set is not None:
         deck_label += f" [player-filtered: {len(player_set)} player(s)]"
     click.echo(f"// Consensus deck: {deck_label}")
-    window_since = deck.window[0] or "open"
-    window_until = deck.window[1] or "current"
     sample_tier = tier_for_sample(deck.sample_n)
-    click.echo(
-        f"// window: regime current [{window_since}..{window_until}]  "
-        f"sample_n={deck.sample_n} [{sample_tier}]  "
-        "(uniform current-regime window — deck composition surface)"
-    )
+    click.echo(f"// sample_n={deck.sample_n} [{sample_tier}]")
     if sample_tier == "speculative":
         click.echo(
             f"// ⚠ thin sample (n={deck.sample_n}) — modal card choices and inclusion %s are "
