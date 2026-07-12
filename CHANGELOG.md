@@ -1,3 +1,29 @@
+## Unreleased
+
+The stable-era release: every statistic windows to each archetype's (and camp's) own detected
+stable era — the largest stretch of still-solid data — with the triggering disturbance named.
+
+### Features
+- **Per-entity stable-era detection** — new `analytics/eras/` package: density-adaptive entity
+  series, signal ensemble (presence cliffs/ramps, composition change-points via ruptures,
+  share shifts, win-rate corroboration), selection-corrected permutation p-values, fleet-wide
+  Benjamini–Hochberg FDR, 30-deck era floors, camp inheritance. Calibrated against frozen
+  real-corpus ground truths (the Flow State one-week adoption step; the Candelabra/Tron cliff).
+- **Era ledger + CLI** — `eras run|list|explain|confirm`: rebuildable `entity_eras` store,
+  ban/release/unattributed attribution (corpus-first-seen release fallback), Beta-Binomial BOCPD
+  drift alarm ("possible unregistered B&R change"), and the confirm loop that appends to the
+  curated `BAN_EVENTS` JSON and heals the regime table.
+- **Era-aware windows are the default** — the adaptive matchup matrix sources each cell over
+  `[max(stable_since(a), stable_since(b)), now)` (ban-only fallback, loudly labeled); the global
+  field era is detection-derived; consensus/card-frequency surfaces window at the entity's own
+  era (camp-aware); `discover run` pools within the parent's stable era (`--all-pool` escape) and
+  Gate C flags camps that are list generations (median date + %current per camp).
+- **Hierarchical + cross-era cell shrinkage** — cells shrink toward informative priors (parent →
+  shrunk marginal; camp → leave-camp-out parent cell; thin post-boundary cells → their own
+  pre-disturbance value, labeled) instead of flat 0.5; `prior_source` carried and rendered.
+- **BAN_EVENTS as curated JSON** — migrated from code to package-shipped
+  `data/banlist/events.json` (module API unchanged), appendable via `eras confirm`.
+
 ## v0.2.0 (2026-07-04)
 
 The sideboard-intelligence release: `advise sideboard` gains a decomposed, explainable,

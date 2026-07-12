@@ -122,6 +122,54 @@ def _default_release_source(con: duckdb.DuckDBPyConnection) -> dict[str, date]:
     return out
 
 
+def _trigger_cards_from_presence_adopt(eras: dict[str, EntityEras]) -> set[str]:
+    """Every distinct trigger card named by an S1 `presence-adopt` signal across ALL entities'
+    boundaries — the release check's own candidate pool (mirrors `attribution._attribute_one`'s
+    predicate: only `presence-adopt` signals name a `trigger_card`)."""
+    cards: set[str] = set()
+    for entity_eras in eras.values():
+        for boundary in entity_eras.boundaries:
+            for sig in boundary.signals:
+                if sig.signal == "presence-adopt" and sig.trigger_card:
+                    cards.add(sig.trigger_card)
+    return cards
+
+
+def _corpus_first_seen(con: duckdb.DuckDBPyConnection, cards: set[str]) -> dict[str, date]:
+    """Corpus-first-seen fallback data source (Finding 1): one batched query for the WHOLE
+    trigger-card set's earliest corpus appearance (min tournament date over any deck running the
+    card, either board) — never a query per card (objective-search-split style).
+
+    Real release-driven S1 adoption boundaries (e.g. the Flow State case) would otherwise
+    mislabel as "unattributed disturbance" whenever `_default_release_source` degrades to `{}`
+    (the common case — the `cards` table carries no release-date column). A card's first
+    appearance in the corpus is a reasonable stand-in for its release date when no authoritative
+    source exists; `attribution.py` only consults this when the injected/schema `releases`
+    mapping has no entry for the card at all — it never overrides a present entry.
+    """
+    if not cards:
+        return {}
+    names = sorted(cards)
+    placeholders = ",".join("?" for _ in names)
+    rows = con.execute(
+        f"""
+        SELECT dc.name, MIN(CAST(t.date AS DATE))
+        FROM deck_cards dc
+        JOIN decks d ON d.tournament_id = dc.tournament_id AND d.deck_idx = dc.deck_idx
+        JOIN tournaments t ON t.id = d.tournament_id
+        WHERE dc.name IN ({placeholders})
+        GROUP BY dc.name
+        """,  # noqa: S608 — placeholders are '?' marks, values bound below
+        names,
+    ).fetchall()
+    out: dict[str, date] = {}
+    for name, first_date in rows:
+        if first_date is None:
+            continue
+        out[name] = first_date if isinstance(first_date, date) else date.fromisoformat(str(first_date))
+    return out
+
+
 def _post_boundary_decks(s: EntitySeries, stable_since: str | None) -> int:
     """Sample size for `eras list`'s confidence tier: decks at/after `stable_since`, or the
     entity's whole pool when there is no boundary (full history IS the sample)."""
@@ -214,9 +262,10 @@ def run_eras(
     eras = derive_eras(series, candidates, alpha=alpha)
 
     releases = (release_source or _default_release_source)(con)
+    corpus_first_seen = _corpus_first_seen(con, _trigger_cards_from_presence_adopt(eras))
     attributions = attribute_boundaries(
         eras, ban_events=BAN_EVENTS, releases=releases, series=series,
-        tolerance_days=_ATTRIBUTION_TOLERANCE_DAYS,
+        tolerance_days=_ATTRIBUTION_TOLERANCE_DAYS, corpus_first_seen=corpus_first_seen,
     )
 
     alarms = compute_drift_alarms(series, eras, attributions)

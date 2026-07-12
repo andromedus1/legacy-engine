@@ -2,9 +2,13 @@
 
 A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data: *"What is the meta, how do I attack it, and how do I tune my deck?"*
 
-legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every
-deck under a consistent archetype taxonomy, and computes the metagame, matchup matrix, and field-aware
-advice on top — every number labeled, sample-gated, and traceable to its source.
+legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every deck
+under a consistent two-level archetype taxonomy (parent archetype × data-driven subarchetype camps),
+detects each deck's **stable eras** from the corpus itself (bans *and* releases rebuild decks —
+every statistic windows to the largest stretch of still-solid data and names the disturbance that
+bounds it), and computes the metagame, matchup matrix, and field-aware advice on top — every number
+labeled, sample-gated, and traceable to its source. Thin or absent signal is always surfaced and
+labeled, never silently zeroed or blended away.
 
 It is the sibling of **edh-engine** (which does the same for cEDH), reusing that platform's
 three-data-layer architecture adapted to a 1v1, best-of-3, sideboarded, 60-card eternal format.
@@ -30,9 +34,9 @@ for how it's built.
 
 ## Status
 
-The **observed-data spine, meta analytics, deck generation, the advisory differentiator, and a
-local visualization layer** are built and tested (2578 passing tests, +1 documented xfail). Only the goldfish-simulation
-pillar remains deferred:
+The **observed-data spine, meta analytics, subarchetype discovery, stable-era detection, deck
+generation, the advisory differentiator, and a local visualization layer** are built and tested
+(2964 passing tests, +1 documented xfail). Only the goldfish-simulation pillar remains deferred:
 
 | Capability | State |
 |---|---|
@@ -46,14 +50,16 @@ pillar remains deferred:
 | Meta trends across ban-list regimes (version-stamped; `--movers N` biggest-movers digest) | ✅ built |
 | Ban-affectedness report (`report affectedness` — which bans drove an archetype's valid_since) | ✅ built |
 | Head-to-head matchup lookup (`report matchups --a/--b` — single directed cell + Wilson CI) | ✅ built |
-| Regime-aware analytics & advisory (adaptive per-cell ban windowing) | ✅ built |
+| Per-entity stable-era detection (`eras run|list|explain|confirm` — change-point ensemble, fleet FDR, ban/release attribution, BOCPD drift alarm) | ✅ built |
+| Era-aware analytics & advisory (stable_since is the DEFAULT per-cell window; detection-derived global field era; ban-only fallback, loudly labeled) | ✅ built |
+| Hierarchical + cross-era cell shrinkage (camp → leave-camp-out parent → marginal priors; thin new-era cells anchor to their own pre-disturbance value, labeled) | ✅ built |
 | Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
 | Sideboard-scorer backtest (`advise backtest` — recommended vs top-finisher boards) | ✅ built |
 | Archetype-sweep backtest (`advise sweep` — batch divergence mining across all archetypes) | ✅ built |
-| Data-driven subarchetype discovery (`discover run|list|apply|promote` — HDBSCAN camps, two-gate validated, staged→promoted) | ✅ built |
+| Data-driven subarchetype discovery (`discover run|list|apply|promote` — HDBSCAN camps, three-gate validated incl. temporal Gate C, era-default pools, staged→promoted) | ✅ built |
 | Variant overlays, opt-in (`report matchups --split-variant` · `report cards --conditioned [--variant]` · `report subgroup --winrates`) | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
 | Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
@@ -118,6 +124,12 @@ legacy-engine refresh cards     # release-aware diff refresh of the card univers
 # Label every ingested deck with an archetype
 legacy-engine label
 
+# Stable-era ledger — detect per-archetype/per-camp era boundaries from the corpus itself
+legacy-engine eras run          # detect + attribute + persist (also raises the drift alarm)
+legacy-engine eras list         # every entity's stable_since + triggering disturbance
+legacy-engine eras explain "Doomsday"   # walk one entity's boundary derivations (signals, p, verdicts)
+legacy-engine eras confirm 2026-06-29 "Candelabra of Tawnos" "Tron growth engine"  # register a confirmed ban → regime table heals
+
 # Meta & performance reports
 legacy-engine report meta       # meta-share (raw / top-cut / win-rate-weighted; online vs paper)
 legacy-engine report meta --venues online,paper   # cross-venue divergence comparison
@@ -134,7 +146,9 @@ legacy-engine report variants --archetype "Dimir Tempo"  # registered variants +
 legacy-engine report new-cards  # card names added in the latest refresh-cards ingest diff
 legacy-engine report speculate "Psychic Frog"     # PRE-DATA FORECAST for a specific card
 legacy-engine report prices "Force of Will"       # per-printing USD prices for a card
-# report/advise commands take ban-regime windowing: --since / --until / --regime / --all-time
+# report/advise commands take explicit windowing (--since / --until / --regime / --all-time);
+# by DEFAULT they window per-entity at each archetype's detected stable era (ban-only fallback,
+# loudly labeled) — every windowed figure names its window and trigger in // audit lines
 
 # Per-card win-rate report
 legacy-engine report cards                       # per-card presence-correlational win-rate (vs field)
@@ -154,7 +168,8 @@ legacy-engine advise refresh     --deck my.txt   # per-venue tuned maindeck + si
 legacy-engine advise acquire     --collection binder.txt --archetype "Dimir Tempo"  # priced buy list
 legacy-engine advise backtest --archetype "Dimir Tempo" --field field.txt  # scorer's board vs top-finisher boards (empirical anchor, never pass/fail)
 legacy-engine advise sweep --field field.txt                    # batch backtest EVERY archetype; ranked scorer-vs-winners divergence clusters
-legacy-engine discover run --archetype "Doomsday"               # cluster a parent into camps (HDBSCAN, two-gate validated), stage as candidate
+legacy-engine discover run --archetype "Doomsday"               # cluster a parent into camps within its stable era (HDBSCAN, three-gate validated incl. temporal Gate C), stage as candidate
+legacy-engine discover run --archetype "Doomsday" --all-pool    # cluster the full corpus instead; %current stays anchored to the era
 legacy-engine discover apply --archetype "Doomsday"             # apply a staged split to decks.variant (labeled-speculative overlay)
 legacy-engine discover promote --archetype "Doomsday" --variant "Tamiyo, Inquisitive Student"  # curate a confirmed camp into the registry
 legacy-engine report matchups --split-variant "Doomsday" --a "Doomsday [Tamiyo, Inquisitive Student]" --b "Izzet Delver"  # camp-level matchup cells
@@ -254,8 +269,10 @@ This project is built with a research-grounded, substrate-driven workflow:
 src/legacy_engine/
   ingestion/   # Scryfall (oracle + prices bulk), fbettega cache, rules, banlist, releases, DuckDB store
   archetype/   # rules loader, matcher (ported Detect), colors, labeler, variants
-  analytics/   # match_results, matchup (adaptive ban-windowing), metashare, trends, card_value,
-               #   affectedness, subgroup, venue, speculation
+  analytics/   # match_results, matchup (era-aware windows + hierarchical priors), metashare,
+               #   trends, card_value, affectedness, discovery, subgroup, venue, speculation
+               #   eras/     (stable-era detection: series, bocpd, detect, ensemble, store,
+               #              attribution, run, consume)
                #   players/  (identity, strength, history)
   advisory/    # field, positioning, sideboard, whattoplay, report, gaps, window,
                #   collection, acquire, primer, refresh
@@ -268,7 +285,7 @@ src/legacy_engine/
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 scripts/       # standalone helpers: knowledge-index gen; viz prototypes (meta_view.py, deck_vs_cohort_viz.py)
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (2579 tests, 2578 passing + 1 documented xfail)
+tests/         # pytest suite (2964 passing + 1 documented xfail)
 ```
 
 ## License

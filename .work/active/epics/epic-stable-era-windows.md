@@ -186,3 +186,29 @@ All six children done: `-detection`, `-era-ledger`, `-consumption`, `-discovery-
 consumption review flagged: sideboard's per-opponent windows and the dashboard's tile-audit
 labeling). Detail lives in each child's own body/Implementation notes. The post-epic dogfooding
 payoff above remains open (explicitly out-of-scope for the epic itself).
+
+## Completion review fixes (2026-07-12)
+
+Cross-model completion review of the closed epic surfaced three verified findings, fixed
+surgically with tests (branch `fix/era-completion-findings`):
+
+1. **Release attribution fallback** — `analytics/eras/run.py`'s `_default_release_source`
+   honestly degrades to `{}` (no release-date column on `cards`), which mislabeled real
+   release-driven S1 adoptions (the Flow State case) as "unattributed disturbance". Added a
+   batched corpus-first-seen query (`_corpus_first_seen`, objective-search-split style) that
+   fills the gap in `attribution.py`'s release check ONLY when the injected/schema `releases`
+   source has no entry for the trigger card — injected sources still win outright.
+2. **Consensus window audit line** — `generate consensus` (cli.py) hardcoded a
+   "// window: regime current ... uniform current-regime window" line regardless of the actual
+   resolved basis. Now resolves the window once up front (`entity_era_window`) and echoes the
+   honest `// window: since <date> (<label>)` line, matching the `report cards` convention.
+3. **Camp-aware consensus windows** — `entity_era_window(con, archetype)` only resolved the
+   PARENT label, so `--variant` camps with their own `stable_since` were windowed at the
+   parent's era. Added an optional `variant` param that checks the camp label
+   (`f"{archetype} [{variant}]"`) first, falls back to the parent, then the existing ban-regime
+   fallback — threaded through `card_frequencies`/`build_consensus`/the CLI call sites that carry
+   a variant.
+
+14 new tests added (`tests/analytics/eras/test_attribution.py`,
+`tests/analytics/eras/test_run.py`, `tests/test_generation_consensus.py`); one stale assertion
+updated in `tests/test_cli.py`. Full suite: 2964 passed, 1 xfailed (baseline 2950 + 1 xfail).
