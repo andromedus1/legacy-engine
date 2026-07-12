@@ -31,6 +31,10 @@ LINCHPINS_DIR = PACKAGE_DATA_DIR / "linchpins"
 LINCHPINS_REGISTRY_PATH = LINCHPINS_DIR / "legacy.json"  # shipped linchpin overrides (curated SSOT)
 PLAYERS_DIR = PACKAGE_DATA_DIR / "players"
 ALIASES_PATH = PLAYERS_DIR / "aliases.json"             # shipped player-alias map (curated SSOT)
+BAN_EVENTS_DIR = PACKAGE_DATA_DIR / "banlist"
+BAN_EVENTS_PATH = BAN_EVENTS_DIR / "events.json"        # shipped dated B&R events (curated SSOT;
+                                                         # ingestion.banlist.BAN_EVENTS binds from
+                                                         # this at import; `eras confirm` appends)
 
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"
