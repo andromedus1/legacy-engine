@@ -1,17 +1,70 @@
 {
   "_comment": "Dated B&R events (curated-json-resource-loader pattern). Loaded by ingestion.banlist.load_ban_events at import to bind BAN_EVENTS; appended to by `eras confirm` (analytics.eras.attribution/CLI). Order is not load-bearing — the loader sorts by (date, card) — but is kept sorted here for readable diffs.",
   "events": [
-    {"date": "2022-01-01", "card": "Ragavan, Nimble Pilferer", "reason": "Format-warping UR Delver engine"},
-    {"date": "2023-03-06", "card": "Expressive Iteration", "reason": "Izzet Delver dominance"},
-    {"date": "2023-03-06", "card": "White Plume Adventurer", "reason": "Mono-W Initiative dominance"},
-    {"date": "2024-08-26", "card": "Grief", "reason": "Powered Dimir Reanimator hand disruption"},
-    {"date": "2024-12-16", "card": "Psychic Frog", "reason": "Dimir Reanimator/tempo at 2x next deck"},
-    {"date": "2024-12-16", "card": "Vexing Bauble", "reason": "Suppressed non-blue tempo"},
-    {"date": "2025-02-01", "card": "Underworld Breach", "reason": "Cross-format combo engine (exact Legacy date approx)"},
-    {"date": "2025-03-31", "card": "Troll of Khazad-dûm", "reason": "Low-downside reanimator target"},
-    {"date": "2025-03-31", "card": "Sowing Mycospawn", "reason": "Flexible Eldrazi/Ancient Tomb land denial"},
-    {"date": "2025-11-10", "card": "Entomb", "reason": "Decouple cheat-a-fatty from fair decks"},
-    {"date": "2025-11-10", "card": "Nadu, Winged Wisdom", "reason": "Power-level / uninteractive engine"},
-    {"date": "2026-05-18", "card": "Undercity Informer", "reason": "De-power MH3 Oops All Spells"}
+    {
+      "date": "2022-01-01",
+      "card": "Ragavan, Nimble Pilferer",
+      "reason": "Format-warping UR Delver engine"
+    },
+    {
+      "date": "2023-03-06",
+      "card": "Expressive Iteration",
+      "reason": "Izzet Delver dominance"
+    },
+    {
+      "date": "2023-03-06",
+      "card": "White Plume Adventurer",
+      "reason": "Mono-W Initiative dominance"
+    },
+    {
+      "date": "2024-08-26",
+      "card": "Grief",
+      "reason": "Powered Dimir Reanimator hand disruption"
+    },
+    {
+      "date": "2024-12-16",
+      "card": "Psychic Frog",
+      "reason": "Dimir Reanimator/tempo at 2x next deck"
+    },
+    {
+      "date": "2024-12-16",
+      "card": "Vexing Bauble",
+      "reason": "Suppressed non-blue tempo"
+    },
+    {
+      "date": "2025-02-01",
+      "card": "Underworld Breach",
+      "reason": "Cross-format combo engine (exact Legacy date approx)"
+    },
+    {
+      "date": "2025-03-31",
+      "card": "Sowing Mycospawn",
+      "reason": "Flexible Eldrazi/Ancient Tomb land denial"
+    },
+    {
+      "date": "2025-03-31",
+      "card": "Troll of Khazad-dûm",
+      "reason": "Low-downside reanimator target"
+    },
+    {
+      "date": "2025-11-10",
+      "card": "Entomb",
+      "reason": "Decouple cheat-a-fatty from fair decks"
+    },
+    {
+      "date": "2025-11-10",
+      "card": "Nadu, Winged Wisdom",
+      "reason": "Power-level / uninteractive engine"
+    },
+    {
+      "date": "2026-05-18",
+      "card": "Undercity Informer",
+      "reason": "De-power MH3 Oops All Spells"
+    },
+    {
+      "date": "2026-06-29",
+      "card": "Candelabra of Tawnos",
+      "reason": "Tron 0.1->9.3% field explosion via Candelabra reprint (WotC B&R 2026-06-29)"
+    }
   ]
 }
