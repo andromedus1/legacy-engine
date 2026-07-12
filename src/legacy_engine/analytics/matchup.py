@@ -13,13 +13,17 @@ Units covered:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from statsmodels.stats.proportion import proportion_confint
 
 from legacy_engine.analytics.match_results import compute_match_results
 from legacy_engine.confidence import tier_for_sample
 from legacy_engine.models.matchup import MatchupCell
+
+if TYPE_CHECKING:
+    from legacy_engine.analytics.eras.consume import EraHorizon
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -296,14 +300,25 @@ class AdaptiveMatrix:
     """A matchup matrix whose cells are sourced over per-pair ban-aware windows.
 
     ``matrix`` is a normal ``MatchupMatrix`` (rectangular, same row set as the full-corpus
-    ``min_row_share`` inclusion). ``valid_since[a]`` is each archetype's ban-affectedness horizon
-    (ISO date or ``None`` = full history). ``cell_windows[(a, b)]`` records the ``since`` actually
-    used for that ordered cell — ``max(valid_since[a], valid_since[b])`` — for auditability.
+    ``min_row_share`` inclusion). ``valid_since[a]`` is each archetype's resolved horizon (ISO
+    date or ``None`` = full history) — since epic-stable-era-windows-consumption, this is the
+    per-entity ``stable_since`` horizon (era-aware, honest-degrading to the pre-epic ban-only
+    ``archetype_valid_since`` when there is no era data) rather than a ban-only horizon alone.
+    ``cell_windows[(a, b)]`` records the ``since`` actually used for that ordered cell —
+    ``max(valid_since[a], valid_since[b])`` — for auditability. ``horizon_meta[a]`` carries the
+    full ``EraHorizon`` (source/trigger/alarm) behind each ``valid_since[a]`` value — defaults to
+    ``{}`` so pre-epic direct-construction call sites (tests building an ``AdaptiveMatrix`` by
+    hand) stay valid without updating. ``audit_preamble`` carries the whole-path degrade line
+    (``entity_eras`` missing/empty entirely) when the default era-aware path detected it — empty
+    when ``horizons`` was supplied explicitly, or when era data exists (even if incomplete for
+    some individual entities — that degrades silently per-entity, not as a whole-path banner).
     """
 
     matrix: MatchupMatrix
     valid_since: dict[str, str | None]
     cell_windows: dict[tuple[str, str], str | None]
+    horizon_meta: "dict[str, EraHorizon]" = field(default_factory=dict)
+    audit_preamble: tuple[str, ...] = ()
 
 
 def _base_archetype(label: str, split_variant: str | None) -> str:
@@ -327,27 +342,38 @@ def build_adaptive_matrix(
     min_row_share: float = 0.02,
     affect_threshold: float = 0.25,
     split_variant: str | None = None,
+    horizons: dict[str, str | None] | None = None,
 ) -> AdaptiveMatrix:
     """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
 
-    Each archetype has a ``valid_since`` (latest ban that materially affected it; see
-    ``analytics.affectedness``). A cell ``(a, b)`` pools matches back to
-    ``max(valid_since[a], valid_since[b])`` (``None`` = full corpus), so unaffected×unaffected cells
-    keep full history (established tier) while ban-affected cells truncate honestly. Row inclusion +
-    marginals + mirror counts come from the full-corpus scan (stable); only per-cell data sourcing is
-    windowed. Cost: one ``compute_match_results`` per distinct ``valid_since`` value (≤ #ban-dates),
-    not per cell.
+    Each archetype has a ``valid_since`` horizon (``None`` = full history). By default (``horizons
+    is None``) this is resolved per-entity via ``analytics.eras.consume.era_horizons`` — the
+    epic-stable-era-windows-consumption default: an entity's own persisted ``stable_since``
+    (exact -> parent camp -> ban-only ``archetype_valid_since`` fallback when there is no era
+    data at all). A cell ``(a, b)`` pools matches back to ``max(valid_since[a], valid_since[b])``,
+    so unaffected×undisturbed cells keep full history (established tier) while disturbed cells
+    truncate honestly. Row inclusion + marginals + mirror counts come from the full-corpus scan
+    (stable); only per-cell data sourcing is windowed. Cost: one ``compute_match_results`` per
+    distinct horizon value (≤ #distinct dates), not per cell.
+
+    ``horizons`` (advanced/testing hook, default ``None``): an explicit ``{label: since}`` map
+    that BYPASSES ``era_horizons`` entirely and is used verbatim as ``valid_since`` — this is how
+    a caller pins the exact pre-epic ``archetype_valid_since``-only behavior (passing its output
+    directly reproduces the byte-identical old numbers, since the default era-aware path's own
+    ban-only fallback branch calls the very same ``archetype_valid_since`` with the same
+    arguments when there is no era data). ``horizon_meta`` is empty when ``horizons`` is supplied
+    explicitly (no per-entity source/trigger/alarm metadata to report).
 
     ``split_variant`` (opt-in, default ``None``): passed through to every
     ``compute_match_results`` call so ``split_variant``'s camp rows are force-included (see
     ``build_matrix``) and its labels use ``f"{split_variant} [{variant}]"``. Since
-    ``archetype_valid_since`` cannot look up a synthetic camp label, each camp's horizon is
-    resolved via its parent archetype (``_base_archetype``) before the lookup, then mapped back —
-    every camp of the same parent shares that parent's ``valid_since``. ``None`` is byte-identical
-    to the pre-split behavior (``_base_archetype`` is then the identity function).
+    ``archetype_valid_since`` cannot look up a synthetic camp label, each camp's ban-only horizon
+    is resolved via its parent archetype (``_base_archetype``) before the lookup, then mapped
+    back — every camp of the same parent shares that parent's ban-only ``valid_since`` (era-aware
+    camps, when a camp clears its OWN detection floor, get their own horizon instead — see
+    ``era_horizons``). ``None`` is byte-identical to the pre-split behavior (``_base_archetype``
+    is then the identity function).
     """
-    from legacy_engine.analytics.affectedness import archetype_valid_since
-
     # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
     full = compute_match_results(con, provenance=provenance, split_variant=split_variant)
     total_matches = full.coverage.decisive_matched
@@ -361,13 +387,19 @@ def build_adaptive_matrix(
         or (_force_prefix is not None and a.startswith(_force_prefix))
     )
 
-    # 2. Affectedness horizon per included archetype — resolved via the parent archetype for camp
-    #    labels (archetype_valid_since only knows plain decks.archetype values).
-    base_archetypes = sorted({_base_archetype(a, split_variant) for a in included})
-    base_valid_since = archetype_valid_since(
-        con, base_archetypes, provenance=provenance, affect_threshold=affect_threshold,
-    )
-    valid_since = {a: base_valid_since[_base_archetype(a, split_variant)] for a in included}
+    # 2. Horizon per included archetype: explicit override, or the era-aware adapter default.
+    horizon_meta: "dict[str, EraHorizon]" = {}
+    audit_preamble: tuple[str, ...] = ()
+    if horizons is not None:
+        valid_since = {a: horizons.get(a) for a in included}
+    else:
+        from legacy_engine.analytics.eras.consume import era_horizons
+
+        horizon_meta, audit_preamble = era_horizons(
+            con, included, provenance=provenance, split_variant=split_variant,
+            affect_threshold=affect_threshold,
+        )
+        valid_since = {a: horizon_meta[a].since for a in included}
 
     # 3. One scan per distinct valid_since (None reuses the full-corpus scan). s_ab is always one of
     #    these values (max of two members), so this set covers every cell window.
@@ -400,4 +432,7 @@ def build_adaptive_matrix(
         archetypes=included,
         caveat=_CAVEAT,
     )
-    return AdaptiveMatrix(matrix=matrix, valid_since=valid_since, cell_windows=cell_windows)
+    return AdaptiveMatrix(
+        matrix=matrix, valid_since=valid_since, cell_windows=cell_windows,
+        horizon_meta=horizon_meta, audit_preamble=audit_preamble,
+    )
