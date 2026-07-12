@@ -236,7 +236,7 @@ class TestAdaptiveAudit:
             audit_preamble=("// eras: no era data — ban-only horizons; run `eras run`",),
         )
         assert lines[0] == "// eras: no era data — ban-only horizons; run `eras run`"
-        assert lines[1] == "// adaptive: per-entity era windows — 1 entities ban-only; all others full-corpus"
+        assert lines[1] == "// adaptive: per-entity era windows — 1 entity ban-only; all others full-corpus"
 
 
 class TestBuildAdvisoryInputsFieldEra:

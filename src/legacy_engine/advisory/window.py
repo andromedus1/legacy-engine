@@ -160,7 +160,8 @@ def _adaptive_audit(
             for a, since, trigger in named
         ]
         if n_ban_only:
-            parts.append(f"{n_ban_only} entities ban-only")
+            noun = "entity" if n_ban_only == 1 else "entities"
+            parts.append(f"{n_ban_only} {noun} ban-only")
         summary = "; ".join(parts) + "; all others full-corpus"
         lines = (f"// adaptive: per-entity era windows — {summary}",)
 

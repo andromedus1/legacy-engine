@@ -106,11 +106,9 @@ def entity_era_window(con: duckdb.DuckDBPyConnection, archetype: str) -> tuple[s
     if stored.stable_since is None:
         return None, None, "undisturbed — full corpus"
 
-    trigger: str | None = None
-    for b in stored.boundaries:
-        if b.bh_accepted and not b.floor_rejected and b.date == stored.stable_since:
-            trigger = b.attribution.detail if b.attribution is not None else None
-            break
+    from legacy_engine.analytics.eras.consume import _winning_boundary_trigger
+
+    trigger = _winning_boundary_trigger(stored)
     return stored.stable_since, None, (trigger or "disturbance detected")
 
 
