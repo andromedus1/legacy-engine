@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-detection
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, methodology]
 parent: epic-stable-era-windows
 depends_on: []
@@ -319,3 +319,19 @@ inclusion tables (real corpus numbers), a stable stretch, and a null-fleet gener
   — **Fallback**: per-signal α split (S1 exact tests are cheap and sharp; spend FDR budget
   there), documented in the calibration test.
 - **ruptures API drift** — pinned `>=1.1,<2` and lazy import keeps failures loud and local.
+
+## Implementation summary (2026-07-11)
+
+All 4 stories implemented on `feature/stable-era-detection` (commits ae0f643, dcdcb70, 6bfa906,
+095f10b), suite 2809 passed + 1 xfail, ruff clean on the new package. Notable as-built deviations
+(each documented in the story bodies + module docstrings):
+- bocpd: literal P(run_length=0) is provably constant under constant hazard; `p_change` is
+  P(run_length <= 1) with full derivation in the docstring.
+- detect: S3 `_SHARE_MIN_SIZE=2` (min_size=3 provably cannot date a cliff in the last two
+  complete buckets — the Candelabra case); operating points pinned by the frozen fixtures
+  (_PELT_PEN=0.5, _SHARE_PEN=0.003).
+- ensemble: `floor_rejected` audit field added; Tron stable_since honestly None at this corpus
+  edge (confirmation asymmetry — drift alarm is the immediate-flag path); Dimir carries a real
+  second accepted boundary (2026-05-11 share settling).
+Local venv note: dep re-resolution bumped numpy to 2.5 breaking the optional umap smoke test
+(numba cap); pinned back to numpy<2.5 locally; CI unaffected (umap not installed there).
