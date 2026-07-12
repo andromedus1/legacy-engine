@@ -1,14 +1,14 @@
 ---
 id: epic-stable-era-windows
 kind: epic
-stage: implementing
+stage: done
 tags: [analytics, methodology, ingestion]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-12
 ---
 
 # Per-entity stable-era detection → maximal solid windows everywhere
@@ -177,3 +177,12 @@ of this epic).
 Re-run best deck / best call on stable-era windows and compare against
 decks/best-deck-era-audit.html's verdicts (Lands [Sphere/Ancient Tomb] best deck; Dimir Tempo
 [Barrowgoyf] best owned call).
+
+## Closing note (2026-07-12)
+
+All six children done: `-detection`, `-era-ledger`, `-consumption`, `-discovery-gate`,
+`-shrinkage` (the five original child features) plus the bundled follow-up story
+`epic-stable-era-windows-mixed-horizon-consumers` (closed the two mixed-horizon-consumer gaps the
+consumption review flagged: sideboard's per-opponent windows and the dashboard's tile-audit
+labeling). Detail lives in each child's own body/Implementation notes. The post-epic dogfooding
+payoff above remains open (explicitly out-of-scope for the epic itself).
