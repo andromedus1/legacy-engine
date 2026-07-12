@@ -5,6 +5,13 @@ stands up a tmp DuckDB (schema + a seeded two-camp Doomsday-like pool) and EVERY
 `runner.invoke` passes `--db <that path>` — never the default DB. Staging/registry paths are
 likewise pinned under tmp_path via `--discovered-path` / `--registry-path` so no test ever
 touches the shipped package data.
+
+`--all-pool` on `discover run`: these fixtures' tournaments are dated '2026-01-01' with no
+`entity_eras` row for 'Doomsday'/'Lands', so the era-aware default (epic-stable-era-windows-
+discovery-gate Unit 2) falls back to the CURRENT ban-regime window (`entity_era_window`'s
+"absent entirely" branch) — a window that will drift ahead of a fixed fixture date over time.
+Tests that exercise the discovery pipeline itself (not the era-default window logic, which has
+its own dedicated tests below) pass `--all-pool` to pin the pre-epic unwindowed-pool behavior.
 """
 
 from __future__ import annotations
@@ -87,6 +94,44 @@ def _build_blob_db(tmp_path) -> str:
     return db_path
 
 
+def _build_two_generation_db(tmp_path) -> str:
+    """Tmp DuckDB: the same clean two-camp 'Doomsday' split, but each camp's decks are dated a
+    full list-generation apart (camp A ~2025-06, camp B ~2026-05) — Gate C's calibration shape
+    (epic-stable-era-windows-discovery-gate Unit 1), used here to exercise the CLI's Gate C
+    surfacing (report warning + per-camp median/pct_current rendering)."""
+    from legacy_engine.ingestion import store
+
+    db_path = str(tmp_path / "two_gen.duckdb")
+    con = store.connect(db_path)
+    store.init_schema(con)
+    con.execute(
+        "INSERT INTO tournaments VALUES ('old', 'Old', '2025-06-01', NULL, 'Legacy', 'src', 'online')"
+    )
+    con.execute(
+        "INSERT INTO tournaments VALUES ('new', 'New', '2026-05-01', NULL, 'Legacy', 'src', 'online')"
+    )
+    deck_rows = []
+    card_rows = []
+    for idx in range(35):
+        deck_rows.append(("old", idx, "p", "W", "Doomsday", None))
+        card_rows += [
+            ("old", idx, "main", "Core Land", 4),
+            ("old", idx, "main", "Card A1", 4),
+            ("old", idx, "main", "Card A2", 3),
+        ]
+    for idx in range(35):
+        deck_rows.append(("new", idx, "p", "W", "Doomsday", None))
+        card_rows += [
+            ("new", idx, "main", "Core Land", 4),
+            ("new", idx, "main", "Card B1", 4),
+            ("new", idx, "main", "Card B2", 3),
+        ]
+    con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
+    con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
+    con.close()
+    return db_path
+
+
 def _curated_registry(tmp_path) -> str:
     path = tmp_path / "legacy.json"
     path.write_text(json.dumps({"version": "test", "variants": [], "defaults": {}}, indent=2))
@@ -109,7 +154,7 @@ class TestDiscoverRun:
         result = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
             "--db", db_path, "--discovered-path", staged,
-            "--n-boot", "10",
+            "--n-boot", "10", "--all-pool",
         ])
         assert result.exit_code == 0, result.output
         assert "// verdict: PASS" in result.output
@@ -129,7 +174,7 @@ class TestDiscoverRun:
         result = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
             "--db", db_path, "--discovered-path", staged,
-            "--n-boot", "10",
+            "--n-boot", "10", "--all-pool",
         ])
         assert result.exit_code == 0, result.output
         assert "// verdict: FAIL" in result.output
@@ -167,14 +212,14 @@ class TestDiscoverRun:
 
         first = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert first.exit_code == 0, first.output
         assert "// replaced prior staged candidate" not in first.output
 
         second = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert second.exit_code == 0, second.output
         assert "// replaced prior staged candidate for 'Doomsday'" in second.output
@@ -189,7 +234,7 @@ class TestDiscoverRun:
 
         first = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert first.exit_code == 0, first.output
 
@@ -203,10 +248,188 @@ class TestDiscoverRun:
 
         second = runner.invoke(main, [
             "discover", "run", "--archetype", "Lands",
-            "--db", db_path2, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path2, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert second.exit_code == 0, second.output
         assert "// replaced prior staged candidate" not in second.output
+
+
+# ---------------------------------------------------------------------------
+# discover run — era-aware default window + --all-pool escape (Unit 2)
+# ---------------------------------------------------------------------------
+
+class TestDiscoverRunEraDefault:
+    def test_no_era_data_falls_back_to_ban_regime_and_excludes_stale_fixture(self, runner, tmp_path):
+        """No `entity_eras` row for 'Doomsday' -> `entity_era_window`'s "absent entirely"
+        branch (ban-regime fallback, label 'ban regime'). The fixture's tournament (2026-01-01)
+        predates the live ban regime, so the era-default pool ends up empty and the split
+        degrades honestly rather than silently defaulting to the full corpus."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        result = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// pool window: since " in result.output
+        assert "(ban regime)" in result.output
+        assert "// verdict: FAIL" in result.output
+        assert "no separable structure" in result.output
+        assert not (tmp_path / "discovered.json").exists()
+
+    def test_all_pool_restores_full_corpus_and_stages(self, runner, tmp_path):
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        result = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10", "--all-pool",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// pool window: full corpus (--all-pool); % current vs " in result.output
+        assert "// verdict: PASS" in result.output
+        assert (tmp_path / "discovered.json").exists()
+
+    def test_explicit_since_overrides_era_default_and_all_pool(self, runner, tmp_path):
+        """An explicit --since wins over both the era-default AND a simultaneous --all-pool —
+        and doesn't get the dedicated `// pool window:` echo (that line is era-default/--all-pool
+        only; the existing `// window: ...` report line already covers the explicit case)."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        result = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10",
+            "--since", "2026-01-01", "--all-pool",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// pool window:" not in result.output
+        assert "// window: 2026-01-01" in result.output
+        assert "// verdict: PASS" in result.output
+
+    def test_seeded_era_window_includes_fixture_and_echoes_label(self, runner, tmp_path):
+        """A seeded `entity_eras` `stable_since` matching the fixture's date -> the era-default
+        pool includes every fixture deck and the CLI echoes the ledger's own since + label."""
+        db_path = _build_discovery_db(tmp_path)
+        from legacy_engine.analytics.eras.ensemble import EntityEras
+        from legacy_engine.analytics.eras.store import write_entity_eras
+        from legacy_engine.ingestion import store
+
+        con = store.connect(db_path)
+        write_entity_eras(
+            con,
+            {"Doomsday": EntityEras(
+                entity="Doomsday", stable_since="2026-01-01", boundaries=(),
+                inherited_from_parent=False,
+            )},
+            {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05, "run_at": "2026-07-12T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Doomsday": "Doomsday"},
+            },
+        )
+        con.close()
+
+        staged = str(tmp_path / "discovered.json")
+        result = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// pool window: since 2026-01-01 (" in result.output
+        assert "// verdict: PASS" in result.output
+
+
+# ---------------------------------------------------------------------------
+# discover run/list — Gate C temporal-mixing surfacing (Unit 2)
+# ---------------------------------------------------------------------------
+
+class TestDiscoverGateCSurfacing:
+    def test_run_report_shows_median_dates_and_temporal_mixing_warning(self, runner, tmp_path):
+        db_path = _build_two_generation_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        result = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10", "--all-pool",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// verdict: PASS" in result.output   # Gate C flags, never fails
+        assert "// ⚠ temporal mixing: camps may be list generations" in result.output
+        assert "median 2025-06-01" in result.output
+        assert "median 2026-05-01" in result.output
+        # --all-pool pools the full corpus but %current stays anchored to the entity's ERA
+        # since (ban-regime fallback here) — the documented diagnostic (Unit 2 design decision).
+        assert "% current" in result.output
+
+    def test_list_renders_the_same_gate_c_fields(self, runner, tmp_path):
+        db_path = _build_two_generation_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        run = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10", "--all-pool",
+        ])
+        assert run.exit_code == 0, run.output
+
+        result = runner.invoke(main, ["discover", "list", "--discovered-path", staged])
+        assert result.exit_code == 0, result.output
+        assert "// ⚠ temporal mixing: camps may be list generations" in result.output
+        assert "median 2025-06-01" in result.output
+        assert "median 2026-05-01" in result.output
+
+    def test_staged_record_persists_gate_c_fields_on_disk(self, runner, tmp_path):
+        db_path = _build_two_generation_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        run = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "10", "--all-pool",
+        ])
+        assert run.exit_code == 0, run.output
+
+        data = json.loads((tmp_path / "discovered.json").read_text())
+        split = data["splits"][0]
+        assert split["temporal_mixing"] is True
+        assert split["temporal_note"] == "camps may be list generations"
+        median_dates = {c["median_date"] for c in split["camps"]}
+        assert median_dates == {"2025-06-01", "2026-05-01"}
+
+    def test_old_shape_staged_record_still_loads_and_lists(self, runner, tmp_path):
+        """A staged record written before this epic (no median_date/pct_current/temporal_mixing
+        keys at all) must still load and list cleanly — additive-JSON-keys backward compat."""
+        staged = tmp_path / "discovered.json"
+        staged.write_text(json.dumps({
+            "version": "1",
+            "splits": [
+                {
+                    "parent": "Doomsday",
+                    "generated_from": "discover run @ 2026-01-01 (pre-epic)",
+                    "params": {"since": None, "reducer": "svd", "seed": 0, "n_boot": 20},
+                    "camps": [
+                        {
+                            "name": "Murktide Regent",
+                            "signature_cards": ["Murktide Regent"],
+                            "n": 40,
+                            "tier": "evolving",
+                            "member_keys": [["t1", 0]],
+                        },
+                        {
+                            "name": "non-Murktide Regent",
+                            "signature_cards": ["Personal Tutor"],
+                            "n": 35,
+                            "tier": "evolving",
+                            "member_keys": [["t1", 1]],
+                        },
+                    ],
+                    "stability": 0.95,
+                    "status": "candidate",
+                }
+            ],
+        }, indent=2))
+
+        result = runner.invoke(main, ["discover", "list", "--discovered-path", str(staged)])
+        assert result.exit_code == 0, result.output
+        assert "Doomsday" in result.output
+        assert "Murktide Regent" in result.output
+        # No Gate C fields on the old record -> nothing fabricated, no crash.
+        assert "temporal mixing" not in result.output
+        assert "median" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +449,7 @@ class TestDiscoverList:
         staged = str(tmp_path / "discovered.json")
         run = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert run.exit_code == 0, run.output
 
@@ -249,7 +472,7 @@ class TestDiscoverPromote:
         staged = str(tmp_path / "discovered.json")
         run = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert run.exit_code == 0, run.output
         data = json.loads((tmp_path / "discovered.json").read_text())
@@ -322,7 +545,7 @@ class TestDiscoverApply:
         staged = str(tmp_path / "discovered.json")
         run = runner.invoke(main, [
             "discover", "run", "--archetype", "Doomsday",
-            "--db", db_path, "--discovered-path", staged, "--n-boot", "5",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
         ])
         assert run.exit_code == 0, run.output
         return db_path, staged

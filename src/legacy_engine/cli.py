@@ -6487,7 +6487,16 @@ def discover() -> None:
 
 @discover.command("run")
 @click.option("--archetype", required=True, help="Parent archetype to discover within (e.g. 'Doomsday').")
-@click.option("--since", default=None, help="Window start (YYYY-MM-DD, inclusive; default: full corpus).")
+@click.option(
+    "--since", default=None,
+    help="Window start (YYYY-MM-DD, inclusive; overrides the era-aware default). "
+         "Default: this archetype's era-aware stable window (see --all-pool).",
+)
+@click.option(
+    "--all-pool", is_flag=True, default=False,
+    help="Ignore the era-aware default and cluster the full unwindowed corpus "
+         "(the pre-epic behavior). Ignored when --since is given explicitly.",
+)
 @click.option(
     "--reducer",
     type=click.Choice(["svd", "umap"], case_sensitive=False),
@@ -6522,6 +6531,7 @@ def discover() -> None:
 def discover_run(
     archetype: str,
     since: str | None,
+    all_pool: bool,
     reducer: str,
     seed: int,
     n_boot: int,
@@ -6537,6 +6547,10 @@ def discover_run(
     sample tier + signature divergence), and stages a PASSing split as a candidate in the
     staging registry.  A FAILing split is still fully reported — never silently dropped —
     it just isn't staged.
+
+    Defaults the clustering pool to this archetype's era-aware stable window
+    (`entity_era_window`) rather than the full corpus — pass `--since` to override, or
+    `--all-pool` to explicitly restore the pre-epic unwindowed pool.
 
     Example: legacy-engine discover run --archetype "Doomsday"
     """
@@ -6557,10 +6571,52 @@ def discover_run(
     con = store.connect(db) if db else store.connect()
     try:
         _echo_data_freshness(con)
+
+        if since is not None:
+            effective_since = since
+            current_since = since
+        elif all_pool:
+            # Full-corpus pool, but %current stays anchored to the entity's ERA since —
+            # that's the diagnostic value of --all-pool: cluster everything, then see how
+            # current each camp is relative to the live era (design decision, Unit 2).
+            from legacy_engine.generation.consensus import entity_era_window
+
+            effective_since = None
+            current_since, _until, window_label = entity_era_window(con, archetype)
+            click.echo(
+                f"// pool window: full corpus (--all-pool); % current vs "
+                f"{current_since or 'full corpus'} ({window_label})"
+            )
+        else:
+            from legacy_engine.generation.consensus import entity_era_window
+
+            effective_since, _until, window_label = entity_era_window(con, archetype)
+            current_since = effective_since
+            if effective_since is None:
+                click.echo(f"// pool window: full corpus ({window_label})")
+            else:
+                click.echo(f"// pool window: since {effective_since} ({window_label})")
+
+        pool_n = con.execute(
+            """
+            SELECT count(*) FROM decks d JOIN tournaments t ON t.id = d.tournament_id
+            WHERE d.archetype = ? AND (? IS NULL OR t.date >= ?)
+            """,
+            [archetype, effective_since, effective_since],
+        ).fetchone()[0]
+        click.echo(f"// pool: {pool_n} decks")
+        if pool_n == 0:
+            click.echo(
+                "// ⚠ the resolved pool window excludes every deck of this archetype — "
+                "widen with --since or --all-pool (the FAIL below reflects an empty pool, "
+                "not unstructured decks)"
+            )
+
         split = discover_subarchetypes(
             con,
             archetype,
-            since=since,
+            since=effective_since,
+            current_since=current_since,
             reducer=partial(reduce_dims, method=reducer),
             seed=seed,
             n_boot=n_boot,
@@ -6570,7 +6626,8 @@ def discover_run(
         con.close()
 
     _print_discovery_report(
-        split, since=since, reducer=reducer, seed=seed, n_boot=n_boot, min_samples=min_samples,
+        split, since=effective_since, reducer=reducer, seed=seed, n_boot=n_boot,
+        min_samples=min_samples,
     )
 
     if not split.passed:
@@ -6587,7 +6644,7 @@ def discover_run(
         split,
         generated_from=f"discover run @ {date.today().isoformat()}",
         params={
-            "since": since,
+            "since": effective_since,
             "reducer": reducer,
             "seed": seed,
             "n_boot": n_boot,
@@ -6630,11 +6687,31 @@ def _print_discovery_report(
             for name, delta in camp.signature_cards[:5]
             if delta > 0
         )
-        click.echo(f"  camp {camp.name}: n={camp.n} [{camp.tier}]  signature: {top or '(none)'}")
+        temporal = _format_camp_temporal(camp.median_date, camp.pct_current)
+        click.echo(
+            f"  camp {camp.name}: n={camp.n} [{camp.tier}]  signature: {top or '(none)'}{temporal}"
+        )
+
+    if split.temporal_mixing:
+        click.echo(f"// ⚠ temporal mixing: {split.temporal_note}")
 
     for reason in split.reasons:
         click.echo(f"// {reason}")
     click.echo(f"// verdict: {'PASS' if split.passed else 'FAIL'}")
+
+
+def _format_camp_temporal(median_date: str | None, pct_current: float | None) -> str:
+    """Render a camp's Gate C diagnostics as a trailing report fragment, or "" when absent.
+
+    ``median <YYYY-MM-DD> · <NN>% current`` — the `% current` clause is omitted when
+    ``pct_current`` is ``None`` (honest: we don't know, don't fabricate a number). The whole
+    fragment is omitted when ``median_date`` itself is ``None`` (no dated decks in the camp).
+    """
+    if median_date is None:
+        return ""
+    if pct_current is None:
+        return f"  median {median_date}"
+    return f"  median {median_date} · {pct_current:.0%} current"
 
 
 @discover.command("list")
@@ -6667,9 +6744,12 @@ def discover_list(discovered_path: str | None, verbose: bool) -> None:
             f"\n{split.parent}  [status: {split.status}]  stability={split.stability:.3f}"
         )
         click.echo(f"// generated: {split.generated_from}  params: {split.params}")
+        if split.temporal_mixing:
+            click.echo(f"// ⚠ temporal mixing: {split.temporal_note}")
         for camp in split.camps:
             sig = ", ".join(camp.signature_cards[:3]) or "(none)"
-            click.echo(f"  - {camp.name}: n={camp.n} [{camp.tier}]  signature: {sig}")
+            temporal = _format_camp_temporal(camp.median_date, camp.pct_current)
+            click.echo(f"  - {camp.name}: n={camp.n} [{camp.tier}]  signature: {sig}{temporal}")
 
 
 @discover.command("promote")
