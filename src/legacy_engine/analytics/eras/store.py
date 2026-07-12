@@ -248,7 +248,8 @@ def write_entity_eras(
 
 def read_entity_eras(con: duckdb.DuckDBPyConnection) -> dict[str, StoredEntityEras]:
     """Read every persisted entity row, fully deserialized. Empty dict on a fresh/missing table
-    (honest-degrade — `eras list`/`explain` render "no era data" rather than crash)."""
+    (honest-degrade — `eras list`/`explain` render "no era data" rather than crash). Only the
+    missing-table case degrades; any other DB error (corruption, schema drift) stays loud."""
     try:
         rows = con.execute(
             """
@@ -258,7 +259,7 @@ def read_entity_eras(con: duckdb.DuckDBPyConnection) -> dict[str, StoredEntityEr
             FROM entity_eras
             """
         ).fetchall()
-    except Exception:
+    except duckdb.CatalogException:
         return {}
 
     out: dict[str, StoredEntityEras] = {}
@@ -287,9 +288,15 @@ def read_entity_eras(con: duckdb.DuckDBPyConnection) -> dict[str, StoredEntityEr
 def stable_since_map(con: duckdb.DuckDBPyConnection) -> dict[str, str | None]:
     """The consumption seam: ``entity -> stable_since`` (``None`` = full history). A lightweight
     direct query — no `boundaries_json` deserialization — since the adaptive-matrix horizon
-    function (`-consumption`) only ever needs the date. Empty dict on a fresh/missing table."""
+    function (`-consumption`) only ever needs the date. Empty dict on a fresh/missing table
+    (missing-table only; other DB errors stay loud).
+
+    Key semantics for consumers: a key PRESENT with ``None`` means "analyzed, no accepted
+    boundary — full history is solid"; a key ABSENT means "never analyzed" (entity below the
+    detection floors, or `eras run` hasn't covered it) — consumers must treat absence as
+    "fall back to the ban-only `valid_since` horizon", never as full-history-by-default."""
     try:
         rows = con.execute("SELECT entity, stable_since FROM entity_eras").fetchall()
-    except Exception:
+    except duckdb.CatalogException:
         return {}
     return {entity: since for entity, since in rows}
