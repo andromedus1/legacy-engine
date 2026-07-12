@@ -63,6 +63,25 @@ comparisons then use this to grab the biggest possible window of solid data.
   epic-design: the field is a cross-entity distribution and may keep a global-era definition derived
   from the union of per-entity disturbances.
 
+## Design decisions
+
+Locked with Andrew via `--only-questions` (2026-07-11). Child feature designs treat these as
+fixed inputs — do not re-ask.
+
+- **Shrinkage rollout — one shot, both default together**: hierarchical cell shrinkage
+  (camp → leave-camp-out parent → marginal → 0.5, plus the cross-era prior) becomes the default in
+  the SAME release as stable_since windows. Consumers eat one all-cells-shift event; goldens
+  re-pinned once; triple-display (shrunk%|raw% n=) carries the change.
+- **Field window — global, detection-derived**: keep ONE global field-composition window (the
+  analysis-gates convention), but the "current era" boundary is derived from the detection layer —
+  a confirmed high-share disturbance opens a new global field era automatically instead of waiting
+  on BAN_EVENTS. Field comp self-heals the same way cells do.
+- **Self-heal gate — auto-truncate, labeled**: a disturbance that clears the calibrated statistical
+  bar (FDR-corrected, min-segment floor) truncates windows immediately, even when unattributed;
+  affected cells carry "window since <date>: unattributed disturbance — possible unregistered B&R
+  change". Human confirmation later upgrades the label and updates BAN_EVENTS; it never gates the
+  truncation.
+
 ## Disturbance signals to detect (change-point detection on per-entity weekly series)
 
 1. composition drift: distance between adjacent windows' consensus vectors / card-inclusion
