@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows
 kind: epic
-stage: drafting
+stage: implementing
 tags: [analytics, methodology, ingestion]
 parent: null
 depends_on: []
@@ -100,6 +100,46 @@ fixed inputs — do not re-ask.
 horizon function. Honesty: every cell carries its detected window + the triggering disturbance;
 thin post-disturbance windows degrade honestly (hierarchical prior + labels) rather than silently
 pooling across a break.
+
+## Decomposition
+
+Split by capability layer along the data flow: detect → persist/attribute → consume, with the two
+independent consumers (windowed surfaces; discovery gating) parallel after the ledger, and the
+prior change last so goldens re-pin once at the end. Alternative shapes rejected: splitting
+detection by signal type (S1-S4 share the series builders and the ensemble/FDR machinery —
+tightly coupled); merging consumption+shrinkage into one giant feature (each is a full
+feature-design pass on its own; the one-shot constraint is a RELEASE property, enforced by
+late-binding, not a PR property).
+
+### Child features
+
+- `epic-stable-era-windows-detection` — signal-typed detection engine + ledger-calibrated
+  operating point (pure analytics; ruptures dep) — depends on: `[]`
+- `epic-stable-era-windows-era-ledger` — persistence, attribution, drift alarm,
+  explain/report CLI, BAN_EVENTS confirmation loop (Candelabra registration) — depends on:
+  `[epic-stable-era-windows-detection]`
+- `epic-stable-era-windows-consumption` — stable_since default horizon: adaptive matrix +
+  advisory-window block (~15 sites) + consensus family + detection-derived global field —
+  depends on: `[epic-stable-era-windows-era-ledger]`
+- `epic-stable-era-windows-discovery-gate` — discovery stable-window default + temporal Gate C +
+  %current/median-date in report — depends on: `[epic-stable-era-windows-era-ledger]`
+- `epic-stable-era-windows-shrinkage` — hierarchical (leave-camp-out parent-anchored) + cross-era
+  priors as the default cell estimate — depends on: `[epic-stable-era-windows-consumption]`
+
+### Decomposition risks
+
+- **Serial critical path** detection → ledger → consumption → shrinkage (only discovery-gate
+  parallelizes). Accepted: consumers genuinely need persisted boundaries; do not stub.
+- **Golden churn**: consumption re-pins CLI-body goldens, shrinkage re-pins them again in-tree.
+  Accepted — the one-shot constraint binds the RELEASE, not individual PRs; release-deploy binds
+  all five features to one version so users see a single shift.
+- **Riskiest feature is detection** (method calibration). Mitigated: the attested brief locks the
+  method families, and the calibration harness against the labeled ledger (Candelabra, Flow
+  State, non-events) is in the feature's scope — a mis-calibrated detector fails its own pinned
+  fixtures, not dogfooding.
+- **Field-window semantics** (detection-derived global era) touches positioning outputs used in
+  standing analyses; the audit header must make the field window's derivation visible so venue/
+  era comparisons stay interpretable.
 
 ## Absorbed items (full context preserved above; original bodies in git history)
 
