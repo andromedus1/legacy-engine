@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-era-ledger
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, ingestion]
 parent: epic-stable-era-windows
 depends_on: [epic-stable-era-windows-detection]

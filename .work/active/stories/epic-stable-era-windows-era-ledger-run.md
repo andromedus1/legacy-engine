@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-era-ledger-run
 kind: story
-stage: review
+stage: done
 tags: [analytics, methodology]
 parent: epic-stable-era-windows-era-ledger
 depends_on: [epic-stable-era-windows-era-ledger-store]

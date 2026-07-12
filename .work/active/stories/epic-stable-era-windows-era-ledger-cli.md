@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-era-ledger-cli
 kind: story
-stage: review
+stage: done
 tags: [analytics]
 parent: epic-stable-era-windows-era-ledger
 depends_on: [epic-stable-era-windows-era-ledger-run]
