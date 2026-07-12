@@ -156,6 +156,83 @@ class TestReleaseAttribution:
         assert out[("Foo", "2026-03-02")].kind == "ban"
 
 
+class TestCorpusFirstSeenReleaseFallback:
+    """Finding 1 (completion review): when the injected/schema `releases` mapping has no entry
+    for an S1 presence-adopt trigger card (the common case — the `cards` table carries no
+    release-date column), `corpus_first_seen` fills the gap so a real release-driven adoption
+    boundary (the Flow State case) attributes as "release" instead of mislabeling as an
+    "unattributed disturbance"."""
+
+    def test_first_seen_near_boundary_attributes_release_with_first_seen_detail(self):
+        sig = CandidateBoundary(
+            entity="Bar", date="2026-04-20", signal="presence-adopt", magnitude=0.9,
+            pvalue=0.01, evidence="Flow State 0%->95%", trigger_card="Flow State",
+        )
+        boundary = _boundary("2026-04-20", signals=(sig,))
+        eras = {"Bar": _eras("Bar", [boundary])}
+        # No injected/schema release-date source names "Flow State" at all.
+        corpus_first_seen = {"Flow State": date(2026, 4, 20)}
+        out = attribute_boundaries(
+            eras, ban_events=(), releases={}, series={},
+            corpus_first_seen=corpus_first_seen,
+        )
+        attr = out[("Bar", "2026-04-20")]
+        assert attr.kind == "release"
+        assert attr.card == "Flow State"
+        assert "first corpus appearance 2026-04-20" in attr.detail
+
+    def test_long_existing_card_does_not_spuriously_attribute_release(self):
+        # The trigger card has been in the corpus for years — its first appearance is nowhere
+        # near this boundary, so the fallback must NOT manufacture a release attribution.
+        sig = CandidateBoundary(
+            entity="Bar", date="2026-04-20", signal="presence-adopt", magnitude=0.9,
+            pvalue=0.01, evidence="...", trigger_card="Ancient Staple",
+        )
+        boundary = _boundary("2026-04-20", signals=(sig,))
+        eras = {"Bar": _eras("Bar", [boundary])}
+        corpus_first_seen = {"Ancient Staple": date(2020, 1, 1)}
+        out = attribute_boundaries(
+            eras, ban_events=(), releases={}, series={},
+            corpus_first_seen=corpus_first_seen,
+        )
+        assert out[("Bar", "2026-04-20")].kind == "unattributed"
+
+    def test_injected_release_source_still_wins_over_corpus_fallback(self):
+        # The injected/schema `releases` source names the card (even if its date sits right at
+        # the edge of tolerance) — the corpus-first-seen fallback must never be consulted, let
+        # alone override it, whenever an entry already exists.
+        sig = CandidateBoundary(
+            entity="Bar", date="2026-04-20", signal="presence-adopt", magnitude=0.9,
+            pvalue=0.01, evidence="...", trigger_card="Flow State",
+        )
+        boundary = _boundary("2026-04-20", signals=(sig,))
+        eras = {"Bar": _eras("Bar", [boundary])}
+        releases = {"Flow State": date(2026, 4, 18)}
+        # A corpus-first-seen date that would ALSO match, but must be ignored since `releases`
+        # already has an entry for this card.
+        corpus_first_seen = {"Flow State": date(2020, 1, 1)}
+        out = attribute_boundaries(
+            eras, ban_events=(), releases=releases, series={},
+            corpus_first_seen=corpus_first_seen,
+        )
+        attr = out[("Bar", "2026-04-20")]
+        assert attr.kind == "release"
+        assert "first corpus appearance" not in attr.detail
+        assert "2026-04-18" in attr.detail
+
+    def test_no_corpus_first_seen_at_all_is_a_no_op(self):
+        """`corpus_first_seen=None` (the default) must be byte-identical to the pre-fallback
+        behavior — an adopt signal with no release data anywhere is still unattributed."""
+        sig = CandidateBoundary(
+            entity="Bar", date="2026-04-20", signal="presence-adopt", magnitude=0.9,
+            pvalue=0.01, evidence="...", trigger_card="Mystery Card",
+        )
+        boundary = _boundary("2026-04-20", signals=(sig,))
+        eras = {"Bar": _eras("Bar", [boundary])}
+        out = attribute_boundaries(eras, ban_events=(), releases={}, series={})
+        assert out[("Bar", "2026-04-20")].kind == "unattributed"
+
+
 class TestToleranceBoundary:
     def test_exactly_tolerance_days_matches(self):
         s = _trackable_card_series("Foo", "Test Banned Card", 0.40, start=date(2026, 1, 19))
