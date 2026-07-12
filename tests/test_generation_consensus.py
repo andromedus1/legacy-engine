@@ -28,7 +28,10 @@ Fixture archetype: "Delver" with known card frequencies across 10 decks.
     - Force of Negation: 4/10 @ 2       → inclusion_pct=0.4, modal_count=2
     ... up to 15
 
-We use a date within the current (post-Undercity-Informer 2026-05-18) regime: 2026-05-25.
+All tournament dates below are derived from the ban ledger via `in_current_regime()` (tests/
+conftest.py) rather than hardcoded — the current regime's start date shifts every time
+`eras confirm` registers a new ban, so a literal date goes stale (see the Candelabra of
+Tawnos registration, 2026-06-29).
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from legacy_engine.generation.consensus import (
 from legacy_engine.generation.models import GeneratedDeck
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +71,8 @@ def _card(name: str, count: int = 4) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Build 10 "Delver" decks in the current regime (2026-05-25 > 2026-05-18 cutoff).
+# Build 10 "Delver" decks in the current regime (ledger-derived date, always
+# after the latest confirmed ban).
 # ---------------------------------------------------------------------------
 
 def _build_delver_tournament() -> dict:
@@ -124,11 +129,12 @@ def _build_delver_tournament() -> dict:
 
         decks.append(_make_deck_raw(f"player{i}", main, side))
 
+    delver_date = in_current_regime(7)
     return {
         "Tournament": {
             "Name": "Legacy Challenge 32",
-            "Date": "2026-05-25",
-            "Uri": f"https://www.mtgo.com/decklist/legacy-challenge-32-2026-05-25",
+            "Date": delver_date,
+            "Uri": f"https://www.mtgo.com/decklist/legacy-challenge-32-{delver_date}",
             "Formats": "Legacy",
         },
         "Decks": decks,
@@ -145,11 +151,12 @@ def _build_thin_tournament() -> dict:
         _make_deck_raw("thinB", [_card("Dark Ritual", 4), _card("Reanimate", 4),
                                   _card("Griselbrand", 1), _card("Chancellor of the Annex", 1)], []),
     ]
+    thin_date = in_current_regime(8)  # one day after the Delver tournament
     return {
         "Tournament": {
             "Name": "Thin Tourney",
-            "Date": "2026-05-26",
-            "Uri": "https://www.mtgo.com/decklist/thin-2026-05-26",
+            "Date": thin_date,
+            "Uri": f"https://www.mtgo.com/decklist/thin-{thin_date}",
             "Formats": "Legacy",
         },
         "Decks": decks,
@@ -332,8 +339,8 @@ class TestBuildConsensus:
 
     def test_window_populated(self, con):
         deck = build_consensus(con, "Delver")
-        # Default window: latest ban-regime (since=2026-05-18, until=None)
-        assert deck.window[0] == "2026-05-18"
+        # Default window: latest ban-regime (since=<last confirmed ban date>, until=None)
+        assert deck.window[0] == in_current_regime(0)
         assert deck.window[1] is None
 
     def test_archetype_field(self, con):
@@ -423,7 +430,7 @@ class TestGenerateConsensusCLI:
         )
         # This fixture has zero rounds, so no player clears the strength gate (nonzero exit is
         # expected) — what this test proves is that the window audit line fired BEFORE that.
-        assert "// window: since 2026-05-18 (ban regime)" in result.output
+        assert f"// window: since {in_current_regime(0)} (ban regime)" in result.output
 
     def test_unknown_archetype_exits_nonzero(self, tmp_path):
         """generate consensus exits non-zero for an unknown archetype."""
@@ -485,11 +492,12 @@ def _build_dupboard_tournament() -> dict:
             main.append(_card("Consider", 4))
         side = [_card("Pyroblast", 4), _card("Red Elemental Blast", 4)]  # Pyroblast 5/5 → 1.0
         decks.append(_make_deck_raw(f"dup{i}", main, side))
+    dup_date = in_current_regime(7)
     return {
         "Tournament": {
             "Name": "DupBoard Open",
-            "Date": "2026-05-25",
-            "Uri": "https://www.mtgo.com/decklist/dupboard-2026-05-25",
+            "Date": dup_date,
+            "Uri": f"https://www.mtgo.com/decklist/dupboard-{dup_date}",
             "Formats": "Legacy",
         },
         "Decks": decks,

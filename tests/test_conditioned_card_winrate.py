@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 @pytest.fixture
@@ -219,7 +220,7 @@ def _build_bauble_signconflict_tournament() -> dict:
 
     return {
         "Tournament": {
-            "Name": "Bauble Sign Conflict", "Date": "2026-06-01",
+            "Name": "Bauble Sign Conflict", "Date": in_current_regime(3),
             "Uri": "https://test.com/bauble-sign-conflict", "Formats": "Legacy",
         },
         "Decks": decks,
@@ -316,7 +317,7 @@ class TestReportCardsConditioned:
             ["report", "cards", "--archetype", "Dimir Tempo", "--conditioned", "--db", sign_conflict_db_path],
         )
         assert result.exit_code == 0, result.output
-        assert "// window: since 2026-05-18 (ban regime)" in result.output
+        assert f"// window: since {in_current_regime(0)} (ban regime)" in result.output
 
     def test_sign_conflict_line_fires_for_bauble(self, runner, sign_conflict_db_path):
         """The core scenario: pooled marginal negative, Dimir-Tempo-conditioned positive."""
@@ -475,7 +476,7 @@ def test_conditioned_variant_scopes_card_universe_to_the_camp(runner, tmp_path):
     ]
     raw = {
         "Tournament": {
-            "Name": "Universe Scope", "Date": "2026-06-01",
+            "Name": "Universe Scope", "Date": in_current_regime(3),
             "Uri": "https://test.com/universe-scope", "Formats": "Legacy",
         },
         "Decks": decks, "Rounds": rounds, "Standings": [],

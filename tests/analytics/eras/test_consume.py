@@ -15,6 +15,7 @@ from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
 from legacy_engine.analytics.eras.store import write_entity_eras
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -186,18 +187,20 @@ class TestResolveFieldEra:
     def test_high_share_entity_widens_field_since(self):
         con = store.connect(":memory:")
         # 600 decks total, "Big" is 60% share with an accepted boundary well after the
-        # current ban regime start (2026-05-18) -> widens (truncates) the field window forward.
-        # Dated AFTER the boundary so the resulting [2026-06-15, now) window clears the thin floor.
-        _load_decks(con, archetype="Big", n=600, dt="2026-06-20", name_prefix="b")
-        _load_decks(con, archetype="Small", n=400, dt="2026-06-20", name_prefix="s")
+        # current ban regime start -> widens (truncates) the field window forward.
+        # Dated AFTER the boundary so the resulting [boundary, now) window clears the thin floor.
+        boundary_date = in_current_regime(28)
+        decks_date = in_current_regime(33)  # 5 days after the boundary
+        _load_decks(con, archetype="Big", n=600, dt=decks_date, name_prefix="b")
+        _load_decks(con, archetype="Small", n=400, dt=decks_date, name_prefix="s")
         eras = {
-            "Big": EntityEras(entity="Big", stable_since="2026-06-15", boundaries=(), inherited_from_parent=False),
+            "Big": EntityEras(entity="Big", stable_since=boundary_date, boundaries=(), inherited_from_parent=False),
             "Small": EntityEras(entity="Small", stable_since=None, boundaries=(), inherited_from_parent=False),
         }
         _write(con, eras)
 
         since, label = resolve_field_era(con, min_share=0.02)
-        assert since == "2026-06-15"
+        assert since == boundary_date
         assert "detection-derived" in label
         con.close()
 
@@ -239,12 +242,14 @@ class TestResolveFieldEra:
 
     def test_thin_resulting_window_degrades_with_banner(self):
         con = store.connect(":memory:")
-        # Big has a very recent boundary (2026-06-29) with almost no decks after it.
+        # Big has a very recent boundary (just after the current ban regime start) with
+        # almost no decks after it.
+        boundary_date = in_current_regime(10)
         _load_decks(con, archetype="Big", n=600, dt="2026-01-01", name_prefix="b")
-        _load_decks(con, archetype="Big", n=5, dt="2026-06-29", name_prefix="b2")
+        _load_decks(con, archetype="Big", n=5, dt=boundary_date, name_prefix="b2")
         _load_decks(con, archetype="Filler", n=400, dt="2026-01-01", name_prefix="f")
         eras = {
-            "Big": EntityEras(entity="Big", stable_since="2026-06-29", boundaries=(), inherited_from_parent=False),
+            "Big": EntityEras(entity="Big", stable_since=boundary_date, boundaries=(), inherited_from_parent=False),
             "Filler": EntityEras(entity="Filler", stable_since=None, boundaries=(), inherited_from_parent=False),
         }
         _write(con, eras)
@@ -261,8 +266,8 @@ class TestResolveFieldEra:
         con = store.connect(":memory:")
         _load_decks(con, archetype="Big", n=600, dt="2026-06-01", name_prefix="b")
         _load_decks(con, archetype="Filler", n=400, dt="2026-06-01", name_prefix="f")
-        # An accepted boundary from BEFORE the current ban regime start (2026-05-18) must not
-        # move the field window backward.
+        # An accepted boundary from BEFORE the current ban regime start must not move the
+        # field window backward.
         eras = {
             "Big": EntityEras(entity="Big", stable_since="2026-01-01", boundaries=(), inherited_from_parent=False),
             "Filler": EntityEras(entity="Filler", stable_since=None, boundaries=(), inherited_from_parent=False),

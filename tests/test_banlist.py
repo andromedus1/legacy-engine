@@ -199,15 +199,20 @@ class TestLoadBanEvents:
         path.write_text(json.dumps({"events": events}), encoding="utf-8")
         return path
 
-    def test_shipped_events_match_the_original_hardcoded_twelve(self):
-        # BAN_EVENTS (bound from the shipped JSON at import) must still carry exactly the
-        # original 12 dated events, verbatim — including the non-ASCII card name.
-        assert len(BAN_EVENTS) == 12
+    def test_shipped_events_contain_the_original_migrated_twelve(self):
+        # BAN_EVENTS (bound from the shipped JSON at import) must still carry the 12 events
+        # migrated from the hardcoded tuple, verbatim — including the non-ASCII card name.
+        # NOT an exact count: `eras confirm` legitimately GROWS this file (Candelabra of
+        # Tawnos, 2026-06-29, was the first confirmed addition), so pin the migration as a
+        # subset plus monotone growth, never as a ceiling.
+        assert len(BAN_EVENTS) >= 12
         assert (date(2022, 1, 1), "Ragavan, Nimble Pilferer",
                 "Format-warping UR Delver engine") in BAN_EVENTS
         assert (date(2026, 5, 18), "Undercity Informer",
                 "De-power MH3 Oops All Spells") in BAN_EVENTS
         assert any(card == "Troll of Khazad-dûm" for _d, card, _r in BAN_EVENTS)
+        assert any(card == "Candelabra of Tawnos" and d == date(2026, 6, 29)
+                   for d, card, _r in BAN_EVENTS)
 
     def test_loader_sorts_by_date_then_card_regardless_of_file_order(self, tmp_path):
         path = self._write(tmp_path, [

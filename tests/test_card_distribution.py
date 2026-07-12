@@ -31,6 +31,7 @@ from legacy_engine.generation.card_distribution import (
 )
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -99,11 +100,12 @@ def _build_delver_tournament() -> dict:
 
         decks.append(_make_deck_raw(f"player{i}", main, side))
 
+    dist_date = in_current_regime(7)
     return {
         "Tournament": {
             "Name": "Legacy Challenge Distribution Test",
-            "Date": "2026-05-25",
-            "Uri": "https://www.mtgo.com/decklist/legacy-challenge-dist-2026-05-25",
+            "Date": dist_date,
+            "Uri": f"https://www.mtgo.com/decklist/legacy-challenge-dist-{dist_date}",
             "Formats": "Legacy",
         },
         "Decks": decks,
@@ -202,7 +204,7 @@ class TestCardCountDistributions:
         raw = {
             "Tournament": {
                 "Name": "Tie Test",
-                "Date": "2026-05-25",
+                "Date": in_current_regime(7),
                 "Uri": "https://example.com/tie-test",
                 "Formats": "Legacy",
             },
