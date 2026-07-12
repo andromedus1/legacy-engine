@@ -70,7 +70,7 @@ from legacy_engine.models.card import Card
 
 # gate-cruft-test-helper-duplication: _con/_make_field are shared conftest helpers now
 # (were byte-identical local copies here and in test_whattoplay.py).
-from tests.conftest import _con, _make_field
+from tests.conftest import _con, _make_field, in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -6325,16 +6325,16 @@ class TestEmpiricalSideboardSwings:
 
         Control decks that run the tech card BEAT Combo; Control decks WITHOUT it LOSE to
         Combo → the (tech, side, Combo) card-value cell carries a positive lift the empirical
-        swing proxy can pick up. Dated 2026-05-19+ so it falls inside the current ban regime,
-        which is the window recommend_sideboard scans by default (adaptive mode). 50 events
-        → n=50 (evolving) for the seeded cell.
+        swing proxy can pick up. Dated inside the current ban regime (ledger-derived via
+        `in_current_regime`), which is the window recommend_sideboard scans by default
+        (adaptive mode). 50 events → n=50 (evolving) for the seeded cell.
         """
         from legacy_engine.ingestion.cache import parse_cache_item
 
         con = store.connect(":memory:")
         store.init_schema(con)
         for i in range(50):
-            d = f"2026-05-{(i % 13) + 19:02d}"
+            d = in_current_regime((i % 13) + 3)
             raw = {
                 "Tournament": {"Name": f"Swing {i}", "Date": d,
                                "Uri": f"https://www.mtgo.com/decklist/swing-{i:03d}", "Formats": "Legacy"},

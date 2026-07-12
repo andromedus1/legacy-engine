@@ -1,8 +1,9 @@
 """Tests for epic-regime-aware-advisory-cli-surface — resolve_advisory_window + the CLI flags.
 
 `make_rounds_corpus(n)` yields 4 rounds per repeat dated 2026-01-(r+1), so n repeats = 4n rounds
-within [2026-01-01, 2026-01-(n+1)). The latest ban regime ("current") opens 2026-05-18, so the
-corpus has ZERO rounds in the current regime — a natural thin-degrade case.
+within [2026-01-01, 2026-01-(n+1)). The latest ban regime ("current") opens on the ledger's last
+confirmed ban date (see `in_current_regime`/`BAN_EVENTS`), well after Jan 2026, so the corpus has
+ZERO rounds in the current regime — a natural thin-degrade case.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from legacy_engine.advisory.window import (
 from legacy_engine.analytics.eras.consume import EraHorizon
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
+from tests.conftest import in_current_regime
 
 
 class TestResolveAdvisoryWindow:
@@ -92,7 +94,7 @@ class TestResolveAdvisoryWindow:
         # Deck-based surfaces (report meta) pass thin_floor=0 → window honored, never degraded.
         con, _ = make_rounds_corpus(n_repeats=2)
         res = resolve_advisory_window(con, regime="current", thin_floor=0)
-        assert res.since == "2026-05-18" and res.until is None and res.banner is None
+        assert res.since == in_current_regime(0) and res.until is None and res.banner is None
         con.close()
 
 

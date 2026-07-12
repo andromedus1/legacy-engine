@@ -26,6 +26,7 @@ from legacy_engine.cli import main
 from legacy_engine.generation.tuning import tune_deck
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
+from tests.conftest import in_current_regime
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,7 @@ def _build_bauble_split_tournament(n_bauble: int = 8, n_non_bauble: int = 4) -> 
     return {
         "Tournament": {
             "Name": "Coverage Rest Test Tourney",
-            "Date": "2026-06-01",
+            "Date": in_current_regime(7),
             "Uri": "https://test.com/coverage-rest",
             "Formats": "Legacy",
         },
@@ -445,7 +446,7 @@ def _build_doctor_tournament() -> dict:
     return {
         "Tournament": {
             "Name": "Doctor Test Tourney",
-            "Date": "2026-06-01",
+            "Date": in_current_regime(7),
             "Uri": "https://test.com/doctor-test",
             "Formats": "Legacy",
         },
