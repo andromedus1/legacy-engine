@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows
 kind: epic
-stage: implementing
+stage: done
 tags: [analytics, methodology, ingestion]
 parent: null
 depends_on: []
@@ -212,3 +212,11 @@ surgically with tests (branch `fix/era-completion-findings`):
 14 new tests added (`tests/analytics/eras/test_attribution.py`,
 `tests/analytics/eras/test_run.py`, `tests/test_generation_consensus.py`); one stale assertion
 updated in `tests/test_cli.py`. Full suite: 2964 passed, 1 xfailed (baseline 2950 + 1 xfail).
+
+## Epic closed (2026-07-12)
+
+All 5 features + 2 follow-up stories shipped across PRs #45-#51, every PR CI-green, every
+feature fresh-context deep-reviewed, cross-model (Codex) completion review run with all findings
+fixed and re-confirmed (release-attribution corpus-first-seen fallback, honest consensus window
+echo, camp-aware era windows, docs roll-forward, camp-scoped conditioned card universe). Suite
+2604 → 2965 (+1 xfail) across the epic. Foundation docs + README + CHANGELOG rolled forward.
