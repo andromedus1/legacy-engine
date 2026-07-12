@@ -69,6 +69,12 @@ class DiscoveredCamp(LegacyEngineModel):
     # trip resolve_variant's ambiguity fail-fast). None on hand-edited/legacy staging files,
     # which fall back to the transient-rules path.
     member_keys: list[tuple[str, int]] | None = None
+    # Gate C temporal diagnostics (additive — epic-stable-era-windows-discovery-gate Unit 2).
+    # Both None-safe: absent on staged records written before this epic, and on any camp whose
+    # member decks carry no tournament date. ``extra="ignore"`` + these defaults mean an OLD
+    # staged JSON record (no such keys) loads unchanged.
+    median_date: str | None = None
+    pct_current: float | None = None
 
 
 class DiscoveredSplitRecord(LegacyEngineModel):
@@ -86,6 +92,10 @@ class DiscoveredSplitRecord(LegacyEngineModel):
     camps: list[DiscoveredCamp] = Field(default_factory=list)
     stability: float
     status: str = "candidate"
+    # Gate C temporal-mixing flag, additive (see DiscoveredCamp above) — surfaced by
+    # `discover run`/`discover list` as an honest-degrade warning, never gating promotion.
+    temporal_mixing: bool = False
+    temporal_note: str | None = None
 
 
 class DiscoveredRegistry(LegacyEngineModel):

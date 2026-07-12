@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
+from datetime import date as _date
 
 import numpy as np
 
@@ -54,10 +55,14 @@ class DeckVector:
 
     ``key`` is ``(tournament_id, deck_idx)`` — the same identity used by the ``decks`` table.
     ``counts`` maps mainboard card name -> copies (0 or absent both mean "not in this deck").
+    ``date`` is the deck's tournament date (``t.date``, ISO ``YYYY-MM-DD``), additive for Gate C
+    temporal-mixing detection — ``None`` when unknown (older/hand-built fixtures never set it,
+    and clustering/naming never reads it; only Gate C's per-camp stats do).
     """
 
     key: tuple[str, int]
     counts: dict[str, int]
+    date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +177,13 @@ class Camp:
     signature_cards: list[tuple[str, float]]   # (card, delta) vs the rest, sorted |delta| desc
     n: int
     tier: ConfidenceLevel
+    # Gate C temporal fields (additive, default-safe — existing hand-built Camp() calls in
+    # tests/callers stay green). median_date is the camp's member decks' median tournament date
+    # (None when no member deck carries a date). pct_current is the fraction of the camp's
+    # decks dated >= a caller-supplied `current_since` (None-safe: None when current_since
+    # wasn't given — an honest "we don't know" rather than a fabricated 0%/100%).
+    median_date: str | None = None
+    pct_current: float | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +197,12 @@ class DiscoveredSplit:
     silhouette: float | None   # secondary diagnostic only — never gates (HDBSCAN is non-convex)
     passed: bool               # Gate A AND Gate B
     reasons: list[str]         # honest-degrade: why passed / failed, verbatim
+    # Gate C temporal-mixing flag (additive, default-safe). Unlike Gate A/B this NEVER fails the
+    # split — a statistically-valid split whose camps separate strongly by date is still
+    # `passed` (if A+B pass); it's flagged so downstream (`discover apply`/`promote`) can warn or
+    # refuse, per the epic's honesty convention (surface, don't silently hide or auto-fail).
+    temporal_mixing: bool = False
+    temporal_note: str | None = None
 
 
 _DOUBLE_DIPPING_GUARD_NOTE = (
@@ -192,6 +210,57 @@ _DOUBLE_DIPPING_GUARD_NOTE = (
     "no significance test (t-test/chi-square) is ever run on the clustered data "
     "(double-dipping would inflate Type I error; brief §5)"
 )
+
+# Gate C — temporal-mixing threshold (brief absorbed idea-discovery-temporal-gate; epic
+# epic-stable-era-windows-discovery-gate Unit 1). Pinned by the two synthetic calibration
+# fixtures in tests/analytics/test_discovery.py::TestClusterAndValidateGateC:
+#   - old-camp median 2025-06-01 vs new-camp median 2026-05-01 (~334 days apart) -> FLAGS.
+#   - both camps drawn from the same ~30-day window -> does NOT flag.
+# 120 days sits comfortably below the flagging fixture's gap and above the non-flagging one; a
+# real two-sample distributional test can replace this heuristic later without an API change
+# (DiscoveredSplit.temporal_mixing/temporal_note are the stable contract, not this constant).
+_TEMPORAL_GAP_DAYS = 120
+_TEMPORAL_MIXING_NOTE = "camps may be list generations"
+
+
+def _median_date(dates: list[str]) -> str | None:
+    """Median ISO date over ``dates`` (empty -> None).
+
+    Works in ordinal-day space so an even count averages to the nearest real calendar day
+    (rather than picking an arbitrary one of the two middle dates).
+    """
+    if not dates:
+        return None
+    ordinals = sorted(_date.fromisoformat(d).toordinal() for d in dates)
+    n = len(ordinals)
+    mid = n // 2
+    if n % 2 == 1:
+        med_ordinal = ordinals[mid]
+    else:
+        med_ordinal = round((ordinals[mid - 1] + ordinals[mid]) / 2)
+    return _date.fromordinal(med_ordinal).isoformat()
+
+
+def _camp_temporal_stats(
+    decks_by_key: dict[tuple[str, int], "DeckVector"],
+    keys: list[tuple[str, int]],
+    current_since: str | None,
+) -> tuple[str | None, float | None]:
+    """Per-camp median deck date + %-current, both None-safe (honest-degrade-marker).
+
+    ``pct_current`` is the fraction of the camp's decks (the full membership, not just the
+    dated ones) whose date is present and >= ``current_since`` — a deck with no date never
+    counts as current. ``None`` when ``current_since`` wasn't supplied (caller doesn't know a
+    reference date, so no fabricated fraction is reported).
+    """
+    if not keys:
+        return None, None
+    dates = [decks_by_key[k].date for k in keys if decks_by_key[k].date is not None]
+    median_date = _median_date(dates)
+    if current_since is None:
+        return median_date, None
+    n_current = sum(1 for k in keys if (decks_by_key[k].date or "") >= current_since)
+    return median_date, n_current / len(keys)
 
 
 def _avg_copies(decks_by_key: dict[tuple[str, int], DeckVector], keys: list[tuple[str, int]],
@@ -328,13 +397,20 @@ def cluster_and_validate(
     min_delta: float = 0.75,
     min_sig_cards: int = 2,
     min_samples: int = 10,
+    current_since: str | None = None,
 ) -> DiscoveredSplit:
     """Cluster a parent archetype's flex-band matrix into validated, named camps.
 
     Pipeline: reduce (injected ``reducer``) -> HDBSCAN (self-determines k; noise = -1) -> Gate A
-    (bootstrap stability) -> Gate B (both-camp evolving tier + signature divergence) -> naming.
-    ``passed`` is Gate A AND Gate B. ``reasons`` records every gate outcome verbatim — nothing
-    thin is hidden (honest-degrade-marker).
+    (bootstrap stability) -> Gate B (both-camp evolving tier + signature divergence) -> Gate C
+    (temporal mixing) -> naming. ``passed`` is Gate A AND Gate B — Gate C never gates ``passed``,
+    it only sets ``temporal_mixing``/``temporal_note`` (honest-degrade-marker: flag, don't hide
+    or silently fail). ``reasons`` records every gate outcome verbatim — nothing thin is hidden.
+
+    ``current_since`` (optional) is the reference date Gate C's per-camp ``pct_current`` is
+    computed against (typically the caller's era-window ``since``); ``None`` leaves
+    ``pct_current`` honestly ``None`` on every camp rather than fabricating a fraction against
+    an unknown reference.
 
     ``parent`` is left as ``""`` here — the pure core has no notion of the archetype label; the
     DB wrapper (``discover_subarchetypes``) stamps it via ``dataclasses.replace`` once it knows
@@ -444,6 +520,19 @@ def cluster_and_validate(
         ))
     # len(unique_camps) == 0 -> camps stays [] (all noise).
 
+    # Gate C prerequisite: stamp each camp's median date / %-current now that member_keys are
+    # final. Noise decks are excluded by construction — camp_keys only ever holds non-noise
+    # cluster members (label != -1), so noise never enters a Gate C comparison.
+    enriched_camps: list[Camp] = []
+    for camp in camps:
+        median_date, pct_current = _camp_temporal_stats(
+            decks_by_key, camp.member_keys, current_since,
+        )
+        enriched_camps.append(
+            dataclasses.replace(camp, median_date=median_date, pct_current=pct_current)
+        )
+    camps = enriched_camps
+
     stability = _bootstrap_stability(
         Xred, base_labels, min_cluster_size=min_cluster_size,
         min_samples=min(min_samples, min_cluster_size), seed=seed, n_boot=n_boot,
@@ -464,6 +553,9 @@ def cluster_and_validate(
         "(silhouette is a secondary diagnostic only — not a gate)"
     )
 
+    temporal_mixing = False
+    temporal_note: str | None = None
+
     if len(unique_camps) == 0:
         reasons.append("no separable structure: no dense clusters found (all decks labeled noise)")
         passed = False
@@ -477,6 +569,33 @@ def cluster_and_validate(
         reasons.extend(gate_b_reasons)
         passed = gate_a_pass and gate_b_pass
 
+        # Gate C — temporal mixing (flags, never fails; noise already excluded from `camps`).
+        dated_camps = [c for c in camps if c.median_date is not None]
+        if len(dated_camps) >= 2:
+            gap_days = max(
+                abs(
+                    (_date.fromisoformat(a.median_date) - _date.fromisoformat(b.median_date)).days
+                )
+                for i, a in enumerate(dated_camps)
+                for b in dated_camps[i + 1:]
+            )
+            temporal_mixing = gap_days >= _TEMPORAL_GAP_DAYS
+            if temporal_mixing:
+                temporal_note = _TEMPORAL_MIXING_NOTE
+                reasons.append(
+                    f"gate C temporal: max camp median-date gap {gap_days}d "
+                    f">= {_TEMPORAL_GAP_DAYS}d (FLAG — {_TEMPORAL_MIXING_NOTE})"
+                )
+            else:
+                reasons.append(
+                    f"gate C temporal: max camp median-date gap {gap_days}d "
+                    f"< {_TEMPORAL_GAP_DAYS}d — no temporal mixing detected"
+                )
+        else:
+            reasons.append(
+                "gate C temporal: insufficient dated decks to compare camp date distributions"
+            )
+
     return DiscoveredSplit(
         parent="",
         camps=camps,
@@ -485,6 +604,8 @@ def cluster_and_validate(
         silhouette=silhouette,
         passed=passed,
         reasons=reasons,
+        temporal_mixing=temporal_mixing,
+        temporal_note=temporal_note,
     )
 
 
@@ -510,11 +631,12 @@ def discover_subarchetypes(
 
     ``**params`` are split between ``build_feature_matrix`` (``flex_lo``/``flex_hi``) and
     ``cluster_and_validate`` (``reducer``/``seed``/``n_boot``/``stability_min``/``min_delta``/
-    ``min_sig_cards``) by keyword name.
+    ``min_sig_cards``/``current_since``) by keyword name. ``t.date`` rides along on every row so
+    each ``DeckVector`` carries its tournament date for Gate C's temporal-mixing check.
     """
     rows = con.execute(
         """
-        SELECT d.tournament_id, d.deck_idx, dc.name, dc.count
+        SELECT d.tournament_id, d.deck_idx, t.date, dc.name, dc.count
         FROM decks d
         JOIN tournaments t ON t.id = d.tournament_id
         JOIN deck_cards dc
@@ -528,9 +650,15 @@ def discover_subarchetypes(
     ).fetchall()
 
     decks_map: dict[tuple[str, int], dict[str, int]] = {}
-    for tournament_id, deck_idx, name, count in rows:
-        decks_map.setdefault((tournament_id, deck_idx), {})[name] = count
-    deck_vectors = [DeckVector(key=key, counts=counts) for key, counts in decks_map.items()]
+    dates_map: dict[tuple[str, int], str | None] = {}
+    for tournament_id, deck_idx, deck_date, name, count in rows:
+        key = (tournament_id, deck_idx)
+        decks_map.setdefault(key, {})[name] = count
+        dates_map[key] = deck_date
+    deck_vectors = [
+        DeckVector(key=key, counts=counts, date=dates_map.get(key))
+        for key, counts in decks_map.items()
+    ]
 
     matrix_kwargs = {k: v for k, v in params.items() if k in _MATRIX_PARAM_NAMES}
     cluster_kwargs = {k: v for k, v in params.items() if k not in _MATRIX_PARAM_NAMES}
