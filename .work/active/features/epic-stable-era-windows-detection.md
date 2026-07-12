@@ -1,7 +1,7 @@
 ---
 id: epic-stable-era-windows-detection
 kind: feature
-stage: review
+stage: done
 tags: [analytics, methodology]
 parent: epic-stable-era-windows
 depends_on: []
