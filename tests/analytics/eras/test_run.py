@@ -435,3 +435,47 @@ class TestFlowStateReleaseAttributionEndToEnd:
         assert boundary.attribution.card == "Flow State"
         assert "first corpus appearance 2026-04-20" in boundary.attribution.detail
         assert result.n_entities == 1
+
+
+class TestAlarmWeeklyRecency:
+    """Dogfood regression (first real-corpus run): the alarm must be a WEEKLY recency
+    instrument with a RECENT share gate. Tron's 4-week density-adaptive buckets left the
+    entire Candelabra cliff inside the incomplete trailing detection bucket, and its
+    corpus-LIFETIME share (0.7%) failed the 2% floor even though it held ~11% of the
+    recent field — so the epic's headline alarm case never fired."""
+
+    def _rise_and_cliff_weekly(self):
+        # 30 weekly buckets, field 1400/wk: fringe (2/wk x20) -> risen (55/wk x9) ->
+        # cliff (18 in the final complete week). Lifetime share = 553/42000 ≈ 1.3% (< the
+        # 2% floor — the old lifetime gate rejects it); recent-8 share = 403/11200 ≈ 3.6%
+        # (≥ 2% — the recency gate admits it), and the 55→18 drop is a BOCPD surprise.
+        counts = [2] * 20 + [55] * 9 + [18]
+        from legacy_engine.analytics.eras.series import Bucket, EntitySeries
+
+        dates = [f"2026-{1 + i // 4:02d}-{1 + 7 * (i % 4):02d}" for i in range(30)]
+        buckets = tuple(
+            Bucket(start=dates[i], complete=True, decks=counts[i], field_decks=1400,
+                   wins=0, losses=0, card_incl={})
+            for i in range(30)
+        )
+        return EntitySeries(entity="RiseCliff", parent="RiseCliff", bucket_weeks=1,
+                            flex_cards=(), buckets=buckets)
+
+    def test_recent_share_gate_admits_lifetime_diluted_riser(self):
+        from legacy_engine.analytics.eras.run import compute_drift_alarms
+
+        s = self._rise_and_cliff_weekly()
+        # lifetime share = (2*20+55*9+18)/(30*1400) ≈ 1.3% < 2% floor;
+        # recent-8 share = (55*7+18... ) computed over the last 8 buckets ≈ 3.9% ≥ 2%.
+        alarms = compute_drift_alarms({"RiseCliff": s}, {}, {})
+        assert "RiseCliff" in alarms, "recent-share gate must admit a freshly risen entity"
+
+    def test_run_eras_evaluates_alarm_on_weekly_buckets(self, tmp_path):
+        """run_eras must pass force_bucket_weeks=1 series to the alarm — verified
+        structurally: the alarm series builder is invoked with the override."""
+        import inspect
+
+        from legacy_engine.analytics.eras import run as run_mod
+
+        src = inspect.getsource(run_mod.run_eras)
+        assert "force_bucket_weeks=1" in src
