@@ -287,7 +287,7 @@ inclusion tables (real corpus numbers), a stable stretch, and a null-fleet gener
 
 **Acceptance Criteria**:
 - [ ] `uv pip install -e .` (CI path) resolves ruptures; import is lazy inside detect.py
-- [ ] Calibration suite pins the operating point: changing `_PELT_PEN` by ±50% fails a test
+- [ ] Calibration suite pins the operating point at the measured WINDOW EDGES (the safe windows are wide, so ±50% is inside them): guards assert detection is lost beyond the measured upper edges of `_PELT_PEN` and `_SHARE_PEN`
 
 ---
 
@@ -335,3 +335,18 @@ All 4 stories implemented on `feature/stable-era-detection` (commits ae0f643, dc
   second accepted boundary (2026-05-11 share settling).
 Local venv note: dep re-resolution bumped numpy to 2.5 breaking the optional umap smoke test
 (numba cap); pinned back to numpy<2.5 locally; CI unaffected (umap not installed there).
+
+## Review (2026-07-11, fresh-context deep review)
+
+Verdict APPROVE (no Critical/High). All 5 findings fixed in-tree post-review:
+- S3 magnitude/evidence now segment-level means (was adjacent-bucket 0.0 no-op on the cliff).
+- Calibration AC replaced by measured window-edge guard tests (±50% was inside the safe window).
+- Camp max-rule now appends the parent's winning boundary so stable_since always resolves to a
+  boundary present in the entity's own tuple (explain-surface contract).
+- NEW stochastic null-fleet test exposed a real anti-conservatism: the permutation null now
+  re-MAXIMIZES gain over admissible splits per permutation (selection correction), and S1
+  regime checks pool ≥4 buckets / ≥40 decks per side — fleet acceptances on stationary noise:
+  11 → 0. Consequence: Dimir's marginal 2026-05-11 settling boundary no longer clears BH
+  (recorded, rejected); Dimir stable_since = 2026-04-20 adoption.
+- Tron hold-back note corrected: only the p-value defense fires (boundary placement leaves 80
+  decks, floor untouched).

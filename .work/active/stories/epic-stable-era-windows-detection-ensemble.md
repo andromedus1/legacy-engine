@@ -59,13 +59,14 @@ design's own binding false-positive controls; the tests pin the TRUE behavior wi
 comments rather than gaming the expectations:
 
 1. **Tron `stable_since` is None at this snapshot, not the cliff date.** The Candelabra cliff is
-   ONE complete bucket old at the corpus edge (2026-06-22 = 20 decks; 06-29 partial). Two
-   independent binding defenses hold it back: (a) a segment-permutation p-value for a boundary
-   2 buckets from the series end is mathematically bounded below at ~1/n_pooled — the min_size-
-   legal split at 2026-06-15 pools (28,36,50,58,59 | 59,20) and scores p≈0.55, and even a
-   min_size=1 split at the true cliff can't beat ~1/7 of permutations — so it cannot clear
-   fleet BH at any calibration; (b) the true cliff bucket leaves 21 decks in the new era, below
-   the 30-deck floor regardless. This is the brief §4 "confirmation asymmetry" case working as
+   ONE complete bucket old at the corpus edge (2026-06-22 = 20 decks; 06-29 partial). The
+   binding defense that holds it back is the permutation p-value: a segment-permutation p for a
+   boundary this close to the series end is mathematically bounded below at ~1/n_pooled — the
+   min_size-legal split at 2026-06-15 pools (28,36,50,58,59 | 59,20) and scores p≈0.55 — so it
+   cannot clear fleet BH at any calibration. (Correction from the feature review: the 30-deck
+   floor does NOT fire here — the boundary as placed at 2026-06-15 leaves 80 decks after it;
+   the floor would only bind a split at the true cliff bucket. One defense fires, not two; the
+   conclusion is unchanged.) This is the brief §4 "confirmation asymmetry" case working as
    designed: the offline derivation must NOT truncate on a 1-week-old era; the BOCPD drift alarm
    (bocpd.py, consumed by the era-ledger feature) is the designed mechanism that flags it NOW.
    The detect-level test (story `-detectors`) pins that the share detector FIRES at the

@@ -51,6 +51,8 @@ _VANISH_HI: float = 0.25   # prior-regime inclusion floor for a "ban cliff" cand
 _VANISH_LO: float = 0.05   # post-crossing inclusion ceiling for a confirmed vanish
 _ADOPT_LO: float = 0.05    # prior-regime inclusion ceiling for a "release ramp" candidate
 _ADOPT_HI: float = 0.25    # post-crossing inclusion floor for a confirmed adopt
+_S1_REGIME_BUCKETS: int = 4    # pooled-window width (buckets) for the S1 regime fractions
+_S1_MIN_POOLED_DECKS: int = 40  # minimum pooled decks per side before S1 may call a crossing
 _ONE_BUCKET_JUMP: float = 0.50  # |jump| at/above this confirms off a single bucket (brief §1:
                                  # Flow State's one-week 0%->90-95% step needs no second bucket)
 
@@ -180,21 +182,30 @@ def _segment_cost_gain(cost_factory, pooled: np.ndarray, split: int) -> float:
 
 def _permutation_pvalue(
     cost_factory, pooled: np.ndarray, split: int, *, n_perm: int, seed: int,
+    min_size: int = 1,
 ) -> tuple[float, float]:
-    """Observed cost gain at `split` plus its segment-permutation p-value.
+    """Observed cost gain at `split` plus its selection-corrected segment-permutation p-value.
 
-    Pools the two adjacent segments' points (`pooled`), shuffles their order `n_perm` times with
-    a seeded `default_rng`, and recomputes the cost gain at the SAME split position each time —
-    the null distribution of "gain from cutting here" under no true structure. p = (1 + #{perm
-    gain >= observed}) / (n_perm + 1) (brief §4 / E-Divisive's permutation scheme).
+    Pools the two adjacent segments' points (`pooled`) and shuffles their order `n_perm` times
+    with a seeded `default_rng`. Because the tested split was CHOSEN by the search to maximize
+    gain, the null statistic must be the MAX gain over all admissible splits of the permuted
+    sequence (respecting `min_size` on both sides) — recomputing at the fixed split alone is
+    anti-conservative (the observed value is a maximum; the fixed-split null is not), which a
+    stochastic stationary fleet exposes as spurious fleet-BH acceptances. p = (1 + #{perm
+    max-gain >= observed}) / (n_perm + 1) (brief §4 / E-Divisive's permutation scheme, which
+    likewise re-maximizes its statistic within permuted segments).
     """
     observed = _segment_cost_gain(cost_factory, pooled, split)
     rng = np.random.default_rng(seed)
     n = pooled.shape[0]
+    admissible = range(min_size, n - min_size + 1)
     exceed = 0
     for _ in range(n_perm):
         permuted = pooled[rng.permutation(n)]
-        if _segment_cost_gain(cost_factory, permuted, split) >= observed:
+        perm_max = max(
+            _segment_cost_gain(cost_factory, permuted, k) for k in admissible
+        )
+        if perm_max >= observed:
             exceed += 1
     pvalue = (1 + exceed) / (n_perm + 1)
     return observed, pvalue
@@ -258,9 +269,35 @@ def detect_presence(s: EntitySeries) -> list[CandidateBoundary]:
             if not confirmed:
                 continue
 
+            # Regime check on POOLED windows, not the two crossing buckets alone: at
+            # mid-tier weekly densities (~12-14 decks/bucket) single-bucket fractions
+            # cross the thresholds by pure binomial noise; a stochastic stationary
+            # fleet exposes those as spurious fleet-BH acceptances. Pool up to
+            # _S1_REGIME_BUCKETS on each side of the crossing and require the POOLED
+            # fractions to satisfy the same regime bounds, with at least
+            # _S1_MIN_POOLED_DECKS of pooled sample per side. A real ban/release step
+            # (Flow State: 0% -> 90%+ across every following bucket) passes trivially;
+            # noise wobbles revert to their base rate under pooling and fail.
+            pool_prev = points[max(0, j - _S1_REGIME_BUCKETS):j]
+            pool_curr = points[j:j + _S1_REGIME_BUCKETS]
+            prev_pool_incl = sum(i for _, i, _ in pool_prev)
+            prev_pool_decks = sum(d for _, _, d in pool_prev)
+            curr_pool_incl = sum(i for _, i, _ in pool_curr)
+            curr_pool_decks = sum(d for _, _, d in pool_curr)
+            if min(prev_pool_decks, curr_pool_decks) < _S1_MIN_POOLED_DECKS:
+                continue
+            prev_pool_frac = prev_pool_incl / prev_pool_decks
+            curr_pool_frac = curr_pool_incl / curr_pool_decks
+            if signal == "presence-vanish":
+                regime_ok = prev_pool_frac >= _VANISH_HI and curr_pool_frac < _VANISH_LO
+            else:
+                regime_ok = prev_pool_frac < _ADOPT_LO and curr_pool_frac >= _ADOPT_HI
+            if not regime_ok:
+                continue
+
             table = [
-                [prev_incl, prev_decks - prev_incl],
-                [curr_incl, curr_decks - curr_incl],
+                [prev_pool_incl, prev_pool_decks - prev_pool_incl],
+                [curr_pool_incl, curr_pool_decks - curr_pool_incl],
             ]
             _, pvalue = fisher_exact(table)
 
@@ -271,8 +308,8 @@ def detect_presence(s: EntitySeries) -> list[CandidateBoundary]:
                 magnitude=jump,
                 pvalue=float(pvalue),
                 evidence=(
-                    f"{card} {prev_frac:.0%}→{curr_frac:.0%} "
-                    f"(decks {prev_decks}→{curr_decks})"
+                    f"{card} {prev_pool_frac:.0%}→{curr_pool_frac:.0%} "
+                    f"(decks {prev_pool_decks}→{curr_pool_decks} pooled)"
                 ),
                 trigger_card=card,
             ))
@@ -333,7 +370,7 @@ def detect_composition(
         pooled = vectors[left_start:right_end]
         split = left_end - left_start
         observed_gain, pvalue = _permutation_pvalue(
-            cost_factory, pooled, split, n_perm=n_perm, seed=seed,
+            cost_factory, pooled, split, n_perm=n_perm, seed=seed, min_size=3,
         )
 
         unsplit_cost = cost_factory().fit(pooled).error(0, pooled.shape[0])
@@ -413,10 +450,15 @@ def detect_share(
         split = left_end - left_start
         _observed_gain, pvalue = _permutation_pvalue(
             cost_factory, pooled, split, n_perm=n_perm, seed=seed,
+            min_size=_SHARE_MIN_SIZE,
         )
 
-        before_share = float(shares[b_idx - 1])
-        after_share = float(shares[b_idx])
+        # Segment-level means, not the two buckets straddling the split: with
+        # min_size=2 the level shift can land one bucket INSIDE the new segment
+        # (the Candelabra cliff does exactly that), and an adjacent-bucket delta
+        # would then report a 0.0-magnitude no-op audit line.
+        before_share = float(shares[left_start:left_end].mean())
+        after_share = float(shares[left_end:right_end].mean())
         magnitude = abs(after_share - before_share)
 
         candidates.append(CandidateBoundary(
@@ -425,7 +467,7 @@ def detect_share(
             signal="share",
             magnitude=magnitude,
             pvalue=float(pvalue),
-            evidence=f"share {before_share:.1%}→{after_share:.1%}/wk",
+            evidence=f"share {before_share:.1%}→{after_share:.1%}/wk (segment means)",
             trigger_card=None,
         ))
     return candidates

@@ -222,11 +222,24 @@ def derive_eras(
             # A camp with its own accepted boundaries keeps them — but a parent-wide
             # disturbance disturbs every camp, so the effective stable_since is the LATER of
             # own vs parent's (`_max_date`); a camp can be MORE recently disturbed than its
-            # parent, never less.
+            # parent, never less. When the parent's date wins, the parent's winning boundary
+            # is appended to the camp's boundary list so `stable_since` always resolves to a
+            # boundary PRESENT in `boundaries` — the explain surface must never have to hunt
+            # a horizon's justification on a different entity.
+            effective_since = _max_date(own_since, parent_since)
+            camp_boundaries = own_boundaries
+            if effective_since is not None and effective_since != own_since:
+                parent_winning = [
+                    b for b in parent_boundaries
+                    if b.bh_accepted and not b.floor_rejected and b.date == effective_since
+                ]
+                camp_boundaries = tuple(
+                    sorted((*own_boundaries, *parent_winning), key=lambda b: b.date)
+                )
             result[entity] = EntityEras(
                 entity=entity,
-                stable_since=_max_date(own_since, parent_since),
-                boundaries=own_boundaries,
+                stable_since=effective_since,
+                boundaries=camp_boundaries,
                 inherited_from_parent=False,
             )
             continue

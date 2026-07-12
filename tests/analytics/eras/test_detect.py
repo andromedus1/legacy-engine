@@ -213,3 +213,47 @@ class TestWinrateCorroboration:
         )
         out = corroborate_winrate(s, [cand])
         assert out[0].evidence == cand.evidence  # unchanged
+
+
+class TestOperatingPointWindowEdges:
+    """Pin the measured EDGES of the safe calibration windows (review finding: ±50% moves
+    inside the window and changes nothing — these guards pin where behavior actually flips,
+    so a large regression to either constant goes red)."""
+
+    def test_pelt_pen_upper_edge_loses_the_rebalance(self, composition_rebalance_series):
+        from legacy_engine.analytics.eras.detect import detect_composition
+
+        at_op = detect_composition(composition_rebalance_series)
+        assert at_op, "operating point must detect the rebalance"
+        beyond = detect_composition(composition_rebalance_series, pen=2.5)
+        assert not beyond, "pen=2.5 sits beyond the measured detection window (~<=1.0)"
+
+    def test_share_pen_upper_edge_loses_the_tron_cliff(self, tron_cliff_series):
+        from legacy_engine.analytics.eras import detect as d
+
+        def _cliff_dates(cands):
+            return [c.date for c in cands if c.date in ("2026-06-08", "2026-06-15", "2026-06-22")]
+
+        at_op = d.detect_share(tron_cliff_series)
+        assert _cliff_dates(at_op), "operating point must date the cliff within ±1 bucket"
+        orig = d._SHARE_PEN
+        try:
+            d._SHARE_PEN = 0.05  # an order of magnitude beyond the measured [0.001, 0.005] window
+            beyond = d.detect_share(tron_cliff_series)
+        finally:
+            d._SHARE_PEN = orig
+        assert not _cliff_dates(beyond), (
+            "pen=0.05 sits beyond the measured window for the CLIFF boundary "
+            f"(got {[c.date for c in beyond]})"
+        )
+
+    def test_share_evidence_reports_segment_level_shift(self, tron_cliff_series):
+        # Review finding: adjacent-bucket deltas reported a 0.0-magnitude no-op audit line for
+        # the Candelabra cliff. Segment means must carry a real (non-zero) shift.
+        from legacy_engine.analytics.eras.detect import detect_share
+
+        cands = detect_share(tron_cliff_series)
+        assert cands
+        cliff = cands[-1]
+        assert cliff.magnitude > 0.01, f"segment-mean magnitude should be material, got {cliff.magnitude}"
+        assert "segment means" in cliff.evidence

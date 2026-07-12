@@ -120,16 +120,21 @@ class TestRealCaseIntegration:
         assert real_eras["Doomsday"].stable_since == "2026-04-20"
         assert real_eras["Izzet Delver"].stable_since == "2026-04-13"  # within +/-1 bucket
 
-    def test_dimir_stable_since_is_the_post_adoption_share_settling(self, real_eras):
-        # The frozen real corpus contains a GENUINE second disturbance for Dimir Tempo: its
-        # play rate halves after the Flow State meta shift (weekly decks ~40-45 pre-adoption vs
-        # ~17-24 from mid-May), and the share detector legitimately dates that settling
-        # 2026-05-11 with permutation p=0.005 — 3 buckets after the adoption boundary, outside
-        # the 2-bucket merge tolerance. stable_since = the LAST accepted boundary by contract,
-        # so it is the share settling, not the adoption step. The adoption boundary itself is
-        # separately accepted (asserted above) — both are real, and truncating to the later one
-        # is the conservative windowing choice.
-        assert real_eras["Dimir Tempo"].stable_since == "2026-05-11"
+    def test_dimir_stable_since_is_the_adoption_bucket(self, real_eras):
+        # The frozen real corpus contains a plausible SECOND disturbance for Dimir Tempo (its
+        # play rate halves after the Flow State meta shift, dated 2026-05-11 by the share
+        # detector). Under the fixed-split permutation null that boundary scored p=0.005 and
+        # became stable_since; under the SELECTION-CORRECTED null (max gain over admissible
+        # splits per permutation — the fixed-split version is anti-conservative because the
+        # tested split was chosen to maximize gain) it no longer clears fleet BH, so the
+        # gradual settling is honestly held and stable_since stays at the loud, multi-signal
+        # adoption boundary. The settling candidate is still recorded in `boundaries` as a
+        # rejected audit-trail entry.
+        assert real_eras["Dimir Tempo"].stable_since == "2026-04-20"
+        settling = [b for b in real_eras["Dimir Tempo"].boundaries if b.date == "2026-05-11"]
+        assert settling and not any(
+            b.bh_accepted and not b.floor_rejected for b in settling
+        ), "the settling candidate should be recorded but not accepted"
 
     def test_adoption_boundary_merges_presence_and_share_evidence(self, real_eras):
         adoption = next(
@@ -141,11 +146,12 @@ class TestRealCaseIntegration:
 
     def test_tron_cliff_is_recorded_but_not_yet_accepted_at_this_snapshot(self, real_eras):
         # The Candelabra cliff is 1 complete bucket old at the corpus edge (2026-06-22 = 20
-        # decks, 2026-06-29 partial). Two independent defenses HOLD it back, by design:
-        # a segment-permutation p on a boundary this close to the series end is bounded below
-        # at roughly 1/n_pooled (the low bucket can land in the short segment in ~1/n of
-        # permutations), so it cannot clear fleet BH; and the true cliff bucket would leave
-        # only 21 decks in the new era, below the 30-deck floor. This is the brief §4
+        # decks, 2026-06-29 partial). The binding defense that HOLDs it back, by design, is the
+        # permutation p: a segment-permutation p on a boundary this close to the series end is
+        # bounded below at roughly 1/n_pooled (the low bucket can land in the short segment in
+        # ~1/n of permutations), so it cannot clear fleet BH. (The 30-deck floor does NOT fire
+        # here — the boundary as placed at 2026-06-15 leaves 80 decks after it; the floor would
+        # only bind a split at the true cliff bucket.) This is the brief §4
         # "confirmation asymmetry" case: the offline stable_since derivation must NOT truncate
         # on a 1-week-old era — the BOCPD drift alarm (bocpd.py, era-ledger feature) is the
         # designed mechanism for flagging it immediately. The detect-level test already pins
@@ -264,8 +270,11 @@ class TestCampInheritance:
 
         camp = eras["P [c]"]
         assert camp.inherited_from_parent is False  # keeps its own boundaries
-        assert [b.date for b in camp.boundaries] == [_wk(2)]
+        # The parent's winning boundary is appended so stable_since always resolves to a
+        # boundary present in THIS entity's tuple (explain-surface contract).
+        assert [b.date for b in camp.boundaries] == [_wk(2), _wk(7)]
         assert camp.stable_since == _wk(7)          # parent's later date wins
+        assert any(b.date == camp.stable_since for b in camp.boundaries)
 
     def test_camp_with_own_later_boundary_keeps_it(self):
         series = {
@@ -313,3 +322,64 @@ class TestEndToEndSeam:
             assert e.entity == entity
             assert isinstance(e.boundaries, tuple)
             assert e.stable_since is None or isinstance(e.stable_since, str)
+
+
+class TestStochasticNullFleet:
+    def test_stochastic_stationary_fleet_accepts_zero(self):
+        """Review finding: the periodic stable fixture gives detectors zero variance, so BH
+        never sees real detector output. This fleet is genuinely stochastic (seeded binomial
+        noise around stationary rates) — spurious candidates may arise; fleet BH + floors
+        must still accept ZERO boundaries. Seed pinned; a seed change that breaks this is a
+        calibration regression, not test flake."""
+        import numpy as np
+
+        from legacy_engine.analytics.eras.detect import (
+            detect_composition,
+            detect_presence,
+            detect_share,
+        )
+        from legacy_engine.analytics.eras.ensemble import derive_eras
+        from legacy_engine.analytics.eras.series import Bucket, EntitySeries
+
+        rng = np.random.default_rng(7)
+        n_buckets, field = 30, 300
+        base_fracs = np.linspace(0.15, 0.85, 10)
+        dates = [f"2026-{1 + i // 4:02d}-{1 + 7 * (i % 4):02d}" for i in range(n_buckets)]
+
+        series: dict[str, EntitySeries] = {}
+        for e in range(40):
+            p_share = 0.04 + 0.002 * (e % 5)
+            buckets = []
+            for t in range(n_buckets):
+                decks = int(rng.binomial(field, p_share))
+                decks = max(decks, 12)  # keep composition vectors estimable every bucket
+                card_incl = {
+                    f"C{j:02d}": int(rng.binomial(decks, base_fracs[j]))
+                    for j in range(10)
+                }
+                wins = int(rng.binomial(decks * 3, 0.5))
+                buckets.append(Bucket(
+                    start=dates[t], complete=True, decks=decks, field_decks=field,
+                    wins=wins, losses=decks * 3 - wins, card_incl=card_incl,
+                ))
+            ent = f"Null{e:02d}"
+            series[ent] = EntitySeries(
+                entity=ent, parent=ent, bucket_weeks=1,
+                flex_cards=tuple(f"C{j:02d}" for j in range(10)),
+                buckets=tuple(buckets),
+            )
+
+        cands = []
+        for s in series.values():
+            cands += detect_presence(s)
+            cands += detect_composition(s, seed=7)
+            cands += detect_share(s, seed=7)
+
+        eras = derive_eras(series, cands)
+        accepted = [
+            (ent, b.date)
+            for ent, ee in eras.items()
+            for b in ee.boundaries
+            if b.bh_accepted and not b.floor_rejected
+        ]
+        assert accepted == [], f"stochastic null fleet produced accepted boundaries: {accepted}"
