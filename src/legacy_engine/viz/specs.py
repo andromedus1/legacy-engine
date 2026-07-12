@@ -443,6 +443,7 @@ def spec_matchup_row(rows: list[dict], *, deck: str) -> dict:
         window = r.get("window") or "full corpus"
         vl_rows.append({
             "opponent": r["opponent"],
+            "p_raw": r.get("p_raw"),
             "p_shrunk": p if display and p is not None else None,
             "ci_low": r.get("ci_low") if display else None,
             "ci_high": r.get("ci_high") if display else None,
@@ -486,7 +487,8 @@ def spec_matchup_row(rows: list[dict], *, deck: str) -> dict:
             },
             "tooltip": [
                 {"field": "opponent", "type": "nominal", "title": "Opponent"},
-                {"field": "p_shrunk", "type": "quantitative", "title": "Win rate", "format": ".1%"},
+                {"field": "p_shrunk", "type": "quantitative", "title": "Win rate (shrunk)", "format": ".1%"},
+                {"field": "p_raw", "type": "quantitative", "title": "Win rate (raw)", "format": ".1%"},
                 {"field": "n", "type": "quantitative", "title": "n (matches)"},
                 {"field": "tier", "type": "nominal", "title": "Tier"},
                 {"field": "window", "type": "nominal", "title": "Data window (since)"},

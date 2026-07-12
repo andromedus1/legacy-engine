@@ -370,10 +370,12 @@ class TestGoldenReportMatchupsDefault:
         "matchup-n is a separate, smaller sample than meta-share-n. Cells with n<30 are hidden.\n"
     )
     _GRID = (
+        "Cells: shrunk%|raw% n=matches — the raw record always travels with the estimate; "
+        "small n is pulled toward 50%.\n"
         "          Control               Doomsday            \n"
         "----------------------------------------------------\n"
-        "Control   n=0 (mirror)          16.7% (n=36)        \n"
-        "Doomsday  83.3% (n=36)          n=0 (mirror)        \n"
+        "Control   n=0 (mirror)          17%|3% n=36         \n"
+        "Doomsday  83%|97% n=36          n=0 (mirror)        \n"
         "// window: full-corpus\n"
     )
     GOLDEN = (

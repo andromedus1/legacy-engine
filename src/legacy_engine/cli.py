@@ -872,6 +872,7 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
 
     # Header row
     header = " " * row_label_width + "  " + "  ".join(a.ljust(col_width) for a in archetypes)
+    click.echo("Cells: shrunk%|raw% n=matches — the raw record always travels with the estimate; small n is pulled toward 50%.")
     click.echo(header)
     click.echo("-" * len(header))
 
@@ -887,8 +888,12 @@ def _print_matchup_matrix(matrix) -> None:  # type: legacy_engine.analytics.matc
             elif not cell.display:
                 part = f"n={cell.n} (insufficient)"
             else:
-                pct = f"{cell.p_shrunk:.1%}" if cell.p_shrunk is not None else "n/a"
-                part = f"{pct} (n={cell.n})"
+                if cell.p_shrunk is not None and cell.p_raw is not None:
+                    # Triple display (shrunk%|raw% n=) — shrinkage compresses small samples
+                    # toward 50%, so the raw record must always travel with the estimate.
+                    part = f"{cell.p_shrunk:.0%}|{cell.p_raw:.0%} n={cell.n}"
+                else:
+                    part = "n/a"
             row_parts.append(part.ljust(col_width))
         click.echo("  ".join(row_parts))
 
@@ -948,7 +953,7 @@ def _print_head_to_head(
         )
         click.echo(
             f"  {archetype_b!r} win-rate vs {archetype_a!r}: "
-            f"{rev.p_shrunk:.1%} (n={rev.n}){rev_caveat}"
+            f"{rev.p_shrunk:.1%} (raw {rev.p_raw:.1%}, n={rev.n}){rev_caveat}"
         )
 
 
