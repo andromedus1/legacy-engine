@@ -1,0 +1,33 @@
+# MYSTIC FORGE COMBO — post-Candelabra shell (2026-07-13)
+# NOT the engine's consensus output: the post-ban pool is n=5 across THREE distinct shells, so the
+# modal consensus is a Franken-list. This is Univerce's exact 75 — Legacy Challenge 32 top-10
+# (4-2, 2026-07-01) — corroborated by ItsSwiftyTime's league list (same 75 within 3 cards:
+# 3rd Manifold Key + 1 Pithing Needle/2 Mindbreak Trap board slots vs the 4th Flute + 4 Leyline).
+# Variant note: DethFrmAbove's build (best single result, 6-2 / 3rd place same Challenge) keeps a
+# partial Tron package (4 Planar Nexus, 4 Urza's Tower, 4 Urza's Workshop) + 4 Trinisphere, and
+# cuts City of Traitors/Bauble/Hamlet. Two real shells — reps will decide; this file is the
+# two-player one. Pre-ban consensus (n=53, Karn/Candelabra Tron) is dead — Candelabra banned 06-29.
+4 Ancient Tomb
+4 Chalice of the Void
+4 City of Traitors
+4 Glaring Fleshraker
+4 Grim Monolith
+4 Kozilek's Command
+4 Lotus Petal
+2 Manifold Key
+4 Mishra's Bauble
+4 Mox Opal
+3 Mystic Forge
+4 Petrified Hamlet
+1 Skateboard
+4 The Fantasticar
+4 The One Ring
+1 Tormod's Crypt
+4 Urza's Saga
+1 Voltaic Key
+
+Sideboard
+4 Defense Grid
+3 Dismember
+4 Disruptor Flute
+4 Leyline of the Void
