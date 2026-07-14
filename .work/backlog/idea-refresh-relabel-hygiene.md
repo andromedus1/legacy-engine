@@ -13,3 +13,9 @@ run`) or print a loud `// ⚠ labels wiped — run: label && discover apply … 
 (b) make ingestion preserve labels for unchanged decks (keyed reload instead of full reload);
 (c) at minimum an audit line in refresh output stating how many labeled rows were lost.
 The staged-registry membership persistence made recovery lossless — keep that guarantee.
+
+**Recurred 2026-07-13:** the wipe happens even on a NO-OP refresh — cache said "Already up to
+date", zero new tournaments (deck count and max date unchanged), yet the reload still dropped
+labels to 3 and variants to 0. Manual recovery (label + 29× discover apply + eras run) worked
+again but took ~10 min of wall clock. This fires on every refresh, not just data-bearing ones —
+raises the priority of option (b) (keyed reload preserving labels for unchanged decks).
