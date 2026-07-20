@@ -1,0 +1,51 @@
+# ESPER PHELIA (Yorion 80) — winner-validated stock list (2026-07-20)
+# List = Carroz, 2nd place Legacy Challenge 32 2025-09-21, unmodified — the cleanest stock copy
+# of the Phelia camp's 80-card Yorion blink mode. Shell cross-validated by Dan Atkins' 1st place
+# MLCG 2026-03-07 (same 4x Vial/Overlord/Phelia/Recruiter/Solitude core, spice differs).
+# Camp context: Esper Midrange [Phelia] n=62 since 2025-08-01, EVOLVING tier; camp WR 54.3%
+# (n=127 matches) vs 41.9% for non-Phelia Esper. Yorion-80 mode: 51-29 (63.8%) across 12 entries
+# vs 53.3% for the 60-card mode — both thin, treat as lean not verdict.
+# Regime caveat: camp data is ~95% pre-2026-05-18 regimes; ZERO post-Candelabra-ban (2026-06-29)
+# sample. Plan-based positioning only.
+
+4 Aether Vial
+4 Baleful Strix
+4 Brainstorm
+4 Flooded Strand
+4 Force of Will
+4 Marsh Flats
+4 Overlord of the Balemurk
+4 Phelia, Exuberant Shepherd
+4 Polluted Delta
+4 Quantum Riddler
+4 Recruiter of the Guard
+4 Solitude
+4 Swords to Plowshares
+4 Tamiyo, Inquisitive Student
+4 Wasteland
+2 Karakas
+2 Orcish Bowmasters
+2 Tundra
+2 Underground Sea
+1 Flickerwisp
+1 Harbinger of the Seas
+1 Island
+1 Lavinia, Azorius Renegade
+1 Meticulous Archive
+1 Plains
+1 Scrubland
+1 Shadowy Backstreet
+1 Skyclave Apparition
+1 Swamp
+1 Undercity Sewers
+1 Witch Enchanter
+
+Sideboard
+3 Clarion Conqueror
+3 Consign to Memory
+2 Deafening Silence
+2 Faerie Macabre
+2 Grafdigger's Cage
+1 Gilded Drake
+1 Opposition Agent
+1 Yorion, Sky Nomad
