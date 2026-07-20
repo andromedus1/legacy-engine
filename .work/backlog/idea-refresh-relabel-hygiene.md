@@ -19,3 +19,8 @@ date", zero new tournaments (deck count and max date unchanged), yet the reload 
 labels to 3 and variants to 0. Manual recovery (label + 29× discover apply + eras run) worked
 again but took ~10 min of wall clock. This fires on every refresh, not just data-bearing ones —
 raises the priority of option (b) (keyed reload preserving labels for unchanged decks).
+
+**Recurred 2026-07-20:** third occurrence, again on a fully no-op refresh (upstream
+fbettega/MTG_decklistcache stalled since 2026-07-02, so zero new data). Labels 65,785→3,
+variants 21,484→0; recovered via label + 29× discover apply + eras run. Every single refresh
+now costs a ~10-min manual recovery — this should be scoped, not re-parked.
