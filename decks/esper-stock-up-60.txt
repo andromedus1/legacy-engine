@@ -1,0 +1,44 @@
+# ESPER STOCK UP — camp consensus, winner-validated (2026-07-20)
+# List = engine consensus over the Esper Midrange [Stock Up] camp, n=53 since 2025-08-01,
+# EVOLVING tier. The camp is highly consensual: 4x Stock Up 40/53, 2x Snapcaster 51/53,
+# 2x Murktide 50/53, 2x Edict 38/53, 3x Thoughtseize 50/53, 1x Sanctuary 51/53 — modal
+# counts assemble a clean 60/15.
+# Winner validation: harmonywoods (8 of the camp's top-14 finishes; 6-2 Challenge 32
+# 2026-01-10) matches this 75 within one flex slot (their 1 Kaito + 1 Barrowgoyf main vs
+# consensus 2 Kaito; board 3 Hydro + 1 Dress Down vs 2 Hydro + 2 Cage).
+# Best-measured Esper Midrange version: 55.7% (146-116) since 2025-08, 59.6% (56-38) in 2026.
+# Regime caveat: ZERO post-Candelabra-ban (2026-06-29) sample. NOTE: harmonywoods' own
+# 2026-04-29 list drifted to 4x Flow State / 1 Stock Up — a fork to watch, not folded in.
+
+4 Brainstorm
+4 Flooded Strand
+4 Force of Will
+4 Orcish Bowmasters
+4 Polluted Delta
+4 Ponder
+4 Stock Up
+4 Swords to Plowshares
+4 Tamiyo, Inquisitive Student
+3 Thoughtseize
+3 Tundra
+3 Underground Sea
+2 Kaito, Bane of Nightmares
+2 Murktide Regent
+2 Sheoldred's Edict
+2 Snapcaster Mage
+1 Island
+1 Marsh Flats
+1 Mystic Sanctuary
+1 Plains
+1 Scrubland
+1 Snow-Covered Swamp
+1 Undercity Sewers
+
+Sideboard
+3 Force of Negation
+2 Barrowgoyf
+2 Clarion Conqueror
+2 Consign to Memory
+2 Grafdigger's Cage
+2 Hydroblast
+2 Prismatic Ending
