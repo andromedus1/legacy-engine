@@ -1,0 +1,49 @@
+# GRIXIS THUNDERTRAP (wizards) — winner-validated stock list (2026-07-20)
+# List = Ark4n, 1st place Legacy Challenge 32 2025-11-08 (7-1), unmodified. Ark4n owns this camp:
+# three Challenge wins (2025-08-30, 2025-10-04 8-1, 2025-11-08 7-1) + 3rd 2025-12-06.
+# Every slot sits inside the camp's copy-count consensus (n=62 since 2025-08-01, EVOLVING tier):
+# 4x Thundertrap (60/62), 3x Flame of Anor (48/62), 4x Tamiyo (59/62), 3x Fatal Push (52/62),
+# 2x Kaito (59/62), 3-4x Thoughtseize, 1x Edict/Sanctuary/Lórien modal.
+# Camp WR 60.5% (n=86 matches, EVOLVING) vs 44.5% for non-Thundertrap Grixis.
+# Regime caveat: camp is ~98% pre-2026-05-18 data; ZERO post-Candelabra-ban (2026-06-29) sample.
+# Sole current-regime sighting (David Adelman 2026-06-27) is a Flow State/Lórien hybrid — a
+# different direction, n=1, not folded in.
+
+4 Brainstorm
+4 Force of Will
+4 Polluted Delta
+4 Ponder
+4 Scalding Tarn
+4 Tamiyo, Inquisitive Student
+4 Thoughtseize
+4 Thundertrap Trainer
+3 Fatal Push
+3 Flame of Anor
+3 Underground Sea
+2 Dress Down
+2 Kaito, Bane of Nightmares
+2 Nihil Spellbomb
+2 Orcish Bowmasters
+2 Volcanic Island
+1 Badlands
+1 Bloodstained Mire
+1 Island
+1 Lórien Revealed
+1 Mystic Sanctuary
+1 Sheoldred's Edict
+1 Swamp
+1 Tyrant's Scorn
+1 Undercity Sewers
+
+Sideboard
+2 Barrowgoyf
+2 Meltdown
+2 Null Rod
+2 Pyroblast
+1 Blood Moon
+1 Consign to Memory
+1 Force of Negation
+1 Hydroblast
+1 Red Elemental Blast
+1 Surgical Extraction
+1 Unlicensed Hearse
