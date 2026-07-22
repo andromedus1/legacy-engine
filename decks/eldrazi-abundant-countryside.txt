@@ -1,0 +1,40 @@
+# ELDRAZI [ABUNDANT COUNTRYSIDE] — colorless stock, modal camp 60 (2026-07-21)
+# List = the modal exact-60 of the Eldrazi [Abundant Countryside] camp's colorless majority
+# (18/78 colorless decks run this exact maindeck; camp n=122 since 2026-04-13, ESTABLISHED
+# tier; era engine-dated to Petrified Hamlet adoption). Colorless majority outperforms the
+# red-splash Bombardiers fork: 58.7% (182-128) vs 57.2% (115-86) since 04-13.
+# Winner validation: Gnurant (3x League 5-0 in the last 10 days of data: 06-21/23/27) runs
+# the same 52-card core, forking only the flex slots (4 It That/4 Smasher/0 Sire/1 Mountain
+# vs our modal 3/2/2/1 Wastes). Grim Monolith + City of Traitors fork (7 decks, 69.4%) is a
+# thin pilot cluster — watch, not adopt.
+# Why this deck (the agency case, 2026-07-21 unsuppressed report + full-corpus audit):
+# adjusted WR vs field 53.6%, and the best MEASURED floor in the format — worst matchups
+# 41.9% vs Painter (n=178, 1.3% of field), 44.4% vs Mystic Forge (n=185), 46.2% vs S&T
+# (n=264), 47.1% vs Izzet (n=163); 95% field coverage. No blowout losses anywhere.
+# Regime caveat: ZERO post-Candelabra-ban (2026-06-29) camp sample in the 2-day window.
+
+4 Abundant Countryside
+4 Ancient Tomb
+4 Cavern of Souls
+4 Chalice of the Void
+4 Eldrazi Linebreaker
+4 Eldrazi Temple
+4 Eye of Ugin
+4 Glaring Fleshraker
+4 Kozilek's Command
+4 Lotus Petal
+4 Petrified Hamlet
+4 Thought-Knot Seer
+4 Wastescape Battlemage
+3 It That Heralds the End
+2 Reality Smasher
+2 Sire of Seven Deaths
+1 Wastes
+
+Sideboard
+4 Disruptor Flute
+4 Leyline of the Void
+2 Dismember
+2 Mindbreak Trap
+2 Null Rod
+1 Warping Wail
