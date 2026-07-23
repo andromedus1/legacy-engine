@@ -176,10 +176,14 @@ def seed_cache(verbose: bool) -> None:
     cache.mirror_cache()
     con = store.connect()
     try:
-        n = cache.ingest_cache(con)
+        stats = cache.ingest_cache(con)
     finally:
         con.close()
-    click.echo(f"Ingested {n} Legacy tournaments into DuckDB")
+    click.echo(f"Ingested {stats.loaded} Legacy tournaments into DuckDB "
+               f"({stats.unchanged} unchanged, {stats.seeded} seeded)")
+    # Label-honesty audit (preserved / ⚠ dropped lines) — same surface as `refresh all`.
+    for line in _refresh_cache_audit(stats)[1:]:
+        click.echo(line)
 
 
 @seed.command("rules")

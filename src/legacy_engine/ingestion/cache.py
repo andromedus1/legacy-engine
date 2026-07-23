@@ -185,6 +185,50 @@ class IngestStats:
         return max(0, self.variants_before - self.variants_after)
 
 
+def _db_matches_parsed(con, tid: str, tr: TournamentResult) -> bool:
+    """True when the stored rows for ``tid`` exactly match the parsed file content.
+
+    Guards the migration seed path: a ledger-less file is only blessed as already-ingested when
+    the DB actually holds its content. Otherwise (the file changed after its pre-ledger ingest)
+    seeding would record the NEW file's hash while the DB keeps the OLD rows — and every later
+    refresh would hash-match and skip it, so the new content would never load.
+    """
+    db_decks = con.execute(
+        "SELECT deck_idx, player, result FROM decks WHERE tournament_id = ? ORDER BY deck_idx",
+        [tid],
+    ).fetchall()
+    if db_decks != [(i, d.player, d.result) for i, d in enumerate(tr.decks)]:
+        return False
+
+    parsed_cards = []
+    for i, d in enumerate(tr.decks):
+        for cc in d.mainboard:
+            parsed_cards.append((i, "main", cc.name, cc.count))
+        for cc in d.sideboard:
+            parsed_cards.append((i, "side", cc.name, cc.count))
+    db_cards = con.execute(
+        "SELECT deck_idx, board, name, count FROM deck_cards WHERE tournament_id = ?", [tid]
+    ).fetchall()
+    if sorted(db_cards) != sorted(parsed_cards):
+        return False
+
+    db_rounds = con.execute(
+        "SELECT match_idx, player1, player2, result FROM rounds WHERE tournament_id = ? ORDER BY match_idx",
+        [tid],
+    ).fetchall()
+    if db_rounds != [(i, m.player1, m.player2, m.result) for i, m in enumerate(tr.rounds)]:
+        return False
+
+    db_standings = sorted(con.execute(
+        "SELECT rank, player, points, wins, losses, draws FROM standings WHERE tournament_id = ?",
+        [tid],
+    ).fetchall(), key=str)
+    parsed_standings = sorted(
+        [(s.rank, s.player, s.points, s.wins, s.losses, s.draws) for s in tr.standings], key=str
+    )
+    return db_standings == parsed_standings
+
+
 def ingest_cache(con, cache_dir: Path = CACHE_DIR, *, full: bool = False) -> IngestStats:
     """Parse + load discovered Legacy events into the DuckDB store, keyed by content hash.
 
@@ -197,13 +241,17 @@ def ingest_cache(con, cache_dir: Path = CACHE_DIR, *, full: bool = False) -> Ing
     A path with no ledger row but whose parsed tournament id is ALREADY present in ``tournaments``
     (the pre-feature migration case: real data, no ledger yet) is "seeded" — the ledger row is
     written but the tournament is NOT reloaded, so labels applied before this feature shipped
-    survive the first post-upgrade refresh.
+    survive the first post-upgrade refresh. Seeding is verified, not trusted: the parsed file
+    content must MATCH the stored rows (decks, cards, rounds, standings); a mismatched file
+    reloads as ``changed`` instead — a seed must never bless content the DB doesn't actually hold.
 
     ``full=True`` bypasses both skips: every discovered event is reloaded (and its ledger row
     rewritten) regardless of hash or prior seeding — an explicit, opt-in "wipe and rebuild".
 
-    Resilience NFR: one bad event (unreadable JSON, parse failure, or load failure) is logged and
-    skipped — the batch continues, and NO ledger row is written for it, so the next run retries.
+    Resilience NFR: one bad event (parse failure or load failure) is logged and skipped — the
+    batch continues, and NO ledger row is written for it, so the next run retries. (Files that
+    fail to read as JSON are dropped earlier, in discovery, with a warning — they never reach
+    this loop and are invisible to these stats.)
     """
     from legacy_engine.ingestion import store
 
@@ -237,7 +285,7 @@ def ingest_cache(con, cache_dir: Path = CACHE_DIR, *, full: bool = False) -> Ing
                 "SELECT 1 FROM tournaments WHERE id = ?", [tid]
             ).fetchone() is not None
 
-            if ledger_row is None and tid_exists and not full:
+            if ledger_row is None and tid_exists and not full and _db_matches_parsed(con, tid, tr):
                 con.execute(
                     "INSERT OR REPLACE INTO ingest_ledger VALUES (?, ?, ?, ?)",
                     [key, digest, tid, datetime.now(timezone.utc).isoformat()],

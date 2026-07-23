@@ -298,3 +298,31 @@ Built exactly per the design above, all 4 units, no deviations.
   updated in place for the new return shape.
 - **Full suite**: `2977 passed, 1 xfailed` — green.
 - **No deviations** from the design; no design-flaw escape hatch triggered.
+
+## Review (2026-07-23)
+
+**Verdict**: Approve with comments (after in-review fixes)
+
+**Blockers**: none remaining — two Important findings from the cross-model (Codex,
+effort=high) deep review were correctness bugs in the delivered feature and were fixed
+in-review rather than parked:
+1. **Seed clause could bless a changed file** (cache.py seed branch): a pre-feature DB
+   holding version A of an event while the cache file held version B would seed B's
+   hash without loading B — every later refresh hash-matched and the new content never
+   loaded (Codex reproduced this synthetically). Fix: `_db_matches_parsed(con, tid, tr)`
+   — seeding is now verified, not trusted; the parsed file must exactly match the
+   stored decks/deck_cards/rounds/standings rows, else the event reloads as `changed`.
+   Pinned by `test_seed_path_verifies_content_and_reloads_a_changed_file`.
+2. **Missed call site**: `seed cache` (cli.py) still consumed the old int return and
+   printed `Ingested IngestStats(...) Legacy tournaments`. Fix: uses `stats.loaded`
+   (+ unchanged/seeded counts) and now emits the same label-honesty audit lines as
+   `refresh all`.
+
+**Important**: none open.
+**Nits**: discovery-level unreadable-JSON files never reach the stats loop, so they
+can't count as `bad` — docstring corrected to say so honestly (files dropped at
+discovery are invisible to IngestStats).
+
+**Notes**: substrate mode, deep lane, cross-model fresh-context reviewer (Codex via
+peeragent, read-only). Reviewer verdict was "Request changes"; both change requests
+implemented and re-verified in-session. Full suite after fixes: 2978 passed, 1 xfailed.

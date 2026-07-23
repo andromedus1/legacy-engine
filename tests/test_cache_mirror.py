@@ -181,6 +181,41 @@ class TestKeyedReload:
         assert con.execute("SELECT count(*) FROM ingest_ledger").fetchone()[0] == 2
         con.close()
 
+    def test_seed_path_verifies_content_and_reloads_a_changed_file(self, tmp_path):
+        """A ledger-less file whose content DIVERGED from the DB must reload, never be blessed.
+
+        Codex review finding (2026-07-23): seeding on tid-existence alone would record the NEW
+        file's hash while the DB kept the OLD rows — every later refresh would then hash-match
+        and skip it, so the new content would never load.
+        """
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+        self._label_all(con)
+        con.execute("DELETE FROM ingest_ledger")  # simulate a pre-feature DB
+
+        # The file changes AFTER its pre-ledger ingest (same Uri -> same tournament_id).
+        challenge_path = cache_dir / "Tournaments" / "MTGO" / "2026" / "05" / "24" / "challenge.json"
+        modified = json.loads(challenge_path.read_text())
+        modified["Decks"][0]["Mainboard"][0]["CardName"] = "Ponder"
+        challenge_path.write_text(json.dumps(modified))
+
+        stats = cache.ingest_cache(con, cache_dir)
+
+        assert stats.changed == 1  # the diverged file reloads
+        assert stats.seeded == stats.total - 1  # the untouched file still seeds
+        # The DB now holds the NEW content, and the reloaded event's labels are honestly reset.
+        cards = {r[0] for r in con.execute(
+            "SELECT dc.name FROM deck_cards dc JOIN tournaments t ON t.id = dc.tournament_id "
+            "WHERE t.uri = ?", [_CHALLENGE["Tournament"]["Uri"]]
+        ).fetchall()}
+        assert cards == {"Ponder"}
+        assert stats.labels_dropped == 1
+        # A second refresh now hash-matches and preserves everything.
+        second = cache.ingest_cache(con, cache_dir)
+        assert second.unchanged == second.total
+        con.close()
+
     def test_full_reload_wipes_labels_and_reloads_everything(self, tmp_path):
         con = store.connect(":memory:")
         cache_dir = _build_cache(tmp_path)
