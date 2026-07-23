@@ -8,10 +8,13 @@ Result — that is normal, never an error.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from legacy_engine.config import CACHE_DIR, FBETTEGA_CACHE_REPO
@@ -145,24 +148,170 @@ def discover_legacy_events(cache_dir: Path = CACHE_DIR) -> list[tuple[Path, str]
     return events
 
 
-def ingest_cache(con, cache_dir: Path = CACHE_DIR) -> int:
-    """Parse + load every discovered Legacy event into the DuckDB store. Returns the count loaded.
+@dataclass
+class IngestStats:
+    """Outcome counters for one ``ingest_cache`` run — the label-honesty audit surface.
 
-    Resilience NFR: one bad event (unreadable JSON, parse failure, or load failure) is logged and
-    skipped — the batch continues. Returns the count of events successfully loaded.
+    Only ``new`` and ``changed`` events go through ``store.load_tournament`` (the DELETE +
+    re-insert that wipes that tournament's ``archetype``/``variant`` labels). ``unchanged``
+    and ``seeded`` events are skipped entirely, so any labels already sitting on their decks
+    survive the run — that skip is the whole point of the keyed reload.
+    """
+
+    total: int = 0
+    new: int = 0
+    changed: int = 0
+    unchanged: int = 0
+    seeded: int = 0
+    bad: int = 0
+    labels_before: int = 0
+    labels_after: int = 0
+    variants_before: int = 0
+    variants_after: int = 0
+
+    @property
+    def loaded(self) -> int:
+        """Events that triggered a reload this run (new + changed)."""
+        return self.new + self.changed
+
+    @property
+    def labels_dropped(self) -> int:
+        """Net archetype-labeled decks lost this run (never negative)."""
+        return max(0, self.labels_before - self.labels_after)
+
+    @property
+    def variants_dropped(self) -> int:
+        """Net variant-labeled decks lost this run (never negative)."""
+        return max(0, self.variants_before - self.variants_after)
+
+
+def _db_matches_parsed(con, tid: str, tr: TournamentResult) -> bool:
+    """True when the stored rows for ``tid`` exactly match the parsed file content.
+
+    Guards the migration seed path: a ledger-less file is only blessed as already-ingested when
+    the DB actually holds its content. Otherwise (the file changed after its pre-ledger ingest)
+    seeding would record the NEW file's hash while the DB keeps the OLD rows — and every later
+    refresh would hash-match and skip it, so the new content would never load.
+    """
+    db_decks = con.execute(
+        "SELECT deck_idx, player, result FROM decks WHERE tournament_id = ? ORDER BY deck_idx",
+        [tid],
+    ).fetchall()
+    if db_decks != [(i, d.player, d.result) for i, d in enumerate(tr.decks)]:
+        return False
+
+    parsed_cards = []
+    for i, d in enumerate(tr.decks):
+        for cc in d.mainboard:
+            parsed_cards.append((i, "main", cc.name, cc.count))
+        for cc in d.sideboard:
+            parsed_cards.append((i, "side", cc.name, cc.count))
+    db_cards = con.execute(
+        "SELECT deck_idx, board, name, count FROM deck_cards WHERE tournament_id = ?", [tid]
+    ).fetchall()
+    if sorted(db_cards) != sorted(parsed_cards):
+        return False
+
+    db_rounds = con.execute(
+        "SELECT match_idx, player1, player2, result FROM rounds WHERE tournament_id = ? ORDER BY match_idx",
+        [tid],
+    ).fetchall()
+    if db_rounds != [(i, m.player1, m.player2, m.result) for i, m in enumerate(tr.rounds)]:
+        return False
+
+    db_standings = sorted(con.execute(
+        "SELECT rank, player, points, wins, losses, draws FROM standings WHERE tournament_id = ?",
+        [tid],
+    ).fetchall(), key=str)
+    parsed_standings = sorted(
+        [(s.rank, s.player, s.points, s.wins, s.losses, s.draws) for s in tr.standings], key=str
+    )
+    return db_standings == parsed_standings
+
+
+def ingest_cache(con, cache_dir: Path = CACHE_DIR, *, full: bool = False) -> IngestStats:
+    """Parse + load discovered Legacy events into the DuckDB store, keyed by content hash.
+
+    Every event file is tracked in ``ingest_ledger`` by its cache-relative path and a sha256 of
+    its bytes. An event whose hash matches its ledger row is skipped entirely — no parse, no
+    ``load_tournament`` call — so its decks' archetype/variant labels are left untouched. This is
+    the fix for the data-hygiene bug where a no-op ``refresh all`` wiped every label because
+    ``load_tournament`` unconditionally deletes + re-inserts a tournament's child rows.
+
+    A path with no ledger row but whose parsed tournament id is ALREADY present in ``tournaments``
+    (the pre-feature migration case: real data, no ledger yet) is "seeded" — the ledger row is
+    written but the tournament is NOT reloaded, so labels applied before this feature shipped
+    survive the first post-upgrade refresh. Seeding is verified, not trusted: the parsed file
+    content must MATCH the stored rows (decks, cards, rounds, standings); a mismatched file
+    reloads as ``changed`` instead — a seed must never bless content the DB doesn't actually hold.
+
+    ``full=True`` bypasses both skips: every discovered event is reloaded (and its ledger row
+    rewritten) regardless of hash or prior seeding — an explicit, opt-in "wipe and rebuild".
+
+    Resilience NFR: one bad event (parse failure or load failure) is logged and skipped — the
+    batch continues, and NO ledger row is written for it, so the next run retries. (Files that
+    fail to read as JSON are dropped earlier, in discovery, with a warning — they never reach
+    this loop and are invisible to these stats.)
     """
     from legacy_engine.ingestion import store
 
-    count = 0
-    skipped = 0
-    for path, source in discover_legacy_events(cache_dir):
+    store.init_schema(con)
+
+    stats = IngestStats()
+    stats.labels_before = con.execute("SELECT count(*) FROM decks WHERE archetype IS NOT NULL").fetchone()[0]
+    stats.variants_before = con.execute("SELECT count(*) FROM decks WHERE variant IS NOT NULL").fetchone()[0]
+
+    events = discover_legacy_events(cache_dir)
+    stats.total = len(events)
+
+    for path, source in events:
         try:
-            raw = json.loads(path.read_text())
-            store.load_tournament(con, parse_cache_item(raw, source))
-            count += 1
+            key = path.relative_to(cache_dir).as_posix()
+            blob = path.read_bytes()
+            digest = hashlib.sha256(blob).hexdigest()
+
+            ledger_row = con.execute(
+                "SELECT content_hash FROM ingest_ledger WHERE path = ?", [key]
+            ).fetchone()
+
+            if ledger_row is not None and ledger_row[0] == digest and not full:
+                stats.unchanged += 1
+                continue
+
+            raw = json.loads(blob)
+            tr = parse_cache_item(raw, source)
+            tid = store.tournament_id(tr)
+            tid_exists = con.execute(
+                "SELECT 1 FROM tournaments WHERE id = ?", [tid]
+            ).fetchone() is not None
+
+            if ledger_row is None and tid_exists and not full and _db_matches_parsed(con, tid, tr):
+                con.execute(
+                    "INSERT OR REPLACE INTO ingest_ledger VALUES (?, ?, ?, ?)",
+                    [key, digest, tid, datetime.now(timezone.utc).isoformat()],
+                )
+                stats.seeded += 1
+                continue
+
+            store.load_tournament(con, tr)
+            con.execute(
+                "INSERT OR REPLACE INTO ingest_ledger VALUES (?, ?, ?, ?)",
+                [key, digest, tid, datetime.now(timezone.utc).isoformat()],
+            )
+            if ledger_row is None and not tid_exists:
+                stats.new += 1
+            else:
+                stats.changed += 1
         except Exception as exc:  # noqa: BLE001 — tolerate one bad event, keep the batch
-            skipped += 1
+            stats.bad += 1
             logger.warning("Skipping bad event %s: %s", path, exc)
-    if skipped:
-        logger.warning("Ingest complete: %d events loaded, %d skipped", count, skipped)
-    return count
+
+    stats.labels_after = con.execute("SELECT count(*) FROM decks WHERE archetype IS NOT NULL").fetchone()[0]
+    stats.variants_after = con.execute("SELECT count(*) FROM decks WHERE variant IS NOT NULL").fetchone()[0]
+
+    if stats.bad:
+        logger.warning(
+            "Ingest complete: %d loaded, %d unchanged, %d seeded, %d bad",
+            stats.loaded, stats.unchanged, stats.seeded, stats.bad,
+        )
+    return stats

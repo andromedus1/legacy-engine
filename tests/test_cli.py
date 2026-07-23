@@ -1317,3 +1317,55 @@ class TestSlotROIPuntRender:
         )
         assert result.exit_code == 0, result.output
         assert "// slot-ROI" not in result.output
+
+
+class TestRefreshCacheAudit:
+    """Pure formatter: refresh-cache summary + label-honesty audit lines (no CLI invocation)."""
+
+    def _stats(self, **overrides):
+        from legacy_engine.ingestion.cache import IngestStats
+
+        kwargs = dict(
+            total=2, new=1, changed=0, unchanged=1, seeded=0, bad=0,
+            labels_before=3, labels_after=3, variants_before=3, variants_after=3,
+        )
+        kwargs.update(overrides)
+        return IngestStats(**kwargs)
+
+    def test_summary_line_reports_counts(self):
+        from legacy_engine.cli import _refresh_cache_audit
+
+        lines = _refresh_cache_audit(self._stats())
+        assert lines[0] == (
+            "Refreshed tournament cache: 2 events — 1 new, 0 changed, 1 unchanged, 0 seeded"
+        )
+
+    def test_bad_suffix_only_when_bad_gt_zero(self):
+        from legacy_engine.cli import _refresh_cache_audit
+
+        clean = _refresh_cache_audit(self._stats(bad=0))
+        assert "bad" not in clean[0]
+
+        dirty = _refresh_cache_audit(self._stats(bad=2))
+        assert dirty[0].endswith(", 2 bad")
+
+    def test_preserved_line_on_zero_drops(self):
+        from legacy_engine.cli import _refresh_cache_audit
+
+        lines = _refresh_cache_audit(self._stats(labels_after=3, variants_after=3))
+        assert any(line.startswith("// labels preserved:") for line in lines)
+        assert not any("⚠" in line for line in lines)
+
+    def test_warning_line_present_iff_drops(self):
+        from legacy_engine.cli import _refresh_cache_audit
+
+        dropped = _refresh_cache_audit(
+            self._stats(labels_before=3, labels_after=1, variants_before=3, variants_after=1)
+        )
+        warn_lines = [line for line in dropped if "⚠" in line]
+        assert len(warn_lines) == 1
+        assert "2 archetype + 2 variant labels dropped" in warn_lines[0]
+        assert any(line.startswith("// labels: ") for line in dropped)
+
+        preserved = _refresh_cache_audit(self._stats(labels_after=3, variants_after=3))
+        assert not any("⚠" in line for line in preserved)

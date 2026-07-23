@@ -176,10 +176,14 @@ def seed_cache(verbose: bool) -> None:
     cache.mirror_cache()
     con = store.connect()
     try:
-        n = cache.ingest_cache(con)
+        stats = cache.ingest_cache(con)
     finally:
         con.close()
-    click.echo(f"Ingested {n} Legacy tournaments into DuckDB")
+    click.echo(f"Ingested {stats.loaded} Legacy tournaments into DuckDB "
+               f"({stats.unchanged} unchanged, {stats.seeded} seeded)")
+    # Label-honesty audit (preserved / ⚠ dropped lines) — same surface as `refresh all`.
+    for line in _refresh_cache_audit(stats)[1:]:
+        click.echo(line)
 
 
 @seed.command("rules")
@@ -272,11 +276,42 @@ def refresh() -> None:
     """Incrementally refresh mirrored sources (cache, rules, cards, prices)."""
 
 
+def _refresh_cache_audit(stats) -> list[str]:
+    """Pure formatter: refresh-cache summary + label-honesty audit lines."""
+    summary = (
+        f"Refreshed tournament cache: {stats.total} events — "
+        f"{stats.new} new, {stats.changed} changed, {stats.unchanged} unchanged, "
+        f"{stats.seeded} seeded"
+    )
+    if stats.bad:
+        summary += f", {stats.bad} bad"
+    lines = [summary]
+
+    drops = stats.labels_dropped + stats.variants_dropped
+    if drops == 0:
+        lines.append(
+            f"// labels preserved: {stats.labels_after:,} archetype / "
+            f"{stats.variants_after:,} variant rows untouched"
+        )
+    else:
+        lines.append(
+            f"// ⚠ {stats.labels_dropped:,} archetype + {stats.variants_dropped:,} variant "
+            "labels dropped on reloaded events — run: label && discover apply <archetype>… && eras run"
+        )
+        lines.append(
+            f"// labels: {stats.labels_after:,} archetype / {stats.variants_after:,} variant rows remain"
+        )
+    return lines
+
+
 @refresh.command("all")
 @click.option("--prices", "refresh_prices", is_flag=True, default=False,
               help="Also re-pull prices bulk (skipped by default; ~547 MB).")
+@click.option("--full", "full_reload", is_flag=True, default=False,
+              help="Force reload of every cache event (bypasses the unchanged-event skip; labels "
+                   "on all decks will be wiped — rerun label/discover apply/eras run after).")
 @_verbose
-def refresh_all(refresh_prices: bool, verbose: bool) -> None:
+def refresh_all(refresh_prices: bool, full_reload: bool, verbose: bool) -> None:
     """Refresh all mirrored sources: cache + rules + optionally prices."""
     _setup_logging(verbose)
     from legacy_engine.ingestion import cache, store
@@ -286,10 +321,11 @@ def refresh_all(refresh_prices: bool, verbose: bool) -> None:
     cache.mirror_cache()
     con = store.connect()
     try:
-        n = cache.ingest_cache(con)
+        stats = cache.ingest_cache(con, full=full_reload)
     finally:
         con.close()
-    click.echo(f"Refreshed tournament cache: {n} Legacy tournaments")
+    for line in _refresh_cache_audit(stats):
+        click.echo(line)
 
     # Vendor the archetype rules.
     sha = refresh_rules()
