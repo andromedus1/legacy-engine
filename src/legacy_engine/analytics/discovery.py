@@ -231,7 +231,10 @@ def _median_date(dates: list[str]) -> str | None:
     """
     if not dates:
         return None
-    ordinals = sorted(_date.fromisoformat(d).toordinal() for d in dates)
+    # Real-corpus dates mix plain ISO dates with full timestamps (MTGO events carry
+    # "2024-11-09T10:00:00"); date.fromisoformat rejects the time component, so take the
+    # date portion only — the same date-portion normalization corpus_freshness uses.
+    ordinals = sorted(_date.fromisoformat(d[:10]).toordinal() for d in dates)
     n = len(ordinals)
     mid = n // 2
     if n % 2 == 1:
