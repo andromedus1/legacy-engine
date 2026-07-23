@@ -95,6 +95,19 @@ CREATE TABLE IF NOT EXISTS player_aliases (
 )\
 """
 
+# Derived state — the keyed-reload ledger tracks which cache files have already been ingested
+# (by content hash), so an unchanged event on a re-refresh is skipped rather than reloaded and
+# wiping archetype/variant labels. An empty ledger means "nothing recorded yet" and forces a full
+# ingest (never a false "unchanged"), so a fresh/pre-feature DB degrades safely.
+INGEST_LEDGER_DDL = """\
+CREATE TABLE IF NOT EXISTS ingest_ledger (
+    path          VARCHAR PRIMARY KEY,
+    content_hash  VARCHAR NOT NULL,
+    tournament_id VARCHAR NOT NULL,
+    ingested_at   VARCHAR NOT NULL
+)\
+"""
+
 
 def connect(path: Path | str = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
     """Open (creating parent dirs) a DuckDB connection. Use ":memory:" for tests."""
@@ -121,6 +134,8 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("ALTER TABLE decks ADD COLUMN IF NOT EXISTS variant VARCHAR")
     # Derived identity table — data populated by materialize_player_aliases; empty until then.
     con.execute(PLAYER_ALIASES_DDL)
+    # Derived state — empty ledger ⇒ full ingest; existing DBs gain this table on next init.
+    con.execute(INGEST_LEDGER_DDL)
 
 
 # Multi-face layout classes — determine how a face name inherits attributes.
