@@ -505,6 +505,23 @@ class TestClusterAndValidateGateC:
         assert pct_by_camp["2026-01-01"] == pytest.approx(0.0)
         assert pct_by_camp["2026-06-10"] == pytest.approx(1.0)
 
+    def test_timestamp_format_dates_do_not_crash(self):
+        """Real-corpus MTGO dates carry a time component ("2026-06-10T10:00:00").
+
+        Regression: date.fromisoformat rejects the time part, so a camp containing such a
+        deck used to crash the whole discovery run (Cephalid Breakfast never swept). The
+        date-portion normalization must keep median_date/pct_current working.
+        """
+        decks = _dated_two_camp_decks(
+            dates_a=["2026-01-01T10:00:00"], dates_b=["2026-06-10T18:30:00"],
+        )
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20, current_since="2026-06-01")
+
+        pct_by_camp = {c.median_date: c.pct_current for c in split.camps}
+        assert pct_by_camp["2026-01-01"] == pytest.approx(0.0)   # median normalized to date only
+        assert pct_by_camp["2026-06-10"] == pytest.approx(1.0)
+
     def test_existing_hand_built_camp_and_split_constructors_still_work(self):
         """Additive-defaults contract: old call shapes (no temporal kwargs) stay green."""
         camp = Camp(name="X", member_keys=[], signature_cards=[], n=40, tier="evolving")
