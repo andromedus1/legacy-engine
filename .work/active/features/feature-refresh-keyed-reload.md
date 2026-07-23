@@ -1,7 +1,7 @@
 ---
 id: feature-refresh-keyed-reload
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, hygiene]
 parent: null
 depends_on: []
@@ -252,3 +252,49 @@ ledger lifecycle (seed / upsert / retry-on-failure tests).
   discovered.json) keeps `discover apply` recovery lossless for those decks —
   untouched by this feature (guarantee preserved: we only ever skip work, never alter
   the label/apply path).
+
+## Implementation notes
+
+Built exactly per the design above, all 4 units, no deviations.
+
+- **Unit 1** — `INGEST_LEDGER_DDL` added to `src/legacy_engine/ingestion/store.py:102-111`
+  (`ingest_ledger(path PK, content_hash, tournament_id, ingested_at)`); executed in
+  `init_schema` at `store.py:138` right after `PLAYER_ALIASES_DDL`, with a comment
+  stating the derived-state / empty-ledger-⇒-full-ingest constraint. `CREATE TABLE IF
+  NOT EXISTS` makes this a no-op migration for existing DBs.
+- **Unit 2** — `src/legacy_engine/ingestion/cache.py`: `IngestStats` dataclass
+  (`cache.py:152-183`, with `loaded`/`labels_dropped`/`variants_dropped` properties) and
+  the rewritten `ingest_cache(con, cache_dir=CACHE_DIR, *, full=False) -> IngestStats`
+  (`cache.py:188`). Calls `store.init_schema(con)` up front so the before-counts and
+  ledger table exist even on an all-skip run. Per event: read bytes once, sha256 hash,
+  ledger lookup by `path.relative_to(cache_dir).as_posix()` (includes the
+  `Tournaments/<Source>/...` prefix as specified). Decision tree implemented exactly:
+  hash-match+not-full → `unchanged` (no parse/write); ledger-miss+tid-already-exists+
+  not-full → seed (ledger row written, no reload); everything else →
+  `store.load_tournament` + ledger upsert, classified `new` (no prior row, tid didn't
+  exist) or `changed` (covers force-reloads under `full=True`, which never count as
+  `unchanged`). Per-event exceptions caught, `bad` incremented, logged, ledger row left
+  untouched (retry-next-run). `discover_legacy_events`, `parse_cache_item`,
+  `mirror_cache` untouched.
+- **Unit 3** — `src/legacy_engine/cli.py`: `refresh all` gained `--full` (dest
+  `full_reload`) (`cli.py:306-308`); `_refresh_cache_audit(stats) -> list[str]` pure formatter
+  (`cli.py:275-300`) emits the summary line (with `, N bad` suffix only when `bad > 0`),
+  then either the `// labels preserved: ...` line (zero drops) or the `// ⚠ ... labels
+  dropped ... — run: label && discover apply <archetype>… && eras run` line plus a `//
+  labels: ... rows remain` line (drops > 0). `refresh_all` echoes each formatter line.
+- **Unit 4** — `tests/test_cache_mirror.py`: updated the two existing `ingest_cache`
+  assertions to the `IngestStats` shape (`stats.loaded`, `stats.bad`, plus a new
+  assertion that a bad path never gets a ledger row) and added `TestKeyedReload` with 6
+  new tests covering: full-skip on an identical second ingest; a modified event
+  reloading only that tournament's labels; a new file loading without disturbing
+  existing labels; the seed path for a pre-feature DB (tournaments populated, ledger
+  empty); `full=True` wiping and reloading everything; and a failed reload leaving the
+  prior ledger row (and its old hash) intact for retry. `tests/test_cli.py`: added
+  `TestRefreshCacheAudit` (4 tests) exercising `_refresh_cache_audit` directly — bad
+  suffix presence, preserved-line vs warning-line mutual exclusivity, and exact drop
+  counts in the warning line.
+- **Test count**: 6 new tests in `tests/test_cache_mirror.py` (`TestKeyedReload`) + 4 new
+  tests in `tests/test_cli.py` (`TestRefreshCacheAudit`) = 10 new tests; 2 existing tests
+  updated in place for the new return shape.
+- **Full suite**: `2977 passed, 1 xfailed` — green.
+- **No deviations** from the design; no design-flaw escape hatch triggered.

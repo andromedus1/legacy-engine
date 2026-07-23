@@ -45,8 +45,9 @@ class TestDiscoverLegacyEvents:
 class TestIngestCache:
     def test_ingests_all_legacy_events(self, tmp_path):
         con = store.connect(":memory:")
-        n = cache.ingest_cache(con, _build_cache(tmp_path))
-        assert n == 2
+        stats = cache.ingest_cache(con, _build_cache(tmp_path))
+        assert stats.loaded == 2
+        assert stats.total == 2
         assert con.execute("SELECT count(*) FROM tournaments").fetchone()[0] == 2
         # the paper event is tagged paper, the MTGO one online
         provs = {r[0] for r in con.execute("SELECT provenance FROM tournaments").fetchall()}
@@ -74,9 +75,155 @@ class TestIngestResilience:
 
         con = store.connect(":memory:")
         with caplog.at_level("WARNING"):
-            n = cache.ingest_cache(con, tmp_path)
-        assert n == 2  # two good events load; the bad one is skipped, batch continues
+            stats = cache.ingest_cache(con, tmp_path)
+        assert stats.loaded == 2  # two good events load; the bad one is skipped, batch continues
+        assert stats.bad == 1
         assert "skipping bad event" in caplog.text.lower()
+        # the bad path never gets a ledger row, so the next run retries it
+        assert con.execute(
+            "SELECT count(*) FROM ingest_ledger WHERE path LIKE '%bad%'"
+        ).fetchone()[0] == 0
+        con.close()
+
+
+class TestKeyedReload:
+    """The core fix: an unchanged event on re-refresh must not wipe archetype/variant labels."""
+
+    def _label_all(self, con) -> None:
+        con.execute("UPDATE decks SET archetype = 'X', variant = 'Y'")
+
+    def test_identical_second_ingest_is_a_full_skip(self, tmp_path):
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        first = cache.ingest_cache(con, cache_dir)
+        assert first.loaded == first.total == 2
+        self._label_all(con)
+
+        second = cache.ingest_cache(con, cache_dir)
+
+        assert second.unchanged == second.total == 2
+        assert second.loaded == 0
+        assert second.labels_dropped == 0
+        assert second.variants_dropped == 0
+        assert con.execute(
+            "SELECT count(*) FROM decks WHERE archetype IS NOT NULL"
+        ).fetchone()[0] == 2
+        con.close()
+
+    def test_modified_event_reloads_only_that_tournament(self, tmp_path):
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+        self._label_all(con)
+
+        # Rewrite the MTGO event with a different deck (changes its content hash).
+        challenge_path = cache_dir / "Tournaments" / "MTGO" / "2026" / "05" / "24" / "challenge.json"
+        modified = json.loads(challenge_path.read_text())
+        modified["Decks"][0]["Mainboard"][0]["CardName"] = "Ponder"
+        challenge_path.write_text(json.dumps(modified))
+
+        stats = cache.ingest_cache(con, cache_dir)
+
+        assert stats.changed == 1
+        assert stats.unchanged == stats.total - 1
+        assert stats.labels_dropped == 1  # the one previously-labeled deck on the reloaded event
+        assert stats.variants_dropped == 1
+
+        rows = con.execute(
+            "SELECT t.uri, d.archetype, d.variant FROM decks d "
+            "JOIN tournaments t ON t.id = d.tournament_id"
+        ).fetchall()
+        by_uri = {uri: (archetype, variant) for uri, archetype, variant in rows}
+        assert by_uri[_CHALLENGE["Tournament"]["Uri"]] == (None, None)
+        assert by_uri[_PAPER["Tournament"]["Uri"]] == ("X", "Y")
+        con.close()
+
+    def test_new_file_loads_without_disturbing_existing_labels(self, tmp_path):
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+        self._label_all(con)
+
+        third = {
+            "Tournament": {"Name": "Legacy Trial", "Date": "2026-05-25",
+                           "Uri": "https://www.mtgo.com/decklist/legacy-trial-2026-05-25", "Formats": "Legacy"},
+            "Decks": [{"Player": "z", "Result": "1st", "Mainboard": [{"Count": 4, "CardName": "Daze"}], "Sideboard": []}],
+            "Rounds": [], "Standings": [],
+        }
+        (cache_dir / "Tournaments" / "MTGO" / "2026" / "05" / "24" / "trial.json").write_text(json.dumps(third))
+
+        stats = cache.ingest_cache(con, cache_dir)
+
+        assert stats.new == 1
+        assert stats.labels_dropped == 0
+        assert stats.variants_dropped == 0
+        assert con.execute(
+            "SELECT count(*) FROM decks WHERE archetype IS NOT NULL"
+        ).fetchone()[0] == 2
+        con.close()
+
+    def test_seed_path_when_ledger_is_absent_but_data_exists(self, tmp_path):
+        """Simulates a pre-feature DB: tournaments already loaded, ledger never populated."""
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+        self._label_all(con)
+        con.execute("DELETE FROM ingest_ledger")
+
+        stats = cache.ingest_cache(con, cache_dir)
+
+        assert stats.seeded == stats.total == 2
+        assert stats.loaded == 0
+        assert stats.labels_dropped == 0
+        assert con.execute(
+            "SELECT count(*) FROM decks WHERE archetype IS NOT NULL"
+        ).fetchone()[0] == 2
+        assert con.execute("SELECT count(*) FROM ingest_ledger").fetchone()[0] == 2
+        con.close()
+
+    def test_full_reload_wipes_labels_and_reloads_everything(self, tmp_path):
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+        self._label_all(con)
+
+        stats = cache.ingest_cache(con, cache_dir, full=True)
+
+        assert stats.loaded == stats.total == 2
+        assert stats.unchanged == 0
+        assert stats.labels_dropped > 0
+        assert con.execute(
+            "SELECT count(*) FROM decks WHERE archetype IS NOT NULL"
+        ).fetchone()[0] == 0
+        con.close()
+
+    def test_failed_reload_retries_next_run(self, tmp_path):
+        """A previously-ingested event that becomes unparseable is skipped, not un-ledgered."""
+        con = store.connect(":memory:")
+        cache_dir = _build_cache(tmp_path)
+        cache.ingest_cache(con, cache_dir)
+
+        challenge_path = cache_dir / "Tournaments" / "MTGO" / "2026" / "05" / "24" / "challenge.json"
+        old_row = con.execute(
+            "SELECT content_hash FROM ingest_ledger WHERE path LIKE '%challenge.json'"
+        ).fetchone()
+        assert old_row is not None
+        old_hash = old_row[0]
+
+        # Valid JSON, still Formats=Legacy (discovery keeps it), but a malformed Standing makes
+        # parse_cache_item raise — same shape as TestIngestResilience's bad event.
+        corrupted = json.loads(challenge_path.read_text())
+        corrupted["Standings"] = [{"Rank": "not-an-int", "Player": "a"}]
+        challenge_path.write_text(json.dumps(corrupted))
+
+        stats = cache.ingest_cache(con, cache_dir)
+
+        assert stats.bad == 1
+        row = con.execute(
+            "SELECT content_hash FROM ingest_ledger WHERE path LIKE '%challenge.json'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == old_hash  # the OLD (pre-corruption) ledger row survives untouched
         con.close()
 
 
