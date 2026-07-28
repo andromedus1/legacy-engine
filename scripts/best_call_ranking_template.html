@@ -88,6 +88,7 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
 .tablewrap { overflow-x: auto; }
 svg text { font-family: inherit; }
 .footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.hint { font-size: 13px; color: var(--ink-2); margin: -8px 0 14px; }
 .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
   border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
   font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
@@ -97,6 +98,9 @@ svg text { font-family: inherit; }
 <div class="viz-root">
 <h1>Best Deck / Best Call — ranked by Agency</h1>
 <div class="audit" id="audit"></div>
+<div class="hint"><b>Click any row</b> in the Archetypes or Subarchetypes tables to expand its
+full matchup ledger — every current-field opponent with shrunk + raw win rate, sample size,
+window, and blowout highlights.</div>
 
 <div class="card def">
   <details class="method">
@@ -207,9 +211,9 @@ adjusted WR and floor. <b>Blue = grounded floor</b>: the deck's top-8 field oppo
 measured (n ≥ 8) and ≥ 80% of field share-mass is covered, so the floor is a measured claim.
 <b>Gray = thin floor (a lean)</b>: that grounding failed — unknown matchups sit near the deck's
 own shrunk average, and agency = min over cells can only <i>fall</i> as more get measured — so
-the dot's floor is an upper bound, not a claim. Faded = not current (fewer than 5 decks in the
-last 4 corpus weeks). Labels mark the top 5 grounded-and-current decks by agency; hover any dot
-for its numbers.</div>
+the dot's floor is an upper bound, not a claim. <b>Filled dot = current; hollow dot = not
+current</b> (fewer than 5 decks in the last 4 corpus weeks). Labels mark the top 5
+grounded-and-current decks by agency; hover any dot for its numbers.</div>
 
 <h2>Archetypes</h2>
 <div class="card tablewrap"><table id="t-arch"></table>
@@ -425,11 +429,15 @@ renderTable("t-camp", D.camps, true);
   let dots = "", labels = "";
   rows.forEach(r => {
     const grounded = r.grounded, current = r.recent_4wk >= 5;
-    const fill = grounded ? "var(--s1)" : "var(--muted)";
-    const op = !grounded ? ".55" : (current ? "1" : ".35");
-    const state = (grounded ? "grounded" : "thin floor") + (current ? "" : " · not current");
+    // color = grounding (blue grounded / gray thin); shape = currency (filled current / hollow not)
+    const col = grounded ? "var(--s1)" : "var(--muted)";
+    const op = grounded ? "1" : ".65";
+    const fill = current ? col : "var(--surface-1)";
+    const stroke = current ? "var(--surface-1)" : col;
+    const state = (grounded ? "grounded" : "thin floor")
+      + (current ? "" : " · not current (<5 decks/4wk)");
     dots += `<circle cx="${X(r.adj)}" cy="${Y(r.floor)}" r="6" fill="${fill}" opacity="${op}"
-      stroke="var(--surface-1)" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
+      stroke="${stroke}" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
       data-x="${fmtP(r.adj)}" data-y="${fmtP(r.floor)}" data-g="${state}"/>`;
     if (topByAgency.includes(r.label))
       labels += `<text x="${X(r.adj)+9}" y="${Y(r.floor)+4}" font-size="11.5" fill="var(--ink)">${r.label}</text>`;
@@ -437,8 +445,12 @@ renderTable("t-camp", D.camps, true);
   const legend = `
     <circle cx="${m.l+8}" cy="${m.t+8}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
     <text x="${m.l+18}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">grounded floor</text>
-    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".55" stroke="var(--surface-1)" stroke-width="2"/>
-    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>`;
+    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".65" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>
+    <circle cx="${m.l+8}" cy="${m.t+28}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+18}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">filled = current</text>
+    <circle cx="${m.l+128}" cy="${m.t+28}" r="6" fill="var(--surface-1)" stroke="var(--s1)" stroke-width="2"/>
+    <text x="${m.l+138}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">hollow = not current (&lt;5 decks/4wk)</text>`;
   document.getElementById("scatter-card").innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%">
       ${g}${dots}${labels}${legend}
