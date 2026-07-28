@@ -170,8 +170,9 @@ svg text { font-family: inherit; }
       form). If that era window has n&lt;8, the full-history cell is shown instead and
       labeled <b>FC</b> — more data, but it may blend old builds; the label keeps that
       trade-off visible.</li>
-      <li><b>Sample tiers</b> — the ledger's tier words are fixed thresholds on n:
-      <i>speculative</i> &lt;30, <i>evolving</i> 30–99, <i>established</i> ≥100.</li>
+      <li><b>Sample tiers</b> — tier words on this page (e.g. the field-basis tier in the
+      audit header) are fixed thresholds on n: <i>speculative</i> &lt;30, <i>evolving</i>
+      30–99, <i>established</i> ≥100.</li>
       <li><b>Camps (subarchetypes)</b> — found by clustering each archetype's mainboard
       flex slots (TF-IDF → SVD → HDBSCAN), then gated: the split must survive bootstrap
       re-clustering (co-membership stability ≥0.9 over 50 resamples) and every camp needs a
@@ -187,19 +188,33 @@ svg text { font-family: inherit; }
   </details>
 </div>
 
-<h2>Archetypes by Agency %</h2>
-<div class="card tablewrap"><table id="t-arch"></table>
-<div class="footnote">Click a row to expand its full matchup ledger (every current-field opponent,
-with window and sample). ◦not current = fewer than 5 decks in the last 4 corpus weeks.</div></div>
-
-<h2>Subarchetypes (camps) by Agency %</h2>
-<div class="card tablewrap"><table id="t-camp"></table>
-<div class="footnote">Camp field share = parent share × camp fraction among the parent's
-post-ban labeled decks. Camp labels are staged-candidate provenance (speculative overlay,
-not promoted). Same grounding gates as above.</div></div>
-
 <h2>Agency map — general strength vs floor</h2>
 <div class="card scroll" id="scatter-card"></div>
+<div class="footnote" style="margin: -4px 2px 0">One dot per archetype with a computable
+adjusted WR and floor. Blue = grounded floor, gray = thin floor (a lean). Faded = not current.
+Labels mark the top 5 grounded-and-current decks by agency; hover any dot for its numbers.</div>
+
+<h2>Archetypes</h2>
+<div class="card tablewrap"><table id="t-arch"></table>
+<div class="footnote">Click a row to expand its full matchup ledger — one line per
+current-field opponent: the chip after the name is that opponent's % of meta; the first
+number is the shrunk estimate, <i>raw</i> is wins/n; <span class="chip">era</span> /
+<span class="chip">FC</span> is the cell's window (era-windowed, or full-corpus fallback when
+the era cell has n&lt;8); "unmeasured" = n&lt;8, excluded from floor and blowouts.
+<br>Column notes: <b>decks/4wk</b> = the deck's corpus count over the last 4 corpus weeks;
+<b>◦not current</b> marks names with fewer than 5 decks in that span (historical form, not a
+live pick); <b>window</b> = the row's era window (<span class="chip">since date</span> =
+stable_since from era detection; <span class="chip">full history</span> = no accepted era
+boundary); <b>% of meta</b> = share of all decks in the field window (audit header);
+<b>≤</b> before an agency value = ungrounded row, the value is an upper bound.</div></div>
+
+<h2>Subarchetypes (camps)</h2>
+<div class="card tablewrap"><table id="t-camp"></table>
+<div class="footnote">Same columns, ledger, and markers as the archetype table above.
+Camp % of meta = parent share × camp fraction among the parent's field-window decks.
+<b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
+builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
+Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
 
 <div class="tooltip" id="tip"></div>
 </div>
