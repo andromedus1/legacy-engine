@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-12T17:36:09Z'
+generated_at: '2026-07-28T14:47:36Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -97,6 +97,37 @@ documents:
       Gate C temporal-mixing). Matchup cells shrink toward hierarchical priors (camp
       → leave-camp-out parent′ → marginal′ → 0.5; thin post-boundary cells toward
       their own pre-disturbance value, labeled).'
+  docs/analysis/best-call-ranking.md:
+    summary: 'Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored,
+      fully
+
+      regenerable). One tracked script recomputes the page from the DuckDB corpus
+      through a
+
+      tracked HTML template: scripts/refresh_best_call_ranking.py +
+
+      scripts/best_call_ranking_template.html. Defines Agency % and the grounded/current
+
+      strata; the page itself carries the authoritative definitional prose.
+
+      '
+    decisions:
+    - 'Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page''s
+      single ranking number; theory under test: maximum agency = most fun.'
+    - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred,
+      full-corpus fallback labeled FC; a thin era cell is shown thin, never a shrinkage
+      prior masquerading as a floor.'
+    - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass
+      covered; ungrounded rows are labeled leans (agency shown as an upper bound),
+      and sorting never intermixes strata.
+    - Field basis = the current ban-regime window; --field-since defaults to the latest
+      confirmed ban event so regime changes auto-track; its confidence tier is computed
+      from window size, never hardcoded.
+    - The output page is gitignored and disposable; the template + refresh script
+      are the tracked artifacts — regenerate, don't hand-edit (data changes go in
+      the script, presentation changes in the template).
+    - 'Refresh THIS page last in the data cycle: its matrices read eras + variants,
+      so it inherits whatever labeling state exists when it runs.'
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo

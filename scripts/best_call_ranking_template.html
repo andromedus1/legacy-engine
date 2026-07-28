@@ -1,0 +1,346 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Best Deck / Best Call — Agency Ranking</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s1-weak:#9ec5f4; --bar:#86b6ef; --bar-deep:#2a78d6;
+  --amber:#fab219;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:#1a1a19; --page:#0d0d0d;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+  --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
+}
+html, body { margin: 0; background: var(--page); color: var(--ink); }
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page); color: var(--ink); margin:0; padding: 24px;
+  line-height: 1.45; min-height: 100vh; box-sizing: border-box; }
+.viz-root h1 { font-size: 22px; margin: 0 0 2px; }
+.viz-root h2 { font-size: 16px; margin: 28px 0 8px; }
+.audit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; color: var(--muted); white-space: pre-wrap; margin: 10px 0 18px; }
+.card { background: var(--surface-1); border: 1px solid var(--ring);
+  border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+.def { max-width: 880px; }
+.def b { color: var(--s1); }
+.def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+.def .gates li { margin: 3px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px;
+  border-bottom: 1px solid var(--axis); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.name { font-weight: 600; }
+tr.thin td { color: var(--muted); }
+tr.thin td.name { font-weight: 500; }
+tr.stale td.name::after { content: " ◦not current"; color: var(--amber);
+  font-size: 10.5px; font-weight: 500; vertical-align: 1px; }
+.barcell { min-width: 150px; }
+.bar { display: inline-block; height: 8px; border-radius: 4px;
+  background: var(--bar-deep); vertical-align: middle; margin-right: 6px; }
+tr.thin .bar { background: var(--muted); opacity: .5; }
+.chip { font-size: 10.5px; color: var(--muted); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 0 5px; margin-left: 4px; vertical-align: 1px; }
+.expander { cursor: pointer; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.expander:hover { background: color-mix(in oklab, var(--s1) 7%, transparent); }
+tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 4%, transparent); }
+.cells { font-size: 12px; columns: 3; column-gap: 24px; padding: 4px 0; }
+.cells div { break-inside: avoid; padding: 1px 0; }
+.cells .unm { color: var(--muted); }
+.scroll { overflow-x: auto; }
+.tablewrap { overflow-x: auto; }
+svg text { font-family: inherit; }
+.footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
+  border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
+  font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+<h1>Best Deck / Best Call — ranked by Agency</h1>
+<div class="audit" id="audit"></div>
+
+<div class="card def">
+  <h2 style="margin-top:0">What is Agency&nbsp;%?</h2>
+  <div><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
+  how much of the match result your own play keeps in the worst case.
+  The <b>adjusted field WR</b> is your shrunk win rate weighted by the current field's
+  archetype shares (are you competitive <i>in general</i>?). The <b>worst grounded matchup</b>
+  is your floor against any opponent you can actually be paired into (are you competitive
+  <i>against anyone</i>?). A high-agency deck never hands the result to the pairing screen:
+  it concedes no free wins to the room. Theory under test: <b>maximum agency = most fun</b>.</div>
+  <ul class="gates">
+    <li><b>Measured cells only</b> — a matchup counts when its sample is n ≥ 8 matches.
+        Era-windowed cells are preferred; when the era window is too thin, the full-corpus cell is
+        used and labeled <span class="chip">FC</span> (never silently dropped, never a shrinkage
+        prior masquerading as a floor).</li>
+    <li><b>Coverage counts against the floor</b> — unmeasured field share is shown per row;
+        a floor claim over 70% of the field is a 70% claim.</li>
+    <li><b>Blowouts</b> — count of measured current-field matchups where you're getting run over:
+        raw WR &lt;&nbsp;40% is a full blowout, 40–45% is a half. The chip shows
+        <span class="chip">full✕ + half½ of N measured</span>. Floor is your single worst hole;
+        blowout count is <i>how many</i> holes — a richer read on "competitive against anyone."
+        Thin cells are excluded (a shrinkage prior is not a blowout).</li>
+    <li><b>% meta that blows you out</b> — the blowout count weighted by field share: the full
+        share of every sub-40% opponent plus half the share of every 40–45% opponent. This is
+        <i>how much of the room you sit down against at a structural disadvantage</i> — a small
+        count of blowouts against big-share decks matters more than many against fringe brews.
+        Measured share only, so it's a lower bound (unmeasured opponents can't be counted).</li>
+    <li><b>Grounded rows</b> — the top-8 field opponents must each be measured and
+        ≥ 80% of field share-mass covered. Rows failing this are listed separately in
+        gray: their agency number is a lean, not a claim.</li>
+    <li id="field-basis"></li>
+  </ul>
+</div>
+
+<h2>Archetypes by Agency %</h2>
+<div class="card tablewrap"><table id="t-arch"></table>
+<div class="footnote">Click a row to expand its full matchup ledger (every current-field opponent,
+with window and sample). ◦not current = fewer than 5 decks in the last 4 corpus weeks.</div></div>
+
+<h2>Subarchetypes (camps) by Agency %</h2>
+<div class="card tablewrap"><table id="t-camp"></table>
+<div class="footnote">Camp field share = parent share × camp fraction among the parent's
+post-ban labeled decks. Camp labels are staged-candidate provenance (speculative overlay,
+not promoted). Same grounding gates as above.</div></div>
+
+<h2>Agency map — general strength vs floor</h2>
+<div class="card scroll" id="scatter-card"></div>
+
+<div class="tooltip" id="tip"></div>
+</div>
+<script>
+const D = __D_BLOB__;
+const fmtP = p => p == null ? "—" : (100*p).toFixed(1);
+const fieldTier = n => n >= 100 ? "established" : n >= 30 ? "evolving" : "SPECULATIVE";
+document.getElementById("field-basis").innerHTML =
+  `<b>Field basis</b> — shares come from the current ban-regime window` +
+  ` (since ${D.meta.field_since}${D.meta.regime_card ? ", post-" + D.meta.regime_card + " ban" : ""}):` +
+  ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
+  ` (${fieldTier(D.meta.field_decks)} tier). Matchup cells are windowed independently.`;
+const audit = [
+  `// corpus through ${D.meta.corpus_max} · field basis: ${D.meta.field_decks} decks since ${D.meta.field_since} (post-${D.meta.regime_card || "ban"} regime — ${fieldTier(D.meta.field_decks)} tier)`,
+  `// cells: era-windowed (adaptive per-pair horizons), full-corpus fallback labeled FC · measured = n>=${D.meta.ground_n}`,
+  `// grounded row = top-${D.meta.top_k} field opponents measured AND coverage >= ${(100*D.meta.cover_min).toFixed(0)}% of field share-mass`,
+  ...(D.meta.audit || []),
+].join("\n");
+document.getElementById("audit").textContent = audit;
+
+function windowChip(r) {
+  if (!r.since) return `<span class="chip">full history</span>`;
+  return `<span class="chip">since ${r.since}</span>`;
+}
+// Blowout tally over MEASURED current-field matchups (n>=8): a matchup at raw WR <40%
+// is a full blowout, 40–45% is a half. Thin cells are excluded (a shrinkage prior is not
+// a blowout). denom = # measured field matchups, shown so the count is interpretable.
+// metaShare = field share-mass that blows you out (full share <40% + half share 40–45%) —
+// the count weighted by how much of the room each blowout actually is. Measured share only,
+// so it's a lower bound (unmeasured opponents can't be counted).
+function blowouts(r) {
+  let full = 0, half = 0, denom = 0, metaFull = 0, metaHalf = 0;
+  for (const c of r.cells) {
+    if (!c.measured || c.raw == null || c.opp === r.subject) continue;
+    denom += 1;
+    if (c.raw < 0.40) { full += 1; metaFull += (c.share || 0); }
+    else if (c.raw < 0.45) { half += 1; metaHalf += (c.share || 0); }
+  }
+  return {score: full + 0.5 * half, full, half, denom,
+          metaShare: metaFull + 0.5 * metaHalf};
+}
+function rowHtml(r, i, camp) {
+  const stale = r.recent_4wk < 5 ? " stale" : "";
+  const cls = (r.grounded ? "" : "thin") + stale;
+  const name = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
+  const w = Math.max(2, Math.round((r.agency || 0) * 220));
+  const agencyTxt = (r.grounded ? "" : "≤ ") + fmtP(r.agency);
+  const floorTxt = r.floor == null ? "—" :
+    `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`;
+  const b = blowouts(r);
+  const bTxt = `${b.score % 1 ? b.score.toFixed(1) : b.score}` +
+    ` <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span>`;
+  const metaTxt = `${(100 * b.metaShare).toFixed(1)}%`;
+  return `<tr class="expander ${cls}" data-i="${r._idx}" data-v="${camp?'c':'a'}">
+    <td>${i + 1}</td>
+    <td class="name">${name}</td>
+    <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
+    <td>${fmtP(r.adj)}</td>
+    <td>${floorTxt}</td>
+    <td>${bTxt}</td>
+    <td>${metaTxt}</td>
+    <td>${(100*r.coverage).toFixed(0)}%</td>
+    <td>${(100*r.field_share).toFixed(1)}%</td>
+    <td>${r.recent_4wk}</td>
+    <td>${windowChip(r)}</td>
+  </tr>`;
+}
+const COLS = [
+  {label:"#", sort:false},
+  {label:"deck", get:r => (r.parent ? r.parent+" ["+r.camp+"]" : r.subject).toLowerCase(), dir:1},
+  {label:"agency %", get:r => r.agency, dir:-1},
+  {label:"adj field WR %", get:r => r.adj, dir:-1},
+  {label:"worst grounded matchup %", get:r => r.floor, dir:-1},
+  {label:"blowouts", get:r => r._b.score, dir:1},
+  {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
+  {label:"floor coverage", get:r => r.coverage, dir:-1},
+  {label:"% of meta", get:r => r.field_share, dir:-1},
+  {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
+  {label:"window", get:r => r.since || "", dir:1},
+];
+// Default sort: agency %, descending. Click a header to sort by that column;
+// click again to flip direction. Sorting happens WITHIN each honesty stratum —
+// grounded-current rows never intermix with not-current or thin-floor rows.
+const sortState = {"t-arch": {col: 2, dir: -1}, "t-camp": {col: 2, dir: -1}};
+[...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
+
+function cmpBy(col, dir) {
+  const get = COLS[col].get;
+  return (a, b) => {
+    const va = get(a), vb = get(b);
+    const na = va == null || va === "", nb = vb == null || vb === "";
+    if (na && nb) return 0;
+    if (na) return 1;   // nulls always last
+    if (nb) return -1;
+    return va < vb ? -dir : va > vb ? dir : 0;
+  };
+}
+
+function headHtml(id) {
+  const st = sortState[id];
+  return "<tr>" + COLS.map((c, k) => {
+    if (c.sort === false) return `<th>${c.label}</th>`;
+    const arrow = k === st.col ? (st.dir === 1 ? " ▲" : " ▼") : "";
+    return `<th class="sortable" data-col="${k}">${c.label}${arrow}</th>`;
+  }).join("") + "</tr>";
+}
+
+function renderTable(id, rows, camp) {
+  const el = document.getElementById(id);
+  const st = sortState[id];
+  const strata = [
+    ["", rows.filter(r => r.grounded && r.recent_4wk >= 5)],
+    ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
+      rows.filter(r => r.grounded && r.recent_4wk < 5)],
+    ["ungrounded (thin floor — the ≤ value is an UPPER BOUND: agency = min over cells, so it can only fall as more matchups get measured; shrinkage parks unknown cells near the deck's own hot marginal)",
+      rows.filter(r => !r.grounded)],
+  ];
+  let html = headHtml(id), i = 0;
+  for (const [label, set] of strata) {
+    if (!set.length) continue;
+    if (label) html += `<tr><td colspan="11" style="color:var(--muted);font-size:11.5px;
+      text-transform:uppercase;letter-spacing:.04em;padding-top:14px">${label}</td></tr>`;
+    [...set].sort(cmpBy(st.col, st.dir)).forEach(r => { html += rowHtml(r, i, camp); i += 1; });
+  }
+  el.innerHTML = html;
+  el.querySelectorAll("th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = Number(th.dataset.col);
+      if (st.col === col) st.dir = -st.dir;
+      else { st.col = col; st.dir = COLS[col].dir; }
+      renderTable(id, rows, camp);
+    });
+  });
+  el.querySelectorAll("tr.expander").forEach(tr => {
+    tr.addEventListener("click", () => {
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains("detail")) { next.remove(); return; }
+      const src = tr.dataset.v === "c" ? D.camps : D.arch;
+      const r = src[Number(tr.dataset.i)];
+      const cells = r.cells.map(c => {
+        const lbl = `${c.opp} <span class="chip">${(100*c.share).toFixed(1)}%</span>`;
+        if (!c.measured) return `<div class="unm">${lbl} — unmeasured (n=${c.n})</div>`;
+        const raw = c.raw == null ? "" : ` raw ${fmtP(c.raw)}`;
+        return `<div>${lbl} ${fmtP(c.p)}%${raw} · n=${c.n} <span class="chip">${c.window}</span></div>`;
+      }).join("");
+      const d = document.createElement("tr");
+      d.className = "detail";
+      d.innerHTML = `<td colspan="11"><div class="cells">${cells}</div></td>`;
+      tr.after(d);
+    });
+  });
+}
+renderTable("t-arch", D.arch, false);
+renderTable("t-camp", D.camps, true);
+
+// ---- scatter: adj WR (x) vs floor (y); agency = distance to the lower-left ----
+(function scatter() {
+  const rows = [
+    ...D.arch.filter(r => r.adj != null && r.floor != null).map(r => ({...r, kind:"arch",
+      label:r.subject})),
+  ];
+  const W = 860, H = 480, m = {l: 52, r: 16, t: 14, b: 40};
+  const xs = rows.map(r => r.adj), ys = rows.map(r => r.floor);
+  const xmin = Math.min(.40, ...xs) - .01, xmax = Math.max(.56, ...xs) + .01;
+  const ymin = Math.min(.25, ...ys) - .01, ymax = Math.max(.52, ...ys) + .01;
+  const X = v => m.l + (v - xmin) / (xmax - xmin) * (W - m.l - m.r);
+  const Y = v => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
+  let g = "";
+  for (let v = Math.ceil(xmin*20)/20; v <= xmax; v += .05)
+    g += `<line x1="${X(v)}" y1="${m.t}" x2="${X(v)}" y2="${H-m.b}" stroke="var(--grid)"/>` +
+         `<text x="${X(v)}" y="${H-m.b+16}" fill="var(--muted)" font-size="11" text-anchor="middle">${(100*v).toFixed(0)}</text>`;
+  for (let v = Math.ceil(ymin*20)/20; v <= ymax; v += .05)
+    g += `<line x1="${m.l}" y1="${Y(v)}" x2="${W-m.r}" y2="${Y(v)}" stroke="var(--grid)"/>` +
+         `<text x="${m.l-8}" y="${Y(v)+4}" fill="var(--muted)" font-size="11" text-anchor="end">${(100*v).toFixed(0)}</text>`;
+  // 50% reference lines
+  g += `<line x1="${X(.5)}" y1="${m.t}" x2="${X(.5)}" y2="${H-m.b}" stroke="var(--axis)" stroke-dasharray="4 3"/>`;
+  if (ymin < .5 && ymax > .5)
+    g += `<line x1="${m.l}" y1="${Y(.5)}" x2="${W-m.r}" y2="${Y(.5)}" stroke="var(--axis)" stroke-dasharray="4 3"/>`;
+  const topByAgency = rows.filter(r => r.grounded && r.recent_4wk >= 5)
+    .sort((a,b)=>b.agency-a.agency).slice(0,5).map(r=>r.label);
+  let dots = "", labels = "";
+  rows.forEach(r => {
+    const grounded = r.grounded, current = r.recent_4wk >= 5;
+    const fill = grounded ? "var(--s1)" : "var(--muted)";
+    const op = !grounded ? ".55" : (current ? "1" : ".35");
+    const state = (grounded ? "grounded" : "thin floor") + (current ? "" : " · not current");
+    dots += `<circle cx="${X(r.adj)}" cy="${Y(r.floor)}" r="6" fill="${fill}" opacity="${op}"
+      stroke="var(--surface-1)" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
+      data-x="${fmtP(r.adj)}" data-y="${fmtP(r.floor)}" data-g="${state}"/>`;
+    if (topByAgency.includes(r.label))
+      labels += `<text x="${X(r.adj)+9}" y="${Y(r.floor)+4}" font-size="11.5" fill="var(--ink)">${r.label}</text>`;
+  });
+  const legend = `
+    <circle cx="${m.l+8}" cy="${m.t+8}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+18}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">grounded floor</text>
+    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".55" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>`;
+  document.getElementById("scatter-card").innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%">
+      ${g}${dots}${labels}${legend}
+      <text x="${(m.l+W-m.r)/2}" y="${H-6}" fill="var(--muted)" font-size="11.5" text-anchor="middle">adjusted field WR %</text>
+      <text x="14" y="${(m.t+H-m.b)/2}" fill="var(--muted)" font-size="11.5" text-anchor="middle" transform="rotate(-90 14 ${(m.t+H-m.b)/2})">worst matchup %</text>
+    </svg>`;
+  const tip = document.getElementById("tip");
+  document.querySelectorAll("#scatter-card circle[data-label]").forEach(c => {
+    c.addEventListener("mousemove", e => {
+      tip.style.display = "block";
+      tip.style.left = (e.clientX + 14) + "px";
+      tip.style.top = (e.clientY + 10) + "px";
+      tip.innerHTML = `<b>${c.dataset.label}</b><br>agency ${c.dataset.a}% · adj ${c.dataset.x}% · floor ${c.dataset.y}%<br><span style="color:var(--muted)">${c.dataset.g}</span>`;
+    });
+    c.addEventListener("mouseleave", () => tip.style.display = "none");
+  });
+})();
+</script>
+</body>
+</html>
