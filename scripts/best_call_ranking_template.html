@@ -44,6 +44,11 @@ html, body { margin: 0; background: var(--page); color: var(--ink); }
 .def b { color: var(--s1); }
 .def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
 .def .gates li { margin: 3px 0; }
+.def details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+.def details.method summary { cursor: pointer; font-weight: 600; font-size: 13.5px;
+  color: var(--ink-2); user-select: none; }
+.def details.method summary:hover { color: var(--ink); }
+.def details.method ul { margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
   text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px;
@@ -124,6 +129,60 @@ svg text { font-family: inherit; }
         gray: their agency number is a lean, not a claim.</li>
     <li id="field-basis"></li>
   </ul>
+  <details class="method">
+    <summary>How the numbers are made — matches, shrinkage, era windows, camps</summary>
+    <ul class="gates">
+      <li><b>Where matches come from</b> — decklists are mirrored from the public tournament
+      cache (MTGO + Melee + CardsRealm) and labeled with archetypes by a rules engine.
+      Matchup win rates come only from <b>rounds-bearing events</b> (Challenges and paper
+      events publish pairings; MTGO leagues publish decklists but no rounds). So a deck's
+      meta share and its matchup sample are different-sized populations — a big field share
+      with thin matchup cells is normal, not a bug. A match counts when one player took
+      strictly more games ("2-1", "2-0"); draws and byes are excluded from win rates.</li>
+      <li><b>Why two win rates per matchup</b> — <i>raw</i> is literally wins/n: what
+      happened, but noisy at small n (a 3-1 cell reads 75% and means almost nothing).
+      The headline number is a <b>Beta-Binomial shrunk estimate</b>: it behaves as if the
+      cell started with ~15 phantom matches at a prior win rate, so small samples get pulled
+      toward the prior and big samples converge to raw. The gap between the two numbers is
+      itself a signal — a big gap means "small sample, don't trust raw".</li>
+      <li><b>The prior is hierarchical, not flat</b> — a matchup cell shrinks toward the
+      deck's own overall win rate (itself first shrunk toward 50%), so an unknown matchup
+      for a strong deck reads as "probably decent", not "coin flip". A camp's cell shrinks
+      toward its parent archetype's same matchup with that camp's decks removed — camps
+      inherit the parent's profile until their own data speaks. When an era boundary
+      truncates a cell below n=100, the pre-boundary value serves as its prior (labeled in
+      the cell's provenance), so history informs but never impersonates the current era.</li>
+      <li><b>Era windows ("since" column)</b> — every deck's history is bucketed by week and
+      scanned by four change detectors: card-presence cliffs/ramps (a ban or a new-set
+      adoption is a visible step), composition shifts in the flex slots, share-of-field
+      breaks, and win-rate corroboration (never primary evidence on its own). Nearby
+      candidates merge; the whole fleet of boundaries then passes one
+      <b>Benjamini–Hochberg false-discovery screen</b> (α=0.05) so ~150 entities screened
+      every refresh don't accumulate false eras; a surviving boundary is still rejected if
+      too few decks exist after it. The last accepted boundary is the deck's
+      <i>stable_since</i>; each boundary is attributed to a ban/release when the evidence
+      names one (e.g. "release: Flow State adoption"), and an unattributed disturbance
+      raises a drift alarm instead of silently re-windowing.</li>
+      <li><b>How a cell picks its window</b> — a matchup A-vs-B pools matches back to the
+      <i>later</i> of the two decks' stable_since dates (both sides must be in their current
+      form). If that era window has n&lt;8, the full-history cell is shown instead and
+      labeled <b>FC</b> — more data, but it may blend old builds; the label keeps that
+      trade-off visible.</li>
+      <li><b>Sample tiers</b> — the ledger's tier words are fixed thresholds on n:
+      <i>speculative</i> &lt;30, <i>evolving</i> 30–99, <i>established</i> ≥100.</li>
+      <li><b>Camps (subarchetypes)</b> — found by clustering each archetype's mainboard
+      flex slots (TF-IDF → SVD → HDBSCAN), then gated: the split must survive bootstrap
+      re-clustering (co-membership stability ≥0.9 over 50 resamples) and every camp needs a
+      real sample plus clearly divergent signature cards. Camps are a <i>staged overlay</i>
+      — applied for analysis, never silently promoted to taxonomy — and decks that fit no
+      camp stay honestly [unlabeled]. Camp field share = parent share × the camp's fraction
+      of the parent's current-window decks.</li>
+      <li><b>No significance theater</b> — the clustering gate is stability-based on purpose:
+      running a t-test on data the clustering already saw would double-dip and inflate false
+      positives. Where a real multiple-testing control exists (era boundaries), it's BH-FDR;
+      where it can't exist honestly, the page shows sample sizes and tiers instead.</li>
+    </ul>
+  </details>
 </div>
 
 <h2>Archetypes by Agency %</h2>
