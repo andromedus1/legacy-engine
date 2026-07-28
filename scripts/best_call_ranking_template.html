@@ -141,6 +141,18 @@ svg text { font-family: inherit; }
       meta share and its matchup sample are different-sized populations — a big field share
       with thin matchup cells is normal, not a bug. A match counts when one player took
       strictly more games ("2-1", "2-0"); draws and byes are excluded from win rates.</li>
+      <li><b>What "current field" means</b> — the field is every published decklist since the
+      latest confirmed B&amp;R change (the audit header names the ban): a ban invalidates the
+      room it changed, so share estimates never mix regimes. <b>% of meta</b> is a deck's share
+      of all window decklists — raw counts, one published list = one vote, no win-rate
+      weighting. Know what gets published, because the field inherits that bias: MTGO leagues
+      publish only 5-0 lists, challenges publish top finishers, paper events publish whatever
+      the venue uploads — and online + paper are blended here (the engine tracks venue splits,
+      but this page doesn't). Decklists the labeling rules can't classify surface as
+      <i>Unknown</i> rather than being dropped. Note the two "currents": the field window is
+      the ban regime; the <b>◦not current</b> marker uses a shorter horizon (the last 4 corpus
+      weeks), because "legal in this regime" and "actually being played this month" are
+      different questions.</li>
       <li><b>Why two win rates per matchup</b> — <i>raw</i> is literally wins/n: what
       happened, but noisy at small n (a 3-1 cell reads 75% and means almost nothing).
       The headline number is a <b>Beta-Binomial shrunk estimate</b>: it behaves as if the
@@ -233,7 +245,8 @@ document.getElementById("field-basis").innerHTML =
   `<b>Field basis</b> — shares come from the current ban-regime window` +
   ` (since ${D.meta.field_since}${D.meta.regime_card ? ", post-" + D.meta.regime_card + " ban" : ""}):` +
   ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
-  ` (${fieldTier(D.meta.field_decks)} tier). Matchup cells are windowed independently.`;
+  ` (${fieldTier(D.meta.field_decks)} tier). Shares are raw published-list counts, no win-rate` +
+  ` weighting. Matchup cells are windowed independently.`;
 const audit = [
   `// corpus through ${D.meta.corpus_max} · field basis: ${D.meta.field_decks} decks since ${D.meta.field_since} (post-${D.meta.regime_card || "ban"} regime — ${fieldTier(D.meta.field_decks)} tier)`,
   `// cells: era-windowed (adaptive per-pair horizons), full-corpus fallback labeled FC · measured = n>=${D.meta.ground_n}`,
