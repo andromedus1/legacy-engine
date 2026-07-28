@@ -251,11 +251,23 @@ document.getElementById("field-basis").innerHTML =
   ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
   ` (${fieldTier(D.meta.field_decks)} tier). Shares are raw published-list counts, no win-rate` +
   ` weighting. Matchup cells are windowed independently.`;
+// Audit header = data-shape stats only (methodology lives in the explainer sections below).
+const M = D.meta;
+const nf = v => v == null ? null : v.toLocaleString();
+const groundedCur = D.arch.filter(r => r.grounded && r.recent_4wk >= 5).length;
+let measCells = 0, totCells = 0;
+for (const r of [...D.arch, ...D.camps])
+  for (const c of r.cells) { totCells += 1; if (c.measured) measCells += 1; }
+const nParents = new Set(D.camps.map(r => r.parent)).size;
 const audit = [
-  `// corpus through ${D.meta.corpus_max} · field basis: ${D.meta.field_decks} decks since ${D.meta.field_since} (post-${D.meta.regime_card || "ban"} regime — ${fieldTier(D.meta.field_decks)} tier)`,
-  `// cells: era-windowed (adaptive per-pair horizons), full-corpus fallback labeled FC · measured = n>=${D.meta.ground_n}`,
-  `// grounded row = top-${D.meta.top_k} field opponents measured AND coverage >= ${(100*D.meta.cover_min).toFixed(0)}% of field share-mass`,
-  ...(D.meta.audit || []),
+  `// corpus through ${M.corpus_max}`
+    + (M.corpus_decks ? ` · ${nf(M.corpus_decks)} decks / ${nf(M.corpus_events)} events` : "")
+    + (M.matches_total ? ` · ${nf(M.matches_total)} decisive matches (rounds-bearing events)` : ""),
+  `// field: ${nf(M.field_decks)} decks since ${M.field_since} (post-${M.regime_card || "ban"} regime — ${fieldTier(M.field_decks)} tier)`
+    + (M.field_events ? ` · ${nf(M.field_events)} events` : "")
+    + (M.field_archetypes ? ` · ${M.field_archetypes} archetypes` : ""),
+  `// tables: ${D.arch.length} archetypes (${groundedCur} grounded + current) · ${D.camps.length} camps across ${nParents} parents · ${nf(measCells)}/${nf(totCells)} matchup cells measured`,
+  ...(M.audit || []),
 ].join("\n");
 document.getElementById("audit").textContent = audit;
 
