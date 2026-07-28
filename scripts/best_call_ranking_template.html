@@ -44,7 +44,7 @@ html, body { margin: 0; background: var(--page); color: var(--ink); }
 .def b { color: var(--s1); }
 .def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
 .def .gates li { margin: 3px 0; }
-.def details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+.def details.method + details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
 .def details.method summary { cursor: pointer; font-weight: 600; font-size: 13.5px;
   color: var(--ink-2); user-select: none; }
 .def details.method summary:hover { color: var(--ink); }
@@ -99,8 +99,9 @@ svg text { font-family: inherit; }
 <div class="audit" id="audit"></div>
 
 <div class="card def">
-  <h2 style="margin-top:0">What is Agency&nbsp;%?</h2>
-  <div><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
+  <details class="method">
+  <summary>What is Agency&nbsp;%? — the metric and each column</summary>
+  <div style="margin-top:8px"><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
   how much of the match result your own play keeps in the worst case.
   The <b>adjusted field WR</b> is your shrunk win rate weighted by the current field's
   archetype shares (are you competitive <i>in general</i>?). The <b>worst grounded matchup</b>
@@ -129,6 +130,7 @@ svg text { font-family: inherit; }
         gray: their agency number is a lean, not a claim.</li>
     <li id="field-basis"></li>
   </ul>
+  </details>
   <details class="method">
     <summary>How the numbers are made — matches, shrinkage, era windows, camps</summary>
     <ul class="gates">
