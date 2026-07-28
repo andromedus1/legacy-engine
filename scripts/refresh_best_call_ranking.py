@@ -107,6 +107,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                  regime_card):
     corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
+    corpus_decks, corpus_events = con.execute(
+        "select (select count(*) from decks), (select count(*) from tournaments)").fetchone()
+    field_events = con.execute(
+        "select count(*) from tournaments where substr(date,1,10) >= ?", [field_since]).fetchone()[0]
 
     win_rows = con.execute(
         "select k.archetype, count(*) from decks k join tournaments t on k.tournament_id=t.id "
@@ -185,7 +189,12 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             "regime_card": regime_card,
             "ground_n": ground_n, "top_k": top_k, "cover_min": cover_min,
             "min_row_share": min_row_share, "current_4wk": current_4wk,
-            "corpus_max": corpus_max, "audit": [],
+            "corpus_max": corpus_max,
+            # data-shape stats for the page's audit header (all counts, no method prose)
+            "corpus_decks": corpus_decks, "corpus_events": corpus_events,
+            "field_events": field_events, "field_archetypes": len(shares),
+            "matches_total": ad.matrix.total_matches,
+            "audit": [],
         },
         "arch": arch_out,
         "camps": camps_out,
