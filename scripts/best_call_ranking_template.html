@@ -44,7 +44,7 @@ html, body { margin: 0; background: var(--page); color: var(--ink); }
 .def b { color: var(--s1); }
 .def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
 .def .gates li { margin: 3px 0; }
-.def details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+.def details.method + details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
 .def details.method summary { cursor: pointer; font-weight: 600; font-size: 13.5px;
   color: var(--ink-2); user-select: none; }
 .def details.method summary:hover { color: var(--ink); }
@@ -88,6 +88,7 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
 .tablewrap { overflow-x: auto; }
 svg text { font-family: inherit; }
 .footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.hint { font-size: 13px; color: var(--ink-2); margin: -8px 0 14px; }
 .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
   border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
   font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
@@ -97,10 +98,14 @@ svg text { font-family: inherit; }
 <div class="viz-root">
 <h1>Best Deck / Best Call — ranked by Agency</h1>
 <div class="audit" id="audit"></div>
+<div class="hint"><b>Click any row</b> in the Archetypes or Subarchetypes tables to expand its
+full matchup ledger — every current-field opponent with shrunk + raw win rate, sample size,
+window, and blowout highlights.</div>
 
 <div class="card def">
-  <h2 style="margin-top:0">What is Agency&nbsp;%?</h2>
-  <div><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
+  <details class="method">
+  <summary>What is Agency&nbsp;%? — the metric and each column</summary>
+  <div style="margin-top:8px"><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
   how much of the match result your own play keeps in the worst case.
   The <b>adjusted field WR</b> is your shrunk win rate weighted by the current field's
   archetype shares (are you competitive <i>in general</i>?). The <b>worst grounded matchup</b>
@@ -129,6 +134,7 @@ svg text { font-family: inherit; }
         gray: their agency number is a lean, not a claim.</li>
     <li id="field-basis"></li>
   </ul>
+  </details>
   <details class="method">
     <summary>How the numbers are made — matches, shrinkage, era windows, camps</summary>
     <ul class="gates">
@@ -139,6 +145,18 @@ svg text { font-family: inherit; }
       meta share and its matchup sample are different-sized populations — a big field share
       with thin matchup cells is normal, not a bug. A match counts when one player took
       strictly more games ("2-1", "2-0"); draws and byes are excluded from win rates.</li>
+      <li><b>What "current field" means</b> — the field is every published decklist since the
+      latest confirmed B&amp;R change (the audit header names the ban): a ban invalidates the
+      room it changed, so share estimates never mix regimes. <b>% of meta</b> is a deck's share
+      of all window decklists — raw counts, one published list = one vote, no win-rate
+      weighting. Know what gets published, because the field inherits that bias: MTGO leagues
+      publish only 5-0 lists, challenges publish top finishers, paper events publish whatever
+      the venue uploads — and online + paper are blended here (the engine tracks venue splits,
+      but this page doesn't). Decklists the labeling rules can't classify surface as
+      <i>Unknown</i> rather than being dropped. Note the two "currents": the field window is
+      the ban regime; the <b>◦not current</b> marker uses a shorter horizon (the last 4 corpus
+      weeks), because "legal in this regime" and "actually being played this month" are
+      different questions.</li>
       <li><b>Why two win rates per matchup</b> — <i>raw</i> is literally wins/n: what
       happened, but noisy at small n (a 3-1 cell reads 75% and means almost nothing).
       The headline number is a <b>Beta-Binomial shrunk estimate</b>: it behaves as if the
@@ -168,8 +186,9 @@ svg text { font-family: inherit; }
       form). If that era window has n&lt;8, the full-history cell is shown instead and
       labeled <b>FC</b> — more data, but it may blend old builds; the label keeps that
       trade-off visible.</li>
-      <li><b>Sample tiers</b> — the ledger's tier words are fixed thresholds on n:
-      <i>speculative</i> &lt;30, <i>evolving</i> 30–99, <i>established</i> ≥100.</li>
+      <li><b>Sample tiers</b> — tier words on this page (e.g. the field-basis tier in the
+      audit header) are fixed thresholds on n: <i>speculative</i> &lt;30, <i>evolving</i>
+      30–99, <i>established</i> ≥100.</li>
       <li><b>Camps (subarchetypes)</b> — found by clustering each archetype's mainboard
       flex slots (TF-IDF → SVD → HDBSCAN), then gated: the split must survive bootstrap
       re-clustering (co-membership stability ≥0.9 over 50 resamples) and every camp needs a
@@ -185,19 +204,40 @@ svg text { font-family: inherit; }
   </details>
 </div>
 
-<h2>Archetypes by Agency %</h2>
-<div class="card tablewrap"><table id="t-arch"></table>
-<div class="footnote">Click a row to expand its full matchup ledger (every current-field opponent,
-with window and sample). ◦not current = fewer than 5 decks in the last 4 corpus weeks.</div></div>
-
-<h2>Subarchetypes (camps) by Agency %</h2>
-<div class="card tablewrap"><table id="t-camp"></table>
-<div class="footnote">Camp field share = parent share × camp fraction among the parent's
-post-ban labeled decks. Camp labels are staged-candidate provenance (speculative overlay,
-not promoted). Same grounding gates as above.</div></div>
-
 <h2>Agency map — general strength vs floor</h2>
 <div class="card scroll" id="scatter-card"></div>
+<div class="footnote" style="margin: -4px 2px 0">One dot per archetype with a computable
+adjusted WR and floor. <b>Blue = grounded floor</b>: the deck's top-8 field opponents are each
+measured (n ≥ 8) and ≥ 80% of field share-mass is covered, so the floor is a measured claim.
+<b>Gray = thin floor (a lean)</b>: that grounding failed — unknown matchups sit near the deck's
+own shrunk average, and agency = min over cells can only <i>fall</i> as more get measured — so
+the dot's floor is an upper bound, not a claim. <b>Filled dot = current; hollow dot = not
+current</b> (fewer than 5 decks in the last 4 corpus weeks). Labels mark the top 5
+grounded-and-current decks by agency; hover any dot for its numbers.</div>
+
+<h2>Archetypes</h2>
+<div class="card tablewrap"><table id="t-arch"></table>
+<div class="footnote">Click a row to expand its full matchup ledger — one line per
+current-field opponent: the chip after the name is that opponent's % of meta; the first
+number is the shrunk estimate, <i>raw</i> is wins/n; <span class="chip">era</span> /
+<span class="chip">FC</span> is the cell's window (era-windowed, or full-corpus fallback when
+the era cell has n&lt;8); "unmeasured" = n&lt;8, excluded from floor and blowouts.
+<br>Column notes: <b>decks/4wk</b> = the deck's corpus count over the last 4 corpus weeks;
+<b>◦not current</b> marks names with fewer than 5 decks in that span (historical form, not a
+live pick); <b>window</b> = the row's era window (<span class="chip">since date</span> =
+stable_since from era detection; <span class="chip">full history</span> = no accepted era
+boundary); <b>% of meta</b> = share of all decks in the field window (audit header);
+<b>grounded</b> row = the top-8 field opponents are each measured (n ≥ 8) and ≥ 80% of field
+share-mass is covered — its floor is a measured claim; <b>≤</b> before an agency value =
+ungrounded (thin-floor) row, the value is an upper bound.</div></div>
+
+<h2>Subarchetypes (camps)</h2>
+<div class="card tablewrap"><table id="t-camp"></table>
+<div class="footnote">Same columns, ledger, and markers as the archetype table above.
+Camp % of meta = parent share × camp fraction among the parent's field-window decks.
+<b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
+builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
+Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
 
 <div class="tooltip" id="tip"></div>
 </div>
@@ -209,7 +249,8 @@ document.getElementById("field-basis").innerHTML =
   `<b>Field basis</b> — shares come from the current ban-regime window` +
   ` (since ${D.meta.field_since}${D.meta.regime_card ? ", post-" + D.meta.regime_card + " ban" : ""}):` +
   ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
-  ` (${fieldTier(D.meta.field_decks)} tier). Matchup cells are windowed independently.`;
+  ` (${fieldTier(D.meta.field_decks)} tier). Shares are raw published-list counts, no win-rate` +
+  ` weighting. Matchup cells are windowed independently.`;
 const audit = [
   `// corpus through ${D.meta.corpus_max} · field basis: ${D.meta.field_decks} decks since ${D.meta.field_since} (post-${D.meta.regime_card || "ban"} regime — ${fieldTier(D.meta.field_decks)} tier)`,
   `// cells: era-windowed (adaptive per-pair horizons), full-corpus fallback labeled FC · measured = n>=${D.meta.ground_n}`,
@@ -388,11 +429,15 @@ renderTable("t-camp", D.camps, true);
   let dots = "", labels = "";
   rows.forEach(r => {
     const grounded = r.grounded, current = r.recent_4wk >= 5;
-    const fill = grounded ? "var(--s1)" : "var(--muted)";
-    const op = !grounded ? ".55" : (current ? "1" : ".35");
-    const state = (grounded ? "grounded" : "thin floor") + (current ? "" : " · not current");
+    // color = grounding (blue grounded / gray thin); shape = currency (filled current / hollow not)
+    const col = grounded ? "var(--s1)" : "var(--muted)";
+    const op = grounded ? "1" : ".65";
+    const fill = current ? col : "var(--surface-1)";
+    const stroke = current ? "var(--surface-1)" : col;
+    const state = (grounded ? "grounded" : "thin floor")
+      + (current ? "" : " · not current (<5 decks/4wk)");
     dots += `<circle cx="${X(r.adj)}" cy="${Y(r.floor)}" r="6" fill="${fill}" opacity="${op}"
-      stroke="var(--surface-1)" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
+      stroke="${stroke}" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
       data-x="${fmtP(r.adj)}" data-y="${fmtP(r.floor)}" data-g="${state}"/>`;
     if (topByAgency.includes(r.label))
       labels += `<text x="${X(r.adj)+9}" y="${Y(r.floor)+4}" font-size="11.5" fill="var(--ink)">${r.label}</text>`;
@@ -400,8 +445,12 @@ renderTable("t-camp", D.camps, true);
   const legend = `
     <circle cx="${m.l+8}" cy="${m.t+8}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
     <text x="${m.l+18}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">grounded floor</text>
-    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".55" stroke="var(--surface-1)" stroke-width="2"/>
-    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>`;
+    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".65" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>
+    <circle cx="${m.l+8}" cy="${m.t+28}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
+    <text x="${m.l+18}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">filled = current</text>
+    <circle cx="${m.l+128}" cy="${m.t+28}" r="6" fill="var(--surface-1)" stroke="var(--s1)" stroke-width="2"/>
+    <text x="${m.l+138}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">hollow = not current (&lt;5 decks/4wk)</text>`;
   document.getElementById("scatter-card").innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%">
       ${g}${dots}${labels}${legend}
