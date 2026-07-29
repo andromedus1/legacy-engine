@@ -14,7 +14,8 @@ Method (the page's definitional card is the authoritative prose):
     n >= ``--ground-n``; else the full-corpus cell labeled FC when ITS n >= ground-n;
     else the era cell kept honestly thin. measured = n >= ground-n.
   - adj field WR = field-share-weighted p_shrunk over n>=1 cells (normalized).
-  - floor = min p_shrunk over measured cells; agency = min(adj, floor).
+  - floor = min p_shrunk over floor-eligible cells: measured AND (n >= 20 OR the 95% CI
+    upper bound < 50%) — a thin cell must prove its hole; agency = min(adj, floor).
   - coverage = measured share-mass / total opponent share-mass; grounded = the
     top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
   - Camps: one split matrix per staged parent in the discovery registry; camp
@@ -75,10 +76,25 @@ def make_cells(subj, field_opps, shares, ad_cells, fc_cells, ground_n):
             continue
         cells.append({
             "opp": opp, "share": r4(shares[opp]), "p": r4(use.p_shrunk), "raw": r4(use.p_raw),
+            "ci_low": r4(use.ci_low), "ci_high": r4(use.ci_high),
             "n": use.n, "window": win, "tier": str(use.tier),
             "measured": use.n >= ground_n,
         })
     return cells
+
+
+# A thin measured cell can set the row's floor only when even its optimistic bound is
+# unfavorable — ambiguity is not a hole. Deep cells (n >= FLOOR_DEEP_N) qualify on their
+# point estimate; thinner ones must have a 95% CI upper bound below 50%.
+FLOOR_DEEP_N = 20
+FLOOR_PROOF_CI = 0.50
+
+
+def _floor_eligible(c) -> bool:
+    return c["measured"] and (
+        c["n"] >= FLOOR_DEEP_N
+        or (c["ci_high"] is not None and c["ci_high"] < FLOOR_PROOF_CI)
+    )
 
 
 def row_stats(cells, top_k, cover_min):
@@ -87,7 +103,8 @@ def row_stats(cells, top_k, cover_min):
     n1_mass = sum(c["share"] for c in n1)
     adj = (sum(c["share"] * c["p"] for c in n1) / n1_mass) if n1 and n1_mass else None
     meas = [c for c in cells if c["measured"]]
-    floor_c = min(meas, key=lambda c: c["p"]) if meas else None
+    eligible = [c for c in meas if _floor_eligible(c)]
+    floor_c = min(eligible, key=lambda c: c["p"]) if eligible else None
     coverage = (sum(c["share"] for c in meas) / den_all) if den_all else 0.0
     topk = sorted(cells, key=lambda c: c["share"], reverse=True)[:top_k]
     topk_ok = bool(topk) and all(c["measured"] for c in topk)
