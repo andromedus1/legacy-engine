@@ -12,7 +12,7 @@ summary: |
   strata; the page itself carries the authoritative definitional prose.
 decisions:
   - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
-  - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred, full-corpus fallback labeled FC; a thin era cell is shown thin, never a shrinkage prior masquerading as a floor."
+  - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
   - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the shrunk estimate, not raw."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
@@ -76,5 +76,9 @@ frontmatter decisions above — the page prose is authoritative.
   thinner when its 95% CI upper bound is still below 50% (an 0-8 qualifies —
   Eldrazi vs Red Stompy, CI 0–26%; a 2-6 is ambiguity and cannot). Still check
   the expanded ledger (CIs shown per cell) before acting on a single-cell verdict.
+- **Fallback windows are ban-scoped** — a deck whose engine was banned (Nadu
+  Cephalid, Candelabra Forge) keeps none of its banned-era matches in any cell
+  that touches it; coverage drops honestly instead (Forge 95%→17% grounding was
+  Candelabra-era data).
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).

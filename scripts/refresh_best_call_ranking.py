@@ -11,8 +11,13 @@ Method (the page's definitional card is the authoritative prose):
   - Rows: ``build_adaptive_matrix``/``build_matrix`` inclusion at
     ``--min-row-share`` (share of marginal match involvement, NOT meta share).
   - Cells vs every current-field opponent: era-windowed cell preferred when its
-    n >= ``--ground-n``; else the full-corpus cell labeled FC when ITS n >= ground-n;
-    else the era cell kept honestly thin. measured = n >= ground-n.
+    n >= ``--ground-n``; else the fallback cell when ITS n >= ground-n; else the era
+    cell kept honestly thin. measured = n >= ground-n.
+  - Fallback window (the Nadu rule): the fallback pools matches since the LAST BAN THAT
+    AFFECTED EITHER DECK in the pair (``archetype_valid_since`` — ran a banned card in
+    >=25% of pre-ban decks), labeled ``BA <date>``; a true full-corpus ``FC`` cell exists
+    only when neither deck was ever ban-affected. A banned engine's matches (Nadu
+    Cephalid, Candelabra Forge) can never inflate a row — in either direction.
   - adj field WR = field-share-weighted p_shrunk over n>=1 cells (normalized).
   - floor = min p_shrunk over floor-eligible cells: measured AND (n >= 20 OR the 95% CI
     upper bound < 50%) — a thin cell must prove its hole; agency = min(adj, floor).
@@ -38,6 +43,7 @@ from pathlib import Path
 
 import duckdb
 
+from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
 from legacy_engine.config import DISCOVERED_VARIANTS_PATH, DUCKDB_PATH
 from legacy_engine.ingestion.banlist import BAN_EVENTS
@@ -56,18 +62,27 @@ def horizon_text(h) -> str:
     return f"{h.source}: {h.trigger}" if h.trigger else h.source
 
 
-def make_cells(subj, field_opps, shares, ad_cells, fc_cells, ground_n):
-    """One row's cells vs every current-field opponent (mirror excluded)."""
+def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground_n,
+               subj_ban=None):
+    """One row's cells vs every current-field opponent (mirror excluded).
+
+    ``fb_by_date`` maps a window-start ISO date (or ``None`` = full corpus) to that
+    window's ``MatchupMatrix`` cells. Each pair's fallback window starts at the later
+    of the two decks' ban-affectedness dates (``subj_ban``/``ban_since[opp]``) — the
+    Nadu rule: a banned engine's matches never blend into a fallback cell.
+    """
     cells = []
     for opp in field_opps:
         if opp == subj:
             continue
         ec = ad_cells.get((subj, opp))
-        fc = fc_cells.get((subj, opp))
+        fb_date = max((d for d in (subj_ban, ban_since.get(opp)) if d), default=None)
+        fc = fb_by_date[fb_date].get((subj, opp)) if fb_date in fb_by_date else None
+        fb_label = f"BA {fb_date}" if fb_date else "FC"
         if ec is not None and ec.n >= ground_n:
             use, win = ec, "era"
         elif fc is not None and fc.n >= ground_n:
-            use, win = fc, "FC"
+            use, win = fc, fb_label
         else:
             use, win = (ec if ec is not None else fc), "era"
         if use is None:  # pair absent from the matrix (e.g. camp vs its own parent)
@@ -157,14 +172,21 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     # ── Archetype level ──
     print("building archetype matrices...", flush=True)
     ad = build_adaptive_matrix(con, min_row_share=min_row_share)
-    fcm = build_matrix(con, min_row_share=min_row_share)
     rows = ad.matrix.archetypes
+    ban_since = archetype_valid_since(con, list(rows))
     field_opps = sorted((a for a in rows if shares.get(a, 0) > 0),
                         key=lambda a: shares[a], reverse=True)
     sh = {a: shares.get(a, 0.0) for a in [*rows, *field_opps]}
+    # Fallback matrices, one per distinct ban-affectedness window (the Nadu rule) + true FC.
+    fb_dates = {None} | {d for d in ban_since.values() if d}
+    fb_by_date = {}
+    for d in sorted(fb_dates, key=lambda x: x or ""):
+        print(f"  fallback matrix since={d or 'full corpus'}...", flush=True)
+        fb_by_date[d] = build_matrix(con, min_row_share=min_row_share, since=d).cells
     arch_out = []
     for i, subj in enumerate(rows):
-        cells = make_cells(subj, field_opps, sh, ad.matrix.cells, fcm.cells, ground_n)
+        cells = make_cells(subj, field_opps, sh, ad.matrix.cells, fb_by_date, ban_since,
+                           ground_n, subj_ban=ban_since.get(subj))
         arch_out.append({
             "subject": subj, **row_stats(cells, top_k, cover_min),
             "since": ad.valid_since.get(subj),
@@ -182,11 +204,18 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     for p, parent in enumerate(parents):
         print(f"[{p + 1}/{len(parents)}] split matrices for {parent!r}...", flush=True)
         adp = build_adaptive_matrix(con, min_row_share=min_row_share, split_variant=parent)
-        fcp = build_matrix(con, min_row_share=min_row_share, split_variant=parent)
+        # Camp labels inherit the parent's ban-affectedness date; build only the fallback
+        # windows this parent's pairs can actually need: max(parent_ban, opp_ban) per opponent.
+        p_ban = ban_since.get(parent)
+        p_dates = {max((d for d in (p_ban, ban_since.get(o)) if d), default=None)
+                   for o in field_opps}
+        fbp = {d: build_matrix(con, min_row_share=min_row_share, split_variant=parent,
+                               since=d).cells for d in p_dates}
         prefix = f"{parent} ["
         for lbl in (r for r in adp.matrix.archetypes if r.startswith(prefix)):
             camp = lbl[len(prefix):-1]
-            cells = make_cells(lbl, field_opps, sh, adp.matrix.cells, fcp.cells, ground_n)
+            cells = make_cells(lbl, field_opps, sh, adp.matrix.cells, fbp, ban_since,
+                               ground_n, subj_ban=p_ban)
             frac = camp_frac.get((parent, camp), 0.0)
             camps_out.append({
                 "subject": lbl, **row_stats(cells, top_k, cover_min),
