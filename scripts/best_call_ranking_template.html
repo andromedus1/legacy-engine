@@ -114,9 +114,12 @@ window, and blowout highlights.</div>
   it concedes no free wins to the room. Theory under test: <b>maximum agency = most fun</b>.</div>
   <ul class="gates">
     <li><b>Measured cells only</b> — a matchup counts when its sample is n ≥ 8 matches.
-        Era-windowed cells are preferred; when the era window is too thin, the full-corpus cell is
-        used and labeled <span class="chip">FC</span> (never silently dropped, never a shrinkage
-        prior masquerading as a floor).</li>
+        Era-windowed cells are preferred; when the era window is too thin, a fallback cell is
+        used — and the fallback pools matches only since <b>the last ban that affected either
+        deck</b> in the pair (ran a banned card in ≥25% of its pre-ban lists), labeled
+        <span class="chip">BA date</span>. A true full-corpus cell
+        (<span class="chip">FC</span>) exists only when neither deck was ever ban-affected.
+        The Nadu rule: a banned engine's matches never inflate a row — in either direction.</li>
     <li><b>A thin cell must prove its hole</b> — the row's floor can only be set by a cell with
         n ≥ 20, or by a thinner measured cell whose 95% CI upper bound is still below 50%
         (an 0-8 qualifies; a 2-6 is ambiguity, not evidence). This keeps the min() from being
@@ -189,9 +192,12 @@ window, and blowout highlights.</div>
       raises a drift alarm instead of silently re-windowing.</li>
       <li><b>How a cell picks its window</b> — a matchup A-vs-B pools matches back to the
       <i>later</i> of the two decks' stable_since dates (both sides must be in their current
-      form). If that era window has n&lt;8, the full-history cell is shown instead and
-      labeled <b>FC</b> — more data, but it may blend old builds; the label keeps that
-      trade-off visible.</li>
+      form). If that era window has n&lt;8, a fallback cell is shown instead — pooled since
+      the later of the two decks' <b>ban-affectedness</b> dates (labeled <b>BA date</b>), or
+      full history (<b>FC</b>) only when neither deck was ever materially hit by a ban. More
+      data, may blend older builds of the same legal engine — but never a banned one: the
+      Nadu-era Cephalid and Candelabra-era Forge matches are structurally excluded from
+      every fallback that touches those decks.</li>
       <li><b>Sample tiers</b> — tier words on this page (e.g. the field-basis tier in the
       audit header) are fixed thresholds on n: <i>speculative</i> &lt;30, <i>evolving</i>
       30–99, <i>established</i> ≥100.</li>
@@ -225,9 +231,10 @@ grounded-and-current decks by agency; hover any dot for its numbers.</div>
 <div class="card tablewrap"><table id="t-arch"></table>
 <div class="footnote">Click a row to expand its full matchup ledger — one line per
 current-field opponent: the chip after the name is that opponent's % of meta; the first
-number is the shrunk estimate, <i>raw</i> is wins/n; <span class="chip">era</span> /
-<span class="chip">FC</span> is the cell's window (era-windowed, or full-corpus fallback when
-the era cell has n&lt;8); "unmeasured" = n&lt;8, excluded from floor and blowouts.
+number is the shrunk estimate, <i>raw</i> is wins/n; the window chip is
+<span class="chip">era</span> (era-windowed), <span class="chip">BA date</span> (fallback since
+the later ban that affected either deck), or <span class="chip">FC</span> (full corpus — neither
+deck ever ban-affected); "unmeasured" = n&lt;8, excluded from floor and blowouts.
 <br>Column notes: <b>decks/4wk</b> = the deck's corpus count over the last 4 corpus weeks;
 <b>◦not current</b> marks names with fewer than 5 decks in that span (historical form, not a
 live pick); <b>window</b> = the row's era window (<span class="chip">since date</span> =

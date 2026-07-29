@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-29T01:10:06Z'
+generated_at: '2026-07-29T03:44:48Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -114,9 +114,11 @@ documents:
     decisions:
     - 'Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page''s
       single ranking number; theory under test: maximum agency = most fun.'
-    - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred,
-      full-corpus fallback labeled FC; a thin era cell is shown thin, never a shrinkage
-      prior masquerading as a floor.'
+    - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred;
+      the fallback pools matches since the last ban that affected either deck (BA
+      label, archetype_valid_since) — full-corpus FC only when neither deck was ever
+      ban-affected. The Nadu rule: a banned engine''s matches never inflate a row
+      (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28).'
     - 'A thin cell must prove its hole: the floor is set only by cells with n>=20
       or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered
       decks mechanically show lower floors. Blowouts classify on the shrunk estimate,
