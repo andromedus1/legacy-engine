@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-28T14:47:36Z'
+generated_at: '2026-07-29T01:10:06Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -117,6 +117,10 @@ documents:
     - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred,
       full-corpus fallback labeled FC; a thin era cell is shown thin, never a shrinkage
       prior masquerading as a floor.'
+    - 'A thin cell must prove its hole: the floor is set only by cells with n>=20
+      or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered
+      decks mechanically show lower floors. Blowouts classify on the shrunk estimate,
+      not raw.'
     - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass
       covered; ungrounded rows are labeled leans (agency shown as an upper bound),
       and sorting never intermixes strata.
