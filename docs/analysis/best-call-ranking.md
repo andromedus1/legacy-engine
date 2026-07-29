@@ -13,6 +13,7 @@ summary: |
 decisions:
   - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred, full-corpus fallback labeled FC; a thin era cell is shown thin, never a shrinkage prior masquerading as a floor."
+  - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the shrunk estimate, not raw."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
@@ -67,11 +68,13 @@ frontmatter decisions above — the page prose is authoritative.
 - **Strata are honesty walls**: grounded+current, grounded-but-not-current
   (<5 decks in the last 4 corpus weeks), ungrounded (thin floor = upper bound).
   Column sorting reorders *within* a stratum only.
-- **Blowouts** count measured current-field matchups at raw WR <40% (full) /
-  40–45% (half); "% meta that blows you out" weights them by field share and is
-  a lower bound (unmeasured opponents can't be counted).
-- **A raw n=8 floor is grounded but fragile** — an 0-8 run reads as a ~21%
-  shrunk floor (Eldrazi vs Red Stompy, 2026-07-28). Check the expanded ledger
-  before acting on a single-cell verdict.
+- **Blowouts** count measured current-field matchups at shrunk WR <40% (full) /
+  40–45% (half) — classified on the shrunk estimate so thin-cell noise doesn't
+  count; "% meta that blows you out" weights them by field share and is a lower
+  bound (unmeasured opponents can't be counted).
+- **Floors are evidence-gated** — a cell sets the floor only at n>=20, or
+  thinner when its 95% CI upper bound is still below 50% (an 0-8 qualifies —
+  Eldrazi vs Red Stompy, CI 0–26%; a 2-6 is ambiguity and cannot). Still check
+  the expanded ledger (CIs shown per cell) before acting on a single-cell verdict.
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).
