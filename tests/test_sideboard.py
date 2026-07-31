@@ -4164,6 +4164,25 @@ class TestDeriveAttacksForPromoted:
         )
         assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
 
+    def test_counter_colorless_regex_does_not_span_sentences(self):
+        """`_RE_COUNTER_COLORLESS` regression (item 2c): the old `.*` + DOTALL let the match
+        span unrelated SENTENCES. A crafted two-sentence card — "Counter target spell." as
+        its own complete sentence, with "colorless spell" only appearing in a LATER, unrelated
+        sentence — must NOT get colorless-reliant; the counter effect here does not actually
+        restrict to colorless spells."""
+        attacks = _derive_attacks_for_promoted(
+            "Test Two-Sentence Card",
+            "Counter target spell. This deals 1 damage to you for each colorless spell "
+            "you've cast this game.",
+            "Instant",
+        )
+        assert "colorless-reliant" not in attacks, (
+            f"Regex must not span the sentence boundary between 'Counter target spell.' and "
+            f"the unrelated later 'colorless spell' mention; got {attacks}"
+        )
+        # The generic counter-magic rule (1) still fires — this IS a counterspell.
+        assert "combo" in attacks and "storm-reliant" in attacks
+
     def test_graveyard_exile_maps_to_graveyard_recursion(self):
         """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
@@ -5277,6 +5296,42 @@ class TestPitchSpellExclusionFromLowCurve:
         cards = [(one_cmc, 4)]
         signals = compute_deck_anti_synergy_signals(cards)
         assert signals.low_curve is True
+
+    def test_their_variant_pitch_spell_excluded_from_low_curve(self):
+        """`_PITCH_SPELL_RE`'s "their" branch must actually match (regression for the
+        escaped-paren bug: `without paying \\(its|their\\) mana cost` matched literal
+        parens, so the "their" alternative was dead — only the "its" wording worked).
+
+        Ground truth (data/legacy.duckdb): Aluren's oracle_text is "Any player may cast
+        creature spells with mana value 3 or less without paying their mana costs and as
+        though they had flash." — the exact "their mana costs" possessive template.  Aluren
+        is CMC 4; without the fix its CMC would inflate the average like FoW's bug did.
+        """
+        brainstorm = Card(
+            name="Brainstorm",
+            type_line="Instant",
+            oracle_text="Draw three cards, then put two cards from your hand on top of your library in any order.",
+            cmc=1.0,
+            colors=["U"],
+        )
+        aluren = Card(
+            name="Aluren",
+            type_line="Enchantment",
+            oracle_text=(
+                "Any player may cast creature spells with mana value 3 or less "
+                "without paying their mana costs and as though they had flash."
+            ),
+            cmc=4.0,
+            colors=["G"],
+        )
+        cards = [(brainstorm, 4), (aluren, 4)]
+        # Without exclusion: avg = (1.0*4 + 4.0*4) / 8 = 2.5 -> low_curve False.
+        # With Aluren excluded as a pitch spell: avg = 1.0*4 / 4 = 1.0 -> low_curve True.
+        signals = compute_deck_anti_synergy_signals(cards)
+        assert signals.low_curve is True, (
+            "Aluren's 'without paying their mana costs' text must match _PITCH_SPELL_RE "
+            f"and be excluded from the CMC average (signals={signals})"
+        )
 
 
 # ---------------------------------------------------------------------------

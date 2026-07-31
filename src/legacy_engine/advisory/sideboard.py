@@ -198,8 +198,7 @@ from legacy_engine.advisory.positioning import _DEFAULT_RISK_QUANTILE, _DIRICHLE
 # Imported here as a module-level constant to avoid importing card_tags (circular risk).
 _PITCH_SPELL_RE = re.compile(
     r"rather than pay this spell's mana cost"
-    r"|without paying its mana cost"
-    r"|without paying \(its|their\) mana cost"
+    r"|without paying (?:its|their) mana costs?"
     r"|you may exile .+ rather than pay"
     r"|you may return .+ to its owner's hand rather than pay",
     re.IGNORECASE,
@@ -1274,7 +1273,12 @@ _RE_COUNTER_NONCREATURE = re.compile(r"counter target noncreature spell", re.IGN
 # without restricting to noncreature spells, and vice versa (Force of Negation/Spell Pierce
 # hit noncreature spells of ANY color, including colorless, but do not specifically call out
 # "colorless spell" the way Consign/Ceremonious Rejection do).
-_RE_COUNTER_COLORLESS = re.compile(r"counter target.*colorless spell", re.IGNORECASE | re.DOTALL)
+# `[^.]*` (not DOTALL `.*`) bounds the match to a single sentence — a future card reading
+# "Counter target spell. ... colorless spell ..." in a LATER, unrelated sentence must not
+# match; `[^.]*` still crosses the newline inside Consign to Memory's one sentence ("Counter
+# target triggered ability or\ncolorless spell.") since a negated character class matches
+# newlines regardless of DOTALL.
+_RE_COUNTER_COLORLESS = re.compile(r"counter target[^.]*colorless spell", re.IGNORECASE)
 
 
 def _derive_attacks_for_promoted(
