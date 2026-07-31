@@ -1,8 +1,18 @@
 ---
-id: bug-sb-combined-fourof-guard
+id: epic-sb-advisor-correctness-fourof-guard
+kind: story
+stage: implementing
+tags: [advisory, bug]
+parent: epic-sb-advisor-correctness
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-04
-tags: [advisory, sideboard]
+updated: 2026-07-31
 ---
+
+# Combined main+SB 4-of legality guard in recommend/considering paths
+
 
 # Sideboard recommend/considering path lacks a combined main+SB 4-of guard
 
