@@ -36,6 +36,19 @@ surface this layer but is not a dependency.
   Andrew's workflow now; schema/storage designed so per-user profiles are a config swap,
   not a rewrite. VISION.md rolled forward with the persistent-coach cross-cutting layer.
 
+## Design decisions
+<!-- captured 2026-07-31 via epic-design --only-questions; feature-design treats these as fixed inputs -->
+- **Storage shape**: files-as-SSOT + rebuildable DuckDB — JSON/markdown knowledge artifacts
+  under data/knowledge/ are the source of truth (git-versionable, hand-inspectable), with
+  derived DuckDB tables rebuilt idempotently per the existing JSON-SSOT pattern.
+- **Archetype-ID trainer**: deferred — absorbed member, not decomposed in v1; coach
+  foundations (knowledge store, findings log, corpus, profile) ship first. Related parked
+  idea: `idea-mtgo-screen-watch-frontend` (screen-viewing front-end for live MTGO
+  dogfooding of the trainer; scout SpellTable's card-recognition as prior art).
+- **Knowledge ingestion mode (design-pass default)**: hybrid derived+curated with named
+  precedence and provenance labels, per the existing hybrid-derived-curated-registry
+  pattern — engine-generated knowledge fills gaps, session-authored/curated entries win by key.
+
 ## Member findings (absorbed from backlog; full text below)
 
 ---
