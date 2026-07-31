@@ -38,3 +38,8 @@ sample sizes + Wilson CIs visible and never overclaim win rates — same gate th
 other advisory surfaces hold.
 
 Related memory: `local-meta-public-report`.
+
+## Design decisions
+<!-- --only-questions pass 2026-07-31: no user-facing ambiguities — direction is pinned by
+the absorbed member texts, parent-epic decisions, and existing project patterns. Full
+feature-design may proceed without an interactive round. -->
