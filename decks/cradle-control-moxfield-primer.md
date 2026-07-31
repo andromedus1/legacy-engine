@@ -10,12 +10,22 @@ Corpus through 2026-07-30. One judgment swap off raw consensus (see board logic)
 
 :::notes:::
 golgari cradle control. GSZ/Natural Order toolbox on a Gaea's Cradle mana engine.
-HONESTY: family match record is ~50% 2026 YTD (n=594), 44.7% in the current era
-window (n=141), 38.5% post-Candelabra (n=26, thin). it is NOT a top performer in
-raw match data right now. its high agency score comes from a few small-n lopsided
-cells (Lands 85.7% n=7, Blue Artifacts 80% n=5) — those are speculative.
+TWO HONEST READS, both true, measuring different things:
+ (1) best-call page: ADJ FIELD WR 54.3 = HIGHEST in the format. that's the
+     field-weighted mean of per-cell SHRUNK wr over measured opponents, using
+     per-cell maximal windows (BA/FC chips reach back to 2024-12-16 or full corpus).
+ (2) actual match record: ~49-50% on every window measured — 50.0% 2026 YTD
+     (n=594 family), 44.7% era window (n=141), 38.5% post-Candelabra (n=26, thin).
+the page's own HEADLINE metric is AGENCY = min(adj field wr, worst grounded matchup).
+cradle's agency is 28.9 — set by Ruby Storm (28.9%, n=13, 0.1% share) — well under
+Blue Artifacts 38.9 and White Beanstalk 40.9. so the page does NOT call this the best
+deck; it calls it the best AVERAGE with a bad floor. sorting by adj field wr alone
+hides that.
+caveats on (1): long per-cell windows mix deck generations (2024:655 / 2025:764 /
+2026:474 matches), and measured-only weighting covers ~64 of 100 share-points.
 label is also fragmented: "Cradle Control" 800 decks + 4c/Golgari/Abzan variants.
-all matchup %s below are RAW leans w/ n. EVERY cell is under n=30 -> all speculative.
+matchup %s below are era-window RAW leans w/ n — much narrower than the page's
+windows, so they read worse. both are shown deliberately; neither is the "true" number.
 :::
 
 ---
