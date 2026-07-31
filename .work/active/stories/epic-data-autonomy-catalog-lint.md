@@ -1,8 +1,18 @@
 ---
-id: idea-catalog-lint-vs-db
-created: 2026-07-03
+id: epic-data-autonomy-catalog-lint
+kind: story
+stage: implementing
 tags: [advisory, infra]
+parent: epic-data-autonomy
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-03
+updated: 2026-07-31
 ---
+
+# Catalog lint: cross-check curated card data against the DB
+
 
 # Catalog lint: cross-check curated card data against the DB
 
