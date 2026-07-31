@@ -154,17 +154,6 @@ class TestCardRoles:
         roles = _card_roles(reanimate)
         assert "graveyard_recursion" in roles
 
-    @pytest.mark.xfail(
-        reason=(
-            "REAL GAP found while draining gate-cruft-test-unused-locals (2026-07-04): "
-            "_RE_GRAVEYARD's third alternative only matches 'from (?:a|any|your) graveyard "
-            "...onto the battlefield', but Exhume's actual oracle text is symmetric ('each "
-            "player ... from THEIR graveyard'), which the regex does not recognize — "
-            "_card_roles(exhume) returns an EMPTY set today, not {'graveyard_recursion'}. "
-            "Not fixed here: this drain's scope is tests-only (no whattoplay.py src changes)."
-        ),
-        strict=True,
-    )
     def test_exhume_has_graveyard_recursion(self):
         exhume = _make_card(
             name="Exhume",
