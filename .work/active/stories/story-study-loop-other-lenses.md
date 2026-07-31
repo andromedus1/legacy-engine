@@ -1,8 +1,18 @@
 ---
-id: idea-study-loop-other-archetype-lenses
+id: story-study-loop-other-lenses
+kind: story
+stage: implementing
+tags: [analytics, advisory]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-04
-tags: [advisory, analytics]
+updated: 2026-07-31
 ---
+
+# Run the study loop through non-Dimir archetype lenses
+
 
 # Run the study loop through non-Dimir archetype lenses
 
