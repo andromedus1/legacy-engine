@@ -16,8 +16,9 @@ decisions:
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
   - "Per-entity stable eras: every per-archetype/per-camp statistic windows to the entity's own detected stable era (change-point detection on composition/play-rate/win-rate — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint detection self-heals banlist announcement lag; every windowed figure names its window and triggering disturbance."
+  - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). maintainer-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
-updated: 2026-07-11
+updated: 2026-07-31
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -92,6 +93,14 @@ A **meta-positioning score** (expected win rate vs the weighted field), a **side
 anti-hate second order), and a **"what to play" advisor** (proactive vs reactive, best-deck vs
 best-metagame-call). Lets a competitive player supply their *expected local field* and get an
 actionable read.
+
+**Cross-cutting: the persistent coach.** The pillars' outputs do not evaporate at the end of a
+session. Meta knowledge (tier reads, matchup insight, field trends), per-deck critical findings,
+and the curated consensus-deck corpus with primers persist as maintained engine state, surfaced
+automatically when relevant — a session starts from accumulated knowledge, not from scratch. Advice
+is grounded in a **user profile** (decks owned and played, collection, local meta, preferences).
+Built maintainer-first; multi-user-ready by design — the profile is data, so serving another player is
+a config swap, not a rewrite.
 
 ## Non-goals (for now)
 - Not an interactive deck-building *editor* GUI, and not a web app yet — a hosted web UI is deferred pending its own research. The engine **does** model the user's personal collection and own decks as a first-class *local* layer (so advice is buildable and actionable from what you actually own), but it stays CLI-first analytics, not a deckbuilding editor.
