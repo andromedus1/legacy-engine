@@ -23,6 +23,9 @@ ETHOS GUARDS (read before extending):
   Note: ``_derive_attacks_for_promoted``'s conservative ``{combo}`` fallback fires exactly
   when NO derivation rule matched, so an exact-fallback result is treated as unclassified
   here rather than fabricating "combo" cluster membership.
+- Same-direction clusters whose member sets are near-identical (Jaccard >=
+  ``_MERGE_JACCARD_THRESHOLD``) are merged into one ``tagA+tagB`` cluster — a tag pair that
+  always co-occurs on the same cards (e.g. combo/storm-reliant) is one root cause, not two.
 
 Objective-search-split shape: ``run_sweep`` does the DB-heavy per-archetype loop and builds
 a plain ``attacks_lookup`` mapping once; ``cluster_divergences`` / ``rank_clusters`` are pure
@@ -50,6 +53,17 @@ _NONSPECULATIVE_TIERS: frozenset[str] = frozenset({"evolving", "established"})
 
 # Cluster key for cards with no mechanical tag attribution.
 UNCLASSIFIED_TAG = "unclassified"
+
+# Jaccard-similarity floor (over full member identity — card + archetype + adoption +
+# confidence, not just card names) at/above which two SAME-DIRECTION clusters are folded
+# into one merged cluster instead of rendering the same root cause twice. Picked from the
+# curated catalog: 9 of the 10 "combo"-tagged hosers are also "storm-reliant" (and vice
+# versa) — the pair the sweep first found duplicated — and both non-mechanical derivation
+# rules that emit combo/storm-reliant always emit them together, so the realistic worst
+# case (one catalog-only outlier diverging on each side) still clears ~0.82. 0.8 is the
+# floor: high enough that unrelated tags never accidentally merge, low enough to reliably
+# catch that pair.
+_MERGE_JACCARD_THRESHOLD = 0.8
 
 
 @dataclass(frozen=True)
@@ -82,7 +96,8 @@ class ClusterMember:
 class DivergenceCluster:
     """All same-direction divergences sharing one answer-tag root cause."""
 
-    tag: str                            # vulnerability tag, or UNCLASSIFIED_TAG
+    tag: str                            # vulnerability tag, UNCLASSIFIED_TAG, or a
+                                         # sorted "tagA+tagB" merge of near-duplicate tags
     direction: str                      # "scorer_only" | "winners_only"
     members: tuple[ClusterMember, ...]  # sorted by (card, archetype)
     n_archetypes: int                   # distinct archetypes represented
@@ -192,6 +207,107 @@ def _attacks_lookup_for(
     return lookup
 
 
+def _cluster_from_members(
+    tag: str,
+    direction: str,
+    members: "tuple[ClusterMember, ...]",
+) -> DivergenceCluster:
+    """Build one cluster's derived stats from its (already sorted, deduplicated) members.
+
+    Shared by the initial per-tag build and the near-duplicate merge step so both compute
+    ``n_archetypes`` / ``tier_breakdown`` / ``total_adoption`` identically.
+    """
+    # One tier per archetype: each archetype gets exactly one backtest_board call, and
+    # confidence-None entries never reach here, so every value is a real tier.
+    arch_tiers: dict[str, str | None] = {m.archetype: m.confidence for m in members}
+    tier_breakdown: dict[str, int] = {}
+    for tier in arch_tiers.values():
+        tier_breakdown[str(tier)] = tier_breakdown.get(str(tier), 0) + 1
+    return DivergenceCluster(
+        tag=tag,
+        direction=direction,
+        members=members,
+        n_archetypes=len(arch_tiers),
+        n_archetypes_nonspeculative=sum(
+            1 for t in arch_tiers.values() if t in _NONSPECULATIVE_TIERS
+        ),
+        total_adoption=sum(m.adoption_pct for m in members),
+        tier_breakdown=tier_breakdown,
+    )
+
+
+def _jaccard(a: frozenset, b: frozenset) -> float:
+    """Jaccard similarity of two sets; two empty sets are defined as identical (1.0)."""
+    union = a | b
+    if not union:
+        return 1.0
+    return len(a & b) / len(union)
+
+
+def _merge_near_duplicate_clusters(
+    clusters: "list[DivergenceCluster]",
+) -> list[DivergenceCluster]:
+    """POST-PROCESS: union same-direction clusters whose member sets are near-identical.
+
+    Catches the case where one curated ``attacks`` tag pair (e.g. ``combo`` +
+    ``storm-reliant`` — see ``_MERGE_JACCARD_THRESHOLD``) makes the SAME divergence render
+    as two separate clusters because a card contributes to every tag it attacks. Similarity
+    is computed over full ``ClusterMember`` identity (card + archetype + adoption +
+    confidence), not just card names, so a merge only fires when the underlying
+    observations coincide — not merely an overlapping vocabulary of cards. Directions never
+    merge (grouped separately below); merging is transitive (union-find), so three-plus
+    mutually-similar tags collapse into one cluster, not a chain of pairwise merges.
+    """
+    by_direction: dict[str, list[int]] = {}
+    for i, c in enumerate(clusters):
+        by_direction.setdefault(c.direction, []).append(i)
+
+    parent = list(range(len(clusters)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[max(ri, rj)] = min(ri, rj)
+
+    for idxs in by_direction.values():
+        member_sets = {i: frozenset(clusters[i].members) for i in idxs}
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                i, j = idxs[a], idxs[b]
+                if _jaccard(member_sets[i], member_sets[j]) >= _MERGE_JACCARD_THRESHOLD:
+                    union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(len(clusters)):
+        groups.setdefault(find(i), []).append(i)
+
+    merged: list[DivergenceCluster] = []
+    for idxs in groups.values():
+        if len(idxs) == 1:
+            merged.append(clusters[idxs[0]])
+            continue
+        component = [clusters[i] for i in idxs]
+        # Deduplicate: the same ClusterMember object is shared across every tag bucket its
+        # card attacks (see cluster_divergences), so equal members collapse via the set.
+        dedup_members = tuple(
+            sorted({m for c in component for m in c.members}, key=lambda m: (m.card, m.archetype))
+        )
+        merged.append(
+            _cluster_from_members(
+                tag="+".join(sorted({c.tag for c in component})),
+                direction=component[0].direction,
+                members=dedup_members,
+            )
+        )
+    return merged
+
+
 def cluster_divergences(
     entries: "tuple[ArchetypeSweepEntry, ...] | list[ArchetypeSweepEntry]",
     attacks_lookup: Callable[[str], frozenset[str]],
@@ -202,8 +318,10 @@ def cluster_divergences(
     creature-interaction cluster emerge from Fatal Push + Snuff Out + Sheoldred's Edict even
     though their full tag sets differ. Directions never merge. Entries whose backtest is
     absent or has ``confidence is None`` (no winner sample — nothing observed to diverge
-    from) contribute nothing. Output is deterministic: members sorted by (card, archetype),
-    clusters sorted by (direction, tag); ranking is ``rank_clusters``' job.
+    from) contribute nothing. Same-direction clusters whose member sets are near-identical
+    (see ``_merge_near_duplicate_clusters``) are folded into one merged-tag cluster so one
+    root cause doesn't render twice. Output is deterministic: members sorted by (card,
+    archetype), clusters sorted by (direction, tag); ranking is ``rank_clusters``' job.
     """
     buckets: dict[tuple[str, str], list[ClusterMember]] = {}
     for entry in entries:
@@ -225,26 +343,10 @@ def cluster_divergences(
     clusters: list[DivergenceCluster] = []
     for (direction, tag), members in sorted(buckets.items()):
         members_sorted = tuple(sorted(members, key=lambda m: (m.card, m.archetype)))
-        # One tier per archetype: each archetype gets exactly one backtest_board call, and
-        # confidence-None entries were excluded above, so every value here is a real tier.
-        arch_tiers: dict[str, str | None] = {m.archetype: m.confidence for m in members_sorted}
-        tier_breakdown: dict[str, int] = {}
-        for tier in arch_tiers.values():
-            tier_breakdown[str(tier)] = tier_breakdown.get(str(tier), 0) + 1
-        clusters.append(
-            DivergenceCluster(
-                tag=tag,
-                direction=direction,
-                members=members_sorted,
-                n_archetypes=len(arch_tiers),
-                n_archetypes_nonspeculative=sum(
-                    1 for t in arch_tiers.values() if t in _NONSPECULATIVE_TIERS
-                ),
-                total_adoption=sum(m.adoption_pct for m in members_sorted),
-                tier_breakdown=tier_breakdown,
-            )
-        )
-    return tuple(clusters)
+        clusters.append(_cluster_from_members(tag, direction, members_sorted))
+
+    merged = _merge_near_duplicate_clusters(clusters)
+    return tuple(sorted(merged, key=lambda c: (c.direction, c.tag)))
 
 
 def rank_clusters(
