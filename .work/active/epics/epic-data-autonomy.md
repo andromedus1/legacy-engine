@@ -30,6 +30,16 @@ sources, normalization, coverage — and assess feasibility/cost of running it o
 Scheduled monitoring and price/catalog work do not need the brief and can be decomposed
 first by epic-design.
 
+## Design decisions
+<!-- captured 2026-07-31 via epic-design --only-questions; the /brief and feature-design treat these as fixed inputs -->
+- **Upstream ownership ambition**: hot-spare pipeline — build and periodically exercise our
+  own tournament-data generation pipeline, but keep consuming upstream normally; flip to
+  ours when upstream is down. The brief targets this feasibility level (not full
+  replication, not archive-only).
+- **Scheduling substrate**: local scheduler (launchd) on the maintainer's Mac, running refresh +
+  B&R/release monitors against local data/ + DuckDB directly; session-start surfaces
+  results. No cloud state to sync.
+
 ## Child stories (quick win, stage: implementing)
 - epic-data-autonomy-catalog-lint — CI lint cross-checking curated JSON (hosers, linchpins) against the cards table in DuckDB
 
