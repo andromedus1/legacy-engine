@@ -3,11 +3,11 @@ id: epic-data-autonomy-catalog-lint
 kind: story
 stage: review
 tags: [advisory, infra]
-parent: null
+parent: epic-data-autonomy
 depends_on: []
 release_binding: null
 gate_origin: null
-created: 2026-07-31
+created: 2026-07-03
 updated: 2026-07-31
 ---
 
