@@ -19,6 +19,7 @@ from legacy_engine.advisory.impact import (
     centrality_factor,
     draw_probability,
     hoser_capabilities,
+    hoser_capabilities_for,
     impact,
     symmetry_factor,
 )
@@ -109,6 +110,95 @@ class TestCentralityFactor:
         )
         # Querying centrality for a DIFFERENT opponent archetype should not pick up the hit.
         assert centrality_factor(hoser, "Eldrazi", [other]) == _CENTRALITY_BASELINE
+
+
+# ---------------------------------------------------------------------------
+# hoser_capabilities_for / color-gated blast capabilities (item 2b) — Pyroblast/Hydroblast/
+# Blue Elemental Blast/Red Elemental Blast only destroy/counter permanents/spells of ONE
+# color (grounded oracle text: Hydroblast "...if it's red."; Pyroblast "...if it's blue.").
+# Hydroblast can never kill Chalice of the Void (colorless).
+# ---------------------------------------------------------------------------
+
+
+class TestHoserCapabilitiesFor:
+    def test_hydroblast_no_credit_vs_colorless_linchpin(self, make_hoser, make_linchpin):
+        hydroblast = make_hoser(name="Hydroblast", colors=frozenset({"U"}))
+        # Chalice of the Void: colorless artifact (data/legacy.duckdb: colors='').
+        chalice = make_linchpin(
+            name="Chalice of the Void",
+            neutralized_by=frozenset({"artifact-removal"}),
+            colors=frozenset(),
+        )
+        assert hoser_capabilities_for(hydroblast, chalice) == frozenset()
+
+    def test_hydroblast_keeps_credit_vs_red_linchpin(self, make_hoser, make_linchpin):
+        hydroblast = make_hoser(name="Hydroblast", colors=frozenset({"U"}))
+        red_creature = make_linchpin(
+            name="Test Red Linchpin",
+            neutralized_by=frozenset({"creature-removal"}),
+            colors=frozenset({"R"}),
+        )
+        assert hoser_capabilities_for(hydroblast, red_creature) == hoser_capabilities(hydroblast)
+        assert "creature-removal" in hoser_capabilities_for(hydroblast, red_creature)
+
+    def test_hydroblast_no_credit_vs_blue_linchpin(self, make_hoser, make_linchpin):
+        """Hydroblast hoses RED, not blue — a blue linchpin is the wrong color too."""
+        hydroblast = make_hoser(name="Hydroblast", colors=frozenset({"U"}))
+        blue_linchpin = make_linchpin(
+            name="Show and Tell",
+            neutralized_by=frozenset({"counter-on-cast"}),
+            colors=frozenset({"U"}),
+        )
+        assert hoser_capabilities_for(hydroblast, blue_linchpin) == frozenset()
+
+    def test_pyroblast_keeps_credit_vs_blue_linchpin(self, make_hoser, make_linchpin):
+        pyroblast = make_hoser(name="Pyroblast", colors=frozenset({"R"}))
+        blue_linchpin = make_linchpin(
+            name="Show and Tell",
+            neutralized_by=frozenset({"counter-on-cast"}),
+            colors=frozenset({"U"}),
+        )
+        assert hoser_capabilities_for(pyroblast, blue_linchpin) == hoser_capabilities(pyroblast)
+
+    def test_pyroblast_no_credit_vs_colorless_linchpin(self, make_hoser, make_linchpin):
+        pyroblast = make_hoser(name="Pyroblast", colors=frozenset({"R"}))
+        chalice = make_linchpin(
+            name="Chalice of the Void",
+            neutralized_by=frozenset({"artifact-removal"}),
+            colors=frozenset(),
+        )
+        assert hoser_capabilities_for(pyroblast, chalice) == frozenset()
+
+    def test_uncolor_gated_hoser_unaffected(self, make_hoser, make_linchpin):
+        """Null Rod's capability isn't color-conditional — the gate must be a no-op for it."""
+        null_rod = make_hoser(name="Null Rod", colors=frozenset())
+        colorless_linchpin = make_linchpin(
+            name="Some Artifact", neutralized_by=frozenset({"artifact-ability-lock"}),
+            colors=frozenset(),
+        )
+        assert hoser_capabilities_for(null_rod, colorless_linchpin) == hoser_capabilities(null_rod)
+
+
+class TestCentralityFactorColorGate:
+    """End-to-end: the color gate flows through centrality_factor's linchpin matching."""
+
+    def test_hydroblast_centrality_baseline_vs_colorless_artifact_linchpin(
+        self, make_hoser, make_linchpin
+    ):
+        hydroblast = make_hoser(name="Hydroblast", colors=frozenset({"U"}))
+        chalice = make_linchpin(
+            archetype="Eldrazi", name="Chalice of the Void", centrality=0.75,
+            neutralized_by=frozenset({"artifact-removal"}), colors=frozenset(),
+        )
+        assert centrality_factor(hydroblast, "Eldrazi", [chalice]) == _CENTRALITY_BASELINE
+
+    def test_hydroblast_centrality_full_credit_vs_red_linchpin(self, make_hoser, make_linchpin):
+        hydroblast = make_hoser(name="Hydroblast", colors=frozenset({"U"}))
+        red_linchpin = make_linchpin(
+            archetype="Test Archetype", name="Test Red Linchpin", centrality=0.9,
+            neutralized_by=frozenset({"creature-removal"}), colors=frozenset({"R"}),
+        )
+        assert centrality_factor(hydroblast, "Test Archetype", [red_linchpin]) == 0.9
 
 
 # ---------------------------------------------------------------------------
