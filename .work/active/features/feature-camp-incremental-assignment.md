@@ -21,3 +21,9 @@ incremental assignment path for post-staging decks: nearest-camp assignment agai
 staged signatures, or membership extension, so a growing corpus doesn't silently
 degrade camp coverage between successful discovery runs. Keep provenance honest
 (incrementally-assigned decks labeled distinctly from clustered membership).
+
+## Design decisions
+<!-- captured 2026-07-31 via feature-design --only-questions; treat as fixed inputs -->
+- **Persistence**: persist incremental assignments to the DB alongside staged labels with
+  an `assigned_by: incremental` provenance flag — consumers see full coverage, provenance
+  is queryable, and the next PASSing discovery run supersedes them.
