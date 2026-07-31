@@ -1,8 +1,18 @@
 ---
-id: idea-meta-report-generation
+id: epic-local-meta-support-meta-report
+kind: feature
+stage: drafting
+tags: [analytics, advisory]
+parent: epic-local-meta-support
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-06-29
-tags: [reporting, advisory]
+updated: 2026-07-31
 ---
+
+# Local meta report generation (one-command, private/local)
+
 
 # Meta report generation as a local engine capability
 
