@@ -1,8 +1,18 @@
 ---
-id: bug-re-graveyard-their-template
-created: 2026-07-04
+id: epic-card-semantics-ir-fix-graveyard-regex
+kind: story
+stage: implementing
 tags: [advisory, bug]
+parent: epic-card-semantics-ir
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-04
+updated: 2026-07-31
 ---
+
+# Fix _RE_GRAVEYARD to match the "their graveyard" oracle template (Exhume)
+
 
 # `_RE_GRAVEYARD` misses the "their graveyard" oracle template (Exhume gets no graveyard role)
 

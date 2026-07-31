@@ -1,8 +1,46 @@
 ---
-id: idea-card-semantics-rules-layer
-created: 2026-07-03
-tags: [advisory, ingestion, needs-research]
+id: epic-card-semantics-ir
+kind: epic
+stage: drafting
+tags: [advisory, ingestion, needs-brief]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-31
+updated: 2026-07-31
 ---
+
+# Card-semantics rules layer — validated semantic IR replacing regex+memory
+
+## Brief
+
+Card semantics currently enter the engine through fragile layers — regex over oracle text,
+model memory, and hand-curated JSON — and dogfooding has repeatedly caught the result:
+misread rules, mislabeled interactions, category errors in tag derivation. Four verified
+bugs from this class are promoted as immediate child stories (tactical track); the
+strategic track replaces the fragile stack with a validated semantic intermediate
+representation (IR) for card rules, per the original park (full text below). The epic is
+tagged needs-brief: run /research-pipeline:brief on the IR design space before epic-design
+decomposes the strategic track.
+
+## Strategic decisions
+- **Sequencing (2026-07-31, scope gate)**: Tactical fixes now, IR behind brief — the four
+  verified bugs ship as stories immediately in the existing regex layer; the IR proceeds
+  in parallel through brief → design. Bug fixes ship regardless of IR timeline.
+
+## Child stories (tactical track, stage: implementing)
+- epic-card-semantics-ir-fix-graveyard-regex — `_RE_GRAVEYARD` misses "their graveyard" (Exhume)
+- epic-card-semantics-ir-fix-ld-mislabel — `_derive_attacks_for_promoted` labels Wasteland/Ghost Quarter creature-based
+- epic-card-semantics-ir-fix-pitch-blast-nits — `_PITCH_SPELL_RE` escaped-paren bug + blast-capability nit
+- epic-card-semantics-ir-fix-greedy-manabase-axis — FoV/Krosan Grip carry greedy-manabase as attack when it means protection
+
+## Member findings (absorbed from backlog; full text below)
+
+---
+
+### idea-card-semantics-rules-layer
+
 
 # Card-semantics rules layer — replace regex+memory with a validated semantic IR
 
