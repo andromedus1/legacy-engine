@@ -86,10 +86,15 @@ _RE_TUTOR = re.compile(
 )
 _RE_STORM = re.compile(r"\bstorm\b", re.IGNORECASE)
 _RE_GRAVEYARD = re.compile(
-    # "return ... from [your/a/the] graveyard" or "from [a/the/your] graveyard to the battlefield"
-    r"return .+? from (?:your|a|the) graveyard"
-    r"|from (?:your|a|the) graveyard to (?:the battlefield|your hand|your library)"
-    r"|put .+? from (?:a|any|your) graveyard (?:onto the battlefield|into your hand)",
+    # "return ... from [your/a/the/their] graveyard" or "from [a/the/your/their] graveyard to
+    # the battlefield" — the "their" alternative covers the possessive templates used by
+    # symmetric/each-player effects (Exhume: "each player PUTS a creature card from THEIR
+    # graveyard onto the battlefield"; Magister of Worth, Roar of Reclamation, etc.). "puts?"
+    # covers both the imperative ("Put target creature card...", Reanimate) and the
+    # third-person singular verb form each-player templates use ("each player puts...").
+    r"return .+? from (?:your|a|the|their) graveyard"
+    r"|from (?:your|a|the|their) graveyard to (?:the battlefield|your hand|your library)"
+    r"|puts? .+? from (?:a|any|your|their) graveyard (?:onto the battlefield|into your hand)",
     re.IGNORECASE,
 )
 # graveyard_fuel: the graveyard is consumed as a QUANTITY resource (delve, delirium,
