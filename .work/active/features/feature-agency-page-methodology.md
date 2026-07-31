@@ -111,3 +111,8 @@ Breakfast the top "agency" deck (high adjusted WR + high worst matchup):
 raw-corroborated basis. Candidate absorption target: the report regenerators, and possibly
 a first-class `advise agency` floor surface in the engine where these gates live in code
 instead of scratchpad scripts.
+
+## Design decisions
+<!-- --only-questions pass 2026-07-31: no user-facing ambiguities — direction is pinned by
+the absorbed member texts, parent-epic decisions, and existing project patterns. Full
+feature-design may proceed without an interactive round. -->
