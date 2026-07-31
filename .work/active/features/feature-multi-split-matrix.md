@@ -1,8 +1,18 @@
 ---
-id: idea-multi-split-matrix
-created: 2026-07-13
+id: feature-multi-split-matrix
+kind: feature
+stage: drafting
 tags: [advisory]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-13
+updated: 2026-07-31
 ---
+
+# Multi-split advisory matrix — one pass across all camp splits
+
 
 **Camp-level ranking needs a multi-split matrix.** Ranking all camps (2026-07-13 meta-view
 session) required 29 separate `build_advisory_inputs(split_variant=parent)` calls — one split
