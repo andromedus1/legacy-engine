@@ -35,6 +35,19 @@ decomposes the strategic track.
 - epic-card-semantics-ir-fix-pitch-blast-nits — `_PITCH_SPELL_RE` escaped-paren bug + blast-capability nit
 - epic-card-semantics-ir-fix-greedy-manabase-axis — FoV/Krosan Grip carry greedy-manabase as attack when it means protection
 
+## Design decisions
+<!-- captured 2026-07-31 via epic-design --only-questions; the /brief and feature-design treat these as fixed inputs -->
+- **IR home**: a NEW `semantics/` module — a fresh bounded context for the validated
+  semantic IR; `interaction_facts.py` becomes a consumer of its output (the maintainer's explicit
+  call, chosen over extending InteractionFacts in place). The ~28 compiled regexes across
+  whattoplay/sideboard/card_tags/interaction_facts migrate to consumers.
+- **Validation ground truth**: internal hand-curated golden fixtures against verbatim
+  oracle text are the validation authority (mechanical-grounding discipline); external tag
+  sources (Scryfall Tagger, MTGJSON keywords) may seed candidates but never gate correctness.
+- **Coverage scope (design-pass default, brief may revisit)**: advisory-consumed semantics
+  first — the tag surface the advisory layer reads today — with a schema designed to extend
+  to goldfish/trainer semantics later.
+
 ## Member findings (absorbed from backlog; full text below)
 
 ---
