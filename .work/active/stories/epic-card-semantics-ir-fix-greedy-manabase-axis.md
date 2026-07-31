@@ -1,8 +1,18 @@
 ---
-id: idea-greedy-manabase-axis-category-error
+id: epic-card-semantics-ir-fix-greedy-manabase-axis
+kind: story
+stage: implementing
+tags: [advisory, bug]
+parent: epic-card-semantics-ir
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-03
-tags: [advisory, sideboard]
+updated: 2026-07-31
 ---
+
+# Fix greedy-manabase axis category error (attack vs protection: FoV/Krosan Grip)
+
 
 # `greedy-manabase` conflates "attacks manabases" with "protects MY manabase" (FoV/Krosan Grip)
 
