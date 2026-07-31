@@ -7150,5 +7150,55 @@ def eras_confirm(event_date: str, card: str, reason: str, events_path: str | Non
     click.echo("// re-run `eras run` (and any windowed report) to pick up the healed regime")
 
 
+# ── lint: curated-data integrity checks (CI-gated) ──
+@main.group()
+def lint() -> None:
+    """Cross-check hand-curated data files against the cards table."""
+
+
+@lint.command("catalog")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def lint_catalog(db: str | None, verbose: bool) -> None:
+    """Lint the curated hoser + linchpin catalogs against cards (the CI gate).
+
+    Cross-checks every curated entry in the shipped hoser/linchpin JSON against the cards
+    table: exact-spelling existence and declared colors vs actual colors are error-level (hard
+    facts); castable_any_color vs Phyrexian-mana/free-activation text, owner-restriction wording
+    vs declared symmetry, and functional_group coherence are warn-level heuristics. Exits with
+    status 1 if any error-severity finding is produced.
+
+    Example: legacy-engine lint catalog
+    """
+    _setup_logging(verbose)
+    from legacy_engine.catalog_lint import lint_catalogs
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        findings = lint_catalogs(con)
+    finally:
+        con.close()
+
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warn"]
+
+    if not findings:
+        click.echo("// catalog lint: clean (0 errors, 0 warnings)")
+        return
+
+    for f in findings:
+        click.echo(f"// [{f.severity}] {f.check} {f.source} :: {f.entry} — {f.message}")
+    click.echo(f"// catalog lint: {len(errors)} error(s), {len(warnings)} warning(s)")
+
+    if errors:
+        raise click.ClickException(f"catalog lint failed: {len(errors)} error-severity finding(s)")
+
+
 if __name__ == "__main__":
     main()
