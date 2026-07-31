@@ -119,3 +119,11 @@ into a Franken-list. Six related arcs, roughly ordered by leverage:
 Arcs 1-3 are one coherent unit: "let registered events do immediately what detection does
 eventually." Related parked items: [[idea-eras-alarm-stale-after-registration]],
 [[idea-ranking-imputation-quarantine]], [[idea-consensus-ban-aware-shell-coherent]].
+
+## Design decisions
+<!-- captured 2026-07-31 via feature-design --only-questions; treat as fixed inputs -->
+- **Quarantine presentation**: label-only single ranking is the DEFAULT (prominent
+  coverage/imputation column), PLUS an opt-in partitioned view that splits grounded vs
+  imputation-dominated rows into labeled strata — both views are useful (Andrew).
+  Follows the opt-in-analytics-overlay pattern: the default body stays byte-identical
+  except for the new label column; the strata view sits behind an explicit flag.
