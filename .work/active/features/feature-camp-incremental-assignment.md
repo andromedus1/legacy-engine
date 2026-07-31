@@ -1,8 +1,18 @@
 ---
-id: idea-camp-incremental-assignment
+id: feature-camp-incremental-assignment
+kind: feature
+stage: drafting
+tags: [analytics]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-28
-tags: [discovery]
+updated: 2026-07-31
 ---
+
+# Incremental camp assignment for post-staging decks
+
 
 Discovery FAIL keeps the frozen staged split (member_keys pinned at the last PASSing
 run), so new decks stay camp-unlabeled — 11/12 fresh Cephalid decks had no camp after
