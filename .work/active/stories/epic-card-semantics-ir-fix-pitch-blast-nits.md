@@ -1,8 +1,18 @@
 ---
-id: idea-pitch-regex-and-blast-capability-nits
+id: epic-card-semantics-ir-fix-pitch-blast-nits
+kind: story
+stage: implementing
+tags: [advisory, bug]
+parent: epic-card-semantics-ir
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-03
-tags: [advisory, sideboard]
+updated: 2026-07-31
 ---
+
+# Fix _PITCH_SPELL_RE escaped-paren bug + blast-capability nit
+
 
 # Two small correctness nits from the 2026-07-03 review
 
