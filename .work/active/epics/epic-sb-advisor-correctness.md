@@ -38,6 +38,17 @@ data split that does not exist yet.
 - epic-sb-advisor-correctness-fourof-guard — combined main+SB 4-of legality guard
 - epic-sb-advisor-correctness-sweep-polish — sweep report near-dupe clusters + Σ-adoption formatting
 
+## Design decisions
+<!-- captured 2026-07-31 via epic-design --only-questions; feature-design treats these as fixed inputs -->
+- **Calibration philosophy**: Mechanism fixes only; adoption stays diagnostic — fix the
+  verified defects (impact factor on `_hate:` coverage, castability gating, OUT-side flex,
+  alpha greediness); observed adoption remains a divergence diagnostic per the
+  divergence-as-diagnostic pattern, never blended into scores.
+- **Backtest CI gate**: Yes — a hermetic backtest fixture with a pinned divergence budget
+  runs in CI; advisory changes that widen divergence vs the observed-boards reference fail.
+- **Opponent-boarding-response**: Deferred — stays an absorbed member, not decomposed into
+  v1 features; revisit when a game-level pre/post-board data path exists.
+
 ## Member findings (absorbed from backlog; full text below)
 
 ---
