@@ -66,3 +66,8 @@ wrong same-date ban; `analytics.affectedness.archetype_valid_since` (any-card >=
 pre-ban inclusion, either board) got it right. Align the attribution check: on
 multi-card ban dates, verify inclusion per banned card across the full deck, and name
 the card that actually hits.
+
+## Design decisions
+<!-- --only-questions pass 2026-07-31: no user-facing ambiguities — direction is pinned by
+the absorbed member texts, parent-epic decisions, and existing project patterns. Full
+feature-design may proceed without an interactive round. -->
