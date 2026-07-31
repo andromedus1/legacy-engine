@@ -20,3 +20,8 @@ matrix per parent. Consequences: P(best) is incomparable across per-parent matri
 omit it in the camp view of `decks/best-deck-best-call-ranking.html`), and the sweep costs ~29
 matrix builds (~4-5 min). Support `split_variant` accepting multiple/all parents in one matrix
 so every camp shares one shared-field MC ranking with a valid cross-camp P(best).
+
+## Design decisions
+<!-- --only-questions pass 2026-07-31: no user-facing ambiguities — direction is pinned by
+the absorbed member texts, parent-epic decisions, and existing project patterns. Full
+feature-design may proceed without an interactive round. -->
