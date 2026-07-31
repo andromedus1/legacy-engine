@@ -1257,6 +1257,13 @@ _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 _RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
 _RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
 
+# Land destruction (epic-card-semantics-ir-fix-ld-mislabel): "destroy target land" / "destroy
+# target nonbasic land" — Wasteland ("{T}, Sacrifice this land: Destroy target nonbasic
+# land.") and Ghost Quarter ("{T}, Sacrifice this land: Destroy target land. ...").  Must be
+# checked BEFORE rule 4's bare "destroy target" substring check, which would otherwise
+# mislabel a promoted (non-catalog) land-destruction card as creature-based.
+_RE_LAND_DESTRUCTION = re.compile(r"destroy target (?:nonbasic )?land\b", re.IGNORECASE)
+
 # Broad free/soft anti-noncreature interaction (feature-sfv-attachments): the exact
 # "counter target noncreature spell" template shared by Force of Negation / Spell Pierce /
 # Mental Misstep-style noncreature-restricted counters — distinct from the generic
@@ -1302,6 +1309,10 @@ def _derive_attacks_for_promoted(
        → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
     3. Graveyard exile: "exile" AND "graveyard" present
        → {graveyard-recursion}
+    3b. Land destruction: "destroy target land" / "destroy target nonbasic land" (Wasteland,
+        Ghost Quarter) → {greedy-manabase}   (checked, and skipped for rule 4, the same way
+        rule 2's ``is_color_blast`` short-circuits rule 4 — otherwise the bare "destroy
+        target" substring in rule 4 would mislabel a land-destruction spell creature-based)
     4. Removal: "destroy target" / "exile target creature" / "exile target attacking"
        → {creature-based}
     5. staple_role == "free_interaction" (card_tags lookup)
@@ -1348,8 +1359,15 @@ def _derive_attacks_for_promoted(
     if "graveyard" in text_lower and "exile" in text_lower:
         tags.add("graveyard-recursion")
 
-    # 4. Creature removal (skip when already attributed as a color blast — see #2)
-    if not is_color_blast and (
+    # 3b. Land destruction — checked before rule 4's bare "destroy target" substring check,
+    # which would otherwise mislabel Wasteland/Ghost Quarter-style effects creature-based.
+    is_land_destruction = bool(_RE_LAND_DESTRUCTION.search(text_lower))
+    if is_land_destruction:
+        tags.add("greedy-manabase")
+
+    # 4. Creature removal (skip when already attributed as a color blast — see #2 — or as
+    # land destruction — see #3b)
+    if not is_color_blast and not is_land_destruction and (
         "destroy target" in text_lower
         or "exile target creature" in text_lower
         or "exile target attacking" in text_lower

@@ -4192,6 +4192,49 @@ class TestDeriveAttacksForPromoted:
         )
         assert "graveyard-recursion" in attacks, f"Expected 'graveyard-recursion' in {attacks}"
 
+    def test_ghost_quarter_maps_to_greedy_manabase_not_creature_based(self):
+        """Ghost Quarter (epic-card-semantics-ir-fix-ld-mislabel): NOT a curated HOSER_CATALOG
+        entry, so a promoted Ghost Quarter goes through this derivation. Real oracle text
+        (data/legacy.duckdb): '{T}: Add {C}.\\n{T}, Sacrifice this land: Destroy target land.
+        Its controller may search their library for a basic land card, put it onto the
+        battlefield, then shuffle.' Rule 3b must fire (land destruction) and rule 4 (bare
+        'destroy target' -> creature-based) must be skipped for it."""
+        attacks = _derive_attacks_for_promoted(
+            "Ghost Quarter",
+            "{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller "
+            "may search their library for a basic land card, put it onto the battlefield, "
+            "then shuffle.",
+            "Land",
+        )
+        assert "greedy-manabase" in attacks, f"Expected 'greedy-manabase' in {attacks}"
+        assert "creature-based" not in attacks, (
+            f"Land destruction must not false-positive creature-based; got {attacks}"
+        )
+
+    def test_wasteland_style_nonbasic_land_destruction_maps_to_greedy_manabase(self):
+        """The 'destroy target NONBASIC land' phrasing (Wasteland's real oracle text) must
+        also be caught, not just the bare 'destroy target land' Ghost Quarter uses."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Wasteland-Style Land",
+            "{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target nonbasic land.",
+            "Land",
+        )
+        assert "greedy-manabase" in attacks, f"Expected 'greedy-manabase' in {attacks}"
+        assert "creature-based" not in attacks, (
+            f"Land destruction must not false-positive creature-based; got {attacks}"
+        )
+
+    def test_normal_removal_spell_still_maps_to_creature_based(self):
+        """Sanity: the land-destruction carve-out must not swallow ordinary creature
+        removal — 'Destroy target creature' (no 'land' anywhere) still tags creature-based."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Removal Spell", "Destroy target creature.", "Instant",
+        )
+        assert "creature-based" in attacks, f"Expected 'creature-based' in {attacks}"
+        assert "greedy-manabase" not in attacks, (
+            f"Ordinary creature removal must not false-positive greedy-manabase; got {attacks}"
+        )
+
     def test_red_blast_oracle_text_maps_to_plays_red(self):
         """Hydroblast-style 'if it's red' phrasing → plays-red, not manabase/combo."""
         attacks = _derive_attacks_for_promoted(
@@ -4297,10 +4340,11 @@ class TestMaindeckAnswerCoverage:
 
     def test_wasteland_maps_to_greedy_manabase_via_catalog_short_circuit(self):
         """Wasteland is itself a curated HOSER_CATALOG entry (attacks={'greedy-manabase'});
-        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup
-        is used rather than the oracle->attacks derivation, which would mislabel
-        'Destroy target nonbasic land' as creature-based (it contains the bare substring
-        'destroy target' — see TestDeriveAttacksForPromoted's removal rule)."""
+        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup is
+        used rather than the oracle->attacks derivation — the derivation also correctly maps
+        'Destroy target nonbasic land' to greedy-manabase (rule 3b, see
+        TestDeriveAttacksForPromoted's land-destruction tests), but the catalog entry is
+        authoritative and skips the derivation call entirely for catalog cards."""
         coverage = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
         assert coverage == {"greedy-manabase": pytest.approx(1.0)}
 
