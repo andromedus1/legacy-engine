@@ -1,8 +1,18 @@
 ---
-id: idea-acquire-color-identity-filter
+id: epic-sb-advisor-correctness-acquire-color-filter
+kind: story
+stage: implementing
+tags: [advisory, bug]
+parent: epic-sb-advisor-correctness
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-06-27
-tags: [bug, advisory]
+updated: 2026-07-31
 ---
+
+# Color-identity filter for advise acquire + sideboard candidate pool
+
 
 **`advise acquire` (and the `advise sideboard` candidate pool) suggests off-color
 cards the deck cannot cast — no color-identity filter.**

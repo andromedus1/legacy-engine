@@ -1,8 +1,18 @@
 ---
-id: idea-sweep-report-polish
-created: 2026-07-04
+id: epic-sb-advisor-correctness-sweep-polish
+kind: story
+stage: implementing
 tags: [advisory, cli]
+parent: epic-sb-advisor-correctness
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-04
+updated: 2026-07-31
 ---
+
+# Sweep report polish: near-duplicate clusters + Σ-adoption formatting
+
 
 # Sweep report polish — near-duplicate clusters + Σ-adoption formatting
 
