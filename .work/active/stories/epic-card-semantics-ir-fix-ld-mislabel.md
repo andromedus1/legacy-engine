@@ -1,8 +1,18 @@
 ---
-id: idea-derive-attacks-land-destruction-mislabel
-created: 2026-07-03
+id: epic-card-semantics-ir-fix-ld-mislabel
+kind: story
+stage: implementing
 tags: [advisory, bug]
+parent: epic-card-semantics-ir
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-07-03
+updated: 2026-07-31
 ---
+
+# Fix _derive_attacks_for_promoted land-destruction mislabel (Wasteland/Ghost Quarter)
+
 
 `_derive_attacks_for_promoted` (src/legacy_engine/advisory/sideboard.py) mislabels
 land-destruction spells as `creature-based`.
