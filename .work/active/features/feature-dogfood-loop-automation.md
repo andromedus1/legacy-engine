@@ -1,8 +1,18 @@
 ---
-id: idea-dogfood-loop-as-autonomous-process
+id: feature-dogfood-loop-automation
+kind: feature
+stage: drafting
+tags: [infra]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
 created: 2026-07-04
-tags: []
+updated: 2026-07-31
 ---
+
+# Dogfooding session workflow as an autonomous idea-processing loop
+
 
 # Dogfooding session workflow as an autonomous idea-processing loop
 
