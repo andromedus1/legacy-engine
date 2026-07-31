@@ -3618,9 +3618,16 @@ def advise_sweep(
             for rank, c in enumerate(group, start=1):
                 tiers = ", ".join(f"{n} {t}" for t, n in sorted(c.tier_breakdown.items()))
                 thin = "" if c.n_archetypes_nonspeculative > 0 else "  [THIN: speculative-tier support only]"
+                # total_adoption is a Σ over members — its raw percent form can exceed 100%
+                # on wide clusters (e.g. "5904%") and read as broken. Display the per-member
+                # AVERAGE instead: it stays bounded 0-100% and reads honestly; breadth is
+                # already conveyed by the adjacent "n archetype(s)" figure, so nothing here
+                # is lost by not showing the sum. The raw Σ (total_adoption) is unchanged in
+                # the dataclass/JSON payload and still drives rank_clusters.
+                mean_adoption = c.total_adoption / len(c.members) if c.members else 0.0
                 click.echo(
                     f"  {rank}. {c.tag} — {c.n_archetypes} archetype(s) ({tiers}), "
-                    f"Σ adoption {c.total_adoption * 100:.0f}%{thin}"
+                    f"avg adoption {mean_adoption:.0%}{thin}"
                 )
                 by_card: dict[str, list] = {}
                 for m in c.members:
