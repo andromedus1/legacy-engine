@@ -16,6 +16,15 @@ BUT field-weighted vs the measured top field = 50.7% (66 share-pts covered). the
 means it beats the long tail harder than it beats the top decks. read both.
 camp matters: the parent "Aluren" label also holds a DEAD Baleful Strix generation
 (nothing since 2026-01-31) which drags the parent to 43.2% weighted. build the camp.
+TAXONOMY: this is really a UG SHOW AND TELL deck, not its own archetype. vs the
+`Show and Tell` label it shares 15 core cards and the whole engine (S&T / Omniscience /
+Emrakul / Atraxa / Tomb / City / Petal / FoW / Brainstorm / Ponder / Stock Up) —
+core Jaccard 0.54. the only real difference is the second cheat package + colors:
+Aluren+Acererak in UG here vs Sneak Attack (77%) in UR there. S&T's own camps are
+already Sneak / non-Sneak; this is effectively a third camp under a different parent
+because the rules-based labeler keys on the card Aluren.
+-> so the 73.9% "vs Show and Tell" cell below is an INTRA-FAMILY matchup, not an edge
+   against a distinct strategy. discount it accordingly.
 all %s below are camp RAW leans w/ n. everything is under n=30 -> speculative.
 :::
 
