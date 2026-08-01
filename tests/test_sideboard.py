@@ -7208,7 +7208,12 @@ class TestGating:
             con.close()
 
     def test_smart_off_is_baseline(self):
+        """smart=False must render the FULL SideboardPackage byte-identical to the pre-feature
+        call (no smart/tau/redundancy_strength kwargs at all) — a captured-baseline comparison,
+        not a single natural_budget_count sentinel that a partial regression could still pass."""
+        baseline = self._pkg()  # pre-feature call: smart/tau/redundancy_strength all at default
         pkg = self._pkg(smart=False)
+        assert pkg == baseline
         assert pkg.natural_budget_count is None  # contract inactive → byte-identical render
 
     def test_smart_on_activates_contract_without_exploding(self):
@@ -7296,14 +7301,22 @@ class TestHedgeAllocator:
         assert ins == {"Broad": 1}, f"breadth-aggregating pick should win the single flex slot: {ins}"
 
     def test_recommend_sideboard_hedge_off_no_insurance(self):
+        """hedge='off' must render the FULL SideboardPackage byte-identical to the pre-hedge
+        call (no hedge kwarg at all) — a captured-baseline comparison, not a single
+        insurance_cards sentinel that a partial regression could still pass."""
         con = TestRedundancyDecay._gy_field_corpus()
         try:
+            baseline = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
+                catalog=TestRedundancyDecay._gy_catalog(), tau=0.10,
+            )
             pkg = recommend_sideboard(
                 con, _make_field({"Reanimator": 1.0}), {}, solver="greedy",
                 catalog=TestRedundancyDecay._gy_catalog(), tau=0.10, hedge="off",
             )
         finally:
             con.close()
+        assert pkg == baseline
         assert pkg.insurance_cards == frozenset()
 
     def test_recommend_sideboard_hedge_never_overlaps_core(self):

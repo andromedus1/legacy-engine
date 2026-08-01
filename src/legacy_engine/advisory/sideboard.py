@@ -1824,8 +1824,7 @@ def _build_coverage_model(
     catalog constant + caveat is retained.  Gated-additive: ``card_swing_overrides=None``
     → no-op (byte-identical to pre-feature for callers without card-value data).
 
-    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3;
-    draw-prob deflation removed by feature-sfv-weights):
+    Impact-modulated element weights (feature-sb-field-weighted-scorer-wiring, Unit B3):
     When ``opponent_linchpins`` is not None, each (archetype, tag) element's weight is
     additionally multiplied by
     ``impact(best_hoser_for_tag, archetype, ...).score_without_draw_prob()`` — the decomposed
@@ -1838,12 +1837,15 @@ def _build_coverage_model(
     maindeck composition for the ``cast_requires`` castability gate (e.g. Massacre's "opponent
     controls a Plains" clause).  Uses ``copies=1`` only to evaluate castability
     (``cast_requires`` gating can be copy-count-sensitive in principle, though none of today's
-    tokens are); the resulting ``draw_prob`` factor is discarded, never multiplied in — the
-    copy-count taper is EXCLUSIVELY Unit B4's job (the ILP/greedy per-copy marginal via
+    tokens are).
+
+    ``draw_prob`` is intentionally excluded from this multiplier via ``score_without_draw_prob()``:
+    the copy-count taper is EXCLUSIVELY Unit B4's job (the ILP/greedy per-copy marginal via
     ``_u_redundancy``).  Folding ``draw_probability`` into the element weight too would
     double-count the same draw dimension AND uniformly deflate the whole element-weight scale
-    (draw_prob(1)≈0.4 for every impact-modulated element) — the exact bug feature-sfv-weights
-    fixes (see ``docs/briefs/scorer-flexibility-valuation.md`` §2, distortion D2).
+    (draw_prob(1)≈0.4 for every impact-modulated element) — see
+    ``docs/briefs/scorer-flexibility-valuation.md`` §2, distortion D2.
+
     Gated-additive: ``opponent_linchpins=None`` (the default) → every impact multiplier is 1.0 →
     element weights are BYTE-IDENTICAL to pre-impact (mirrors the ``matchup_pressure is None``
     no-op above).
