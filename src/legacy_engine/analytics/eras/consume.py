@@ -25,6 +25,7 @@ number.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import duckdb
@@ -52,6 +53,24 @@ def _parent_label(label: str, split_variant: str | None) -> str:
     if split_variant is not None and label.startswith(f"{split_variant} ["):
         return split_variant
     return label
+
+
+def _resolve_parent(
+    label: str, split_variant: str | None, camp_parent: "Mapping[str, str] | None",
+) -> str:
+    """The parent archetype of ``label`` — explicit ``camp_parent`` entry first, prefix rule after.
+
+    The multi-split matrix splits MANY parents at once, and the staged registry contains both
+    ``Painter`` and ``Blue Painter``: a prefix rule cannot disambiguate those, so
+    ``compute_match_results`` records the camp -> parent map at relabel time (the labeler knows the
+    parent) and threads it here. A label absent from the map falls through to the single-split
+    prefix rule, which is the identity when ``split_variant`` is ``None``.
+    """
+    if camp_parent is not None:
+        parent = camp_parent.get(label)
+        if parent is not None:
+            return parent
+    return _parent_label(label, split_variant)
 
 
 @dataclass(frozen=True)
@@ -95,6 +114,7 @@ def era_horizons(
     *,
     provenance: str | None = None,
     split_variant: str | None = None,
+    camp_parent: "Mapping[str, str] | None" = None,
     affect_threshold: float = 0.25,
 ) -> tuple[dict[str, EraHorizon], tuple[str, ...]]:
     """Resolve every label in ``archetypes`` to an ``EraHorizon`` (exact -> parent -> ban-only).
@@ -104,6 +124,11 @@ def era_horizons(
     ``matchup.build_adaptive_matrix`` itself uses). Returns ``(horizons, audit_preamble)`` where
     ``audit_preamble`` is empty unless ``entity_eras`` is missing/empty entirely, in which case it
     carries exactly one whole-path-degrade line.
+
+    ``camp_parent`` (opt-in, default ``None``): an explicit ``camp label -> parent archetype`` map
+    (``MatchResults.camp_parent``) used INSTEAD of the prefix rule for the labels it covers — the
+    multi-split matrix splits many parents at once, where prefixes are ambiguous. Labels it does
+    not cover still resolve by prefix, so ``None`` is the untouched single-split path.
     """
     from legacy_engine.analytics.affectedness import archetype_valid_since
 
@@ -124,7 +149,7 @@ def era_horizons(
             )
             continue
 
-        parent = _parent_label(label, split_variant)
+        parent = _resolve_parent(label, split_variant, camp_parent)
         parent_entry = stored.get(parent) if parent != label else None
         if parent_entry is not None:
             horizons[label] = EraHorizon(
@@ -138,12 +163,14 @@ def era_horizons(
         need_ban_only.append(label)
 
     if need_ban_only:
-        base_labels = sorted({_parent_label(a, split_variant) for a in need_ban_only})
+        base_labels = sorted(
+            {_resolve_parent(a, split_variant, camp_parent) for a in need_ban_only}
+        )
         base_valid_since = archetype_valid_since(
             con, base_labels, provenance=provenance, affect_threshold=affect_threshold,
         )
         for label in need_ban_only:
-            base = _parent_label(label, split_variant)
+            base = _resolve_parent(label, split_variant, camp_parent)
             since = base_valid_since.get(base)
             horizons[label] = EraHorizon(
                 since=since,

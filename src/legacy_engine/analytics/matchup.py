@@ -15,6 +15,8 @@ Units covered:
 - feature-multi-split-matrix Unit 2: pooling + multi-parent hierarchy —
   ``_pool_opponent_tallies``, ``_multi_hierarchy_inputs``, ``MultiSplitMatrix``,
   ``build_multi_split_matrix``
+- feature-multi-split-matrix Unit 3: era-windowed multi-split —
+  ``AdaptiveMultiSplitMatrix``, ``build_multi_split_adaptive``
 """
 
 from __future__ import annotations
@@ -938,5 +940,185 @@ def build_adaptive_matrix(
     )
     return AdaptiveMatrix(
         matrix=matrix, valid_since=valid_since, cell_windows=cell_windows,
+        horizon_meta=horizon_meta, audit_preamble=audit_preamble,
+    )
+
+
+# ---------------------------------------------------------------------------
+# feature-multi-split-matrix Unit 3: era-windowed multi-split builder
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AdaptiveMultiSplitMatrix:
+    """``AdaptiveMatrix``'s shape for the rectangular multi-split matrix.
+
+    ``multi`` is the assembled ``MultiSplitMatrix`` (camp subjects + unsplit subjects × parent-level
+    opponents). ``valid_since`` covers subjects AND opponents — an opponent that is a split parent
+    carries the PARENT-level horizon, which is exactly what a per-parent
+    ``build_adaptive_matrix(split_variant=P)`` build resolves for that same unsplit label.
+    ``cell_windows[(subject, opponent)]`` is the ``since`` actually used for that emitted cell
+    (``max`` of the two members' horizons); ``horizon_meta``/``audit_preamble`` carry the same
+    per-entity ``EraHorizon`` provenance and whole-path degrade line ``AdaptiveMatrix`` does.
+    """
+
+    multi: MultiSplitMatrix
+    valid_since: dict[str, str | None]
+    cell_windows: dict[tuple[str, str], str | None]
+    horizon_meta: "dict[str, EraHorizon]" = field(default_factory=dict)
+    audit_preamble: tuple[str, ...] = ()
+
+
+def build_multi_split_adaptive(
+    con,
+    *,
+    parents: "Collection[str]",
+    provenance: str | None = None,
+    min_row_share: float = 0.02,
+    affect_threshold: float = 0.25,
+    horizons: dict[str, str | None] | None = None,
+) -> AdaptiveMultiSplitMatrix:
+    """``build_adaptive_matrix`` for every split parent at once — one scan per distinct horizon.
+
+    Same skeleton as ``build_adaptive_matrix``: a full maximal (camp×camp) scan fixes row/column
+    inclusion, each entity resolves a ``valid_since`` horizon, one ``compute_match_results`` runs
+    per DISTINCT horizon (never per cell, never per parent), each cell is sourced from the scan at
+    ``max(valid_since[subject], valid_since[opponent])``, and a thin (``n<100``) cell truncated at
+    an ERA (not ban-only) boundary shrinks toward its own pre-disturbance value via a lazily-cached
+    pre-boundary scan. The only difference is granularity: every scan is pooled back to parent-level
+    opponents (``_pool_opponent_tallies``) and its hierarchy inputs are reconstructed from camp sums
+    for many parents at once (``_multi_hierarchy_inputs``), feeding the UNCHANGED ``_cell_prior``.
+
+    That makes the result a batching win, not a methodology change: every camp cell — value,
+    ``cell_windows`` entry and cross-era ``prior_source`` label included — is identical to
+    ``build_adaptive_matrix(split_variant=<that camp's parent>)``'s, and every unsplit-subject cell
+    identical to the plain ``build_adaptive_matrix``'s (parity test:
+    tests/test_matchup_multi_split.py::TestAdaptiveParity). The scan count is the number of
+    DISTINCT horizons across all parents, not parents × horizons.
+
+    Camp horizons resolve exact ``entity_eras`` row -> parent row -> ban-only through the explicit
+    ``camp_parent`` map (never prefix parsing — the registry holds both ``Painter`` and ``Blue
+    Painter``). ``horizons`` (advanced/testing hook, default ``None``) bypasses ``era_horizons``
+    entirely and is used verbatim, exactly as in ``build_adaptive_matrix``; ``horizon_meta`` is then
+    empty, which also means no cell can take the cross-era prior (no era-sourced boundary to detect).
+    """
+    # 1. Full maximal scan → subjects/opponents/parents inclusion (stable basis, as in the plain
+    #    adaptive builder: only per-cell data sourcing is windowed).
+    full = compute_match_results(con, provenance=provenance, split_variants=parents)
+    subjects, opponents, observed_parents = _multi_split_inclusion(full, min_row_share)
+    camp_parent = dict(full.camp_parent)
+    entities = sorted(set(subjects) | set(opponents))
+
+    # 2. Horizon per entity: explicit override, or the era-aware adapter default.
+    horizon_meta: "dict[str, EraHorizon]" = {}
+    audit_preamble: tuple[str, ...] = ()
+    if horizons is not None:
+        valid_since = {a: horizons.get(a) for a in entities}
+    else:
+        from legacy_engine.analytics.eras.consume import era_horizons
+
+        horizon_meta, audit_preamble = era_horizons(
+            con, entities, provenance=provenance, camp_parent=camp_parent,
+            affect_threshold=affect_threshold,
+        )
+        valid_since = {a: horizon_meta[a].since for a in entities}
+
+    # 3. One maximal scan per distinct valid_since (None reuses the full scan) — s_ab is always one
+    #    of these values, so this set covers every cell window.
+    mr_by_since = {None: full}
+    for s in set(valid_since.values()):
+        if s is not None and s not in mr_by_since:
+            mr_by_since[s] = compute_match_results(
+                con, provenance=provenance, since=s, split_variants=parents,
+            )
+
+    # 3b. Per-window pooling + hierarchy inputs, derived from each window's OWN scan (never a wider
+    # one — the whole point of era windows). Each window pools with ITS OWN camp_parent map: a camp
+    # absent from the window is absent from that map, which makes `_cell_prior` fall back to the
+    # camp's marginal exactly as `_camp_hierarchy_inputs` does when the camp has no sibling tally.
+    pooled_by_since = {
+        s: _pool_opponent_tallies(mr, mr.camp_parent) for s, mr in mr_by_since.items()
+    }
+    hierarchy_by_since = {
+        s: _multi_hierarchy_inputs(mr, subjects, opponents, mr.camp_parent, pooled_by_since[s])
+        for s, mr in mr_by_since.items()
+    }
+
+    # 3c. Cross-era prior, lazily populated per distinct PRE-boundary date. One extra maximal scan
+    # per boundary serves EVERY parent's cells at that boundary — the per-parent builds pay one
+    # such scan each.
+    pre_pooled_cache: dict = {}
+    pre_hierarchy_cache: dict = {}
+
+    def _era_sourced_boundary(a: str, b: str, s_ab: str) -> bool:
+        """True when ``s_ab`` is the horizon of an era/era-parent-sourced entity (not ban-only).
+
+        Verbatim from ``build_adaptive_matrix`` — a ban-only-truncated cell never gets a cross-era
+        prior, because the ban regime IS the whole known history for that horizon source.
+        """
+        return any(
+            valid_since[x] == s_ab and horizon_meta.get(x) is not None
+            and horizon_meta[x].source in ("era", "era-parent")
+            for x in (a, b)
+        )
+
+    def _cross_era_prior(a: str, b: str, boundary: str) -> tuple[float, str]:
+        """The pooled pre-boundary hierarchical value for (a, b) — cross-era prior mean + label."""
+        if boundary not in pre_pooled_cache:
+            pre_mr = compute_match_results(
+                con, provenance=provenance, until=boundary, split_variants=parents,
+            )
+            pre_pooled_cache[boundary] = _pool_opponent_tallies(pre_mr, pre_mr.camp_parent)
+            pre_hierarchy_cache[boundary] = _multi_hierarchy_inputs(
+                pre_mr, subjects, opponents, pre_mr.camp_parent, pre_pooled_cache[boundary],
+            )
+        pre_marginals, pre_lco, pre_camp_of = pre_hierarchy_cache[boundary]
+        pre_wins, pre_n = pre_pooled_cache[boundary].get((a, b), (0, 0))
+        pre_prior_mean, pre_source = _cell_prior(
+            a, b, marginals=pre_marginals, parent_cells_lco=pre_lco, camp_of=pre_camp_of,
+        )
+        cross_era_mean = beta_binomial_shrink_to(pre_wins, pre_n, prior_mean=pre_prior_mean)
+        label = f"pre-disturbance value (window < {boundary}); hierarchy: {pre_source}"
+        return cross_era_mean, label
+
+    # 4. Assemble: each cell from the window at max(valid_since[subject], valid_since[opponent]).
+    cells: dict[tuple[str, str], MatchupCell] = {}
+    cell_windows: dict[tuple[str, str], str | None] = {}
+    for subject in subjects:
+        s_a = valid_since[subject]
+        cells[(subject, subject)] = build_mirror_cell(
+            subject, mr_by_since[s_a].mirror_n.get(subject, 0),
+        )
+        cell_windows[(subject, subject)] = s_a
+        own_parent = camp_parent.get(subject)
+        for opponent in opponents:
+            if opponent == subject or opponent == own_parent:
+                continue
+            s_ab = max(valid_since[subject] or "", valid_since[opponent] or "") or None
+            marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
+            wins, n = pooled_by_since[s_ab].get((subject, opponent), (0, 0))
+            prior_mean, prior_source = _cell_prior(
+                subject, opponent, marginals=marginals,
+                parent_cells_lco=parent_cells_lco, camp_of=camp_of,
+            )
+            if s_ab is not None and n < 100 and _era_sourced_boundary(subject, opponent, s_ab):
+                prior_mean, prior_source = _cross_era_prior(subject, opponent, s_ab)
+            cells[(subject, opponent)] = build_cell(
+                subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+            )
+            cell_windows[(subject, opponent)] = s_ab
+
+    multi = MultiSplitMatrix(
+        cells=cells,
+        subjects=subjects,
+        opponents=opponents,
+        camp_parent=camp_parent,
+        parents=observed_parents,
+        provenance=provenance,
+        total_matches=full.coverage.decisive_matched,
+        caveat=_CAVEAT,
+    )
+    return AdaptiveMultiSplitMatrix(
+        multi=multi, valid_since=valid_since, cell_windows=cell_windows,
         horizon_meta=horizon_meta, audit_preamble=audit_preamble,
     )
