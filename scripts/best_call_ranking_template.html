@@ -207,7 +207,18 @@ window, and blowout highlights.</div>
       real sample plus clearly divergent signature cards. Camps are a <i>staged overlay</i>
       — applied for analysis, never silently promoted to taxonomy — and decks that fit no
       camp stay honestly [unlabeled]. Camp field share = parent share × the camp's fraction
-      of the parent's current-window decks.</li>
+      of the parent's current-window decks. All camp matchup cells come from ONE
+      multi-split matrix built over every staged parent at once — numerically identical to
+      the old one-matrix-per-parent builds (parity-tested in the engine), but every camp
+      now coexists in a single matrix.</li>
+      <li><b>Cross-camp P(best)</b> — the camp table's P(best) column comes from one
+      shared-field Monte-Carlo: sample the field once per draw (Dirichlet over the
+      parent-level window counts, fixed seed), score <i>every</i> candidate — all camps
+      plus all unsplit archetypes — against that same sampled field, and count how often
+      each is the argmax. Sharing the field draw is what makes the number comparable
+      across camps of different parents. Cells are the same era-preferred / ban-scoped
+      ones the ledger shows; candidates below 5% measured coverage are excluded (their
+      score would be imputation noise) and show n/a instead.</li>
       <li><b>No significance theater</b> — the clustering gate is stability-based on purpose:
       running a t-test on data the clustering already saw would double-dip and inflate false
       positives. Where a real multiple-testing control exists (era boundaries), it's BH-FDR;
@@ -246,8 +257,19 @@ ungrounded (thin-floor) row, the value is an upper bound.</div></div>
 
 <h2>Subarchetypes (camps)</h2>
 <div class="card tablewrap"><table id="t-camp"></table>
-<div class="footnote">Same columns, ledger, and markers as the archetype table above.
-Camp % of meta = parent share × camp fraction among the parent's field-window decks.
+<div class="footnote">Same columns, ledger, and markers as the archetype table above, plus
+<b>P(best)</b>: the probability this deck is the best call for the current field — one
+shared Monte-Carlo where every camp and every unsplit archetype is scored against the
+<i>same</i> sampled field (parent-level Dirichlet, fixed seed; parameters in the audit
+header), on the same era-preferred / ban-scoped cells the ledger shows. Because all
+candidates share one field draw, the values are comparable across camps of <i>different</i>
+parents — the single number the old per-parent matrices could never provide. Candidates
+need ≥&nbsp;5% measured field coverage; rows below that show <b>n/a</b> with their coverage
+(their score would be pure imputation). The chip is the risk-adjusted lower-quartile field
+WR (Q25); <b>S*</b> marks coverage &lt; 85% — a full-field estimate leaning on imputation
+for the unmeasured share, including each camp's own parent (that cell is absent by
+construction). <br>Camp % of meta = parent share × camp fraction among the parent's
+field-window decks.
 <b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
 builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
 Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
@@ -306,6 +328,18 @@ function blowouts(r) {
   return {score: full + 0.5 * half, full, half, denom,
           metaShare: metaFull + 0.5 * metaHalf};
 }
+// Camp-only P(best) cell: ONE shared-field MC across all camps + unsplit archetypes
+// (meta.rank carries seed/draws/basis). p_best=null = below the candidacy coverage gate
+// (cov shown as the reason); the chip is the risk-adjusted lower-quantile field WR,
+// labeled S* when coverage < 85% (full-field value leaning on imputation).
+function pbestHtml(r) {
+  const covTxt = r.s_cov == null ? "—" : (100 * r.s_cov).toFixed(0) + "%";
+  if (r.p_best == null) return `n/a <span class="chip">cov ${covTxt}</span>`;
+  const q = Math.round(((D.meta.rank || {}).quantile ?? 0.25) * 100);
+  const s = r.s_caveated ? "S*" : "S";
+  return `${(100 * r.p_best).toFixed(1)}%` +
+    ` <span class="chip">Q${q} ${s} ${fmtP(r.s_q)}</span>`;
+}
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
   const cls = (r.grounded ? "" : "thin") + stale;
@@ -323,6 +357,7 @@ function rowHtml(r, i, camp) {
     <td class="name">${name}</td>
     <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
     <td>${fmtP(r.adj)}</td>
+    ${camp ? `<td>${pbestHtml(r)}</td>` : ""}
     <td>${floorTxt}</td>
     <td>${bTxt}</td>
     <td>${metaTxt}</td>
@@ -345,14 +380,19 @@ const COLS = [
   {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
   {label:"window", get:r => r.since || "", dir:1},
 ];
+// Camp table adds the cross-camp P(best) column (nulls — candidacy-gated rows — sort last).
+const CAMP_COLS = [...COLS.slice(0, 4),
+  {label:"P(best)", get:r => r.p_best, dir:-1},
+  ...COLS.slice(4)];
+const colsFor = camp => camp ? CAMP_COLS : COLS;
 // Default sort: agency %, descending. Click a header to sort by that column;
 // click again to flip direction. Sorting happens WITHIN each honesty stratum —
 // grounded-current rows never intermix with not-current or thin-floor rows.
 const sortState = {"t-arch": {col: 2, dir: -1}, "t-camp": {col: 2, dir: -1}};
 [...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
 
-function cmpBy(col, dir) {
-  const get = COLS[col].get;
+function cmpBy(col, dir, cols) {
+  const get = cols[col].get;
   return (a, b) => {
     const va = get(a), vb = get(b);
     const na = va == null || va === "", nb = vb == null || vb === "";
@@ -363,9 +403,9 @@ function cmpBy(col, dir) {
   };
 }
 
-function headHtml(id) {
+function headHtml(id, cols) {
   const st = sortState[id];
-  return "<tr>" + COLS.map((c, k) => {
+  return "<tr>" + cols.map((c, k) => {
     if (c.sort === false) return `<th>${c.label}</th>`;
     const arrow = k === st.col ? (st.dir === 1 ? " ▲" : " ▼") : "";
     return `<th class="sortable" data-col="${k}">${c.label}${arrow}</th>`;
@@ -375,6 +415,7 @@ function headHtml(id) {
 function renderTable(id, rows, camp) {
   const el = document.getElementById(id);
   const st = sortState[id];
+  const cols = colsFor(camp);
   const strata = [
     ["", rows.filter(r => r.grounded && r.recent_4wk >= 5)],
     ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
@@ -382,19 +423,19 @@ function renderTable(id, rows, camp) {
     ["ungrounded (thin floor — the ≤ value is an UPPER BOUND: agency = min over cells, so it can only fall as more matchups get measured; shrinkage parks unknown cells near the deck's own hot marginal)",
       rows.filter(r => !r.grounded)],
   ];
-  let html = headHtml(id), i = 0;
+  let html = headHtml(id, cols), i = 0;
   for (const [label, set] of strata) {
     if (!set.length) continue;
-    if (label) html += `<tr><td colspan="11" style="color:var(--muted);font-size:11.5px;
+    if (label) html += `<tr><td colspan="${cols.length}" style="color:var(--muted);font-size:11.5px;
       text-transform:uppercase;letter-spacing:.04em;padding-top:14px">${label}</td></tr>`;
-    [...set].sort(cmpBy(st.col, st.dir)).forEach(r => { html += rowHtml(r, i, camp); i += 1; });
+    [...set].sort(cmpBy(st.col, st.dir, cols)).forEach(r => { html += rowHtml(r, i, camp); i += 1; });
   }
   el.innerHTML = html;
   el.querySelectorAll("th.sortable").forEach(th => {
     th.addEventListener("click", () => {
       const col = Number(th.dataset.col);
       if (st.col === col) st.dir = -st.dir;
-      else { st.col = col; st.dir = COLS[col].dir; }
+      else { st.col = col; st.dir = cols[col].dir; }
       renderTable(id, rows, camp);
     });
   });
@@ -420,7 +461,7 @@ function renderTable(id, rows, camp) {
         `<span class="sw" style="background:var(--amber)"></span>half (40–45%)</div>`;
       const d = document.createElement("tr");
       d.className = "detail";
-      d.innerHTML = `<td colspan="11">${key}<div class="cells">${cells}</div></td>`;
+      d.innerHTML = `<td colspan="${cols.length}">${key}<div class="cells">${cells}</div></td>`;
       tr.after(d);
     });
   });
