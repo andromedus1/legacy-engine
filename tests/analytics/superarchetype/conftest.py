@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from legacy_engine.analytics.superarchetype.aggregate import MemberTally
 from legacy_engine.analytics.superarchetype.cluster import ArchetypeDeck
 
 _STAPLES = ("Brainstorm", "Force of Will", "Ponder", "Wasteland", "Underground Sea")
@@ -90,3 +91,32 @@ def staples():
 @pytest.fixture
 def families():
     return _FAMILIES
+
+
+@pytest.fixture
+def make_tally():
+    """``_make(archetype, wins, n, **flags)`` -> one ``MemberTally`` for the aggregation kernel."""
+
+    def _make(
+        archetype: str = "A",
+        wins: int = 0,
+        n: int = 1,
+        *,
+        intra_cluster: bool = False,
+        definer: bool = True,
+    ) -> MemberTally:
+        return MemberTally(
+            archetype=archetype, wins=wins, n=n, intra_cluster=intra_cluster, definer=definer
+        )
+
+    return _make
+
+
+@pytest.fixture
+def headline_pair(make_tally):
+    """The brief's §6.3 worked example: Dimir Tempo vs the Aluren + Show and Tell cluster.
+
+    Aluren 4-9 (n=13, 30.8%), Show and Tell 24-5 (n=29, 82.8%). Naive count-pooling gives 66.7%
+    on n=42 — the number every gate must refuse.
+    """
+    return [make_tally("Aluren", wins=4, n=13), make_tally("Show and Tell", wins=24, n=29)]
