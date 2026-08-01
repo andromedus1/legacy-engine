@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness-acquire-color-filter
 kind: story
-stage: review
+stage: done
 tags: [advisory, bug]
 parent: epic-sb-advisor-correctness
 depends_on: []

@@ -1,7 +1,7 @@
 ---
 id: epic-card-semantics-ir-fix-pitch-blast-nits
 kind: story
-stage: review
+stage: done
 tags: [advisory, bug]
 parent: epic-card-semantics-ir
 depends_on: []

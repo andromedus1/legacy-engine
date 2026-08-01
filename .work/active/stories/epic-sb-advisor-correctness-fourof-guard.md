@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness-fourof-guard
 kind: story
-stage: review
+stage: done
 tags: [advisory, bug]
 parent: epic-sb-advisor-correctness
 depends_on: []

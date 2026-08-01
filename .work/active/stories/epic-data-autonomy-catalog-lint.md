@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-catalog-lint
 kind: story
-stage: review
+stage: done
 tags: [advisory, infra]
 parent: epic-data-autonomy
 depends_on: []
