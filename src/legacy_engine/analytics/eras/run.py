@@ -22,7 +22,13 @@ from datetime import date, datetime, timezone
 import duckdb
 import numpy as np
 
-from legacy_engine.analytics.eras.attribution import Attribution, attribute_boundaries
+from legacy_engine.analytics.eras.attribution import (
+    Attribution,
+    attribute_boundaries,
+    events_on_nearest_date,
+    is_plausible_ban,
+    rank_same_date_cards,
+)
 from legacy_engine.analytics.eras.bocpd import beta_binomial_bocpd
 from legacy_engine.analytics.eras.detect import (
     CandidateBoundary,
@@ -57,15 +63,35 @@ _ALARM_SHARE_WINDOW_BUCKETS: int = 8  # the share-floor gate is computed over th
 _ALARM_MIN_COMPLETE_BUCKETS: int = 4  # below this, bucket 0's cold-start p_change=1.0 (bocpd.py
                                        # module docstring) could leak into the "recent" window
 
+# Closed vocabulary (closed-vocabulary-fail-fast-token pattern).
+_ALARM_KINDS = frozenset({"unattributed", "registered_pending"})
+
 
 @dataclass(frozen=True)
 class AlarmFlag:
-    """One entity's unattributed drift alarm — the loud, human-facing half of the banlist-
-    currency loop."""
+    """One entity's drift alarm — the loud, human-facing half of the banlist-currency loop.
+
+    ``kind="unattributed"`` (default, backward-compatible): no ban is registered near the
+    disturbance (or one is, but this entity demonstrably doesn't run it enough to be its cause) —
+    the classic "possible unregistered B&R change" case.
+    ``kind="registered_pending"``: a ban IS registered in BAN_EVENTS near the disturbance's own
+    peak date, but the era detector hasn't accepted/floor-cleared a boundary for it yet (thin
+    post-ban sample) — the alarm still fires (there's no consumable `stable_since` boundary yet)
+    but must not imply the ban itself is unregistered. ``card`` names the registered card when
+    ``kind="registered_pending"``, else ``None``.
+    """
 
     entity: str
     p_change: float
     note: str
+    kind: str = "unattributed"
+    card: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in _ALARM_KINDS:
+            raise ValueError(
+                f"AlarmFlag: kind {self.kind!r} must be one of {sorted(_ALARM_KINDS)}"
+            )
 
 
 @dataclass(frozen=True)
@@ -186,12 +212,25 @@ def compute_drift_alarms(
     series: dict[str, EntitySeries],
     eras: dict[str, EntityEras],
     attributions: dict[tuple[str, str], Attribution],
+    *,
+    ban_events: tuple[tuple[date, str, str], ...] = (),
+    tolerance_days: int = _ATTRIBUTION_TOLERANCE_DAYS,
 ) -> dict[str, AlarmFlag]:
     """BOCPD tail check: alarm on a high-share entity whose recent share history looks freshly
     disturbed AND is not already explained by an accepted, attributed (ban/release) boundary.
 
     Public (not a private helper) so it is directly testable against the shared calibration
     fixtures without needing a full DB corpus (see `test_run.py::TestAlarmCalibration`).
+
+    ``ban_events``/``tolerance_days`` (new, both default to the prior no-ledger behavior): once a
+    disturbance is confirmed (BOCPD bar cleared) and NOT already covered by an accepted,
+    attributed boundary, check whether a ban is nonetheless registered near the disturbance's own
+    BOCPD peak date (not `recent_start` — the peak pins the actual moment of surprise within the
+    recent window). If a same-date cohort exists there and its best-ranked card is
+    `is_plausible_ban`, the alarm still fires but with `kind="registered_pending"` wording naming
+    that card instead of implying nothing has been registered. Default `ban_events=()` makes
+    `events_on_nearest_date` always return `None`, so any caller that doesn't pass a ledger (all
+    prior `TestAlarmCalibration` tests) gets today's `kind="unattributed"` output, byte-identical.
     """
     alarms: dict[str, AlarmFlag] = {}
     for entity, s in series.items():
@@ -233,9 +272,38 @@ def compute_drift_alarms(
         if covered:
             continue
 
+        # A ban may already be registered near the disturbance's own peak even though nothing
+        # covers it yet — the boundary is simply held below acceptance (thin post-ban sample),
+        # not evidence nobody has registered anything.
+        recent_window = complete[-_ALARM_RECENT_BUCKETS:]
+        peak_date = date.fromisoformat(recent_window[int(np.argmax(recent))].start)
+        nearest = events_on_nearest_date(ban_events, peak_date, tolerance_days)
+        if nearest is not None:
+            event_date, cards = nearest
+            ranked = rank_same_date_cards(cards, s, peak_date)
+            card, rate = ranked[0]
+            if is_plausible_ban(rate):
+                secondaries = [c for c, _r in ranked[1:]]
+                secondary_note = (
+                    f" (also banned this date: {', '.join(secondaries)})" if secondaries else ""
+                )
+                alarms[entity] = AlarmFlag(
+                    entity=entity, p_change=max_p, kind="registered_pending", card=card,
+                    note=(
+                        f"registered ban ({card} {event_date.isoformat()}) — boundary held "
+                        f"pending confirmation data (p_change={max_p:.3f}){secondary_note}"
+                    ),
+                )
+                continue
+                # else: best-ranked card is verified-and-below-threshold (e.g. Drift's 15%
+                # Undercity Informer inclusion) -> this entity's disturbance genuinely isn't
+                # explained by that ban; fall through to the unattributed wording below.
+
         alarms[entity] = AlarmFlag(
             entity=entity,
             p_change=max_p,
+            kind="unattributed",
+            card=None,
             note=(
                 f"unattributed disturbance (p_change={max_p:.3f}) — "
                 "possible unregistered B&R change"
@@ -251,6 +319,7 @@ def run_eras(
     alpha: float = 0.05,
     seed: int = 0,
     release_source: "Callable[[duckdb.DuckDBPyConnection], dict[str, date]] | None" = None,
+    ban_events: "tuple[tuple[date, str, str], ...] | None" = None,
 ) -> ErasRunResult:
     """The offline era-labeling pass — sibling of `label`/`discover run`.
 
@@ -259,6 +328,11 @@ def run_eras(
     the ban/release ledger (or leave it an honest unattributed disturbance), check the BOCPD
     drift alarm, and persist the whole result to `entity_eras` (DROP + reload; never an
     incremental upsert).
+
+    ``ban_events`` defaults to ``None``, which resolves to the real, module-level `BAN_EVENTS`
+    (byte-identical to today for the CLI and every existing caller); tests inject a synthetic
+    tuple here for a fully hermetic same-date-ban / registered-pending end-to-end proof, never
+    touching the shipped `events.json`.
     """
     series = build_entity_series(con, provenance=provenance)
 
@@ -272,10 +346,11 @@ def run_eras(
 
     eras = derive_eras(series, candidates, alpha=alpha)
 
+    events = ban_events if ban_events is not None else BAN_EVENTS
     releases = (release_source or _default_release_source)(con)
     corpus_first_seen = _corpus_first_seen(con, _trigger_cards_from_presence_adopt(eras))
     attributions = attribute_boundaries(
-        eras, ban_events=BAN_EVENTS, releases=releases, series=series,
+        eras, ban_events=events, releases=releases, series=series,
         tolerance_days=_ATTRIBUTION_TOLERANCE_DAYS, corpus_first_seen=corpus_first_seen,
     )
 
@@ -284,7 +359,7 @@ def run_eras(
     # inside the incomplete trailing detection bucket (the Candelabra/Tron case), invisible
     # to any complete-bucket tail check at that granularity.
     alarm_series = build_entity_series(con, provenance=provenance, force_bucket_weeks=1)
-    alarms = compute_drift_alarms(alarm_series, eras, attributions)
+    alarms = compute_drift_alarms(alarm_series, eras, attributions, ban_events=events)
 
     run_at = datetime.now(timezone.utc).isoformat()
     post_boundary_decks = {
