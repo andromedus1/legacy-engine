@@ -1,18 +1,40 @@
 ---
 id: feature-multi-split-matrix
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-13
-updated: 2026-07-31
+updated: 2026-08-01
 ---
 
 # Multi-split advisory matrix — one pass across all camp splits
 
+## Completion summary (all three stories at review/done)
+
+- `feature-multi-split-matrix-core-tally` (done, PR #65): `split_variants` seam +
+  `camp_parent` provenance in `compute_match_results`; pooling kernel
+  (`_pool_opponent_tallies`), `_multi_hierarchy_inputs`, `MultiSplitMatrix` +
+  `build_multi_split_matrix` with the uniform parity suite.
+- `feature-multi-split-matrix-adaptive-window` (done, PR #70): `build_multi_split_adaptive`
+  (one scan per distinct horizon, pooled cross-era priors), `era_horizons(camp_parent=...)`,
+  `build_multi_split_inputs` (window.py) + `staged_split_parents` — adaptive parity proven
+  field-for-field incl. `cell_windows`/`horizon_meta`/cross-era labels, ~26x on the probe.
+- `feature-multi-split-matrix-best-call-onepass` (review, branch `impl/multi-split-onepass`):
+  the consumer arc. Best-call page camp sweep = ONE adaptive multi-split pass + one uniform
+  multi-split matrix per distinct Nadu-rule fallback date; live-DB old-vs-new diff:
+  115 camp rows / 8,855 opponent cells field-for-field identical, arch rows byte-identical;
+  camp sweep 326.3s -> 15.5s (~21x; 24.4x matrices-only). Cross-camp P(best) restored via
+  one shared-field `rank_decks` MC (fixed seed) over camps + unsplit archetypes on the
+  page-used cells, candidacy-gated at the display-suppression coverage threshold; camp
+  table gains the labeled column. Docs + knowledge index rolled; hermetic script-level
+  parity/Nadu/determinism tests with a mutation-proven diff.
+
+The design's parity guarantee held end-to-end: the one-pass build changed NO existing
+number anywhere in the arc.
 
 **Camp-level ranking needs a multi-split matrix.** Ranking all camps (2026-07-13 meta-view
 session) required 29 separate `build_advisory_inputs(split_variant=parent)` calls — one split
