@@ -14,5 +14,26 @@
     "Ids are stable across refreshes and are what downstream surfaces key on: never renumber one.",
     "An archetype may appear in at most one cluster; the loader fails fast on a duplicate."
   ],
-  "clusters": []
+  "clusters": [
+    {
+      "id": "sac-001",
+      "label": "White creature",
+      "archetypes": [
+        "Death & Taxes",
+        "Energy",
+        "Orzhov Midrange",
+        "Orzhov Scam"
+      ],
+      "_justification": [
+        "Behavioral family the era-windowed composition clustering cannot see: these labels'",
+        "CURRENT cores diverged (Energy's Sand Scout package) while their matchup behavior did not.",
+        "Coherence probe 2026-08-01 (since 2026-01-01, members with n>=12, chi2 per column):",
+        "10 evaluable opponent columns, 0 significantly divergent, median within-family spread 0.05",
+        "-- the tightest measured of all 12 probed families. Recorded in",
+        "epic-superarchetype-layer body (design decision addendum #2). The imputation license is",
+        "computed independently by the aggregation kernel -- this entry creates the family; it does",
+        "not exempt it from any gate."
+      ]
+    }
+  ]
 }
