@@ -300,3 +300,45 @@ Options to weigh at scope time (not decided): reclassify in the vendored rules v
 at the superarchetype layer ([[idea-superarchetype-matchup-aggregation]]) vs. leave labels alone and
 surface the family relationship as a diagnostic. Relates to the era/generation-mixing theme in
 [[idea-camp-incremental-assignment]] and the discovery temporal gate.
+
+## Design decision addendum (2026-08-01) — subject-axis licensed imputation
+
+**Andrew's directive (verbatim intent):** the purpose was to aggregate data to a higher dimension
+to SEE MORE, not less. If all the archetypes in a superarchetype behave similarly, we may be able
+to IMPUTE across the superarchetype — archetypes within a superarchetype should all behave
+somewhat alike.
+
+**Gap this closes:** everything designed so far is opponent-axis pooling (S vs cluster-of-O),
+prior rungs in the shrinkage chain, and gates that only SUBTRACT. Nothing fills an EMPTY subject
+cell (S vs O, n≈0) with a displayed value. The empty cell is the dominant case (median cell n=2).
+
+**Premise verified on the corpus (2026-08-01 probe, since 2026-01-01):**
+- Coherence: across all 12 multi-definer families, ZERO opponent columns show statistically
+  significant member divergence (chi2 p<.05) where >=2 members have n>=12. Median within-family
+  spreads: sa-024 White-creature 0.05 (10 columns!), sa-046 Forge+Tron 0.10, sa-009 Aluren+S&T
+  0.11, sa-027 Dimir 0.21. Power caveat applies (thin columns can't prove coherence) — hence a
+  LICENSE, not an assumption.
+- **Predictive LOO validation (the decisive test): family-imputed cells beat the incumbent
+  marginal imputation.** On 21 held-out cells (member n>=20, sibling pool n>=40, cross-family):
+  MAE 0.075 (family) vs 0.107 (marginal); family wins 15/21. It captures matchup-specific
+  direction the marginal cannot: Dimir Tempo vs Energy own 35% / family 37% / marginal 51%;
+  Dimir Tempo vs Show and Tell own 62% / family 63% / marginal 51%.
+- Prize: with pooled sibling support n>=25, **189 of 681 thin definer cells (28%) become
+  fillable** against the top-14 opponents (360 of those thin cells are fully blank today);
+  the 152 assignee archetypes benefit even more (every assignee has a family by construction).
+- Honest limits: 6 of 12 families have a comparability desert (one big member + long tail) — no
+  evidence to earn a license; they get family-range display, not imputed points. Window matters:
+  (Aluren,S&T) vs fair blue diverges hard in the era window but not YTD — so per-cell vetoes stay.
+
+**Mechanism (locked):** the license is EARNED at profile level where data exists, and SPENT at
+empty cells where it doesn't. Composition defines membership (cluster.py never reads rounds —
+unchanged); behavior only LICENSES imputation. That preserves the double-dip guard: outcomes
+never tune membership. Per-cell local veto: a column with significant measured member divergence
+never imputes, license or not. Imputing S vs O where O is in S's own family: refused (named
+reason). Imputed cells carry uncertainty widened by the family's profile dispersion and a
+provenance chip; they are labeled leans, never grounded rows.
+
+**Display ladder (for -best-call-fallback):** measured cell → family-imputed cell (licensed,
+chip: "imputed from <family>, k sibs, pool n, MAE evidence") → family-range chip (unlicensed or
+vetoed: show member split/range) → marginal-imputed (last resort, quarantined per
+feature-ranking-honesty-guards).
