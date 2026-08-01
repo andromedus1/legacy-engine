@@ -21,6 +21,7 @@ from legacy_engine.analytics.superarchetype.aggregate import (
     dersimonian_laird,
     effective_n,
     heterogeneity,
+    prior_strength,
 )
 
 
@@ -377,3 +378,70 @@ class TestHeterogeneity:
         re = dersimonian_laird(headline_pair)
         with pytest.raises(ValueError, match="no member tallies"):
             heterogeneity([], re)
+
+
+class TestPriorStrength:
+    """The adversarial read's behaviour-changing finding: strength is evidence-gated, never
+    tau^2-gated. The brief's §4.5 would award these fixtures the exact opposite."""
+
+    def test_two_tiny_members_with_tau2_zero_land_near_the_floor(self, make_tally):
+        # Under the brief's §4.5 as written, tau2 = 0 -> s unbounded -> clamp at the MAXIMUM 30.
+        # The evidence gate replaces that: two n=3 members carry almost no evidence, so the zero
+        # (which only means "we cannot see spread") buys a ceiling barely above the floor.
+        members = [make_tally("A", wins=1, n=3), make_tally("B", wins=1, n=3)]
+        re = dersimonian_laird(members)
+        assert re.tau2 == 0.0
+        result = prior_strength(members, re)
+        assert result.strength == pytest.approx(6.67, abs=0.05)
+        assert result.strength < 10.0
+        assert result.strength < 30.0
+        assert "evidence-gated" in result.reason
+        assert "never as coherence" in result.reason
+        assert result.moment_matched is None
+
+    def test_many_large_coherent_members_reach_the_ceiling(self, make_tally):
+        members = [make_tally(name, wins=15, n=30) for name in ("A", "B", "C", "D")]
+        re = dersimonian_laird(members)
+        assert re.tau2 == 0.0
+        result = prior_strength(members, re)
+        assert result.strength == pytest.approx(30.0)
+        assert result.ceiling == pytest.approx(30.0)
+
+    def test_strength_is_non_increasing_in_tau2_at_fixed_evidence(self, make_tally):
+        import dataclasses
+
+        members = [make_tally(name, wins=15, n=30) for name in ("A", "B", "C", "D")]
+        re = dersimonian_laird(members)
+        strengths = [
+            prior_strength(members, dataclasses.replace(re, tau2=tau2)).strength
+            for tau2 in (0.0, 0.05, 0.2, 0.5, 1.0, 5.0, 50.0)
+        ]
+        assert all(a >= b for a, b in pairwise(strengths))
+        assert strengths[0] == pytest.approx(30.0)
+        assert strengths[-1] == pytest.approx(5.0)
+
+    def test_incoherent_cluster_falls_to_the_floor(self, headline_pair):
+        # Headline pair: tau2 = 2.24 -> moment-matched s = 0.86, clamped up to the floor.
+        re = dersimonian_laird(headline_pair)
+        result = prior_strength(headline_pair, re)
+        assert result.strength == pytest.approx(5.0)
+        assert result.moment_matched is not None
+        assert result.moment_matched < 5.0
+        assert "clamped to the floor" in result.reason
+        assert "uncalibrated" in result.reason
+
+    def test_dispersion_binds_below_the_ceiling_and_is_named(self, make_tally):
+        import dataclasses
+
+        members = [make_tally(name, wins=15, n=30) for name in ("A", "B", "C", "D")]
+        re = dataclasses.replace(dersimonian_laird(members), tau2=0.2)
+        result = prior_strength(members, re)
+        # mu = 0.5 -> s = 1/(0.2 * 0.25) - 1 = 19: below the evidence ceiling of 30.
+        assert result.moment_matched == pytest.approx(19.0)
+        assert result.strength == pytest.approx(19.0)
+        assert "binds below the ceiling" in result.reason
+
+    def test_empty_input_fails_fast(self, headline_pair):
+        re = dersimonian_laird(headline_pair)
+        with pytest.raises(ValueError, match="no member tallies"):
+            prior_strength([], re)
