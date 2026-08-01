@@ -16,10 +16,14 @@ conveyed by per-row confidence tiers, not the rounds-bearing matchup population.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import duckdb
 
 from legacy_engine.analytics.trends import resolve_regime
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 _THIN_ROUNDS_FLOOR: int = 500  # below this many in-window rounds → degrade to full corpus + banner
 
@@ -214,3 +218,87 @@ def build_advisory_inputs(
         since=win.since, until=win.until, split_variant=split_variant,
     )
     return AdvisoryInputs(matrix=matrix, field_since=win.since, field_until=win.until, audit=())
+
+
+@dataclass(frozen=True)
+class MultiSplitAdvisoryInputs:
+    """``AdvisoryInputs`` for the rectangular multi-split matrix (feature-multi-split-matrix).
+
+    ``multi`` is the ``analytics.matchup.MultiSplitMatrix``; ``adaptive`` is the enclosing
+    ``AdaptiveMultiSplitMatrix`` in adaptive mode (carrying ``valid_since``/``cell_windows``/
+    ``horizon_meta`` for per-cell window audits) and ``None`` in uniform/full mode, where one
+    window applies to every cell and there is nothing per-entity to report.
+
+    A separate type from ``AdvisoryInputs`` on purpose: the matrix is NOT square, so a consumer
+    must opt into it rather than receive it from the spine (``build_advisory_inputs`` and its ~15
+    call sites are untouched by this feature).
+    """
+
+    multi: object                  # analytics.matchup.MultiSplitMatrix
+    adaptive: object | None        # analytics.matchup.AdaptiveMultiSplitMatrix | None
+    field_since: str | None
+    field_until: str | None
+    audit: tuple[str, ...]
+
+
+def build_multi_split_inputs(
+    con: duckdb.DuckDBPyConnection,
+    win: WindowResolution,
+    *,
+    parents: "Collection[str]",
+    provenance: str | None = None,
+    min_row_share: float = 0.02,
+) -> MultiSplitAdvisoryInputs:
+    """``build_advisory_inputs``'s mode dispatch for the multi-split matrix.
+
+    - ``adaptive`` → ``build_multi_split_adaptive`` (per-entity era horizons, camps resolved
+      through the explicit ``camp_parent`` map) + the detection-derived global field era, with the
+      same ``_adaptive_audit`` lines + field line the single-matrix path emits.
+    - ``uniform``/``full`` → ``build_multi_split_matrix`` over ``win.since``/``win.until``.
+
+    Every mode also emits one ``// multi-split: N parents, M camp rows`` provenance line — the
+    consumer builds both an adaptive matrix and per-date uniform fallbacks, and each needs the
+    marker in its audit header (audit-echo-comment-lines).
+    """
+    from legacy_engine.analytics.eras.consume import resolve_field_era
+    from legacy_engine.analytics.matchup import (
+        build_multi_split_adaptive,
+        build_multi_split_matrix,
+    )
+
+    if win.mode == "adaptive":
+        adaptive = build_multi_split_adaptive(
+            con, parents=parents, provenance=provenance, min_row_share=min_row_share,
+        )
+        field_since, field_label = resolve_field_era(con, provenance=provenance)
+        audit = _adaptive_audit(adaptive.horizon_meta, adaptive.audit_preamble)
+        audit = (
+            *audit,
+            f"// field: since {field_since or 'open'} ({field_label})",
+            _multi_split_audit_line(adaptive.multi),
+        )
+        return MultiSplitAdvisoryInputs(
+            multi=adaptive.multi,
+            adaptive=adaptive,
+            field_since=field_since,
+            field_until=None,
+            audit=audit,
+        )
+
+    multi = build_multi_split_matrix(
+        con, parents=parents, provenance=provenance, min_row_share=min_row_share,
+        since=win.since, until=win.until,
+    )
+    return MultiSplitAdvisoryInputs(
+        multi=multi,
+        adaptive=None,
+        field_since=win.since,
+        field_until=win.until,
+        audit=(_multi_split_audit_line(multi),),
+    )
+
+
+def _multi_split_audit_line(multi) -> str:
+    """The one-line multi-split provenance echo: how many parents split, how many camp rows."""
+    n_camps = sum(1 for s in multi.subjects if s in multi.camp_parent)
+    return f"// multi-split: {len(multi.parents)} parents, {n_camps} camp rows"
