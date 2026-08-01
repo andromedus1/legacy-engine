@@ -20,9 +20,15 @@ file still fails fast — a corrupt staging registry is a bug, not an author edi
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
-from legacy_engine.analytics.discovery import DiscoveredSplit
+from legacy_engine.analytics.discovery import (
+    DEFAULT_MIN_SIMILARITY,
+    DiscoveredSplit,
+    nearest_camp,
+)
 from legacy_engine.archetype.rules import Condition, _loads_lenient
 from legacy_engine.archetype.variants import load_variant_registry, resolve_variant
 from legacy_engine.models.variant import (
@@ -75,7 +81,8 @@ def record_from_split(
     Each camp keeps only its top ``TOP_SIGNATURE_CARDS`` *over-represented* cards (positive
     delta vs the rest) — the first is what promotion turns into an ``InMainboard`` condition.
     Gate C's per-camp ``median_date``/``pct_current`` and the split-level ``temporal_mixing``/
-    ``temporal_note`` ride along additively (epic-stable-era-windows-discovery-gate Unit 2).
+    ``temporal_note`` ride along additively (epic-stable-era-windows-discovery-gate Unit 2), as do
+    the per-camp ``centroid`` and split-level ``flex_cards`` incremental assignment reads.
     """
     camps = [
         DiscoveredCamp(
@@ -88,6 +95,7 @@ def record_from_split(
             member_keys=[tuple(k) for k in camp.member_keys],
             median_date=camp.median_date,
             pct_current=camp.pct_current,
+            centroid=camp.centroid,
         )
         for camp in split.camps
     ]
@@ -99,6 +107,7 @@ def record_from_split(
         stability=split.stability,
         temporal_mixing=split.temporal_mixing,
         temporal_note=split.temporal_note,
+        flex_cards=list(split.flex_cards),
     )
 
 
@@ -327,6 +336,194 @@ def apply_split(
             labeled += 1
 
     return labeled
+
+
+# ---------------------------------------------------------------------------
+# Incremental (nearest-camp) assignment for post-staging decks
+# ---------------------------------------------------------------------------
+
+# Owned by the discovery feature, colocated here rather than in ingestion/store.py — the same
+# shape analytics/eras/store.py uses for entity_eras. Fully rebuildable: drop the table and
+# re-run `discover apply <parent>`; discovered.json + the current decks/deck_cards state are the
+# reconstruction inputs (JSON-SSOT-rebuildable-duckdb-table).
+_INCREMENTAL_ASSIGNMENTS_DDL = """
+CREATE TABLE IF NOT EXISTS variant_incremental_assignments (
+    tournament_id VARCHAR,
+    deck_idx INTEGER,
+    parent VARCHAR,
+    camp VARCHAR,
+    assigned_by VARCHAR,
+    similarity DOUBLE,
+    generated_from VARCHAR,
+    assigned_at VARCHAR,
+    PRIMARY KEY (tournament_id, deck_idx)
+)
+"""
+
+ASSIGNED_BY_INCREMENTAL = "incremental"
+# Closed vocabulary for the assigned_by column. Rows carrying anything else were not written by
+# this path, so the supersession sweep below must never delete them or reset their decks.variant.
+_VALID_ASSIGNED_BY = frozenset({ASSIGNED_BY_INCREMENTAL})
+
+
+@dataclass(frozen=True)
+class IncrementalAssignmentResult:
+    """Outcome of one ``assign_incremental`` pass over a parent archetype.
+
+    ``degraded`` is the honest-degrade marker: the staged split carries no frozen flex
+    vocabulary / camp centroid, so nothing could be compared and nothing was touched.
+    ``note`` names why, always, when ``degraded``.
+    """
+
+    parent: str
+    n_assigned: int
+    n_declined: int
+    n_cleared: int
+    per_camp: dict[str, int]
+    degraded: bool
+    note: str | None
+
+
+def assign_incremental(
+    con,
+    parent: str,
+    *,
+    discovered_path: Path | str | None = None,
+    min_similarity: float = DEFAULT_MIN_SIMILARITY,
+) -> IncrementalAssignmentResult:
+    """Nearest-camp assignment for decks under ``parent`` the staged split's ``member_keys``
+    don't cover — fresh post-staging decks, plus the original clustering's noise decks.
+
+    The honest-coverage complement to ``apply_split``'s exact-membership labeling: a discovery
+    re-run that FAILS its stability gate keeps the frozen staged split, so every deck ingested
+    since would otherwise stay permanently camp-unlabeled. Each candidate is projected into the
+    split's frozen ``flex_cards`` space and assigned to the highest-cosine-similarity camp
+    centroid, or left honestly unlabeled below ``min_similarity``.
+
+    Supersession: unconditionally clears every ``assigned_by='incremental'`` row for ``parent``
+    first (whatever split generation wrote them), resetting those decks' ``decks.variant`` to
+    NULL UNLESS the CURRENT staged split's ``member_keys`` now claims them as real members — in
+    which case ``apply_split``, always called first by the CLI, already gave them the correct
+    label. Then reassigns fresh against the current centroids, so a new PASSing ``discover run``
+    + ``apply_split`` naturally supersedes stale incremental labels with no extra bookkeeping.
+
+    Honest-degrade: a staged split with no ``flex_cards``/``centroid`` (a record written before
+    this path existed) declines entirely — ``degraded=True``, zero ``decks`` rows touched,
+    nothing fabricated. Re-running ``discover run`` for that parent repopulates them.
+
+    Fail-fast ``ValueError`` on: no staged split for ``parent`` (mirrors ``apply_split``); or a
+    ``variant_incremental_assignments`` row whose ``assigned_by`` is outside the closed
+    vocabulary (state this path did not write and must not clear).
+    """
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+
+    path = discovered_path if discovered_path is not None else DISCOVERED_VARIANTS_PATH
+    disc = load_discovered(path)
+    split = next((s for s in disc.splits if s.parent == parent), None)
+    if split is None:
+        staged = ", ".join(sorted(s.parent for s in disc.splits)) or "(none)"
+        raise ValueError(
+            f"assign_incremental: no staged candidate split for parent {parent!r} in {path} "
+            f"(staged parents: {staged})"
+        )
+
+    con.execute(_INCREMENTAL_ASSIGNMENTS_DDL)
+
+    prior = con.execute(
+        "SELECT tournament_id, deck_idx, assigned_by FROM variant_incremental_assignments "
+        "WHERE parent = ?",
+        [parent],
+    ).fetchall()
+    unknown = sorted({row[2] for row in prior} - _VALID_ASSIGNED_BY)
+    if unknown:
+        raise ValueError(
+            f"assign_incremental: variant_incremental_assignments rows for {parent!r} carry "
+            f"assigned_by {unknown} outside the known vocabulary "
+            f"{sorted(_VALID_ASSIGNED_BY)} — refusing to clear state this path did not write"
+        )
+
+    member_keys = {
+        (tid, idx) for camp in split.camps for tid, idx in (camp.member_keys or [])
+    }
+    for tid, idx, _assigned_by in prior:
+        if (tid, idx) not in member_keys:
+            con.execute(
+                "UPDATE decks SET variant = NULL "
+                "WHERE tournament_id = ? AND deck_idx = ? AND archetype = ?",
+                [tid, idx, parent],
+            )
+    con.execute(
+        "DELETE FROM variant_incremental_assignments WHERE parent = ? AND assigned_by = ?",
+        [parent, ASSIGNED_BY_INCREMENTAL],
+    )
+    n_cleared = len(prior)
+
+    centroids = {c.name: c.centroid for c in split.camps if c.centroid}
+    if not split.flex_cards or not centroids:
+        return IncrementalAssignmentResult(
+            parent=parent, n_assigned=0, n_declined=0, n_cleared=n_cleared, per_camp={},
+            degraded=True,
+            note=(
+                f"staged split for {parent!r} carries no frozen flex vocabulary / camp centroid "
+                "(staged before incremental assignment existed) — re-run "
+                f"`discover run --archetype {parent!r}` to populate them"
+            ),
+        )
+
+    # One DB pass for every candidate's mainboard, then a pure decision loop
+    # (objective-search-split). Candidates are the parent's still-unlabeled decks: apply_split
+    # runs first, so cluster members already carry their membership label and are excluded here.
+    rows = con.execute(
+        """
+        SELECT d.tournament_id, d.deck_idx, dc.name, dc.count
+        FROM decks d
+        JOIN deck_cards dc
+          ON dc.tournament_id = d.tournament_id
+         AND dc.deck_idx      = d.deck_idx
+        WHERE d.archetype = ?
+          AND d.variant IS NULL
+          AND dc.board = 'main'
+        """,
+        [parent],
+    ).fetchall()
+    counts_by_key: dict[tuple[str, int], dict[str, int]] = {}
+    for tid, idx, name, count in rows:
+        counts = counts_by_key.setdefault((tid, idx), {})
+        counts[name] = counts.get(name, 0) + count
+
+    assigned_at = date.today().isoformat()
+    per_camp: dict[str, int] = {}
+    n_assigned = 0
+    n_declined = 0
+    for tid, idx in sorted(counts_by_key):
+        result = nearest_camp(
+            counts_by_key[(tid, idx)],
+            split.flex_cards,
+            centroids,
+            min_similarity=min_similarity,
+        )
+        if result.camp is None:
+            n_declined += 1
+            continue
+        con.execute(
+            "UPDATE decks SET variant = ? "
+            "WHERE tournament_id = ? AND deck_idx = ? AND archetype = ?",
+            [result.camp, tid, idx, parent],
+        )
+        con.execute(
+            "INSERT INTO variant_incremental_assignments VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                tid, idx, parent, result.camp, ASSIGNED_BY_INCREMENTAL,
+                result.best_similarity, split.generated_from, assigned_at,
+            ],
+        )
+        per_camp[result.camp] = per_camp.get(result.camp, 0) + 1
+        n_assigned += 1
+
+    return IncrementalAssignmentResult(
+        parent=parent, n_assigned=n_assigned, n_declined=n_declined, n_cleared=n_cleared,
+        per_camp=per_camp, degraded=False, note=None,
+    )
 
 
 def _write_variant_registry(reg: VariantRegistry, path: Path | str) -> None:
