@@ -51,8 +51,10 @@ __all__ = [
     "RungPrior",
     "cluster_view",
     "draw_cluster_pair_tallies",
+    "draw_family_tallies",
     "draw_pool_tallies",
     "draw_row_tallies",
+    "family_profile",
     "registry_audit_lines",
     "resolve_ladder",
     "rung_prior",
@@ -419,6 +421,86 @@ def draw_cluster_pair_tallies(
     )
 
 
+def draw_family_tallies(
+    base: str,
+    gs_id: str,
+    opponent: str,
+    view: ClusterView,
+    *,
+    pooled_by_since: "Mapping[str | None, Mapping[tuple[str, str], tuple[int, int]]]",
+    valid_since: "Mapping[str, str | None]",
+    camps_of: "Mapping[str, Sequence[str]]",
+    regime_start: str | None = None,
+) -> DrawnPool:
+    """The subject's family members' SUBJECT-SIDE tallies vs one opponent — imputation evidence.
+
+    ``base`` (the subject's parent archetype) is excluded AT DRAW TIME: for a camp subject the
+    kernel's own leave-subject-out check compares archetype names and cannot see that the parent's
+    row CONTAINS the camp's matches, so the exclusion must happen where the rows are drawn.
+    Assignee members are drawn with ``definer=False`` — ``impute_cell`` excludes them by name
+    (contribute-vs-receive)."""
+    members = [m for m in view.members[gs_id] if m != base]
+    drawn, not_drawn = draw_row_tallies(
+        members, opponent,
+        pooled_by_since=pooled_by_since, valid_since=valid_since, camps_of=camps_of,
+        regime_start=regime_start,
+    )
+    tallies: list[MemberTally] = []
+    window_counts: dict[str | None, int] = {}
+    pool_n = 0
+    pool_n_current = 0
+    for member in sorted(drawn):
+        wins, n, window, n_current = drawn[member]
+        definer = member in view.contributors[gs_id]
+        tallies.append(MemberTally(
+            archetype=member, wins=wins, n=n, intra_cluster=False, definer=definer,
+        ))
+        if definer:
+            window_counts[window] = window_counts.get(window, 0) + 1
+            pool_n += n
+            pool_n_current += n_current
+    share = (pool_n_current / pool_n) if pool_n else None
+    return DrawnPool(
+        tallies=tuple(tallies),
+        window_note=_mix_note(window_counts, not_drawn),
+        current_regime_share=share,
+    )
+
+
+def family_profile(
+    gs_id: str,
+    view: ClusterView,
+    *,
+    opponents: "Sequence[str]",
+    pooled_by_since: "Mapping[str | None, Mapping[tuple[str, str], tuple[int, int]]]",
+    valid_since: "Mapping[str, str | None]",
+    camps_of: "Mapping[str, Sequence[str]]",
+) -> dict[str, list[MemberTally]]:
+    """One family's era-windowed behaviour profile — ``imputation_license``'s input.
+
+    Columns are the CROSS-FAMILY opponents only (a family's internal cells are what imputation is
+    forbidden to fill, so they earn no license either). Every member is drawn, base included —
+    the license is earned by the family as a whole; ``_column_divergence`` applies its own
+    contributor and n floors."""
+    profile: dict[str, list[MemberTally]] = {}
+    for opponent in opponents:
+        if view.cluster_of.get(opponent) == gs_id:
+            continue
+        drawn, _not_drawn = draw_row_tallies(
+            list(view.members[gs_id]), opponent,
+            pooled_by_since=pooled_by_since, valid_since=valid_since, camps_of=camps_of,
+        )
+        if drawn:
+            profile[opponent] = [
+                MemberTally(
+                    archetype=member, wins=wins, n=n, intra_cluster=False,
+                    definer=member in view.contributors[gs_id],
+                )
+                for member, (wins, n, _window, _current) in sorted(drawn.items())
+            ]
+    return profile
+
+
 # ---------------------------------------------------------------------------
 # The prior rungs (chain position fixed by the epic: camp -> LCO parent' ->
 # superarchetype cell -> cluster x cluster -> marginal' -> 0.5)
@@ -573,8 +655,13 @@ def resolve_ladder(
     pooled: PooledCell | None,
     imputed,  # aggregate.ImputedCell | None
     imputed_tallies: "Sequence[MemberTally]" = (),
+    imputed_skip: str | None = None,
 ) -> LadderEntry:
-    """Resolve one cell's display fallback per the fixed ladder, refusals named at every step."""
+    """Resolve one cell's display fallback per the fixed ladder, refusals named at every step.
+
+    ``imputed_skip`` names why imputation was never ATTEMPTED (intra-family target caught at the
+    membership level, where the kernel's own name-based check cannot see camp labels); it is only
+    read when ``imputed`` is ``None``."""
     if measured_n >= display_gate_n:
         return LadderEntry(
             subject=subject, opponent=opponent, kind="measured", cluster_id=None,
@@ -597,7 +684,10 @@ def resolve_ladder(
             )
         reasons.append(f"imputation refused: {imputed.reason}")
     else:
-        reasons.append("imputation not attempted: subject has no cluster in the registry")
+        reasons.append(
+            imputed_skip
+            or "imputation not attempted: subject has no cluster in the registry"
+        )
 
     if pooled is not None and opponent_cluster_id is not None:
         if pooled.pooled_p is not None and pooled.n_eff >= display_gate_n:

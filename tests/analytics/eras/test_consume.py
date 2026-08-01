@@ -71,6 +71,7 @@ class TestEraHorizonsResolutionOrder:
         assert h == EraHorizon(
             since="2026-04-20", source="era",
             trigger="release: Flow State adoption (2026-04-20)", alarm=None,
+            attribution_kind="release",
         )
         con.close()
 
