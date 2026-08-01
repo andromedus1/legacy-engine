@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-01T02:48:54Z'
+generated_at: '2026-08-01T02:50:56Z'
 generated_from: frontmatter
-total_docs: 30
+total_docs: 31
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -276,6 +276,17 @@ documents:
     label at corpus scale, decide which splits are real vs sampling noise, and feed
     a variant dimension into the matchup matrix + card win-rate without breaking the
     confidence-tier honesty gates? Read before designing epic-subarchetype-resolution.
+- path: docs/briefs/superarchetype-aggregation-adversarial-read.md
+  title: 'Adversarial Source-Support Read: `superarchetype-aggregation.md`'
+  type: brief
+  kind: research
+  updated: '2026-07-31'
+  status: complete
+  research_method: adversarial-reader
+  consumer_hint: Adversarial passage-level source-support audit of docs/briefs/superarchetype-aggregation.md
+    — read this before trusting any numeric threshold, method-transfer claim, or literature
+    attribution in that brief, and before an epic-design session treats one of its
+    gate values as sourced.
 - path: docs/briefs/superarchetype-aggregation.md
   title: 'Brief: Superarchetype Aggregation'
   type: brief

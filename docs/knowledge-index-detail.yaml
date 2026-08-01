@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-01T02:48:54Z'
+generated_at: '2026-08-01T02:50:56Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -1591,6 +1591,59 @@ documents:
       reusing the existing Beta-Binomial shrinkage + speculative/evolving/established
       gates unchanged — every split cell surfaces at its own honest tier, never hidden,
       never blended.'
+  docs/briefs/superarchetype-aggregation-adversarial-read.md:
+    summary: 'Fresh-context adversarial read of all 83 citations in the superarchetype-aggregation
+      brief against
+
+      the 21 attestation files they resolve to. Verdict APPROVE-WITH-FIXES: 68 SUPPORTED,
+      13 OVERSTATED,
+
+      2 MISATTRIBUTED, 0 UNSUPPORTED, plus 9 UNCITED-CRITICAL load-bearing claims.
+      No defect touches the
+
+      recommended method — every finding is a sourcing/labeling defect or an over-precise
+      derivation
+
+      whose correction makes the gates MORE conservative, not less. All clear-cut
+      findings were applied
+
+      as narrowing edits to the brief in the same pass.
+
+      '
+    key_findings:
+    - Zero UNSUPPORTED citations across 83. Every cited passage is real, quoted accurately,
+      and bears on its neighbourhood — the failure mode in this brief is strength
+      and labeling, not fabrication.
+    - 'The dominant defect shape is a project-calibrated threshold sitting adjacent
+      to a source citation that does not endorse that value: m_eff >= 2.0, the 0.60
+      member-share cap, the I-squared action bands, and the AU >= 0.95 dendrogram
+      rule all read as sourced in the at-a-glance table while the body correctly labels
+      most of them as ours.'
+    - The 60% max-member-share cap was the only gate parameter with NO grounding of
+      any kind — no source, no measurement, no stated calibration — and it is the
+      binding constraint at K>=3 (60/20/20 gives m_eff 2.27, which passes the concentration
+      gate and fails only the cap).
+    - 'Section 4.4''s claim that n_eff returns Sigma n_k when tau-squared = 0 is not
+      exactly true: tau-hat-squared = 0 means undetected dispersion, not identical
+      rates, and n_eff falls below Sigma n_k whenever member rates differ, by concavity
+      of p(1-p). The error direction is safe — the gate is stricter than advertised.'
+    - The pvclust feature-axis resampling claim — the entire justification for AU
+      p-values working at N about 30 — rests on the attestation's unquoted summary,
+      not on any quoted passage. Same for the HDBSCAN 'no density contrast at N about
+      30' argument, which is neither sourced (the attested HDBSCAN limitation is dimensional)
+      nor measured, in a brief that measures everything else.
+    - The gao-selective-inference citation was used to raise the double-dipping hazard
+      while the same attestation's next passage ('persists even if two separate and
+      independent data sets are used') was left unquoted — the one passage that most
+      directly challenges the brief's escape argument. The escape argument survives
+      on the disjoint-variables-vs-disjoint-samples distinction, but that distinction
+      had to be stated.
+    - 'Coherence defect worth a design change: section 4.5 reads tau-hat-squared =
+      0 as ''coherent cluster'' and awards the maximum prior strength of 30, while
+      section 6.4 establishes that at these member sizes a zero mostly means ''we
+      cannot see spread''. That hands maximum prior strength to 58.7% of cells on
+      the weakest evidence — the exact inversion the heterogeneity gate exists to
+      prevent.'
   docs/briefs/superarchetype-aggregation.md:
     summary: 'Curates the method for the superarchetype (strategy-cluster) layer:
       clustering archetypes by card
