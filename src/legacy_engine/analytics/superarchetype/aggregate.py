@@ -43,6 +43,8 @@ from dataclasses import dataclass
 from statistics import median
 from typing import TYPE_CHECKING
 
+from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -50,9 +52,12 @@ __all__ = [
     "I2_ONE_SIDED_NOTE",
     "Concentration",
     "Heterogeneity",
+    "MemberSplit",
     "MemberTally",
+    "PooledCell",
     "PriorStrength",
     "RandomEffects",
+    "aggregate_cluster_cell",
     "concentration",
     "dersimonian_laird",
     "effective_n",
@@ -624,4 +629,295 @@ def prior_strength(members: Sequence[MemberTally], re: RandomEffects) -> PriorSt
 
     return PriorStrength(
         strength=strength, ceiling=ceiling, moment_matched=moment_matched, reason=reason
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 6 — orchestrator: one typed pooled cell carrying its own gate verdicts (pure)
+# ---------------------------------------------------------------------------
+
+_Z_95 = 1.959963984540054
+"""Two-sided 95% normal quantile — the project-wide CI convention (advisory-methods brief)."""
+
+_CALIBRATION_AUDIT_NOTE = (
+    "gate thresholds are project calibrations, not sourced values, except where the definition "
+    "site says otherwise (see the constants block in analytics/superarchetype/aggregate.py)"
+)
+
+
+@dataclass(frozen=True)
+class MemberSplit:
+    """One member's raw record — the per-member split that stays reachable behind every pooled
+    number (divergence-as-diagnostic-surface), and the whole display when the pool is refused."""
+
+    archetype: str
+    wins: int
+    n: int
+    p_hat: float
+    tier: ConfidenceLevel
+    intra_cluster: bool
+
+
+@dataclass(frozen=True)
+class PooledCell:
+    """One subject-vs-cluster pooled cell, refusals included — the estimator's only output.
+
+    **Refusal is a state, not an exception**: ``pooled_p is None`` exactly when the pool is
+    refused, with ``refused_reason`` naming every gate that fired and ``member_split`` carrying
+    what to render instead. A refused cell's diagnostics (``concentration``/``heterogeneity``/
+    ``prior``/``n_eff``) are still populated where computable — ``None`` only when there was
+    nothing to compute (empty input, no contributors).
+
+    ``tier`` derives from ``round(n_eff)``, never from the raw pooled count. ``prior`` is inert on
+    a refused cell (there is no ``pooled_p`` to anchor a Beta prior on). ``exclusions`` names
+    every tally that did not contribute and why (self-mirror, assignee) — honest-degrade, never a
+    silent drop. ``window_note`` and ``current_regime_share`` are freshness passthrough (era
+    addendum #2): the kernel never computes windows and never drops them; a pool below the page's
+    muting floor still returns, share attached, for the surface to mute.
+    """
+
+    subject: str
+    cluster_id: str
+    pooled_p: float | None
+    ci_low: float | None
+    ci_high: float | None
+    n_eff: float
+    tier: ConfidenceLevel
+    concentration: Concentration | None
+    heterogeneity: Heterogeneity | None
+    prior: PriorStrength | None
+    intra_cluster_n: int
+    intra_cluster_share: float | None
+    mirror_n: int
+    refused_reason: str | None
+    member_split: tuple[MemberSplit, ...]
+    exclusions: tuple[str, ...]
+    provenance: tuple[str, ...]
+    window_note: str
+    current_regime_share: float | None
+
+
+def _split_of(members: Sequence[MemberTally]) -> tuple[MemberSplit, ...]:
+    return tuple(
+        MemberSplit(
+            archetype=m.archetype,
+            wins=m.wins,
+            n=m.n,
+            p_hat=m.p_hat,
+            tier=tier_for_sample(m.n),
+            intra_cluster=m.intra_cluster,
+        )
+        for m in sorted(members, key=lambda m: m.archetype)
+    )
+
+
+def _refused_cell(
+    subject: str,
+    cluster_id: str,
+    reason: str,
+    *,
+    contributors: Sequence[MemberTally] = (),
+    mirror_n: int = 0,
+    exclusions: tuple[str, ...] = (),
+    provenance: tuple[str, ...] = (),
+    window_note: str = "",
+    current_regime_share: float | None = None,
+) -> PooledCell:
+    """A refusal with everything computable still computed (single-member and gate refusals get
+    diagnostics; structurally empty refusals get honest ``None``s)."""
+    if contributors:
+        re = dersimonian_laird(contributors)
+        conc: Concentration | None = concentration(contributors)
+        het: Heterogeneity | None = heterogeneity(contributors, re)
+        prior: PriorStrength | None = prior_strength(contributors, re)
+        n_eff = effective_n(contributors, re)
+        intra_n = sum(m.n for m in contributors if m.intra_cluster)
+        pool_n = sum(m.n for m in contributors)
+        intra_share: float | None = (intra_n + mirror_n) / (pool_n + mirror_n)
+    else:
+        conc, het, prior = None, None, None
+        n_eff = 0.0
+        intra_n = 0
+        intra_share = None
+    return PooledCell(
+        subject=subject,
+        cluster_id=cluster_id,
+        pooled_p=None,
+        ci_low=None,
+        ci_high=None,
+        n_eff=n_eff,
+        tier=tier_for_sample(round(n_eff)),
+        concentration=conc,
+        heterogeneity=het,
+        prior=prior,
+        intra_cluster_n=intra_n,
+        intra_cluster_share=intra_share,
+        mirror_n=mirror_n,
+        refused_reason=reason,
+        member_split=_split_of(contributors),
+        exclusions=exclusions,
+        provenance=(_CALIBRATION_AUDIT_NOTE, *provenance),
+        window_note=window_note,
+        current_regime_share=current_regime_share,
+    )
+
+
+def aggregate_cluster_cell(
+    subject: str,
+    cluster_id: str,
+    members: Sequence[MemberTally],
+    *,
+    window_note: str = "",
+    current_regime_share: float | None = None,
+) -> PooledCell:
+    """Pool one subject's per-member tallies against one cluster into a single honest cell.
+
+    Pipeline: exclude the exact self-mirror (0.5 by symmetry, zero edge information — its n is
+    reported as ``mirror_n``) and assignee tallies (contribute-vs-receive, era addendum #2), then
+    fit DerSimonian-Laird over the contributors and attach the verdicts:
+
+    - **empty / mirror-only / assignee-only / single contributor** -> refused with a named reason
+      ("a cell with exactly one contributing member is not a pool at all");
+    - **heterogeneity band ``refused``** (I^2 > 0.75 or the spread guard) -> refused; the reason
+      names EVERY gate that fired, including a concentration failure, and ``member_split`` carries
+      the per-member records to render instead — the naive pooled rate appears nowhere;
+    - **otherwise** the cell serves ``pooled_p`` (the random-effects pooled rate, never the raw
+      count pool), a logit-scale 95% CI from the random-effects variance, and
+      ``tier_for_sample(round(n_eff))``; a concentration failure or a ``labelled``/
+      ``not-computable`` band serves WITH its label in ``provenance`` (coverage is the point —
+      honest-degrade, not suppression).
+
+    ``window_note``/``current_regime_share`` ride through untouched; the kernel never computes
+    windows (the caller supplies both from the adaptive build).
+    """
+    if not subject.strip():
+        raise ValueError("aggregate_cluster_cell: subject must be a non-empty archetype name")
+    if not cluster_id.strip():
+        raise ValueError("aggregate_cluster_cell: cluster_id must be a non-empty id")
+
+    passthrough = {"window_note": window_note, "current_regime_share": current_regime_share}
+    if not members:
+        return _refused_cell(
+            subject, cluster_id, "no member tallies supplied — nothing to pool", **passthrough
+        )
+
+    exclusions: list[str] = []
+    contributors: list[MemberTally] = []
+    mirror_n = 0
+    for m in members:
+        if m.archetype == subject:
+            mirror_n += m.n
+            exclusions.append(
+                f"self-mirror excluded from the rate: {subject} vs itself, n={m.n} "
+                "(0.5 by symmetry — carries no edge information; n reported as mirror_n)"
+            )
+        elif not m.definer:
+            exclusions.append(
+                f"{m.archetype}: assignee tally excluded (n={m.n}) — assignees receive "
+                "imputation but never contribute to pools (contribute-vs-receive, era addendum)"
+            )
+        else:
+            contributors.append(m)
+
+    if not contributors:
+        return _refused_cell(
+            subject,
+            cluster_id,
+            (
+                f"no contributor tallies remain: {len(members)} tally(ies) supplied, all "
+                "excluded (see exclusions) — definers and curated members are the only pool "
+                "contributors"
+            ),
+            mirror_n=mirror_n,
+            exclusions=tuple(exclusions),
+            **passthrough,
+        )
+
+    if len(contributors) == 1:
+        only = contributors[0]
+        return _refused_cell(
+            subject,
+            cluster_id,
+            (
+                f"single-member cluster — not a pool at all; {only.archetype} is the only "
+                "contributor (serve its own cell at cluster granularity)"
+            ),
+            contributors=contributors,
+            mirror_n=mirror_n,
+            exclusions=tuple(exclusions),
+            **passthrough,
+        )
+
+    re = dersimonian_laird(contributors)
+    conc = concentration(contributors)
+    het = heterogeneity(contributors, re)
+    prior = prior_strength(contributors, re)
+    n_eff = effective_n(contributors, re)
+    tier = tier_for_sample(round(n_eff))
+
+    pool_n = sum(m.n for m in contributors)
+    intra_n = sum(m.n for m in contributors if m.intra_cluster)
+    intra_share = (intra_n + mirror_n) / (pool_n + mirror_n)
+
+    provenance: list[str] = [_CALIBRATION_AUDIT_NOTE]
+    if het.note:
+        provenance.append(het.note)
+    if not conc.passed and conc.label:
+        provenance.append(f"served with concentration label: {conc.label}")
+
+    if het.band == "refused":
+        reasons = [f"heterogeneity gate: {het.reason}"]
+        if not conc.passed:
+            reasons.append(
+                f"concentration gate also fails: {conc.label} "
+                f"(m_eff {conc.m_eff:.2f}, top share {conc.top_share:.2f})"
+            )
+        return PooledCell(
+            subject=subject,
+            cluster_id=cluster_id,
+            pooled_p=None,
+            ci_low=None,
+            ci_high=None,
+            n_eff=n_eff,
+            tier=tier,
+            concentration=conc,
+            heterogeneity=het,
+            prior=prior,
+            intra_cluster_n=intra_n,
+            intra_cluster_share=intra_share,
+            mirror_n=mirror_n,
+            refused_reason="; ".join(reasons),
+            member_split=_split_of(contributors),
+            exclusions=tuple(exclusions),
+            provenance=tuple(provenance),
+            window_note=window_note,
+            current_regime_share=current_regime_share,
+        )
+
+    variance = _pooled_variance(contributors, re.tau2)
+    half_width = _Z_95 * math.sqrt(variance)
+    pooled_p = _logistic(re.logit_mean)
+    ci_low = _logistic(re.logit_mean - half_width)
+    ci_high = _logistic(re.logit_mean + half_width)
+
+    return PooledCell(
+        subject=subject,
+        cluster_id=cluster_id,
+        pooled_p=pooled_p,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        n_eff=n_eff,
+        tier=tier,
+        concentration=conc,
+        heterogeneity=het,
+        prior=prior,
+        intra_cluster_n=intra_n,
+        intra_cluster_share=intra_share,
+        mirror_n=mirror_n,
+        refused_reason=None,
+        member_split=_split_of(contributors),
+        exclusions=tuple(exclusions),
+        provenance=tuple(provenance),
+        window_note=window_note,
+        current_regime_share=current_regime_share,
     )
