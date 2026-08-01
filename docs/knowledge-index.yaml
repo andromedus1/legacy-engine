@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-01T02:50:56Z'
+generated_at: '2026-08-01T17:05:20Z'
 generated_from: frontmatter
 total_docs: 31
 documents:
@@ -8,7 +8,7 @@ documents:
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-07-31'
+  updated: '2026-08-01'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four
@@ -17,7 +17,7 @@ documents:
   title: Best Deck / Best Call agency ranking — refresh runbook
   type: design
   kind: planning
-  updated: '2026-07-28'
+  updated: '2026-08-01'
   status: active
   consumer_hint: Read before refreshing or interpreting the Best Deck / Best Call
     agency ranking page — the one-command refresh runbook, the metric definitions,
