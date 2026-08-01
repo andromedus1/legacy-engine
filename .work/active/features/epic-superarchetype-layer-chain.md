@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-chain
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-aggregation, feature-multi-split-matrix]
@@ -350,3 +350,81 @@ reported in notes, never tests.
   of registry types; runtime code takes plain dicts and `MemberTally`s. A test asserts
   `"duckdb" not in sys.modules` after a fresh chain-only import (same discipline as
   `test_no_rounds.py`).
+
+## Implementation notes (2026-08-01, branch impl/superarchetype-chain)
+
+Shipped as designed (Option A), one commit per unit. Deviation from the pre-mortem: the
+DB-freeness check became an AST walk over `chain.py`'s import nodes (runtime `duckdb`/`registry`
+imports forbidden, `TYPE_CHECKING` exempt) rather than a `sys.modules` probe — importing any
+submodule executes the package `__init__`, which legitimately pulls duckdb via `registry`.
+
+**What landed where**
+
+- `analytics/superarchetype/chain.py` (new, DB-free): `ClusterView`/`cluster_view` (contributors =
+  provenance `derived`/`curated`; assignees receive), pairwise-window tally drawing
+  (`draw_pool_tallies`, `draw_row_tallies`, `draw_family_tallies`, `draw_cluster_pair_tallies` —
+  split parents partition-summed over camps), `family_profile`, `rung_prior` (rung 1 LOO by member
+  exclusion, rung 2 subject-side DL over count-pooled opponent-family tallies; admissibility =
+  `pooled_p` present AND concentration passed AND het band in {free, labelled}),
+  `resolve_ladder` + `LadderEntry` (closed kinds `measured|pooled|imputed|none`),
+  `registry_audit_lines`, `FAMILY_FIRST_KINDS` (measured; see below).
+- `analytics/matchup.py`: `build_cell(..., prior_strength=SHRINK_STRENGTH)` (additive);
+  `build_multi_split_adaptive(..., superarchetypes=None)` — rung resolution on the marginal
+  branch, cross-era precedence with the (currently empty) family-first exception wired, one
+  regime-start bucket scan for freshness shares, post-assembly
+  `cluster_cells`/`imputed_cells`/`ladder` maps on `AdaptiveMultiSplitMatrix` (additive
+  default-empty fields), registry `//` lines appended to `audit_preamble`.
+- `analytics/eras/consume.py`: `EraHorizon.attribution_kind` (additive, from the winning
+  boundary's stored attribution; ban/release/unattributed).
+- `advisory/window.py`: `build_multi_split_inputs(..., superarchetypes=None)` passthrough
+  (adaptive mode); uniform/full + registry emits
+  `// superarchetype: layer requires adaptive mode — skipped (uniform window)`.
+- `scripts/loo_ladder_harness.py`: the reproducible ladder-order measurement (read-only).
+
+**The LOO harness verdict (the decision this feature owns) — ANCHOR-FIRST everywhere;
+`FAMILY_FIRST_KINDS = frozenset()`.** Preregistered floors (truth n>=20, sibling pool n>=40,
+>=10 cells/kind to decide), real corpus, serving registry (window 2026-05-11): ban 1 cell,
+release 4, unattributed 0 — every kind too thin, anchor kept by rule. Sensitivity at the serving
+floors (truth n>=15, pool n>=25 = `_IMPUTE_MIN_POOL`): 14 cells, still <10 per kind, and the
+ANCHOR also wins outright — composition (ban+release) MAE 0.1138 (anchor) vs 0.1282 (family),
+family 4/10; unattributed 0.1578 vs 0.3119, family 0/4. Family DID beat the marginal (0.1282 vs
+0.1359 composition), consistent with the epic's 2026-08-01 probe — but the own-past anchor is the
+stronger incumbent for young-era cells on today's corpus. The hypothesis (family-first for
+composition-disturbed) is NOT supported; the mechanism stays wired so a future re-measure is a
+one-line recalibration. Reproduce: `.venv/bin/python scripts/loo_ladder_harness.py`.
+
+**Byte-identical proof**: sha-pinned full-output golden (`test_matchup_superarchetype_golden.py`,
+captured on the untouched builder BEFORE any mutation, commit bfc7f4f) + cell-for-cell equality
+tests for `superarchetypes=None` and empty-registry builds + the untouched pre-existing parity
+and CLI-golden suites. Full suite after all units: 3507 passed, 1 skipped (pre-existing skip).
+
+**Real-corpus spot check (read-only, serving config: staged parents, min_row_share=0.001)**:
+144 rung-labeled cells and the changed-cell set equals the rung-labeled set exactly; 557 granted
+imputations (all from sa-003, the only family clearing the license — 5 evaluable columns, 1
+divergent (0.20 <= 0.25), tau_profile 0.269 widening every imputed CI by ±0.13); ladder kinds
+none 15956 / imputed 557 / pooled 124. Example: `Ad Nauseam Tendrils [Preordain]` vs Death &
+Taxes imputes p=0.358 (pool n=67, 7 sibs, ci 0.12-0.61, regime share 0.39, window mix named); an
+Aluren-family assignee (Bant Infect) gets its family pool served (p=0.640, n_eff 4, regime share
+0.0 — honestly mutable) and a NAMED intra-family imputation refusal vs Aluren. The audit fires:
+the serving registry (2026-05-11) now predates the regime start 2026-06-29 —
+`⚠ registry window ... stale taxonomy (window mismatch)` — a real operational finding for the
+next `superarchetype run`. At the OLD default `min_row_share=0.02` the layer engages almost
+nowhere (16 opponents; every family a comparability desert) — the epic's fillable-cell prize
+lives at the serving floor, worth knowing for -best-call-fallback.
+
+**Named narrowings / gaps (deliberate, from the design)**
+
+1. The LCO branch keeps its existing interior anchor (`marginals[base]`); the fully nested
+   `LCO' -> superarchetype` form is deferred (second-order on well-fed parent pools). Camp cells
+   in windows where the camp's parent is absent fall to the marginal branch and CAN take the rung
+   (observed on the real corpus) — consistent with the existing per-window fallback semantics.
+2. Consumption-side per-subject churn flag is not reconstructible from the persisted registry
+   (no previous-run diff at read time) — run-side audit concern.
+3. Rung 2's estimator orientation: DL across subject-family members, each count-pooled across the
+   opponent family (leave-S-out/leave-O-out at draw time); gates therefore measure subject-side
+   sibling disagreement — the axis the imputation probe validated. Documented at the definition
+   site.
+
+**Ruff**: `ruff check src/` (advisory in CI) — changed files carry zero F-class findings; the net
+repo delta is +8, all UP037 quoted-annotation style matching `matchup.py`'s existing convention
+(325 pre-existing repo-wide).
