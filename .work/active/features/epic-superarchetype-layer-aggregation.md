@@ -372,3 +372,51 @@ falsely-green result earlier today). Property tests cover the monotonicity claim
   for `-best-call-fallback` rather than loosening thresholds.
 - **Calibration drift.** Four constants are project calibrations, not sourced. All module-level, named,
   and commented as such; the audit output must say so.
+
+### Unit 7 (ADDED 2026-08-01): profile-coherence imputation license
+**File**: `src/legacy_engine/analytics/superarchetype/aggregate.py`
+Implements the epic's subject-axis licensed-imputation addendum (see epic body — premise verified:
+LOO MAE 0.075 family vs 0.107 marginal, 15/21 wins; 189/681 thin definer cells fillable).
+```python
+_LICENSE_MIN_COLS = 3       # calibration: opponent columns with >=2 members at n>=12
+_LICENSE_SIG_MAX_FRAC = 0.25  # calibration: max share of significantly-divergent columns
+_IMPUTE_MIN_POOL = 25       # calibration: pooled sibling n floor to impute a cell
+
+@dataclass(frozen=True)
+class ImputationLicense:
+    cluster_id: str
+    cols_evaluated: int
+    sig_divergent_cols: int
+    tau_profile: float | None   # dispersion summary across evaluable columns
+    granted: bool
+    reason: str                 # named, always — "insufficient shared columns (1 < 3)" etc.
+
+def imputation_license(cluster_id: str, profile: Mapping[str, Sequence[MemberTally]]) -> ImputationLicense: ...
+
+@dataclass(frozen=True)
+class ImputedCell:
+    subject: str
+    opponent: str
+    p: float | None             # None => refused; see reason
+    ci_low: float | None
+    ci_high: float | None       # widened by tau_profile — never a raw pooled CI
+    pool_n: int
+    siblings: tuple[str, ...]
+    license: ImputationLicense
+    reason: str | None          # named refusal: local-veto / intra-family / pool too thin / no license
+
+def impute_cell(subject: str, opponent: str, license: ImputationLicense,
+                sibling_tallies: Sequence[MemberTally]) -> ImputedCell: ...
+```
+**Acceptance**
+- [ ] A sa-024-shaped profile (>=10 evaluable columns, median spread ~0.05, zero significant) → granted.
+- [ ] A comparability-desert profile (<_LICENSE_MIN_COLS evaluable columns) → NOT granted, named reason;
+      impute_cell then refuses with "no license" (the family-range display is the fallback, owned by
+      -best-call-fallback).
+- [ ] LOCAL VETO: a column whose members measurably diverge (chi2 p<.05 with >=2 members n>=12) refuses
+      imputation for that cell even under a granted license, named reason.
+- [ ] Intra-family target (opponent in subject's own cluster) → refused, named reason.
+- [ ] Imputed CI is strictly wider than the raw pooled CI whenever tau_profile > 0 (assert the widening).
+- [ ] p never appears without the license attached; no NaN/inf escapes.
+- [ ] Non-vacuity: mutate _LICENSE_MIN_COLS / the veto predicate BY SYMBOL NAME and confirm the matching
+      tests go red.

@@ -125,3 +125,11 @@ From the epic's `## Strategic decisions` and `## Design decisions`. Fixed inputs
   `effective_label`), `src/legacy_engine/advisory/window.py`,
   `.work/active/features/feature-multi-split-matrix.md` (its `## Architectural choice` and Units
   2-4 — the seams this feature extends).
+
+## Inherited addendum (2026-08-01): subject-axis imputation consumption
+The epic's licensed-imputation decision (see epic body) lands partly here: for an EMPTY or
+sub-display archetype cell (S vs O), consume `aggregate.impute_cell` — sibling tallies drawn
+era-windowed through the multi-split machinery (never raw full-corpus) — and emit it as a distinct
+cell kind (`imputed`), NEVER blended into measured cells and never a prior-only ghost. The existing
+prior rungs stay as designed; this ADDS a displayable, licensed value for cells the rungs alone
+would leave hidden. prior_source/provenance must name the family, sibling count, pool n, and license.
