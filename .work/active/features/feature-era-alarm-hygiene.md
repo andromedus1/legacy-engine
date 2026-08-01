@@ -1,7 +1,7 @@
 ---
 id: feature-era-alarm-hygiene
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: null
 depends_on: []
@@ -592,3 +592,37 @@ None — single-stride. Both fixes touch two files (`attribution.py`, `run.py`) 
 shared seam (three new public functions), no parallelizable chunks, no cross-session sizing
 concern, and one homogeneous test surface (pytest, hermetic DB/fixtures) — none of Phase 7's
 spawn criteria hold.
+
+## Implementation notes
+
+Implemented exactly to design — no deviations from the architectural choice or unit signatures.
+
+**Files touched**: `src/legacy_engine/analytics/eras/attribution.py`,
+`src/legacy_engine/analytics/eras/run.py`, `tests/analytics/eras/test_attribution.py`,
+`tests/analytics/eras/test_run.py`, `tests/test_cli_eras.py`.
+
+**"No changes needed to cli.py/store.py/window.py/consume.py" — verified true.** Grepped and
+read every alarm-note call site before writing code: `cli.py:6989-6991` (`eras run`) and
+`cli.py:7103-7104` (`eras explain`) both do `f"// ⚠ {entity}: {result.alarms[entity].note}"` /
+`f"\n// ⚠ {r.alarm_note}"` — plain string interpolation. `store.py` persists only
+`alarm_fired`/`alarm_p_change`/`alarm_note` (no `kind`/`card` columns exist or were added — this
+was a deliberate scope cut, Option 3 above). `consume.py:123,134` read `alarm_note` straight into
+`HorizonMeta.alarm`. `advisory/window.py:168-169` formats `h.alarm` as a plain string in
+`f"// ⚠ {a}: {h.alarm}"`. None of the four files were touched; all four were run through the full
+test suite below to prove the claim, not just asserted by inspection.
+
+**Test evidence**:
+- `tests/analytics/eras/test_attribution.py`: 18 pre-existing + 14 new = 32 passed.
+- `tests/analytics/eras/test_run.py`: 25 pre-existing + 6 new = 31 passed.
+- `tests/test_cli_eras.py`: 15 pre-existing + 2 new = 17 passed.
+- `tests/analytics/eras/test_store.py` + `tests/analytics/eras/test_consume.py` (AlarmFlag
+  backward-compat check): 25 passed, unmodified.
+- Full suite: `3027 passed, 1 skipped, 1 xfailed` (skip/xfail pre-existing, unrelated to this
+  feature).
+- `ruff check src/`: 23 pre-existing errors (none in `attribution.py`/`run.py`, confirmed by
+  diffing against the pre-change baseline) — `attribution.py`/`run.py` individually clean.
+
+**Empirical grounding note**: this feature's implementation was carried out against
+`origin/main` at PR #62/#63 (catalog-lint, sweep-polish). The design doc for this feature had
+been drafted on a locally-diverged `main` that never got pushed — see the commit note on this
+same commit for the branch-divergence finding surfaced during implementation.
