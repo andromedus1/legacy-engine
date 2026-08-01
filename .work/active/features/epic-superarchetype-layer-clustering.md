@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-clustering
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: epic-superarchetype-layer
 depends_on: []
@@ -476,3 +476,121 @@ recorded in `## Implementation notes`, not asserted in tests — the corpus move
    entries own ids outright — the fix for a wrong id is a curated entry, not an algorithm change.
 5. **Someone later "improves" coverage by tuning the cut.** The whole point of the no-`rounds`
    enforcement. If a future change adds a `rounds` read to this package, `test_no_rounds.py` fails.
+
+## Implementation notes
+
+Delivered 2026-07-31. Files: `src/legacy_engine/analytics/superarchetype/{__init__,cluster,registry}.py`,
+`src/legacy_engine/data/superarchetypes/legacy.json` (curated SSOT, ships empty),
+two `config.py` path constants, the `superarchetype run|list|explain` group in `cli.py`,
+`tests/analytics/superarchetype/{conftest,test_cluster,test_registry,test_no_rounds}.py`,
+`tests/test_cli_superarchetype.py`. `docs/SPEC.md` and `docs/ARCHITECTURE.md` rolled forward where
+the shipped cut rule differs from what epic-design anticipated (see "Cut selection" below).
+
+### Real-corpus validation
+
+Run read-only against a **copy** of `data/legacy.duckdb` (the real corpus file was never opened for
+write) over the brief's own window `[2026-05-11, 2026-07-30]`, seed 0, `n_boot=200`.
+
+**1. Aluren + Show and Tell — YES, recovered unprompted.** Cluster `sa-001`,
+**AU = 0.972, BP@1.0 = 0.92**, the strongest-supported non-trivial branch after the Izzet and
+Tron pairs. The brief's motivating case reproduces exactly, with no curated entry and nothing in the
+pipeline that knows the pair exists. Five long-tail archetypes (`Creative combo`, `High Tide`,
+`Hypergenesis`, `Bant Infect`, `5c Cascade Rhinos`) assign into the same family, which reads
+correctly as "cheat something enormous into play".
+
+**2. Clusters at the AU cut: K = 20** over 30 definers — **5 AU-supported multi-definer branches**
+plus **15 `au-unsupported singleton`s**. The five supported branches, with their measured support:
+
+| Branch | AU | BP@1.0 |
+|---|---|---|
+| Izzet Delver + Izzet Midrange | 0.996 | 0.99 |
+| Mystic Forge Combo + Tron | 0.993 | 0.98 |
+| Azorius Midrange + Azorius Stoneblade | 0.974 | 0.94 |
+| **Aluren + Show and Tell** | **0.972** | **0.92** |
+| Dimir Delver + Dimir Midrange + Dimir Tempo + Doomsday + Grixis Midrange + Grixis Reanimator + TES | 0.959 | 0.39 |
+
+**3. Definers vs assignees and field coverage.** 183 archetype labels over 5,226 in-window decks.
+**30 definers covering 83.8%** of the field (the brief measured 83.7%); **152 assignees**, so
+**182 archetypes and 98.5% of the field are placed** (the brief measured 182 / 98.3%). Exactly
+**one** archetype is unassigned — the literal label `Unknown`, at 2 core cards, refused by the
+assignee floor with a named reason. The derived 14-card staple list matches the brief's verbatim:
+Brainstorm, Daze, Flooded Strand, Flow State, Force of Will, Island, Lotus Petal, Misty Rainforest,
+Polluted Delta, Ponder, Scalding Tarn, Thoughtseize, Underground Sea, Wasteland. Co-membership
+stability **0.944** (>= 0.90); cophenetic correlation **0.916**, matching the brief exactly.
+
+**4. The "plays blue" mega-cluster IS reproducible with hard staple removal disabled.** At the
+brief's own height cut of 0.93, staples left in fuse **14 of 30 definers** into one cluster —
+Aluren, Azorius Midrange, Azorius Stoneblade, Cephalid breakfast, Dimir Delver, Dimir Midrange,
+Dimir Tempo, Doomsday, Grixis Midrange, Izzet Delver, Izzet Midrange, Jeskai Midrange, Show and
+Tell, White Beanstalk. The brief's central justification is confirmed, and its "14 of 30" figure is
+exact. Through the full shipped pipeline (AU cut applied) with staples left in it is worse still:
+**K = 2, with 24 of 30 definers in one cluster.** With hard removal the largest cluster at the same
+height cut is **7**. Note also that cophenetic correlation *rewards* the wrong answer — 0.945
+without stripping vs 0.916 with — which is why the module treats it as a change tripwire only,
+never an arbiter.
+
+### Cut selection — the one place the shipped rule differs from the brief's wording
+
+The brief says "the deepest height where each retained branch clears AU > 0.95". Measured, the
+single-horizontal-cut reading does not work on this corpus: it is dominated by the weakest branch at
+that height and returns **K = 25** (cut just below the first unsupported merge) or **K = 1** (the
+root, which every bootstrap replicate reproduces by construction). Both sit outside the brief's own
+K≈6-12 sanity band. Shipped instead as pvclust's `pvpick` semantics — descend from the root, retain
+the largest eligible branch on each path, root excluded from candidacy — which is what "every
+retained branch clears AU" means operationally, since retained branches need not share a height.
+
+A second, larger discovery: **AU alone is not safe here.** Near-root branches show BP ≈ 0.02-0.15
+that is essentially *flat across all ten scales*; with no scale signal the multiscale fit returns
+curvature `d ≈ 0` and AU collapses to `Phi(v)`, handing 0.93-0.97 to branches observed in under a
+tenth of resamples. Left unguarded that reassembles the mega-cluster the staple strip exists to
+prevent — the failure arriving through the back door. Shipped guard: `_AU_MIN_BP = 0.30`, a raw
+bootstrap-probability floor at scale 1.0 required in addition to the AU cut. A related fix inside
+the fit itself: below `_MIN_FIT_POINTS = 3` usable scales the two-parameter model is an
+interpolation dressed as an extrapolation (it scored AU 0.70 for a branch present in ~99% of every
+resample), so the branch falls back to its mean BP.
+
+Both are named module-level constants with the rationale at the definition site and both are CLI
+flags, per the epic's provenance discipline.
+
+### The honest read on the taxonomy's shape
+
+**The derived layer is markedly more conservative than the brief's K≈8 operating point.** Only 5
+branches clear the cut; 15 of 30 definers stay singletons. That is the evidence, not a bug: the
+branches AU refuses are *precisely* the ones the brief itself flagged as chassis-driven artifacts
+(Cephalid breakfast with the fair Azorius decks at AU 0.72, Red Stompy with Show and Tell at 0.79,
+Grixis Reanimator with TES at 0.88, Golgari Landfall + Smallpox at 0.63). AU declining to assert
+those is the method working. Red Stompy in particular is a singleton here rather than mis-fused into
+the combo family, which is strictly better than the derived result the brief reports.
+
+The consequence for the epic is real and should reach `-aggregation` planning: the pooling benefit
+from the *derived* layer alone is narrower than the brief's coverage table projects, because that
+table was computed at a fixed K=8 height cut rather than at the AU cut. Two levers exist and both
+are one line: lower `--au-min` / `--min-bp`, or add curated clusters. The shipped curated registry
+is deliberately empty so the derived behaviour is observable before anyone leans on overrides. One
+known override candidate is already visible: `sa-007` pools Doomsday and TES with the fair Dimir
+decks at BP 0.39, which is the weakest supported branch and the least defensible family in the run.
+
+### The no-`rounds` property
+
+Enforced three ways and tested (`tests/analytics/superarchetype/test_no_rounds.py`, 8 tests):
+a **runtime SQL spy** proxy connection records every statement executed during a full
+`run_superarchetypes` pass against a tmp DuckDB carrying a *populated* `rounds` table and asserts
+none names `rounds`/`match_results`; a **source tripwire** scans both modules' executable source
+(comments, docstrings and — the bug this caught — Python 3.12+ f-string parts stripped via
+`tokenize`) for outcome tokens; and a **type check** asserts `ArchetypeDeck` carries exactly
+`{archetype, key, cards}` and that no dataclass in the package exposes an outcome field. Each
+enforcement has a companion test proving it would actually fire.
+
+Deliberate related deviation: the `superarchetype` CLI group does **not** use
+`resolve_advisory_window` (advisory-window-resolution-block), because that block's thin-regime
+degrade counts `rounds` — the taxonomy must not be a function of match outcomes at any point,
+including its window choice. Documented at the group definition.
+
+### Verification
+
+Full suite **3281 passed, 1 skipped** (89 of them new). `ruff check` on the new package and
+`config.py`: **clean**. `cli.py` is a pure 259-line insertion at its pre-existing finding count
+(ruff's `--fix` initially rewrote 39 unrelated pre-existing lines there; that churn was reverted and
+the block re-applied). Determinism is pinned by unit tests and confirmed on the real corpus: two
+seeded runs return an identical `ClusterSolution`, and two CLI `--dry-run` invocations produce
+byte-identical output.
