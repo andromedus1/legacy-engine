@@ -1,7 +1,7 @@
 ---
 id: feature-era-alarm-hygiene
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: null
 depends_on: []
