@@ -16,6 +16,7 @@ from legacy_engine.analytics.superarchetype.aggregate import (
     MemberTally,
     _logit_with_correction,
     dersimonian_laird,
+    effective_n,
 )
 
 
@@ -122,3 +123,79 @@ class TestDersimonianLaird:
         re = dersimonian_laird(headline_pair)
         logits = [_logit_with_correction(m.wins, m.n)[0] for m in headline_pair]
         assert min(logits) < re.logit_mean < max(logits)
+
+
+class TestEffectiveN:
+    """Pins the REAL n_eff behaviour, not the brief's false identity (adversarial-read finding 2)."""
+
+    def test_tau2_zero_and_equal_rates_returns_the_full_pooled_sample(self, make_tally):
+        # Both members at 50%: tau2 = 0 and the clamp returns exactly Sum(n_k) = 30.
+        members = [make_tally("A", wins=5, n=10), make_tally("B", wins=10, n=20)]
+        re = dersimonian_laird(members)
+        assert re.tau2 == 0.0
+        assert effective_n(members, re) == pytest.approx(30.0)
+
+    def test_tau2_zero_and_equal_rates_off_half_still_clamps_to_sum(self, make_tally):
+        # Equal rates away from 0.5 (both 20%): corrected logits differ slightly but Q << df,
+        # tau2 = 0, and the correction's precision inflation still overshoots -> clamp to 30.
+        members = [make_tally("A", wins=2, n=10), make_tally("B", wins=4, n=20)]
+        re = dersimonian_laird(members)
+        assert re.tau2 == 0.0
+        assert members[0].p_hat == members[1].p_hat
+        assert effective_n(members, re) == pytest.approx(30.0)
+
+    def test_tau2_zero_with_differing_rates_sits_strictly_below_sum(self, make_tally):
+        # THE identity the brief asserts and the adversarial read refutes: tau2 = 0 does NOT
+        # imply n_eff = Sum(n_k). Four members whose rates differ (7.5% vs 15%) inside sampling
+        # noise (Q ~ 2.0 < df = 3, so DL clamps tau2 to zero) — concavity of p(1-p) plus the
+        # inverse-variance weighting of p_bar pulls n_eff strictly below Sum(n) = 160.
+        members = [
+            make_tally("A", wins=3, n=40),
+            make_tally("B", wins=3, n=40),
+            make_tally("C", wins=6, n=40),
+            make_tally("D", wins=6, n=40),
+        ]
+        re = dersimonian_laird(members)
+        assert re.tau2 == 0.0
+        assert len({m.p_hat for m in members}) > 1
+        n_eff = effective_n(members, re)
+        assert n_eff < 160.0
+        assert n_eff == pytest.approx(156.5, abs=0.5)
+
+    def test_headline_fixture_collapses_far_below_raw_pooled_n(self, headline_pair):
+        # Brief §6.3: at I^2 = 0.89 the display gate refuses on n_eff before the gates are even
+        # consulted — the raw pooled n = 42 becomes ~3 effective matches.
+        re = dersimonian_laird(headline_pair)
+        n_eff = effective_n(headline_pair, re)
+        assert n_eff == pytest.approx(3.3, abs=0.1)
+
+    def test_n_eff_is_non_increasing_in_tau2(self, headline_pair):
+        import dataclasses
+
+        re = dersimonian_laird(headline_pair)
+        values = [
+            effective_n(headline_pair, dataclasses.replace(re, tau2=tau2))
+            for tau2 in (0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
+        ]
+        assert all(a >= b for a, b in pairwise(values))
+        assert values[0] > values[-1]
+
+    @pytest.mark.parametrize(
+        "tallies",
+        [
+            [("A", 0, 3), ("B", 3, 3)],
+            [("A", 4, 13), ("B", 24, 29)],
+            [("A", 5, 10), ("B", 10, 20), ("C", 1, 9)],
+            [("A", 1, 2), ("B", 2, 3)],
+            [("A", 30, 60), ("B", 45, 90), ("C", 10, 20), ("D", 2, 40)],
+        ],
+    )
+    def test_n_eff_never_exceeds_raw_pooled_n(self, make_tally, tallies):
+        members = [make_tally(a, wins=w, n=n) for a, w, n in tallies]
+        re = dersimonian_laird(members)
+        assert effective_n(members, re) <= sum(m.n for m in members)
+
+    def test_empty_input_fails_fast(self, headline_pair):
+        re = dersimonian_laird(headline_pair)
+        with pytest.raises(ValueError, match="no member tallies"):
+            effective_n([], re)

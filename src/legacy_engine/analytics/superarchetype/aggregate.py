@@ -49,6 +49,7 @@ __all__ = [
     "MemberTally",
     "RandomEffects",
     "dersimonian_laird",
+    "effective_n",
 ]
 
 
@@ -198,3 +199,54 @@ def dersimonian_laird(members: Sequence[MemberTally]) -> RandomEffects:
     logit_mean = sum(w * y for (y, _v), w in zip(stats, w_random, strict=True)) / sum_w_random
     weights = tuple(w / sum_w_random for w in w_random)
     return RandomEffects(logit_mean=logit_mean, tau2=tau2, q=q, df=df, i2=i2, weights=weights)
+
+
+# ---------------------------------------------------------------------------
+# Unit 2 — n_eff: the only integration seam into the tier system (pure)
+# ---------------------------------------------------------------------------
+
+
+def _pooled_variance(members: Sequence[MemberTally], tau2: float) -> float:
+    """Random-effects variance of the pooled logit: ``1 / Sum(1/(v_k + tau^2))``.
+
+    Strictly positive for any non-empty member list (every ``v_k > 0`` by the continuity
+    correction, ``tau^2 >= 0``), so no division-by-zero branch exists downstream.
+    """
+    if not members:
+        raise ValueError("_pooled_variance: no member tallies supplied")
+    return 1.0 / sum(
+        1.0 / (_logit_with_correction(m.wins, m.n)[1] + tau2) for m in members
+    )
+
+
+def effective_n(members: Sequence[MemberTally], re: RandomEffects) -> float:
+    """The effective sample behind the pooled cell: ``1/(Var(theta_hat) * p_bar(1-p_bar))``,
+    clamped to ``<= Sum(n_k)``.
+
+    The construction is the brief author's (§4.4), not a sourced formula, and its REAL behaviour —
+    pinned by tests, per the adversarial read — is:
+
+    - ``tau^2 = 0`` with all member rates equal: the continuity correction inflates every member's
+      precision slightly above ``n_k * p(1-p)``, so the raw value overshoots and the clamp returns
+      exactly ``Sum(n_k)`` — the honest full pooled sample.
+    - ``tau^2 = 0`` with member rates differing: ``n_eff`` can sit STRICTLY below ``Sum(n_k)``
+      (concavity of ``p(1-p)`` plus the inverse-variance weighting of ``p_bar``); the brief's
+      "returns Sum(n_k) at tau^2 = 0" is false as written and is deliberately not asserted.
+    - ``n_eff`` is non-increasing in ``tau^2`` and never exceeds ``Sum(n_k)`` — the error
+      direction is always the safe one (never more generous than the raw pooled count).
+
+    Feed the result to the existing ``tier_for_sample`` / display gate — no new gate machinery,
+    just a more honest argument.
+    """
+    if not members:
+        raise ValueError("effective_n: no member tallies supplied")
+    variance = _pooled_variance(members, re.tau2)
+    p_bar = _logistic(re.logit_mean)
+    pq = p_bar * (1.0 - p_bar)
+    total_n = float(sum(m.n for m in members))
+    if pq <= 0.0:
+        # Unreachable for real tallies (a finite logit keeps p_bar strictly inside (0, 1); pq can
+        # only underflow to 0.0 at |logit| > ~745, i.e. astronomically large n). Named fallback so
+        # no input can produce a ZeroDivisionError or an inf escaping into a cell.
+        return total_n
+    return min(1.0 / (variance * pq), total_n)
