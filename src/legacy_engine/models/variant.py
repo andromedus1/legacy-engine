@@ -75,6 +75,12 @@ class DiscoveredCamp(LegacyEngineModel):
     # staged JSON record (no such keys) loads unchanged.
     median_date: str | None = None
     pct_current: float | None = None
+    # Frozen flex-band centroid — the mean L2-normalized raw-count vector over this camp's member
+    # decks, in the exact representation ``nearest_camp`` projects candidate decks into
+    # (analytics/discovery.py::project_flex_vector / camp_centroid). None on records staged
+    # before this field existed: incremental assignment declines honestly for that parent until
+    # its next `discover run` repopulates it, rather than comparing against a fabricated position.
+    centroid: list[float] | None = None
 
 
 class DiscoveredSplitRecord(LegacyEngineModel):
@@ -96,6 +102,11 @@ class DiscoveredSplitRecord(LegacyEngineModel):
     # `discover run`/`discover list` as an honest-degrade warning, never gating promotion.
     temporal_mixing: bool = False
     temporal_note: str | None = None
+    # The frozen flex-band vocabulary this split clustered on (FeatureMatrix.cards at discovery
+    # time) — the fixed column space every ``DiscoveredCamp.centroid`` lives in and nearest-camp
+    # assignment projects new decks into. Empty on records staged before this field existed
+    # (honest-degrade, see DiscoveredCamp.centroid).
+    flex_cards: list[str] = Field(default_factory=list)
 
 
 class DiscoveredRegistry(LegacyEngineModel):

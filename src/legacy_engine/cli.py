@@ -6889,11 +6889,31 @@ def discover_promote(
     default=None,
     help="Staging registry to read (defaults to data/variants/discovered.json).",
 )
+@click.option(
+    "--min-similarity",
+    type=float,
+    default=None,
+    show_default="0.35",
+    help="Cosine-similarity floor (raw L2-normalized flex-band vectors) for nearest-camp "
+         "incremental assignment; below this a fresh deck stays honestly unlabeled. Defaults to "
+         "analytics.discovery.DEFAULT_MIN_SIMILARITY (0.35), resolved in-body — importing it "
+         "here would pull numpy into every CLI invocation. The shown value is pinned to the "
+         "constant by test_discover_cli.py.",
+)
+@click.option(
+    "--no-incremental",
+    is_flag=True,
+    default=False,
+    help="Skip nearest-camp incremental assignment for post-staging decks — membership "
+         "labeling only.",
+)
 @_verbose
 def discover_apply(
     archetype: str,
     db: str | None,
     discovered_path: str | None,
+    min_similarity: float | None,
+    no_incremental: bool,
     verbose: bool,
 ) -> None:
     """Apply a staged (unpromoted) candidate split's camps directly onto decks.variant.
@@ -6905,15 +6925,28 @@ def discover_apply(
     '<ARCHETYPE> [unlabeled]' via `report matchups --split-variant`. Does NOT touch the curated
     registry and does NOT promote the staged record — it stays status: candidate.
 
+    Decks the staged split's membership doesn't cover (ingested after it was staged, or noise
+    at clustering time) are then assigned to their nearest camp centroid, tracked with
+    assigned_by=incremental provenance and superseded by the next PASSing discovery run. Pass
+    --no-incremental for membership labeling only.
+
     Example: legacy-engine discover apply --archetype "Doomsday"
     """
     _setup_logging(verbose)
-    from legacy_engine.archetype.discovered import apply_split, load_discovered
+    from legacy_engine.analytics.discovery import DEFAULT_MIN_SIMILARITY
+    from legacy_engine.archetype.discovered import (
+        apply_split,
+        assign_incremental,
+        load_discovered,
+    )
     from legacy_engine.config import DISCOVERED_VARIANTS_PATH
     from legacy_engine.ingestion import store
 
     disc_path = discovered_path or str(DISCOVERED_VARIANTS_PATH)
+    if min_similarity is None:
+        min_similarity = DEFAULT_MIN_SIMILARITY
 
+    incremental = None
     con = store.connect(db) if db else store.connect()
     try:
         try:
@@ -6921,6 +6954,10 @@ def discover_apply(
             split = next((s for s in disc.splits if s.parent == archetype), None)
             camp_names = ", ".join(c.name for c in split.camps) if split is not None else None
             n_labeled = apply_split(con, archetype, discovered_path=disc_path)
+            if not no_incremental:
+                incremental = assign_incremental(
+                    con, archetype, discovered_path=disc_path, min_similarity=min_similarity,
+                )
         except (ValueError, FileNotFoundError) as exc:
             raise click.ClickException(str(exc)) from exc
     finally:
@@ -6933,6 +6970,23 @@ def discover_apply(
         "// STAGED CANDIDATE labels applied to decks.variant — speculative provenance; "
         "not promoted to the curated registry"
     )
+
+    if incremental is not None:
+        if incremental.degraded:
+            click.echo(f"// incremental assignment skipped: {incremental.note}")
+        else:
+            if incremental.n_cleared:
+                click.echo(
+                    f"// cleared {incremental.n_cleared} stale incremental assignment(s) from a "
+                    "prior staged generation"
+                )
+            click.echo(
+                f"// {incremental.n_assigned} deck(s) incrementally assigned "
+                f"(assigned_by=incremental, min_similarity={min_similarity}); "
+                f"{incremental.n_declined} candidate(s) left unlabeled below threshold"
+            )
+            for camp_name, n in incremental.per_camp.items():
+                click.echo(f"//   camp {camp_name}: +{n}")
 
 
 # ── eras: stable-era detection, persistence, attribution, drift alarm ──

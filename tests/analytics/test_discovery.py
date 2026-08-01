@@ -16,8 +16,11 @@ from legacy_engine.analytics.discovery import (
     Camp,
     DeckVector,
     build_feature_matrix,
+    camp_centroid,
     cluster_and_validate,
     discover_subarchetypes,
+    nearest_camp,
+    project_flex_vector,
     reduce_dims,
 )
 from legacy_engine.confidence import tier_for_sample
@@ -527,6 +530,215 @@ class TestClusterAndValidateGateC:
         camp = Camp(name="X", member_keys=[], signature_cards=[], n=40, tier="evolving")
         assert camp.median_date is None
         assert camp.pct_current is None
+        assert camp.centroid is None
+
+
+# ---------------------------------------------------------------------------
+# Frozen flex-band projection + nearest-camp assignment
+# ---------------------------------------------------------------------------
+
+class TestProjectFlexVector:
+    def test_overlapping_deck_projects_to_unit_norm(self):
+        vec = project_flex_vector({"A": 4, "B": 3, "Unknown": 2}, ["A", "B", "C"])
+        assert vec.shape == (3,)
+        assert vec[2] == 0.0                                   # absent card -> 0, never dropped
+        assert np.linalg.norm(vec) == pytest.approx(1.0)
+        # Direction preserved: A outweighs B in the same 4:3 ratio as the raw counts.
+        assert vec[0] / vec[1] == pytest.approx(4 / 3)
+
+    def test_no_overlap_gives_all_zero_vector(self):
+        vec = project_flex_vector({"Z": 4}, ["A", "B"])
+        assert not vec.any()
+        assert not np.isnan(vec).any()
+
+    def test_empty_counts_does_not_raise_or_nan(self):
+        vec = project_flex_vector({}, ["A", "B"])
+        assert not vec.any()
+        assert not np.isnan(vec).any()
+
+    def test_empty_flex_cards_gives_empty_vector(self):
+        vec = project_flex_vector({"A": 4}, [])
+        assert vec.shape == (0,)
+
+    def test_copy_counts_matter_not_just_presence(self):
+        """Raw counts, not a presence indicator — a 4-of and a 1-of project differently."""
+        four_of = project_flex_vector({"A": 4, "B": 1}, ["A", "B"])
+        one_of = project_flex_vector({"A": 1, "B": 4}, ["A", "B"])
+        assert float(np.dot(four_of, one_of)) < 1.0
+
+
+class TestCampCentroid:
+    def test_single_member_centroid_equals_that_members_vector(self):
+        counts = {"A": 4, "B": 2}
+        centroid = camp_centroid([counts], ["A", "B", "C"])
+        assert centroid == pytest.approx(list(project_flex_vector(counts, ["A", "B", "C"])))
+
+    def test_multi_member_centroid_is_renormalized_mean(self):
+        cards = ["A", "B"]
+        members = [{"A": 4}, {"B": 4}]
+        centroid = camp_centroid(members, cards)
+        assert np.linalg.norm(centroid) == pytest.approx(1.0)
+        # Mean of the two orthogonal unit vectors, renormalized -> the 45-degree bisector.
+        assert centroid == pytest.approx([2 ** -0.5, 2 ** -0.5])
+
+    def test_empty_member_list_gives_zero_vector(self):
+        centroid = camp_centroid([], ["A", "B"])
+        assert centroid == [0.0, 0.0]
+
+    def test_members_sharing_no_flex_card_give_zero_vector(self):
+        assert camp_centroid([{"Z": 4}, {"Y": 2}], ["A", "B"]) == [0.0, 0.0]
+
+    def test_empty_flex_cards_gives_empty_centroid(self):
+        assert camp_centroid([{"A": 4}], []) == []
+
+
+class TestNearestCamp:
+    _CARDS = ["A1", "A2", "B1", "B2"]
+
+    def _centroids(self) -> dict[str, list[float]]:
+        return {
+            "camp-A": camp_centroid([{"A1": 4, "A2": 3}], self._CARDS),
+            "camp-B": camp_centroid([{"B1": 4, "B2": 3}], self._CARDS),
+        }
+
+    def test_picks_the_closer_camp_and_reports_runner_up(self):
+        result = nearest_camp({"A1": 4, "A2": 3}, self._CARDS, self._centroids())
+        assert result.camp == "camp-A"
+        assert result.runner_up == "camp-B"
+        assert result.best_similarity == pytest.approx(1.0)
+        assert result.reason
+
+    def test_picks_the_other_camp_for_the_mirror_deck(self):
+        result = nearest_camp({"B1": 4, "B2": 3}, self._CARDS, self._centroids())
+        assert result.camp == "camp-B"
+        assert result.runner_up == "camp-A"
+
+    def test_below_floor_declines_with_a_named_reason(self):
+        # Orthogonal-ish deck: one shared card at 1 copy against a 4/3 centroid.
+        result = nearest_camp(
+            {"A1": 1, "B1": 1}, self._CARDS, self._centroids(), min_similarity=0.9,
+        )
+        assert result.camp is None
+        assert "min_similarity" in result.reason
+        assert result.best_similarity < 0.9
+
+    def test_declines_when_deck_shares_no_flex_card(self):
+        result = nearest_camp({"Unrelated": 4}, self._CARDS, self._centroids())
+        assert result.camp is None
+        assert result.best_similarity == 0.0
+        assert "shares no card" in result.reason
+
+    def test_empty_flex_cards_declines_honestly(self):
+        result = nearest_camp({"A1": 4}, [], {"camp-A": [1.0]})
+        assert result.camp is None
+        assert "no frozen flex vocabulary" in result.reason
+
+    def test_empty_centroids_declines_honestly(self):
+        result = nearest_camp({"A1": 4}, self._CARDS, {})
+        assert result.camp is None
+        assert "no camp centroid" in result.reason
+
+    def test_centroid_length_mismatch_fails_fast(self):
+        """Corrupt persisted state, not thin data — never silently score a truncated centroid."""
+        with pytest.raises(ValueError, match="dimension"):
+            nearest_camp({"A1": 4}, self._CARDS, {"camp-A": [1.0, 0.0]})
+
+    def test_ties_resolve_deterministically_by_name(self):
+        centroids = {
+            "zebra": camp_centroid([{"A1": 4}], self._CARDS),
+            "alpha": camp_centroid([{"A1": 4}], self._CARDS),
+        }
+        assert nearest_camp({"A1": 4}, self._CARDS, centroids).camp == "alpha"
+
+    def test_single_camp_has_no_runner_up(self):
+        centroids = {"only": camp_centroid([{"A1": 4}], self._CARDS)}
+        assert nearest_camp({"A1": 4}, self._CARDS, centroids).runner_up is None
+
+
+class TestReconstructionAccuracy:
+    """The load-bearing validation of the simplified representation.
+
+    Nearest-centroid assignment runs on RAW L2-normalized flex-band counts — deliberately
+    dropping the TF-IDF reweighting and SVD reduction HDBSCAN actually clustered on, neither of
+    which is persisted. The floor that makes that trade-off defensible: projecting a split's OWN
+    member decks back through `nearest_camp` must recover their real camp labels. Below 90% the
+    representation isn't trustworthy enough to assign decks HDBSCAN never saw, and the fitted
+    `idf_` vector would have to be persisted alongside `flex_cards` instead.
+
+    Measured on the real corpus at implementation time (30 staged splits, 21,130 member decks):
+    98.6% overall, worst split 92.1%. This fixture is the hermetic regression floor.
+    """
+
+    def _agreement(self, decks: list[DeckVector], **kwargs) -> float:
+        fm = build_feature_matrix(decks, **kwargs)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        assert len(split.camps) >= 2, "fixture must produce a real multi-camp split"
+        assert split.flex_cards == fm.cards
+
+        counts_by_key = {d.key: d.counts for d in decks}
+        centroids = {c.name: c.centroid for c in split.camps}
+        recovered = 0
+        total = 0
+        for camp in split.camps:
+            for key in camp.member_keys:
+                total += 1
+                result = nearest_camp(counts_by_key[key], split.flex_cards, centroids)
+                recovered += result.camp == camp.name
+        return recovered / total
+
+    def test_two_camp_split_recovers_its_own_members(self):
+        assert self._agreement(_two_camp_decks()) >= 0.90
+
+    def test_three_camp_split_with_shared_staples_recovers_its_own_members(self):
+        """The harder case flagged in Risks: camps sharing staples make raw-count cosine less
+        discriminative than TF-IDF+SVD would be."""
+        def deck(i, cards):
+            return DeckVector(key=("t", i), counts=cards)
+        camp_a = [deck(i, {"Sphere": 4, "Port": 4, "Shared": 2}) for i in range(40)]
+        camp_b = [deck(100 + i, {"Sphere": 4, "Tomb": 4, "Shared": 2}) for i in range(40)]
+        camp_c = [deck(200 + i, {"Once": 4, "Rumble": 4, "Shared": 2}) for i in range(40)]
+        agreement = self._agreement(camp_a + camp_b + camp_c, flex_lo=0.05, flex_hi=1.1)
+        assert agreement >= 0.90
+
+
+class TestClusterAndValidateCentroids:
+    def test_passing_split_stamps_centroids_and_flex_cards(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+
+        assert split.flex_cards == fm.cards
+        assert len(fm.cards) >= 2
+        for camp in split.camps:
+            assert camp.centroid is not None
+            assert len(camp.centroid) == len(fm.cards)
+            assert np.linalg.norm(camp.centroid) == pytest.approx(1.0)
+
+    def test_centroids_separate_the_two_camps(self):
+        decks = _two_camp_decks()
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=20)
+        a, b = (c.centroid for c in split.camps)
+        assert float(np.dot(a, b)) < 0.5
+
+    def test_no_flex_band_stamps_nothing_fabricated(self):
+        """The degenerate early return: no camps, no centroids, empty flex vocabulary."""
+        decks = [DeckVector(key=("t1", i), counts={"Core Land": 4}) for i in range(40)]
+        fm = build_feature_matrix(decks)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=5)
+        assert split.camps == []
+        assert split.flex_cards == []
+
+    def test_blob_split_stamps_flex_cards_without_a_validated_camp(self):
+        """A FAILing split still records whatever the matrix really built — never fabricated,
+        never suppressed."""
+        decks = _blob_decks()
+        fm = build_feature_matrix(decks, flex_hi=1.0)
+        split = cluster_and_validate(fm, decks, seed=0, n_boot=10)
+        assert split.passed is False
+        assert split.flex_cards == fm.cards
+        for camp in split.camps:   # k<2, so at most a single-cluster camp
+            assert len(camp.centroid) == len(fm.cards)
 
 
 # ---------------------------------------------------------------------------

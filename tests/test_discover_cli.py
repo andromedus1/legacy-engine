@@ -612,6 +612,29 @@ class TestDiscoverApply:
         staged_data = json.loads((tmp_path / "discovered.json").read_text())
         assert staged_data["splits"][0]["status"] == "promoted"
 
+    def test_apply_reports_zero_incremental_candidates_on_a_full_member_fixture(
+        self, runner, tmp_path,
+    ):
+        """Every deck in this fixture is a cluster member, so the incremental pass has nothing
+        to consider — the new audit lines are purely additive."""
+        db_path, staged = self._run_discover(runner, tmp_path)
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// 0 deck(s) incrementally assigned" in result.output
+        assert "0 candidate(s) left unlabeled below threshold" in result.output
+
+    def test_min_similarity_help_default_matches_the_engine_constant(self, runner):
+        """The shown default is a literal (importing the constant into cli.py would pull numpy
+        into every invocation) — pin it to the real constant so it cannot drift."""
+        from legacy_engine.analytics.discovery import DEFAULT_MIN_SIMILARITY
+
+        result = runner.invoke(main, ["discover", "apply", "--help"])
+        assert result.exit_code == 0, result.output
+        assert str(DEFAULT_MIN_SIMILARITY) in result.output
+
     def test_apply_surfaces_provenance_in_report_matchups(self, runner, tmp_path, monkeypatch):
         """End-to-end: discover run -> discover apply -> report matchups --split-variant shows
         both the camp rows (from decks.variant) and the staged-candidate provenance note."""
@@ -638,3 +661,215 @@ class TestDiscoverApply:
             "// provenance: Doomsday has a STAGED (unpromoted) candidate split — variant "
             "labels may be speculative-provenance" in result.output
         )
+
+
+# ---------------------------------------------------------------------------
+# discover apply — nearest-camp incremental assignment for post-staging decks
+# ---------------------------------------------------------------------------
+
+# Post-staging deck indices, outside the clustered pool's 0..69.
+CLOSE_IDX, PARTIAL_IDX, FAR_IDX = 100, 101, 102
+
+
+def _add_post_staging_decks(db_path: str) -> None:
+    """Insert three decks AFTER the split was staged (so none is in any member_keys).
+
+    This is the shape a growing corpus produces between discovery runs — the decks that stay
+    permanently unlabeled when a re-run fails its stability gate. Their similarity to camp A's
+    centroid spans the decision space:
+
+    - ``CLOSE_IDX``   — the camp-A list verbatim; cosine 1.0 (every camp-A fixture deck is
+                        identical, so the centroid IS that deck's vector).
+    - ``PARTIAL_IDX`` — camp A's first card only; cosine 0.8, above the 0.35 default floor but
+                        below a tightened one.
+    - ``FAR_IDX``     — shares no flex-band card at all; cosine 0.0, always declined.
+    """
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db_path)
+    con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", [
+        ("t1", CLOSE_IDX, "p", "W", "Doomsday", None),
+        ("t1", PARTIAL_IDX, "p", "W", "Doomsday", None),
+        ("t1", FAR_IDX, "p", "W", "Doomsday", None),
+    ])
+    con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", [
+        ("t1", CLOSE_IDX, "main", "Core Land", 4),
+        ("t1", CLOSE_IDX, "main", "Card A1", 4),
+        ("t1", CLOSE_IDX, "main", "Card A2", 3),
+        ("t1", PARTIAL_IDX, "main", "Core Land", 4),
+        ("t1", PARTIAL_IDX, "main", "Card A1", 4),
+        ("t1", FAR_IDX, "main", "Core Land", 4),
+        ("t1", FAR_IDX, "main", "Weird Tech", 4),
+    ])
+    con.close()
+
+
+class TestDiscoverApplyIncremental:
+    def _staged_with_extras(self, runner, tmp_path) -> tuple[str, str]:
+        """Stage over the clean 70-deck pool, THEN add the post-staging decks."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = str(tmp_path / "discovered.json")
+        run = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
+        ])
+        assert run.exit_code == 0, run.output
+        _add_post_staging_decks(db_path)
+        return db_path, staged
+
+    def _variant(self, db_path: str, deck_idx: int) -> str | None:
+        import duckdb
+        con = duckdb.connect(db_path)
+        try:
+            return con.execute(
+                "SELECT variant FROM decks WHERE tournament_id = 't1' AND deck_idx = ?",
+                [deck_idx],
+            ).fetchone()[0]
+        finally:
+            con.close()
+
+    def test_close_post_staging_decks_are_assigned_and_audited(self, runner, tmp_path):
+        db_path, staged = self._staged_with_extras(runner, tmp_path)
+
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// 2 deck(s) incrementally assigned (assigned_by=incremental" in result.output
+        assert "1 candidate(s) left unlabeled below threshold" in result.output
+
+        camp = self._variant(db_path, CLOSE_IDX)
+        assert camp is not None
+        assert self._variant(db_path, PARTIAL_IDX) == camp
+        assert f"//   camp {camp}: +2" in result.output
+
+        import duckdb
+        con = duckdb.connect(db_path)
+        rows = con.execute(
+            "SELECT deck_idx, parent, camp, assigned_by FROM variant_incremental_assignments "
+            "ORDER BY deck_idx"
+        ).fetchall()
+        con.close()
+        assert rows == [
+            (CLOSE_IDX, "Doomsday", camp, "incremental"),
+            (PARTIAL_IDX, "Doomsday", camp, "incremental"),
+        ]
+
+    def test_far_post_staging_deck_stays_unlabeled(self, runner, tmp_path):
+        db_path, staged = self._staged_with_extras(runner, tmp_path)
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert result.exit_code == 0, result.output
+        assert self._variant(db_path, FAR_IDX) is None
+
+    def test_no_incremental_suppresses_the_pass_entirely(self, runner, tmp_path):
+        db_path, staged = self._staged_with_extras(runner, tmp_path)
+
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--no-incremental",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "incrementally assigned" not in result.output
+        for idx in (CLOSE_IDX, PARTIAL_IDX, FAR_IDX):
+            assert self._variant(db_path, idx) is None
+
+        import duckdb
+        con = duckdb.connect(db_path)
+        n_tables = con.execute(
+            "SELECT count(*) FROM duckdb_tables() "
+            "WHERE table_name = 'variant_incremental_assignments'"
+        ).fetchone()[0]
+        con.close()
+        assert n_tables == 0   # the table is never even created
+
+    def test_min_similarity_flag_tightens_the_floor(self, runner, tmp_path):
+        """The partial deck (cosine 0.8) clears the 0.35 default but not a 0.9 floor; the
+        verbatim camp-A list (cosine 1.0) still clears it."""
+        db_path, staged = self._staged_with_extras(runner, tmp_path)
+
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--min-similarity", "0.9",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// 1 deck(s) incrementally assigned" in result.output
+        assert "min_similarity=0.9" in result.output
+        assert "2 candidate(s) left unlabeled below threshold" in result.output
+        assert self._variant(db_path, CLOSE_IDX) is not None
+        assert self._variant(db_path, PARTIAL_IDX) is None
+
+    def test_next_passing_run_supersedes_the_incremental_label(self, runner, tmp_path):
+        """The full dogfood loop: apply (incremental) -> a later PASSing `discover run` that
+        clusters the deck for real -> apply again clears the stale row and the membership label
+        stands."""
+        db_path, staged = self._staged_with_extras(runner, tmp_path)
+        first = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert first.exit_code == 0, first.output
+        assert "// 2 deck(s) incrementally assigned" in first.output
+
+        rerun = runner.invoke(main, [
+            "discover", "run", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged, "--n-boot", "5", "--all-pool",
+        ])
+        assert rerun.exit_code == 0, rerun.output
+        assert "// verdict: PASS" in rerun.output
+
+        second = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", staged,
+        ])
+        assert second.exit_code == 0, second.output
+        assert (
+            "// cleared 2 stale incremental assignment(s) from a prior staged generation"
+            in second.output
+        )
+
+        import duckdb
+        con = duckdb.connect(db_path)
+        still_incremental = con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments WHERE deck_idx = ?",
+            [CLOSE_IDX],
+        ).fetchone()[0]
+        con.close()
+        assert still_incremental == 0                     # now a real cluster member
+        assert self._variant(db_path, CLOSE_IDX) is not None
+
+    def test_pre_feature_staged_record_degrades_with_a_named_reason(self, runner, tmp_path):
+        """A staged record written before this feature (no flex_cards/centroid keys) — the state
+        every real staged split is in until its next `discover run`."""
+        db_path = _build_discovery_db(tmp_path)
+        staged = tmp_path / "discovered.json"
+        staged.write_text(json.dumps({
+            "version": "1",
+            "splits": [{
+                "parent": "Doomsday",
+                "generated_from": "discover run @ 2026-01-01 (pre-feature)",
+                "params": {},
+                "camps": [
+                    {"name": "Card A1", "signature_cards": ["Card A1"], "n": 35,
+                     "tier": "evolving", "member_keys": [["t1", i] for i in range(35)]},
+                    {"name": "non-Card A1", "signature_cards": ["Card B1"], "n": 35,
+                     "tier": "evolving", "member_keys": [["t1", i] for i in range(35, 70)]},
+                ],
+                "stability": 0.95,
+                "status": "candidate",
+            }],
+        }, indent=2))
+        _add_post_staging_decks(db_path)
+
+        result = runner.invoke(main, [
+            "discover", "apply", "--archetype", "Doomsday",
+            "--db", db_path, "--discovered-path", str(staged),
+        ])
+        assert result.exit_code == 0, result.output
+        assert "// incremental assignment skipped:" in result.output
+        assert "no frozen flex vocabulary" in result.output
+        assert "discover run" in result.output
+        assert self._variant(db_path, CLOSE_IDX) is None
