@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-clustering
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, archetype]
 parent: epic-superarchetype-layer
 depends_on: []
@@ -117,3 +117,362 @@ epic-design). Treat as fixed inputs — do not re-ask:
   transfers), `src/legacy_engine/archetype/discovered.py` (registry staging/promotion/apply),
   `src/legacy_engine/analytics/eras/` (the closest package-shaped precedent: detect / store /
   consume), `src/legacy_engine/config.py` (path constants).
+
+## Design
+
+<!-- Written 2026-07-31 during the feature-design pass (autopilot delegation). Ambiguities were
+resolved with judgment and the rationale is inline. Cross-model peer review skipped per the
+orchestrator's instruction. No child stories: the four units share one module pair and one type
+graph, and unit 2's output is unit 3's input in the same call — splitting them would cost more in
+seam-writing than it buys. -->
+
+### Architectural options weighed
+
+**Option A — one flat module `analytics/superarchetype.py`.** Everything (cores, staples, distance,
+AU, assignment, curated merge, JSON, DuckDB, churn) in one file, following `discovery.py`'s
+single-file precedent. Rejected: `discovery.py` is 828 lines and stops at "return a result object" —
+it persists nothing. This feature owns two persistence surfaces (derived JSON SSOT + rebuildable
+DuckDB table) and a curated resource loader, which `eras/` already demonstrates wants its own module.
+A flat file would also put curated-file I/O in the same import graph as the pure numeric core, so the
+"pure core takes card data only" property would rest on discipline rather than on structure.
+
+**Option B (chosen) — the epic's locked two-module package: `cluster.py` + `registry.py`.**
+`cluster.py` is the objective-search-split shape verbatim from `discovery.py`: a pure DB-free core
+plus one thin read-only DB wrapper at the bottom whose single query names exactly two corpus tables,
+`decks` and `deck_cards` (plus `tournaments` for the date window). `registry.py` owns every byte that
+leaves the process: the curated loader, the merge, the derived JSON SSOT, the rebuildable DuckDB
+cache, cluster-identity persistence, and the churn diagnostic. The dependency edge runs
+`registry.py -> cluster.py` and never back, so the pure core cannot reach a file or a table at all.
+
+**Option C — a four-module package mirroring `eras/` (`compose.py` / `cluster.py` / `store.py` /
+`run.py`).** Rejected as premature: `eras/` earned four modules because it has three genuinely
+independent detectors plus an ensemble. Here the pipeline is one linear chain, and the epic already
+fixed the module names that `ARCHITECTURE.md` publishes. Splitting further would invent seams the
+sibling features (`aggregate.py`, `consume.py`) will not use.
+
+**Decision: Option B.** The offline-pass orchestration (`run_superarchetypes`) lives at the bottom of
+`registry.py` rather than in a third `run.py`, because it is 95% persistence: it calls one pure
+function and then does identity-matching, merging, churn, and two writes.
+
+### The no-`rounds` property — how it is enforced, not merely promised
+
+Three independent layers, because this is the epic's sharpest methodological hazard:
+
+1. **Type-structural.** The only input to the pure core is `ArchetypeDeck(archetype, key, cards)`.
+   No type in `cluster.py` has a wins/losses/result field, so a coverage objective is not
+   *expressible* against the core's inputs, let alone optimisable.
+2. **Query-structural.** `cluster.py` contains exactly one corpus `con.execute(...)`, and it is the
+   only corpus read in the whole package. `registry.py`'s statements touch only its own
+   `superarchetype_members` table.
+3. **Mechanically tested.** `tests/analytics/superarchetype/test_no_rounds.py` runs both a source
+   tripwire (scan `cluster.py` + `registry.py` for the tokens `rounds`, `match_results`, `wins`,
+   `losses`, `winrate` — fail if any appears in executable source) and a runtime SQL spy: a proxy
+   connection that records every statement text passed to `execute`/`executemany` and asserts no
+   recorded statement mentions `rounds` or `match_results`, driven by a real end-to-end
+   `run_superarchetypes` call against a tmp DuckDB that *does* contain a populated `rounds` table.
+   The spy is the load-bearing one — it proves the property at runtime, not just in the source.
+
+### Units
+
+Ordered trickiest-first, which is also dependency order for the two hard ones.
+
+---
+
+#### Unit 1 — AU multiscale bootstrap + cut selection (`cluster.py`) — TRICKIEST
+
+The only genuinely novel numerics in the feature, and the one place the brief flags its own port as
+unverified. Everything else is assembly.
+
+```python
+_AU_SCALES: tuple[float, ...] = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4)
+_AU_MIN: float = 0.95          # calibration choice, not a sourced constant
+_AU_MIN_BP: float = 0.30       # calibration choice, not a sourced constant
+_DEFAULT_N_BOOT: int = 200     # calibration choice, not a sourced constant
+
+@dataclass(frozen=True)
+class BranchSupport:
+    node: int
+    members: tuple[str, ...]
+    height: float
+    bp: tuple[float, ...]          # BP per scale, in _AU_SCALES order
+    bp_at_unit_scale: float
+    au: float
+    v: float | None                # signed-distance / curvature fit; None when unfittable
+    d: float | None
+
+def au_pvalues(
+    M: "np.ndarray",               # (n_archetypes, n_cards) binary stripped-core indicator
+    labels: list[str],
+    *,
+    seed: int = 0,
+    n_boot: int = _DEFAULT_N_BOOT,
+    scales: tuple[float, ...] = _AU_SCALES,
+) -> dict[int, BranchSupport]: ...
+
+def select_supported_clusters(
+    Z: "np.ndarray",
+    labels: list[str],
+    support: dict[int, BranchSupport],
+    *,
+    au_min: float = _AU_MIN,
+    min_bp: float = _AU_MIN_BP,
+) -> tuple[list[list[str]], list[str], list[str]]:
+    """-> (clusters, singleton_labels, reasons)"""
+```
+
+**Method, pinned.** For each scale `r`, draw `n_boot` resamples of the **card feature vocabulary**
+with replacement at size `round(r * n_cards)`, express the resample as a per-card multiplicity weight
+vector, recompute the **weighted** Jaccard dissimilarity
+`1 - sum(w * min(a,b)) / sum(w * max(a,b))` (the exact generalisation of set Jaccard under column
+multiplicity — a card drawn twice counts twice), re-run average linkage, and score `BP(r)` as the
+fraction of replicates in which the base node's exact leaf set appears as a node of the bootstrap
+dendrogram. Then fit Shimodaira's multiscale model `psi(r) = v/sqrt(r) + d*sqrt(r)` where
+`psi(r) = -Phi^-1(BP(r))`, by weighted least squares with pvclust's BP-variance weights
+`n_boot * phi(psi)^2 / (p(1-p))`, and report `AU = 1 - Phi(d - v)`.
+
+**Sourcing caveats discharged here, per the epic's instruction.**
+(a) *The feature-axis port.* pvclust resamples the **rows** of the input data matrix — the axis that
+is *not* being clustered (pvclust clusters columns). Our objects are archetypes and our features are
+cards, so resampling the card vocabulary IS pvclust's own axis, not a departure: the brief's flagged
+"port" turns out to be the faithful reading, and the only real adaptation is that our per-column
+statistic is a set-Jaccard rather than a correlation. Recorded as confirmed.
+(b) *Whole-dendrogram application.* pvclust states the AU rule for a single cluster; we apply it to
+every branch and **no multiplicity correction is applied across branches**. Recorded explicitly, in
+the module docstring and in `superarchetype explain`'s output, because it means the count of
+supported branches is optimistic in the usual multiple-comparisons direction.
+(c) *The `>0.95` comparison is strict* (`au > au_min`), per the citation audit's correction.
+
+**`_AU_MIN_BP` — a guard the brief does not specify, added on measured evidence.** AU is a
+*bias-corrected extrapolation* of BP. Measured on the real corpus (see `## Implementation notes`),
+near-root branches show BP ~ 0.02-0.15 that is essentially **flat across all ten scales**; with no
+scale signal the fit returns `d ~ 0` and AU collapses to `Phi(v)`, handing 0.93-0.97 to branches
+observed in under a tenth of replicates. That is extrapolation without evidence, and it is precisely
+the direction that would silently manufacture a mega-cluster. The guard states the minimum claim
+plainly: *a branch must also have been observed as a branch in at least 30% of same-size resamples.*
+Named constant, comment at the definition site marking it a calibration choice, CLI-overridable.
+
+**Cut rule — `pvpick` semantics, not a single height.** The brief's phrase "the deepest height where
+each retained branch clears AU > 0.95" cannot be read as one horizontal cut: measured on the corpus,
+the single-height reading is dominated by the weakest branch at that height and returns either K=25
+(cut below the first unsupported merge) or K=1 (the root, which is trivially supported in every
+replicate). Both are outside the brief's own K~6-12 sanity band, so the single-height reading is not
+what the brief intended. Implemented instead as pvclust's `pvpick`: descend from the root, retain the
+**largest** eligible node on each path, recurse into the children of any node that is not eligible.
+**The root is excluded from candidacy** — "all thirty archetypes are one cluster" is not a claim, and
+it has BP = 1.0 by construction. Leaves reached without being covered become **singleton clusters
+with the named reason `au-unsupported singleton`** — never dropped, because every archetype must get
+a superarchetype.
+
+**Acceptance criteria.**
+- Determinism: two `au_pvalues` calls with the same `(M, labels, seed, n_boot, scales)` return
+  bitwise-identical `au`/`bp` values, and the value does not depend on scale iteration order (each
+  replicate's RNG is derived from `(seed, scale_index, replicate_index)`, never a shared stream).
+- A synthetic matrix with two cleanly disjoint card blocks yields `au > 0.95` on the two block nodes.
+- A synthetic matrix of pure noise yields no node clearing both `au_min` and `min_bp`, and
+  `select_supported_clusters` returns every label as a singleton with the named reason.
+- `select_supported_clusters` never returns the root as a cluster when `n_labels >= 2`.
+- Every label appears exactly once across `clusters + singletons` (partition invariant).
+
+---
+
+#### Unit 2 — representation: cores, definers, staples, distance (`cluster.py`)
+
+```python
+_CORE_INCLUSION: float = 0.50       # calibration choice
+_STAPLE_DEFINER_FRACTION: float = 0.30
+_DEFINER_MIN_DECKS: int = 30
+_DEFINER_MIN_CORE_CARDS: int = 8
+_ASSIGNEE_MIN_CORE_CARDS: int = 5
+
+@dataclass(frozen=True)
+class ArchetypeDeck:
+    archetype: str
+    key: tuple[str, int]
+    cards: frozenset[str]           # maindeck names only; no counts, no outcomes
+
+@dataclass(frozen=True)
+class ArchetypeComposition:
+    archetype: str
+    n_decks: int
+    core: frozenset[str]
+    stripped_core: frozenset[str]
+    is_definer: bool
+    tier: ConfidenceLevel
+
+def build_compositions(decks, *, core_inclusion=_CORE_INCLUSION, ...
+) -> tuple[dict[str, ArchetypeComposition], tuple[str, ...]]:
+    """-> (compositions keyed by archetype, the derived format-staple tuple)"""
+
+def jaccard_dissimilarity(a: frozenset[str], b: frozenset[str]) -> float
+def weighted_jaccard_matrix(M: "np.ndarray", weights: "np.ndarray") -> "np.ndarray"
+```
+
+Ordering is fixed and non-circular: raw cores for every archetype -> definers by
+`n_decks >= 30 AND len(core) >= 8` -> staples as cards core to `>= 30%` of **definers** -> strip
+staples from every archetype's core. Copy counts are deliberately discarded at the query boundary
+(`cards` is a `frozenset`) — the brief's §3.1 finding is that superarchetype splits are
+package-level, and dropping counts makes the abundance confound structurally impossible rather than
+merely unused. Empty union -> dissimilarity `1.0` (two archetypes with nothing left after stripping
+are maximally dissimilar, never `0/0`).
+
+**Acceptance criteria.** Reproduces the brief's measured corpus figures within rounding: 30 definers
+at 83.8% field share, the exact 14-card staple list, cophenetic correlation 0.916 for
+Jaccard/average. Hand-built fixtures cover: an archetype at exactly 50% inclusion (included — the
+threshold is `>=`), a definer at exactly 30 decks / exactly 8 core cards (included), a definer whose
+stripped core is empty (excluded from the matrix with a named reason, not a zero row).
+
+---
+
+#### Unit 3 — pure pipeline + assignment + stability (`cluster.py`)
+
+```python
+_STABILITY_MIN: float = 0.90        # calibration choice
+_VALID_PROVENANCE = frozenset({"derived", "assigned", "curated"})
+
+@dataclass(frozen=True)
+class ClusterMember:
+    archetype: str
+    provenance: str                 # closed vocabulary; __post_init__ fails fast
+    n_decks: int
+    note: str | None = None
+
+@dataclass(frozen=True)
+class DerivedCluster:
+    key: str                        # deterministic content key over the sorted definer members
+    label: str                      # auto-name: the definers, sorted, " + "-joined
+    members: tuple[ClusterMember, ...]
+    au: float | None                # None for an au-unsupported singleton
+    height: float | None
+
+@dataclass(frozen=True)
+class ClusterSolution:
+    clusters: tuple[DerivedCluster, ...]
+    staples: tuple[str, ...]
+    definers: tuple[str, ...]
+    unassigned: tuple[tuple[str, str], ...]     # (archetype, named reason)
+    stability: float
+    cophenetic: float
+    reasons: tuple[str, ...]        # every gate outcome, verbatim
+    degraded: bool
+    seed: int
+    n_boot: int
+
+def cluster_archetypes(decks, *, seed=0, n_boot=200, au_min=_AU_MIN, ...) -> ClusterSolution
+```
+
+**Assignment of the long tail — a deliberate, logged deviation from the brief's wording.** The brief
+says "nearest cluster centroid over the staple-stripped cores". A literal mean-vector centroid is
+metric-inconsistent with Jaccard (Jaccard is not an inner-product space, and the brief itself warns
+against feeding non-metric dissimilarities to metric-assuming methods). Implemented instead as
+**average Jaccard dissimilarity to the cluster's definer members** — which is exactly average
+linkage's own criterion, so an assignee is placed by the same rule that formed the cluster it joins.
+Ties break on `(distance, cluster.key)` for determinism. An assignee with `< 5` core cards, or with
+an empty stripped core, is **unassigned with a named reason** and appears in
+`ClusterSolution.unassigned` — it never gets a fabricated home.
+
+**Stability cross-check.** Resample the card vocabulary at `r = 1.0`, recluster, cut to the same K
+with `fcluster(criterion="maxclust")`, and average pairwise co-membership agreement against the base
+partition over definers. Reported on every run and compared against `_STABILITY_MIN`; it is a
+**diagnostic that annotates**, never a gate that empties the taxonomy — the AU rule already refuses
+unsupported branches, and failing the taxonomy twice for the same evidence would leave the epic with
+nothing to serve.
+
+**Honest-degrade paths, each with a named reason in `reasons` and `degraded=True`:** no definers at
+all; every definer's stripped core empty; no branch clearing the AU cut (every definer a singleton).
+
+---
+
+#### Unit 4 — registry: curated merge, persistence, identity, churn (`registry.py`)
+
+```python
+# config.py additions
+SUPERARCHETYPES_DIR = PACKAGE_DATA_DIR / "superarchetypes"
+SUPERARCHETYPES_REGISTRY_PATH = SUPERARCHETYPES_DIR / "legacy.json"   # curated SSOT
+DERIVED_SUPERARCHETYPES_PATH = DATA_DIR / "superarchetypes" / "derived.json"  # derived SSOT
+
+def load_curated_superarchetypes(path: Path | str) -> dict[str, CuratedCluster]
+def _load_default_curated() -> dict[str, CuratedCluster]     # degrades to {} on any error
+CURATED_SUPERARCHETYPES = _load_default_curated()            # bound once at import
+
+def merge_curated(solution, curated, *, window, ...) -> SuperarchetypeRegistry
+def match_identities(new, previous) -> tuple[SuperarchetypeRegistry, tuple[str, ...]]
+def membership_churn(new, previous) -> ChurnReport
+
+def write_derived_registry(registry, path) -> None
+def read_derived_registry(path) -> SuperarchetypeRegistry | None
+def init_superarchetype_schema(con) -> None
+def rebuild_superarchetype_members(con, registry) -> None
+def read_superarchetype_members(con) -> SuperarchetypeRegistry | None
+def run_superarchetypes(con, *, since, until, seed=0, n_boot=200, ...) -> RunResult
+```
+
+- **curated-json-resource-loader**: `load_curated_superarchetypes` is standalone, path-taking, never
+  imports config, and raises `ValueError` naming the offending path and cluster/archetype key on a
+  missing id/label, a duplicate archetype across clusters, or a bad provenance token.
+  `_load_default_curated` resolves the config path and degrades to `{}` on any error, so an absent
+  or mis-edited curated file no-ops instead of crashing import.
+- **hybrid-derived-curated-registry**: `merge_curated` — a curated cluster wins the id and label
+  outright; a curated member assignment wins by archetype key, is stamped `provenance="curated"`,
+  and **records the derived cluster it replaced** in `ClusterMember.note`, so every override is
+  auditable rather than invisible.
+- **json-ssot-rebuildable-duckdb-table**: `DERIVED_SUPERARCHETYPES_PATH` is the SSOT;
+  `superarchetype_members` is a derived cache rebuilt DROP -> schema -> INSERT on every run. Read
+  degrades to `None` on `duckdb.CatalogException` only; every other DB error stays loud.
+- **Identity across refreshes** (epic decision 5): `match_identities` maps each new cluster to the
+  previous cluster with maximal member overlap, greedily by descending overlap, one-to-one; an
+  unmatched new cluster mints `sa-<nnn>` past the previous max. Curated ids are never remapped.
+- **Churn** (brief §9): `ChurnReport` carries co-membership agreement over the archetypes present in
+  both refreshes, the per-archetype moves, and the arrivals/departures. `run` prints it as `//`
+  lines with the measured ~0.96 baseline named, so a materially lower figure reads as an alarm.
+
+---
+
+#### Unit 5 — CLI (`cli.py`, `superarchetype` group)
+
+`superarchetype run|list|explain`, following cli-nested-groups exactly: `@main.group()`, each leaf
+calls `_setup_logging(verbose)` first, `--db` path option, `con.close()` in a `finally`, all
+provenance on `// `-prefixed lines (audit-echo-comment-lines).
+
+- `run [--db] [--since] [--until] [--au-min] [--min-bp] [--n-boot] [--seed] [--dry-run]` — the
+  offline pass. Echoes window, definer/assignee counts and field share, the staple list, K, per
+  cluster its AU and members, stability vs `_STABILITY_MIN`, the churn report, the identity remap,
+  and every honest-degrade reason. `--dry-run` computes and prints without writing either surface.
+- `list [--db] [--cluster ID]` — clusters and members with `derived`/`assigned`/`curated`
+  provenance; `(no superarchetype registry — run `superarchetype run` first)` when absent.
+- `explain ARCHETYPE [--db]` — one archetype's assignment: its cluster, its provenance, shared vs
+  disjoint stripped-core cards against each cluster-mate, the branch AU, the no-multiplicity-
+  correction caveat, and the derived assignment any curated override replaced.
+
+The derivation window is recorded on the registry, and `list`/`explain` echo it so a consumer can
+see which window the taxonomy was derived over (epic decision 3 — no hot-path clustering, no silent
+staleness).
+
+### Test approach
+
+`tests/analytics/superarchetype/` (`test_cluster.py`, `test_registry.py`, `test_no_rounds.py`) plus
+`tests/test_cli_superarchetype.py`. Factory fixtures returning `_make_X(**kwargs)` closures in a
+package `conftest.py`; `TestX` classes; every CLI test builds a file-backed tmp DuckDB via
+`_build_superarchetype_db(tmp_path) -> str` and passes `--db <that path>` — never the default DB.
+The pure core is tested entirely on hand-built `ArchetypeDeck` lists with no DuckDB at all. One
+determinism test pins a full `ClusterSolution` round-trip at a fixed seed. Real-corpus figures are
+recorded in `## Implementation notes`, not asserted in tests — the corpus moves weekly.
+
+### Pre-mortem
+
+1. **AU extrapolates a mega-cluster into existence.** The exact failure the staple strip exists to
+   prevent, arriving through the back door. Caught in prototyping; mitigated by `_AU_MIN_BP` and by
+   excluding the root from candidacy. Residual risk: a *mid-tree* branch with moderate BP and a
+   flat curve. Surfaced by printing BP-at-unit-scale beside AU in `explain`.
+2. **The taxonomy comes out too conservative to help.** Measured: it does — only a handful of
+   branches clear the cut, leaving most definers as singletons. This is the honest reading of the
+   evidence and is why the curated layer is not optional. Mitigated by making every threshold a
+   named, CLI-overridable calibration constant and by having `run` print the full AU profile, so
+   recalibration is evidence-driven and one flag wide.
+3. **Bootstrap cost explodes.** 10 scales x 200 replicates x an O(m^2 * n_cards) distance rebuild.
+   Measured at ~4-7s for 30 definers x 256 cards; acceptable for an offline pass, and the CLI
+   exposes `--n-boot`.
+4. **Cluster identity churns anyway** because max-overlap matching is greedy and a two-way split can
+   hand the id to the wrong half. Mitigated by reporting the remap loudly and by letting curated
+   entries own ids outright — the fix for a wrong id is a curated entry, not an algorithm change.
+5. **Someone later "improves" coverage by tuning the cut.** The whole point of the no-`rounds`
+   enforcement. If a future change adds a `rounds` read to this package, `test_no_rounds.py` fails.
