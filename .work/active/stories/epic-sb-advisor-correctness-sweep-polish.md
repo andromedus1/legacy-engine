@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness-sweep-polish
 kind: story
-stage: review
+stage: done
 tags: [advisory, cli]
 parent: epic-sb-advisor-correctness
 depends_on: []

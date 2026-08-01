@@ -1,7 +1,7 @@
 ---
 id: feature-multi-split-matrix-core-tally
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-multi-split-matrix
 depends_on: []
