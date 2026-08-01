@@ -1,0 +1,58 @@
+{
+  "meta": {
+    "created_at": "2026-07-31 14:10:35",
+    "base_url": "https://www.cardkingdom.com/"
+  },
+  "row_count": 149977,
+  "file_bytes": 66775641,
+  "first_row": {
+    "id": 10000,
+    "sku": "4ED-117",
+    "scryfall_id": "a363bc91-8278-448e-9d5c-564e4b51eb62",
+    "url": "mtg/4th-edition/abomination",
+    "name": "Abomination",
+    "variation": "",
+    "edition": "4th Edition",
+    "is_foil": "false",
+    "price_retail": "0.35",
+    "qty_retail": 16,
+    "price_buy": "0.01",
+    "qty_buying": 10,
+    "condition_values": {
+      "nm_price": "0.35",
+      "nm_qty": 0,
+      "ex_price": "0.28",
+      "ex_qty": 11,
+      "vg_price": "0.25",
+      "vg_qty": 5,
+      "g_price": "0.18",
+      "g_qty": 0
+    }
+  },
+  "lions_eye_diamond_rows": [
+    {
+      "id": 22165,
+      "sku": "MIR-307",
+      "scryfall_id": "63bacc32-d6ba-420c-9b49-299c08e5fb39",
+      "url": "mtg/mirage/lions-eye-diamond",
+      "name": "Lion's Eye Diamond",
+      "variation": "",
+      "edition": "Mirage",
+      "is_foil": "false",
+      "price_retail": "949.99",
+      "qty_retail": 20,
+      "price_buy": "535.00",
+      "qty_buying": 22,
+      "condition_values": {
+        "nm_price": "949.99",
+        "nm_qty": 5,
+        "ex_price": "854.99",
+        "ex_qty": 8,
+        "vg_price": "759.99",
+        "vg_qty": 7,
+        "g_price": "664.99",
+        "g_qty": 0
+      }
+    }
+  ]
+}
