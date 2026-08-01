@@ -164,3 +164,29 @@ land directly on this feature. Full report: `docs/briefs/superarchetype-aggregat
 Also inherited: I2 is ONE-SIDED evidence — a high value is a reliable stop, a low value is NEVER a
 certificate of exchangeability. That caveat must reach the UI, not just the code (it spans this
 feature and `-best-call-fallback`; the epic's decomposition risks flag it as able to fall between them).
+
+## Measured input from the shipped clustering layer (2026-07-31)
+
+`epic-superarchetype-layer-clustering` shipped and was run against the real corpus. **The derived
+taxonomy is more conservative than the brief's operating point, which directly narrows what this
+feature can deliver — plan against these numbers, not the brief's coverage table.**
+
+- The brief's coverage projections (opponent-pooled cells at n>=30: 4.5% at K=17 → 15.8% at K=8 →
+  36.8% at K=4) were computed at **fixed height cuts**. The shipped pipeline cuts at the AU criterion
+  instead, yielding **K=20 over 30 definers: 5 AU-supported multi-definer branches + 15
+  au-unsupported singletons**. A singleton cluster pools nothing — it is a superarchetype of one, so
+  those 15 rows get NO pooling benefit from the derived layer.
+- Recompute the expected coverage gain at the ACTUAL cut before committing to gate thresholds. The
+  brief's K=8 row is not the shipped configuration.
+- The conservatism is in the right direction: the branches AU refuses are precisely the ones the brief
+  flagged as chassis artifacts (Cephalid/Azorius 0.72, Red Stompy/Show and Tell 0.79, Grixis
+  Reanimator/TES 0.88, Golgari Landfall+Smallpox 0.63). Red Stompy stays a singleton rather than
+  mis-fusing — strictly better than the brief's own derived result.
+- **Validated positive:** Aluren + Show and Tell recovered unprompted at AU 0.972 / BP 0.92 (`sa-001`),
+  which is the pair this whole arc was motivated by. That cluster is real pooling headroom.
+- **Known override candidate flagged by the clustering run:** `sa-007` pools Doomsday and TES with the
+  fair Dimir decks at BP 0.39. If aggregation over that cluster produces a cell that fails the
+  heterogeneity gate, the fix is a curated override in the registry (which ships empty deliberately so
+  derived behaviour is observable first), not a threshold change here.
+- Two one-line levers exist if coverage proves too thin in practice: `--au-min` / `--min-bp` on the
+  clustering CLI, or curated entries. Prefer curated entries — they are auditable per key.
