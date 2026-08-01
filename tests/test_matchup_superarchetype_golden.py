@@ -37,8 +37,11 @@ _CELL_FIELDS = (
 # EraHorizon's consumer-visible fields at pin time (additive fields never move the golden).
 _HORIZON_FIELDS = ("since", "source", "trigger", "alarm")
 
-# sha256 of the canonical serialization below, captured on the pre-superarchetype builder.
-_GOLDEN_SHA = "ea63df1cbbff740d1e9c1ea8b5f957ed170aac07775d1174b55bd6731673bc66"
+# sha256 of _canonical() on the default (no-registry) build. Floats are canonicalized to
+# 12 significant digits before hashing: full-precision hashing is architecture-dependent
+# (scipy/BLAS ulp drift between arm64 and x86_64 CI runners) while any real off-path
+# regression moves values orders of magnitude above the 12th significant figure.
+_GOLDEN_SHA = "944a3f270ec4dda9d6813a10e0798b578d38f15b93b4d55c05ede8d148e0723a"
 
 
 def _canonical(ams) -> str:
@@ -64,7 +67,18 @@ def _canonical(ams) -> str:
         },
         "audit_preamble": list(ams.audit_preamble),
     }
-    return json.dumps(payload, sort_keys=True, allow_nan=False)
+    return json.dumps(_stable(payload), sort_keys=True, allow_nan=False)
+
+
+def _stable(o):
+    """Recursively format floats at 12 significant digits so the hash is architecture-stable."""
+    if isinstance(o, float):
+        return format(o, ".12g")
+    if isinstance(o, dict):
+        return {k: _stable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_stable(v) for v in o]
+    return o
 
 
 class TestDefaultBuildGolden:
