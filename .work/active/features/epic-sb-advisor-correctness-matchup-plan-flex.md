@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness-matchup-plan-flex
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: epic-sb-advisor-correctness
 depends_on: []

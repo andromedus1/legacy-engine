@@ -1,7 +1,7 @@
 ---
 id: feature-multi-split-matrix
 kind: feature
-stage: review
+stage: done
 tags: [advisory]
 parent: null
 depends_on: []
