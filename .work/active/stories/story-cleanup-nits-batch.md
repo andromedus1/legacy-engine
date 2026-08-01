@@ -1,7 +1,7 @@
 ---
 id: story-cleanup-nits-batch
 kind: story
-stage: review
+stage: done
 tags: [analytics, cleanup]
 parent: null
 depends_on: []
