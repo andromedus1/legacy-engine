@@ -25,6 +25,8 @@ from legacy_engine.analytics.trends import resolve_regime
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from legacy_engine.analytics.superarchetype.registry import SuperarchetypeRegistry
+
 _THIN_ROUNDS_FLOOR: int = 500  # below this many in-window rounds → degrade to full corpus + banner
 
 
@@ -248,6 +250,7 @@ def build_multi_split_inputs(
     parents: "Collection[str]",
     provenance: str | None = None,
     min_row_share: float = 0.02,
+    superarchetypes: "SuperarchetypeRegistry | None" = None,
 ) -> MultiSplitAdvisoryInputs:
     """``build_advisory_inputs``'s mode dispatch for the multi-split matrix.
 
@@ -259,6 +262,13 @@ def build_multi_split_inputs(
     Every mode also emits one ``// multi-split: N parents, M camp rows`` provenance line — the
     consumer builds both an adaptive matrix and per-date uniform fallbacks, and each needs the
     marker in its audit header (audit-echo-comment-lines).
+
+    ``superarchetypes`` (opt-in, default ``None`` — epic-superarchetype-layer-chain) rides through
+    to ``build_multi_split_adaptive`` in adaptive mode; ``None`` is byte-identical to today. The
+    layer is era-disciplined and exists on the adaptive builder ONLY (member tallies must come
+    from pairwise era windows), so a uniform/full window with a registry emits a named skip line
+    instead of a silently different number (honest-degrade — the refresh script passes one arg
+    set to both the adaptive build and its per-date uniform fallbacks).
     """
     from legacy_engine.analytics.eras.consume import resolve_field_era
     from legacy_engine.analytics.matchup import (
@@ -269,6 +279,7 @@ def build_multi_split_inputs(
     if win.mode == "adaptive":
         adaptive = build_multi_split_adaptive(
             con, parents=parents, provenance=provenance, min_row_share=min_row_share,
+            superarchetypes=superarchetypes,
         )
         field_since, field_label = resolve_field_era(con, provenance=provenance)
         audit = _adaptive_audit(adaptive.horizon_meta, adaptive.audit_preamble)
@@ -289,12 +300,18 @@ def build_multi_split_inputs(
         con, parents=parents, provenance=provenance, min_row_share=min_row_share,
         since=win.since, until=win.until,
     )
+    audit = (_multi_split_audit_line(multi),)
+    if superarchetypes is not None:
+        audit = (
+            *audit,
+            "// superarchetype: layer requires adaptive mode — skipped (uniform window)",
+        )
     return MultiSplitAdvisoryInputs(
         multi=multi,
         adaptive=None,
         field_since=win.since,
         field_until=win.until,
-        audit=(_multi_split_audit_line(multi),),
+        audit=audit,
     )
 
 

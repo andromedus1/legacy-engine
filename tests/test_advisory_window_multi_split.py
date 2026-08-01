@@ -209,3 +209,49 @@ class TestStagedSplitParents:
         inputs = build_multi_split_inputs(con, _FULL, parents=staged_split_parents(path))
         con.close()
         assert inputs.multi.parents == sorted(PARENTS)
+
+
+class TestSuperarchetypePassthrough:
+    """The registry rides through to the adaptive builder only (epic-superarchetype-layer-chain);
+    a uniform/full window cannot honor the era discipline and says so instead of differing
+    silently."""
+
+    @staticmethod
+    def _registry():
+        from test_matchup_superarchetype import _two_member_registry
+
+        return _two_member_registry()
+
+    def test_adaptive_mode_threads_the_registry_and_echoes_its_provenance(self):
+        con = adaptive_con()
+        inputs = build_multi_split_inputs(
+            con, _ADAPTIVE, parents=PARENTS, superarchetypes=self._registry(),
+        )
+        con.close()
+        assert inputs.adaptive.cluster_cells  # the overlay reached the serving inputs
+        assert inputs.adaptive.ladder
+        assert any(line.startswith("// superarchetype: 2 clusters") for line in inputs.audit)
+
+    def test_uniform_mode_skips_with_a_named_line_and_identical_numbers(self):
+        con = adaptive_con()
+        with_registry = build_multi_split_inputs(
+            con, _UNIFORM, parents=PARENTS, superarchetypes=self._registry(),
+        )
+        without = build_multi_split_inputs(con, _UNIFORM, parents=PARENTS)
+        con.close()
+        assert (
+            "// superarchetype: layer requires adaptive mode — skipped (uniform window)"
+            in with_registry.audit
+        )
+        assert with_registry.multi.cells.keys() == without.multi.cells.keys()
+        assert all(
+            with_registry.multi.cells[k] == without.multi.cells[k]
+            for k in without.multi.cells
+        )
+
+    def test_default_none_emits_no_superarchetype_lines(self):
+        con = adaptive_con()
+        inputs = build_multi_split_inputs(con, _ADAPTIVE, parents=PARENTS)
+        con.close()
+        assert not any("superarchetype" in line for line in inputs.audit)
+        assert inputs.adaptive.cluster_cells == {}
