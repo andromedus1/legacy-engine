@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-aggregation
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-clustering]
@@ -433,3 +433,149 @@ def impute_cell(subject: str, opponent: str, license: ImputationLicense,
 - The license harness (LOO) runs on era-windowed profiles supplied by the caller; the harness API
   takes profiles, not dates. The 2026-01-01 probe numbers (MAE 0.075 vs 0.107) are recorded as
   directional expectations, not fixtures.
+
+## Implementation notes (2026-08-01)
+
+Shipped as designed: one pure module `src/legacy_engine/analytics/superarchetype/aggregate.py`
+(no duckdb import, not even transitive — see the `_pooled_ci` note below), tests in
+`tests/analytics/superarchetype/test_aggregate.py` (99 tests, hermetic, no DB), exports added to
+the package `__init__` with the outcome-seam stated honestly (the taxonomy never reads outcomes;
+the estimator consumes tallies but is DB-free and strictly downstream, so outcomes still cannot
+tune membership). Units 1-7 in design order, one commit per unit.
+
+**Headline-fixture verdict.** Dimir Tempo vs (Aluren 4-9, Show and Tell 24-5) is REFUSED, and
+`refused_reason` names BOTH gates: the heterogeneity gate (I² = 0.89 > 0.75 via the spread guard,
+which fires first — rates span 0.308-0.828, spread 0.52 >= 0.25 among n>=10 members — with I² = 0.89
+confirmed by the guard-silent variant test) and the concentration gate (`dominated by Show and Tell
+(69% of pooled n)`, m_eff 1.75 < 2.0, top share 0.69 >= 0.60). The 66.7% / n=42 number appears
+nowhere in the returned cell — pinned by a recursive walk over every field (no float within 0.005
+of 28/42, no value equal to 42, no "66.7"/"0.667" substring); `member_split` carries the two raw
+records the surface renders instead. Diagnostics on the refused cell: HHI 0.573, m_eff 1.75,
+I² 0.89, n_eff 3.3 (tier speculative) — the display gate would refuse on n_eff alone, as §6.3
+predicted without computing it.
+
+**n_eff at tau² = 0, both directions (adversarial-read finding 2).**
+- Rates equal → `n_eff == sum(n)` exactly, BUT via the clamp: the continuity correction inflates
+  every member's precision slightly above `n·p(1-p)`, so the raw value overshoots (e.g. 32.0 on
+  sum 30) and `min(n_eff, sum(n))` returns the honest full sample. Tests:
+  `test_tau2_zero_and_equal_rates_returns_the_full_pooled_sample` (5-5/10 + 10-10/20 → 30.0) and
+  `test_tau2_zero_and_equal_rates_off_half_still_clamps_to_sum` (2-8/10 + 4-16/20 → 30.0).
+- Rates differing → `n_eff` CAN sit strictly below `sum(n)` at tau² = 0, pinned by
+  `test_tau2_zero_with_differing_rates_sits_strictly_below_sum`: four n=40 members (two 3-37, two
+  6-34; Q = 1.99 < df = 3 so DL clamps tau² to zero; rates 0.075 vs 0.15) → n_eff = 156.5 < 160.
+  Finding the fixture required care: at K=2 near p=0.5 the correction's precision inflation beats
+  the concavity loss and the clamp still binds (the 0.4/0.6 n=10 pair pre-clamps to 21.3 > 20), so
+  strictly-below needs K >= 3-4 and a pooled rate away from 0.5, where the inverse-variance
+  weighting of p̄ adds a first-order loss term. The brief's identity is false as written and is
+  asserted in neither direction beyond these pins; the guaranteed property is the safe one
+  (`n_eff <= sum(n)` always, non-increasing in tau² — both property-tested).
+
+**Prior-strength inversion resolution (adversarial-read finding 1, Unit 5 replaces §4.5).**
+`test_two_tiny_members_with_tau2_zero_land_near_the_floor`: two 1-2 (n=3) members with DL tau² = 0
+get strength 6.67 — near the floor 5, nowhere near 30 — with `reason` naming the rule
+("evidence-gated (replaces the brief's inverted §4.5): 2 member(s) toward 3 and median n 3 toward
+30 set the ceiling at 6.7; tau^2 = 0 is read as 'spread not visible', never as coherence"). Four
+30-match coherent members reach the ceiling 30; strength is non-increasing in tau² at fixed
+evidence (property test); the headline pair's tau² = 2.24 moment-matches to s = 0.86 and clamps up
+to the floor 5 with the clamp named. Reintroducing the brief's inverted behaviour by mutation
+(tau²=0 branch → `_PRIOR_MAX`) turns the tiny-members test red — the inversion cannot come back
+silently. **Floor-vs-SHRINK_STRENGTH check (inherited decision #6, recorded):** floor 5 = 1/3 of
+the standing flat `SHRINK_STRENGTH = 15`, so an incoherent or evidence-poor superarchetype prior
+is strictly weaker than the existing convention — the safe direction; the ceiling 30 =
+`DISPLAY_GATE_N` = 2x the flat strength is reachable only at full evidence (>=3 members, median
+n >= 30). The floor remains a calibration to revisit after dogfooding, marked as such at the
+definition site.
+
+**Mutation evidence (symbol-anchored, one definition site per mutation, tests untouched; baseline
+green before, between, and after; zero surviving mutants):**
+
+| mutation (symbol -> value) | tests red |
+|---|---|
+| `_CONTINUITY` 0.5 -> 0.0 (correction off) | 13 |
+| `_TAU2_MIN_MEMBERS` 2 -> 1 (single-member guard off) | 4 |
+| `effective_n` clamp removed (`min(..., total_n)` -> raw) | 3 |
+| `_MEFF_MIN` 2.0 -> 1.5 | 1 |
+| `_MAX_MEMBER_SHARE` 0.60 -> 0.70 | 1 |
+| `_I2_FREE` 0.40 -> 0.90 | 1 |
+| `_I2_REFUSE` 0.75 -> 2.0 (refuse band off) | 1 |
+| `_SPREAD_FORCE` 0.25 -> 1.1 (guard off) | 1 |
+| `_HET_MIN_MEMBER_N` 5 -> 1 | 3 |
+| `_HET_MIN_MEMBERS` 2 -> 1 | 3 |
+| `_PRIOR_FULL_MEMBERS` 3 -> 1 | 1 |
+| `_PRIOR_FULL_N` 30 -> 3 | 1 |
+| `prior_strength` tau²=0 branch -> `_PRIOR_MAX` (§4.5 inversion reintroduced) | 1 |
+| `_LICENSE_MIN_COLS` 3 -> 1 | 2 |
+| `_LICENSE_COL_MIN_MEMBER_N` 12 -> 1000 (evaluable/veto floor off) | 13 |
+| `_LICENSE_SIG_ALPHA` 0.05 -> 1e-12 (veto predicate off) | 3 |
+| `_IMPUTE_MIN_POOL` 25 -> 10 | 1 |
+
+During mutation planning one vacuity was found and fixed BEFORE running the campaign: no test
+pinned the m_eff arm alone (the headline trips both concentration arms), so
+`test_m_eff_arm_binds_alone_under_the_share_cap` (55/45 split: top share clears the cap, m_eff
+1.98 < 2.0 refuses) was added — it is the single red under the `_MEFF_MIN` mutation.
+
+**Named degrade/refusal reason inventory (honest-degrade-marker; every degenerate numerical branch
+returns one — no NaN/inf escapes any path, walk-asserted):**
+- PooledCell refusals: `no member tallies supplied — nothing to pool`; `no contributor tallies
+  remain: ... all excluded (see exclusions)`; `single-member cluster — not a pool at all; <X> is
+  the only contributor (serve its own cell at cluster granularity)`; `heterogeneity gate: <reason>`
+  joined with `concentration gate also fails: dominated by <member> (...)` when both fire.
+- Heterogeneity reasons: computability floor (`no homogeneity claim in either direction; the cell
+  falls back to the concentration labelling`); defensive single-member-fit mismatch (`the supplied
+  RandomEffects carries no I^2`); `direction/spread guard: ... treated as I^2 > 0.75 regardless of
+  I^2`; `I^2 = x > 0.75: considerable heterogeneity — the pooled number is refused; serve the
+  per-member split instead`; labelled band (`heterogeneous pool: member rates span a-b (I^2 = x)`);
+  the Q = 0 degenerate branch (`Q = 0.0 — no observed dispersion on the logit scale; I^2 = 0.00 is
+  absence of evidence of spread, not evidence of absence (one-sided)`); free band. Every
+  Heterogeneity carries `one_sided_note` = `I2_ONE_SIDED_NOTE` (public constant) as structured
+  provenance for `-best-call-fallback` to render.
+- Concentration label: `dominated by <member> (NN% of pooled n)` — a failing cell is served with
+  the label, never dropped; `calibration_note` names which threshold is measured and which is a
+  project calibration.
+- PooledCell exclusions: self-mirror (`0.5 by symmetry — carries no edge information; n reported
+  as mirror_n`); assignee (`assignees receive imputation but never contribute to pools
+  (contribute-vs-receive, era addendum)`).
+- License reasons: `insufficient shared columns (c < 3) — comparability desert; serve the
+  family-range display, not imputed points`; `divergent profile: s of c evaluable column(s)
+  significantly divergent (f > 0.25)`; the granted reason names cols/sig/median spread. The
+  degenerate all-extreme column (zero chi² margin) is read as agreement (p = 1.0), named in
+  `_column_divergence`.
+- ImputedCell refusals: `intra-family target: <O> is inside <S>'s own cluster <id>`; `no license:
+  <license.reason>`; `no contributor siblings: ...`; `local veto: sibling rates vs <O> measurably
+  diverge (chi2 p = x < 0.05) — this column never imputes, license or not`; `pool too thin
+  (n < 25)`; defensive `license carries no profile dispersion (tau_profile is None)`.
+- ImputedCell exclusions: leave-subject-out (`the subject's own tally is not sibling evidence`);
+  assignee (as above).
+- Kernel fail-fasts (author error, ValueError): empty member list to any helper; MemberTally with
+  n < 1, wins outside [0, n], or blank archetype; duplicate member archetypes in a pool; blank
+  subject/cluster_id/opponent; `Heterogeneity.band` outside the closed vocabulary
+  `{free, labelled, refused, not-computable}`.
+
+**Deviations and judgment calls, all small and named:**
+- `_pooled_ci` reimplements `matchup.wilson_or_jeffreys_ci` instead of importing it: `matchup`
+  imports `match_results`, which imports duckdb at module level, and the design's hard rule is
+  that this kernel never imports duckdb. Parity is pinned to 1e-9 over a (wins, n) grid against
+  the statsmodels-backed original (`TestPooledCiParity`) so the mirror cannot drift silently.
+  Notably statsmodels' Jeffreys does NOT clip at w=0/w=n — the parity test caught exactly that
+  in-flight.
+- `PooledCell`/`ImputedCell` carry an `exclusions: tuple[str, ...]` field beyond the design's
+  field list — the era amendment requires assignee tallies be "refused/excluded with a named
+  reason", and the name has to live somewhere structured for the surface to render.
+- `MemberTally.definer` defaults to True (curated members also pass True); the amendment offered
+  constructor-rejection as the alternative, but the labeled-exclusion form keeps the refusal
+  auditable in the output rather than pushed into caller pre-filtering.
+- The dilution acceptance ("a labelled, non-`free` band") resolves on the real fixtures to band =
+  `not-computable`: both cells have only one member at n >= 5, and their I² is 0.00 — the
+  computability floor, not I², is what stops the confident wrong number, exactly the §6.4 low-power
+  trap. Tests assert band != free plus the dominated-by concentration label on the served cell.
+- The 60/20/20 acceptance requires the cap to bind AT 0.60, so the pass condition is
+  `top_share < _MAX_MEMBER_SHARE` (a share of exactly 0.60 fails); documented at the constant.
+- No separate LOO-harness function shipped: the amendment's constraint ("takes profiles, not
+  dates") is satisfied by `imputation_license`'s API itself; the ladder-order LOO harness over
+  historical disturbances belongs to `-chain` per epic rule 5, and building it here would have
+  outrun the design.
+
+**Verification:** 99 aggregate tests + 71 existing package tests green; full suite green; ruff
+clean on the package and the new tests (pre-existing findings elsewhere in the repo are
+untouched). The refused-cell walk asserts no non-finite value in any field on every degenerate
+path.
