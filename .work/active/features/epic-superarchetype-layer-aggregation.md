@@ -1,14 +1,14 @@
 ---
 id: epic-superarchetype-layer-aggregation
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-clustering]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-01
 ---
 
 # Random-effects pooled cluster cell — n_eff, the two gates, the intra-cluster flag
@@ -224,3 +224,151 @@ Subject `Aluren`: colorless prison n=3 → 12, white creature n=10 → 24, Stomp
    they are thin, and they are the shape that would otherwise ship a confident wrong number.
 4. Combined with the singleton finding above (15 of 30 definers pool nothing), the realistic pitch for
    this arc is **"fewer blank cells and honest leans", not "the thin-data problem is solved"**.
+
+## Architectural choice
+
+**Chosen: one pure module `analytics/superarchetype/aggregate.py` exposing a single orchestrator over
+five independently-testable helpers, taking plain per-member tallies and returning one typed result
+that carries its own gate verdicts.** No DuckDB import; the caller (`-chain`) supplies tallies. This is
+the objective-search-split shape the project already uses, and it is what makes the brief's worked
+examples and today's real-corpus measurements usable directly as fixtures.
+
+Options weighed:
+1. *(chosen)* Pure kernel + typed result. Every gate is a pure predicate over the same inputs, so the
+   headline "this pooled number is a lie" fixture is a two-line unit test.
+2. *Estimator class holding config.* Rejected — the calibration constants are module-level and shared;
+   a class adds lifecycle for no benefit and makes the constants harder to grep.
+3. *Fold the gates into `matchup.py` cell construction.* Rejected — drags DB-shaped inputs into the
+   estimator, puts superarchetype logic in a module `-chain` must edit anyway, and makes gate behaviour
+   untestable without building a whole matrix.
+
+**The result carries verdicts and never silently drops.** `aggregate_cluster_cell` always returns a
+`PooledCell`; a refused pool sets `pooled_p=None` + `refused_reason` + `member_split` so the caller can
+render the members. Honest-degrade, not an exception.
+
+## Implementation Units
+
+### Unit 1 (trickiest — build first): DL random-effects pool on continuity-corrected logits
+**File**: `src/legacy_engine/analytics/superarchetype/aggregate.py`
+```python
+_CONTINUITY = 0.5          # calibration: Haldane-Anscombe correction for 0/n and n/n members
+_TAU2_MIN_MEMBERS = 2      # below this tau^2 is not computable — never claim homogeneity
+
+@dataclass(frozen=True)
+class MemberTally:
+    archetype: str
+    wins: int
+    n: int
+    intra_cluster: bool = False   # epic decision: counts toward the cell, but flagged
+
+@dataclass(frozen=True)
+class RandomEffects:
+    logit_mean: float
+    tau2: float
+    q: float
+    df: int
+    i2: float | None          # None when not computable (see _TAU2_MIN_MEMBERS)
+    weights: tuple[float, ...]
+
+def _logit_with_correction(wins: int, n: int) -> tuple[float, float]: ...
+def dersimonian_laird(members: Sequence[MemberTally]) -> RandomEffects: ...
+```
+**Acceptance**
+- [ ] Reproduces the brief's worked I² for the headline fixture to 2dp (0.89).
+- [ ] A 0-win member and an n-win member both yield finite logit and finite variance.
+- [ ] Single member → `tau2=0.0`, `i2=None`, `df=0` — the caller must not read that as homogeneous.
+- [ ] Weights sum to 1 and flatten toward equality as `tau2` grows (assert monotone, not a fixed value).
+
+### Unit 2: `n_eff` from the random-effects variance
+```python
+def effective_n(members: Sequence[MemberTally], re: RandomEffects) -> float: ...
+```
+**Acceptance**
+- [ ] **PIN REAL BEHAVIOUR, NOT THE BRIEF'S IDENTITY.** `tau2 == 0` AND all member rates equal →
+      `n_eff == sum(n)`. `tau2 == 0` with rates DIFFERING → `n_eff < sum(n)` strictly. Assert both; do
+      not assert the false identity.
+- [ ] `n_eff` non-increasing in `tau2` (property test over a grid).
+- [ ] `n_eff <= sum(n)` always.
+
+### Unit 3: concentration gate
+```python
+_MEFF_MIN = 2.0            # calibration: 1/HHI, the "effective number of members"
+_MAX_MEMBER_SHARE = 0.60   # CALIBRATION, NOT SOURCED — binding at K>=3 (60/20/20 -> m_eff 2.27)
+
+def concentration(members: Sequence[MemberTally]) -> Concentration: ...
+```
+`Concentration` carries `hhi`, `m_eff`, `top_share`, `top_member`, `passed`, and a `calibration_note`
+naming the cap as a project calibration rather than a sourced threshold.
+**Acceptance**
+- [ ] Headline fixture (n=13 / n=29) → HHI 0.573, m_eff 1.75, **fails**.
+- [ ] 60/20/20 passes `m_eff` (2.27) and fails on the cap alone — the K>=3 binding case.
+- [ ] A failing cell is still SERVED, labelled `dominated by <member>` (assert the label, not a drop).
+
+### Unit 4: heterogeneity gate + spread guard + computability
+```python
+_I2_FREE, _I2_REFUSE = 0.40, 0.75      # Cochrane interpretation bands
+_SPREAD_FORCE, _SPREAD_MIN_N = 0.25, 10
+_HET_MIN_MEMBERS, _HET_MIN_MEMBER_N = 2, 5
+
+def heterogeneity(members: Sequence[MemberTally], re: RandomEffects) -> Heterogeneity: ...
+```
+`Heterogeneity.band ∈ {"free","labelled","refused","not-computable"}` — closed vocabulary, fail-fast on
+anything else — plus `one_sided_note`: **I² is one-sided evidence; a high value is a reliable stop, a
+low value is NEVER a certificate of exchangeability.** That string must ride on the result so the UI can
+surface it (the epic flags this caveat as able to fall between features).
+**Acceptance**
+- [ ] Headline fixture → I²=0.89 → `refused`, `member_split` populated.
+- [ ] Direction guard: two members with n>=10 whose rates differ by >=0.25 force `refused` even at low I².
+- [ ] Fewer than 2 members with n>=5 → `not-computable`, with **no homogeneity claim in either
+      direction** (assert `one_sided_note` present and band is not `free`).
+
+### Unit 5: evidence-gated prior strength (REPLACES the brief's inverted §4.5)
+```python
+_PRIOR_MIN, _PRIOR_MAX = 5.0, 30.0
+_PRIOR_FULL_MEMBERS, _PRIOR_FULL_N = 3, 30   # evidence sufficiency, NOT tau2 == 0
+
+def prior_strength(members: Sequence[MemberTally], re: RandomEffects) -> PriorStrength: ...
+```
+Strength scales with **evidence sufficiency** (member count and per-member n), then is *reduced* by
+observed dispersion. `tau2 == 0` alone never buys the maximum.
+**Acceptance**
+- [ ] Two tiny members with `tau2 == 0` → strength near `_PRIOR_MIN`, **not** `_PRIOR_MAX`; `reason`
+      names the evidence rule. (This is the adversarial read's behavior-changing finding.)
+- [ ] Many large coherent members → near `_PRIOR_MAX`.
+- [ ] Strength non-increasing in `tau2` at fixed evidence.
+
+### Unit 6: orchestrator
+```python
+def aggregate_cluster_cell(
+    subject: str, cluster_id: str, members: Sequence[MemberTally],
+) -> PooledCell: ...
+```
+Returns pooled rate + CI + `n_eff` + `tier_for_sample(round(n_eff))` + concentration + heterogeneity +
+prior strength + `intra_cluster_n` + provenance. Refusal → `pooled_p=None`, `refused_reason`,
+`member_split`.
+**Acceptance**
+- [ ] **HEADLINE: Dimir Tempo vs (Aluren 4-9, Show and Tell 24-5) is REFUSED** by both gates, and the
+      66.7% / n=42 number never appears anywhere in the result.
+- [ ] Dilution fixtures (Cradle vs colorless prison 25.0% n=4 → 46.2% n=13; Aluren vs same 100% n=3 →
+      50.0% n=12) produce a labelled, non-`free` band.
+- [ ] Tier derives from `n_eff`, never raw `sum(n)` — assert a case where the two differ.
+- [ ] No NaN/inf escapes; every degenerate branch returns a named reason.
+
+## Implementation Order
+Unit 1 → 2 → 3 → 4 → 5 → 6. Unit 1 is trickiest and everything downstream reads its output.
+
+## Testing
+Hermetic and DB-free throughout — the estimator takes plain tallies, so no fixture DB is needed at all.
+Fixtures come verbatim from the brief's worked examples and the real-corpus measurements recorded above.
+Non-vacuity: mutate each gate's threshold **by symbol name** and confirm the matching test goes red —
+never by text substitution (see `idea-parity-test-mutations-must-be-one-sided`; that trap produced a
+falsely-green result earlier today). Property tests cover the monotonicity claims.
+
+## Risks
+- **Numerical.** DL `tau2` clamps at zero; logits blow up at 0/n without the correction; `i2` divides by
+  Q. Each needs an explicit branch with a named reason — a NaN reaching a cell is worse than a refusal.
+- **Over-refusal.** The gates may refuse so often that pooling adds nothing. Measured expectation is
+  already modest; if the headline fixture refuses but almost nothing else pools, report that as a finding
+  for `-best-call-fallback` rather than loosening thresholds.
+- **Calibration drift.** Four constants are project calibrations, not sourced. All module-level, named,
+  and commented as such; the audit output must say so.
