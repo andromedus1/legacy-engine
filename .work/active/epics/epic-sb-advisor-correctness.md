@@ -38,6 +38,29 @@ data split that does not exist yet.
 - epic-sb-advisor-correctness-fourof-guard — combined main+SB 4-of legality guard
 - epic-sb-advisor-correctness-sweep-polish — sweep report near-dupe clusters + Σ-adoption formatting
 
+## Design decisions
+<!-- captured 2026-07-31 via epic-design --only-questions; feature-design treats these as fixed inputs -->
+- **Calibration philosophy**: Mechanism fixes only; adoption stays diagnostic — fix the
+  verified defects (impact factor on `_hate:` coverage, castability gating, OUT-side flex,
+  alpha greediness); observed adoption remains a divergence diagnostic per the
+  divergence-as-diagnostic pattern, never blended into scores.
+- **Backtest CI gate**: Yes — a hermetic backtest fixture with a pinned divergence budget
+  runs in CI; advisory changes that widen divergence vs the observed-boards reference fail.
+- **Opponent-boarding-response**: Deferred — stays an absorbed member, not decomposed into
+  v1 features; revisit when a game-level pre/post-board data path exists.
+
+## Decomposition status — PARTIAL (do not short-circuit)
+
+An `epic-design` pass was interrupted by an API spend limit on 2026-07-31 after writing exactly
+ONE child feature (`epic-sb-advisor-correctness-backtest-ci-gate`) and before writing the
+`## Decomposition` section or advancing the stage. The decomposition is therefore INCOMPLETE:
+the model-level members below (the `_hate:` impact factor, per-deck castability gating, the
+alpha/option-value near-miss, the OUT-side adoption lock, the creature-interaction triage) still
+need child features.
+
+When epic-design next runs on this epic it MUST NOT take the Phase 1.5 children-already-exist
+short-circuit — one child is not the decomposition. Finish it.
+
 ## Member findings (absorbed from backlog; full text below)
 
 ---
