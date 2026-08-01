@@ -3618,9 +3618,16 @@ def advise_sweep(
             for rank, c in enumerate(group, start=1):
                 tiers = ", ".join(f"{n} {t}" for t, n in sorted(c.tier_breakdown.items()))
                 thin = "" if c.n_archetypes_nonspeculative > 0 else "  [THIN: speculative-tier support only]"
+                # total_adoption is a Σ over members — its raw percent form can exceed 100%
+                # on wide clusters (e.g. "5904%") and read as broken. Display the per-member
+                # AVERAGE instead: it stays bounded 0-100% and reads honestly; breadth is
+                # already conveyed by the adjacent "n archetype(s)" figure, so nothing here
+                # is lost by not showing the sum. The raw Σ (total_adoption) is unchanged in
+                # the dataclass/JSON payload and still drives rank_clusters.
+                mean_adoption = c.total_adoption / len(c.members) if c.members else 0.0
                 click.echo(
                     f"  {rank}. {c.tag} — {c.n_archetypes} archetype(s) ({tiers}), "
-                    f"Σ adoption {c.total_adoption * 100:.0f}%{thin}"
+                    f"avg adoption {mean_adoption:.0%}{thin}"
                 )
                 by_card: dict[str, list] = {}
                 for m in c.members:
@@ -7148,6 +7155,56 @@ def eras_confirm(event_date: str, card: str, reason: str, events_path: str | Non
         f"new regime opens at {parsed_date.isoformat()}"
     )
     click.echo("// re-run `eras run` (and any windowed report) to pick up the healed regime")
+
+
+# ── lint: curated-data integrity checks (CI-gated) ──
+@main.group()
+def lint() -> None:
+    """Cross-check hand-curated data files against the cards table."""
+
+
+@lint.command("catalog")
+@click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+@_verbose
+def lint_catalog(db: str | None, verbose: bool) -> None:
+    """Lint the curated hoser + linchpin catalogs against cards (the CI gate).
+
+    Cross-checks every curated entry in the shipped hoser/linchpin JSON against the cards
+    table: exact-spelling existence and declared colors vs actual colors are error-level (hard
+    facts); castable_any_color vs Phyrexian-mana/free-activation text, owner-restriction wording
+    vs declared symmetry, and functional_group coherence are warn-level heuristics. Exits with
+    status 1 if any error-severity finding is produced.
+
+    Example: legacy-engine lint catalog
+    """
+    _setup_logging(verbose)
+    from legacy_engine.catalog_lint import lint_catalogs
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        findings = lint_catalogs(con)
+    finally:
+        con.close()
+
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warn"]
+
+    if not findings:
+        click.echo("// catalog lint: clean (0 errors, 0 warnings)")
+        return
+
+    for f in findings:
+        click.echo(f"// [{f.severity}] {f.check} {f.source} :: {f.entry} — {f.message}")
+    click.echo(f"// catalog lint: {len(errors)} error(s), {len(warnings)} warning(s)")
+
+    if errors:
+        raise click.ClickException(f"catalog lint failed: {len(errors)} error-severity finding(s)")
 
 
 if __name__ == "__main__":
