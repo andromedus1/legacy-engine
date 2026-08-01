@@ -1,13 +1,20 @@
-"""Tests for the multi-split pooling kernel + uniform builder (feature-multi-split-matrix Unit 2).
+"""Tests for the multi-split pooling kernel, uniform builder, and era-windowed adaptive builder
+(feature-multi-split-matrix Units 2-3).
 
-The headline is **the parity test**: every camp cell of a ``MultiSplitMatrix`` must equal
-``build_matrix(split_variant=parent)``'s cell field-for-field, and every unsplit-subject cell must
-equal the plain ``build_matrix``'s — otherwise the one-pass build is not a pure batching win and
-the architecture is wrong.  Alongside it: pure-kernel tests for ``_pool_opponent_tallies`` /
-``_multi_hierarchy_inputs`` (hand-built ``MatchResults``, no DB), the deliberate
-``(camp, own_parent)`` absence, singleton degeneracy, and the ``ranking_view()`` contract.
+The headline is **the parity test**, in two halves.  Uniform (Unit 2): every camp cell of a
+``MultiSplitMatrix`` must equal ``build_matrix(split_variant=parent)``'s cell field-for-field, and
+every unsplit-subject cell must equal the plain ``build_matrix``'s.  Adaptive (Unit 3): the same
+for ``build_adaptive_matrix``, PLUS the adaptive-only surfaces the uniform half cannot reach —
+``cell_windows``, ``horizon_meta``, and the cross-era ``prior_source`` labels.  Either failing
+means the one-pass build is not a pure batching win and the architecture is wrong.
 
-Hermetic only — the shared two-parent corpus comes from ``test_match_results_multi_split``.
+Alongside them: pure-kernel tests for ``_pool_opponent_tallies`` / ``_multi_hierarchy_inputs``
+(hand-built ``MatchResults``, no DB), the deliberate ``(camp, own_parent)`` absence, singleton
+degeneracy, and the ``ranking_view()`` contract.
+
+Hermetic only — the shared two-parent corpus comes from ``test_match_results_multi_split``; the
+adaptive half layers ``entity_eras`` rows on top of it so all three horizon sources (exact camp
+row / parent-inherited / ban-only) are live in one fixture.
 """
 
 from __future__ import annotations
@@ -16,6 +23,9 @@ import pytest
 
 from legacy_engine.advisory.field import build_custom_field
 from legacy_engine.advisory.positioning import rank_decks
+from legacy_engine.analytics.eras.attribution import Attribution
+from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
+from legacy_engine.analytics.eras.store import write_entity_eras
 from legacy_engine.analytics.match_results import (
     ArchetypeRecord,
     MatchCoverage,
@@ -30,9 +40,13 @@ from legacy_engine.analytics.matchup import (
     _multi_split_inclusion,
     _pool_opponent_tallies,
     beta_binomial_shrink,
+    build_adaptive_matrix,
     build_matrix,
+    build_multi_split_adaptive,
     build_multi_split_matrix,
 )
+from legacy_engine.ingestion import store
+from legacy_engine.ingestion.cache import parse_cache_item
 
 from test_match_results_multi_split import (  # noqa: E402  (sibling test module, sys.path via rootdir)
     EARLY_DATE,
@@ -520,3 +534,322 @@ class TestRankingView:
         again = rank_decks(msm.ranking_view(), field, candidates, n_draws=200, seed=7)
         assert again.decks == ranking.decks
         assert again.p_best == ranking.p_best
+
+
+# ---------------------------------------------------------------------------
+# Adaptive fixture: the shared corpus + entity_eras rows covering all three horizon sources
+#
+#   Doomsday             -> exact era row, since LATE_DATE   (source "era")
+#   Doomsday [Murktide]  -> its OWN era row, since MID_DATE  (source "era", camp-exact)
+#   Doomsday [Turbo]     -> no row, inherits Doomsday's      (source "era-parent")
+#   Control              -> exact era row, since None        (source "era", full history)
+#   Painter + its camps  -> no row anywhere                  (source "ban-only", since None)
+#   Delver               -> no row; ran Entomb pre-ban       (source "ban-only", since dated)
+#
+# Delver's dated ban-only horizon is what proves a ban-only boundary NEVER takes the cross-era
+# prior, while an era boundary at a comparable date does.
+# ---------------------------------------------------------------------------
+
+MID_DATE = "2026-03-01"  # between the two tournaments: a camp-exact horizon distinct from LATE
+_PRE_BAN_DECK_DATE = "2025-06-01"  # inside [2025-03-31, 2025-11-10), the pre-Entomb-ban regime
+
+
+def _era_boundary(date: str) -> EraBoundary:
+    return EraBoundary(
+        date=date, signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False,
+    )
+
+
+def _load_pre_ban_delver_decks(con) -> None:
+    """Rounds-free Delver decks running Entomb before its ban — gives Delver a DATED ban-only
+    horizon without touching a single match tally (no rounds → no matchup data)."""
+    raw = {
+        "Tournament": {
+            "Name": "multi-split-pre-ban", "Date": _PRE_BAN_DECK_DATE,
+            "Uri": "https://example.test/multi-split-pre-ban", "Formats": "Legacy",
+        },
+        "Decks": [
+            {
+                "Player": f"pb{i}", "Result": "1st Place",
+                "Mainboard": [{"Count": 4, "CardName": "Entomb"}], "Sideboard": [],
+            }
+            for i in range(4)
+        ],
+        "Rounds": [], "Standings": [],
+    }
+    tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
+    con.execute("UPDATE decks SET archetype = 'Delver' WHERE tournament_id = ?", [tid])
+
+
+def adaptive_con():
+    """The shared two-parent corpus + the era rows described above."""
+    con = two_parent_con()
+    _load_pre_ban_delver_decks(con)
+    eras = {
+        "Doomsday": EntityEras(
+            entity="Doomsday", stable_since=LATE_DATE,
+            boundaries=(_era_boundary(LATE_DATE),), inherited_from_parent=False,
+        ),
+        "Doomsday [Murktide]": EntityEras(
+            entity="Doomsday [Murktide]", stable_since=MID_DATE,
+            boundaries=(_era_boundary(MID_DATE),), inherited_from_parent=False,
+        ),
+        "Control": EntityEras(
+            entity="Control", stable_since=None, boundaries=(), inherited_from_parent=False,
+        ),
+    }
+    attributions = {
+        ("Doomsday", LATE_DATE): Attribution(
+            kind="release", card="Flow State", detail="release: Flow State adoption",
+        ),
+        ("Doomsday [Murktide]", MID_DATE): Attribution(
+            kind="ban", card="Nadu, Winged Wisdom", detail="ban: Nadu, Winged Wisdom",
+        ),
+    }
+    write_entity_eras(
+        con, eras, attributions, {},
+        run_meta={
+            "provenance": None, "alpha": 0.05, "run_at": "2026-07-31T00:00:00+00:00",
+            "post_boundary_decks": {},
+            "parent": {
+                "Doomsday": "Doomsday",
+                "Doomsday [Murktide]": "Doomsday",
+                "Control": "Control",
+            },
+        },
+    )
+    return con
+
+
+class TestAdaptiveFixtureCoversEveryHorizonSource:
+    """The parity fixture is only meaningful if all three resolution branches are live in it."""
+
+    def test_all_three_sources_present(self):
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        con.close()
+        meta = ams.horizon_meta
+        assert meta["Doomsday [Murktide]"].source == "era"
+        assert meta["Doomsday [Murktide]"].since == MID_DATE
+        assert meta["Doomsday [Turbo]"].source == "era-parent"
+        assert meta["Doomsday [Turbo]"].since == LATE_DATE
+        assert meta["Doomsday"].source == "era"
+        assert meta["Control"].source == "era"
+        assert meta["Control"].since is None
+        assert meta["Painter [Grindstone]"].source == "ban-only"
+        assert meta["Painter [Grindstone]"].since is None
+        assert meta["Delver"].source == "ban-only"
+        assert meta["Delver"].since is not None  # ran Entomb pre-ban
+        assert meta["Delver"].since < EARLY_DATE
+
+    def test_more_than_one_distinct_window_is_actually_in_play(self):
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        con.close()
+        assert len(set(ams.cell_windows.values())) >= 3
+        assert None in set(ams.cell_windows.values())
+
+
+# ---------------------------------------------------------------------------
+# THE ADAPTIVE PARITY TEST
+# ---------------------------------------------------------------------------
+
+
+class TestAdaptiveParity:
+    """One adaptive multi-split build must reproduce N per-parent adaptive builds — values,
+    windows, horizons and cross-era prior labels alike."""
+
+    def test_camp_rows_equal_the_per_parent_adaptive_build(self):
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        msm = ams.multi
+        checked = 0
+        cross_era_cells = 0
+        for parent in PARENTS:
+            per = build_adaptive_matrix(con, split_variant=parent)
+            camps = [s for s in msm.subjects if msm.camp_parent.get(s) == parent]
+            assert camps, f"no camps observed for {parent}"
+            assert set(per.matrix.archetypes) - set(camps) == set(msm.opponents) - {parent}
+            for camp in camps:
+                assert ams.horizon_meta[camp] == per.horizon_meta[camp], f"horizon {camp!r}"
+                assert ams.valid_since[camp] == per.valid_since[camp], f"valid_since {camp!r}"
+                for opponent in msm.opponents:
+                    if opponent == parent:
+                        continue  # own-parent column: absent by design
+                    context = f"{camp!r} vs {opponent!r} (split_variant={parent!r})"
+                    _assert_cell_parity(
+                        msm.cells[(camp, opponent)], per.matrix.cells[(camp, opponent)], context,
+                    )
+                    assert ams.cell_windows[(camp, opponent)] == (
+                        per.cell_windows[(camp, opponent)]
+                    ), f"cell window mismatch for {context}"
+                    if msm.cells[(camp, opponent)].prior_source.startswith("pre-disturbance"):
+                        cross_era_cells += 1
+                    checked += 1
+                _assert_cell_parity(
+                    msm.cells[(camp, camp)], per.matrix.cells[(camp, camp)], f"mirror {camp!r}",
+                )
+                assert ams.cell_windows[(camp, camp)] == per.cell_windows[(camp, camp)]
+                checked += 1
+        assert checked >= 20
+        # Non-vacuity: the cross-era prior override really did fire on camp cells here, so the
+        # field-for-field parity above is covering it and not just the plain hierarchy chain.
+        assert cross_era_cells >= 4
+        con.close()
+
+    def test_opponent_side_horizons_equal_the_per_parent_build(self):
+        """A split parent on the OPPONENT axis must carry the parent-level horizon — the same one
+        the per-parent build resolves for that label as an ordinary unsplit archetype."""
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        for parent in PARENTS:
+            per = build_adaptive_matrix(con, split_variant=parent)
+            for opponent in ams.multi.opponents:
+                if opponent == parent:
+                    continue
+                assert ams.horizon_meta[opponent] == per.horizon_meta[opponent], opponent
+                assert ams.valid_since[opponent] == per.valid_since[opponent], opponent
+        con.close()
+
+    def test_unsplit_rows_equal_the_plain_adaptive_build(self):
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        plain = build_adaptive_matrix(con)
+        msm = ams.multi
+        unsplit = [s for s in msm.subjects if s not in msm.camp_parent]
+        assert unsplit
+        cross_era_cells = 0
+        for subject in unsplit:
+            assert ams.horizon_meta[subject] == plain.horizon_meta[subject]
+            for opponent in msm.opponents:
+                if opponent == subject:
+                    continue
+                context = f"{subject!r} vs {opponent!r} (plain adaptive)"
+                _assert_cell_parity(
+                    msm.cells[(subject, opponent)], plain.matrix.cells[(subject, opponent)],
+                    context,
+                )
+                assert ams.cell_windows[(subject, opponent)] == (
+                    plain.cell_windows[(subject, opponent)]
+                ), f"cell window mismatch for {context}"
+                if msm.cells[(subject, opponent)].prior_source.startswith("pre-disturbance"):
+                    cross_era_cells += 1
+            _assert_cell_parity(
+                msm.cells[(subject, subject)], plain.matrix.cells[(subject, subject)],
+                f"mirror {subject!r} (plain adaptive)",
+            )
+            assert ams.cell_windows[(subject, subject)] == plain.cell_windows[(subject, subject)]
+        assert cross_era_cells >= 1
+        con.close()
+
+    def test_cross_era_prior_labels_are_identical(self):
+        """The cross-era label carries the pre-boundary window AND the pre-boundary hierarchy
+        source — a pooled opponent column must reproduce both exactly."""
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        per = build_adaptive_matrix(con, split_variant="Doomsday")
+        con.close()
+        # A camp cell vs a POOLED parent opponent (Painter's camps summed back to "Painter").
+        key = ("Doomsday [Murktide]", "Painter")
+        assert ams.multi.cells[key].prior_source == (
+            f"pre-disturbance value (window < {MID_DATE}); "
+            "hierarchy: parent cell (leave-camp-out)"
+        )
+        assert ams.multi.cells[key].prior_source == per.matrix.cells[key].prior_source
+        assert ams.multi.cells[key].prior_mean == per.matrix.cells[key].prior_mean
+        assert ams.cell_windows[key] == MID_DATE
+
+    def test_ban_only_boundary_takes_no_cross_era_prior(self):
+        """Delver's horizon is ban-only: a cell truncated at it keeps the hierarchy prior, because
+        the ban regime IS the whole known history for that source."""
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        plain = build_adaptive_matrix(con)
+        con.close()
+        key = ("Control", "Delver")
+        assert ams.valid_since["Delver"] is not None
+        assert ams.cell_windows[key] == ams.valid_since["Delver"]
+        assert ams.multi.cells[key].prior_source == "marginal"
+        assert ams.multi.cells[key].prior_source == plain.matrix.cells[key].prior_source
+
+    def test_own_parent_column_absent_and_axes_match_the_uniform_build(self):
+        con = adaptive_con()
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        uniform = build_multi_split_matrix(con, parents=PARENTS)
+        con.close()
+        assert ams.multi.subjects == uniform.subjects
+        assert ams.multi.opponents == uniform.opponents
+        assert ams.multi.parents == uniform.parents
+        assert ams.multi.cells.keys() == uniform.cells.keys()
+        for camp, parent in ams.multi.camp_parent.items():
+            assert (camp, parent) not in ams.multi.cells
+
+    def test_scan_count_is_distinct_horizons_not_parents_times_horizons(self):
+        """The economics of the feature: one scan per DISTINCT horizon (+ one per cross-era
+        boundary actually used), never one per parent."""
+        con = adaptive_con()
+        calls: list[dict] = []
+        import legacy_engine.analytics.matchup as matchup_mod
+
+        real = matchup_mod.compute_match_results
+
+        def _spy(con_, **kwargs):
+            calls.append(kwargs)
+            return real(con_, **kwargs)
+
+        matchup_mod.compute_match_results = _spy
+        try:
+            ams = build_multi_split_adaptive(con, parents=PARENTS)
+        finally:
+            matchup_mod.compute_match_results = real
+        con.close()
+        n_horizons = len(set(ams.valid_since.values()))
+        n_boundaries = len({w for w in ams.cell_windows.values() if w is not None})
+        assert len(calls) <= n_horizons + n_boundaries
+        assert all(call.get("split_variants") == PARENTS for call in calls)
+
+
+class TestAdaptiveHorizonsOverride:
+    def test_explicit_horizons_bypass_era_horizons(self):
+        con = adaptive_con()
+        pinned = {"Doomsday [Murktide]": LATE_DATE, "Control": EARLY_DATE}
+        ams = build_multi_split_adaptive(con, parents=PARENTS, horizons=pinned)
+        con.close()
+        assert ams.horizon_meta == {}
+        assert ams.audit_preamble == ()
+        assert ams.valid_since["Doomsday [Murktide]"] == LATE_DATE
+        assert ams.valid_since["Control"] == EARLY_DATE
+        assert ams.valid_since["Painter [Grindstone]"] is None  # unlisted → full history
+        assert ams.cell_windows[("Doomsday [Murktide]", "Control")] == LATE_DATE
+
+    def test_pinned_horizons_match_the_per_parent_pinned_build(self):
+        con = adaptive_con()
+        pinned = {
+            "Doomsday [Murktide]": LATE_DATE, "Doomsday [Turbo]": LATE_DATE,
+            "Painter": LATE_DATE, "Control": EARLY_DATE,
+        }
+        ams = build_multi_split_adaptive(con, parents=PARENTS, horizons=pinned)
+        per = build_adaptive_matrix(con, split_variant="Doomsday", horizons=pinned)
+        camps = [s for s in ams.multi.subjects if ams.multi.camp_parent.get(s) == "Doomsday"]
+        for camp in camps:
+            for opponent in ams.multi.opponents:
+                if opponent == "Doomsday":
+                    continue
+                _assert_cell_parity(
+                    ams.multi.cells[(camp, opponent)], per.matrix.cells[(camp, opponent)],
+                    f"pinned {camp!r} vs {opponent!r}",
+                )
+                assert ams.cell_windows[(camp, opponent)] == per.cell_windows[(camp, opponent)]
+        # Pinned horizons carry no era metadata, so no cell may claim a cross-era prior.
+        assert not any(
+            (c.prior_source or "").startswith("pre-disturbance")
+            for c in ams.multi.cells.values()
+        )
+        con.close()
+
+    def test_no_era_data_degrades_with_the_whole_path_banner(self):
+        con = two_parent_con()  # no entity_eras written at all
+        ams = build_multi_split_adaptive(con, parents=PARENTS)
+        con.close()
+        assert ams.audit_preamble == ("// eras: no era data — ban-only horizons; run `eras run`",)
+        assert all(h.source == "ban-only" for h in ams.horizon_meta.values())
