@@ -163,6 +163,35 @@ class TestErasExplain:
         assert "unknown entity" in result.output
 
 
+class TestErasRunRegisteredBanWording:
+    """Finding A end-to-end through the CLI: Tron's own boundary is ban-attributed (Undercity
+    Informer) but the alarm still fires at n=3 (no BH-FDR power) — wording must consult the real
+    shipped ledger and say "registered ban", never "possible unregistered". Drift's genuinely
+    unrelated 15% inclusion must stay the classic unattributed wording in the SAME run, proving
+    the plausibility gate (not mere ban proximity) drives the corrected wording end-to-end."""
+
+    def test_eras_run_shows_both_wordings_in_one_run(self, tmp_path, runner):
+        db_path = _build_eras_db(tmp_path)
+        result = runner.invoke(main, ["eras", "run", "--db", db_path])
+        assert result.exit_code == 0, result.output
+        assert "// ⚠ Tron: registered ban" in result.output
+        assert "Undercity Informer" in result.output
+        assert "// ⚠ Drift: unattributed disturbance" in result.output
+
+    def test_eras_explain_shows_corrected_wording(self, tmp_path, runner):
+        db_path = _build_eras_db(tmp_path)
+        runner.invoke(main, ["eras", "run", "--db", db_path])
+        result = runner.invoke(main, ["eras", "explain", "Tron", "--db", db_path])
+        assert result.exit_code == 0, result.output
+        # The alarm line (`// ⚠ ...`, distinct from each boundary's own per-derivation
+        # `attribution:` line, which legitimately stays "possible unregistered" for Tron's
+        # earlier, genuinely-unrelated small boundaries) must read the corrected wording.
+        alarm_line = next(line for line in result.output.splitlines() if line.startswith("// ⚠"))
+        assert "registered ban" in alarm_line
+        assert "Undercity Informer" in alarm_line
+        assert "possible unregistered" not in alarm_line
+
+
 class TestErasConfirm:
     """`eras confirm` is exercised against a SYNTHETIC event, not the real Candelabra of Tawnos
     ban — that ban is itself now a real, permanent row in the shipped `events.json` (this test
