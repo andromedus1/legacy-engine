@@ -8790,3 +8790,568 @@ class TestFourOfGuardIntegration:
                 f"{main_copies} main + board = {total} copies: {pkg.cards}"
             )
             assert not any(w.startswith("// ILLEGAL:") for w in pkg.warnings), pkg.warnings
+
+
+# ---------------------------------------------------------------------------
+# epic-sb-advisor-correctness-matchup-plan-flex
+# ---------------------------------------------------------------------------
+
+class TestMatchupPlanFlex:
+    """OUT-side land exemption, honest no-flex degrade, IN-side axis relevance gate.
+
+    Hand-built inputs throughout (objective-search-split): no default DB, no corpus.
+    """
+
+    # Card rows copied verbatim from data/legacy.duckdb (`cards.type_line` / `cards.is_land`).
+    # Sink into Stupor and Boggart Trawler are the load-bearing rows: modal-DFC face aliases
+    # whose DB is_land is TRUE (store.load_cards sets face_is_land for every face of a
+    # both-castable layout when ANY face is a land) but whose front face is a spell.
+    _CARD_ROWS = (
+        ("Scalding Tarn", "Land", True),
+        ("Dryad Arbor", "Land Creature — Forest Dryad", True),
+        ("Westvale Abbey", "Land", True),
+        ("Sink into Stupor", "Instant", True),
+        ("Boggart Trawler", "Creature — Goblin", True),
+        ("Ojer Pakpatiq, Deepest Epoch", "Legendary Creature — God", False),
+        ("Brainstorm", "Instant", False),
+    )
+
+    @staticmethod
+    def _cards_con():
+        from legacy_engine.ingestion import store
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        con.executemany(
+            "INSERT INTO cards (name, mana_cost, cmc, type_line, colors, produced_mana, "
+            "oracle_text, layout, is_land, power, toughness) "
+            "VALUES (?, NULL, 0.0, ?, '', '', '', 'normal', ?, NULL, NULL)",
+            list(TestMatchupPlanFlex._CARD_ROWS),
+        )
+        return con
+
+    @staticmethod
+    def _cv(card: str, board: str, opp: str, lift: float, n: int = 120,
+            tier: str = "established"):
+        from legacy_engine.analytics.card_value import CardValue
+        p = 0.5 + lift
+        return CardValue(
+            card=card, board=board, opponent=opp,
+            p_raw=p, p_shrunk=p, prior_mean=0.5, lift=lift, n=n, tier=tier,
+        )
+
+    # -- _in_axis_verdict (pure) ---------------------------------------------
+
+    def test_axis_verdict_off_axis(self):
+        from legacy_engine.advisory.sideboard import _in_axis_verdict
+        assert _in_axis_verdict(
+            frozenset({"plays-red"}), frozenset({"plays-blue", "plays-black"})
+        ) == (False, "off-axis")
+
+    def test_axis_verdict_on_axis(self):
+        from legacy_engine.advisory.sideboard import _in_axis_verdict
+        assert _in_axis_verdict(
+            frozenset({"combo", "storm-reliant", "colorless-reliant"}),
+            frozenset({"combo", "low-interaction"}),
+        ) == (True, "on-axis")
+
+    def test_axis_verdict_hate_is_field_wide(self):
+        """_hate:<tag> elements carry no archetype key — no per-opponent axis exists."""
+        from legacy_engine.advisory.sideboard import _in_axis_verdict
+        assert _in_axis_verdict(
+            frozenset({"_hate"}), frozenset({"plays-blue"})
+        ) == (True, "hate-axis-field-wide")
+
+    def test_axis_verdict_unknown_opponent_axes_never_suppress(self):
+        from legacy_engine.advisory.sideboard import _in_axis_verdict
+        assert _in_axis_verdict(
+            frozenset({"plays-red"}), frozenset()
+        ) == (True, "opponent-axes-unknown")
+
+    def test_axis_verdict_unknown_card_axes_never_suppress(self):
+        from legacy_engine.advisory.sideboard import _in_axis_verdict
+        assert _in_axis_verdict(
+            frozenset(), frozenset({"combo"})
+        ) == (True, "card-axes-unknown")
+
+    def test_axis_verdict_hydroblast_into_ub_mirror(self):
+        """Regression for the 2026-07-04 Dimir primer finding: Hydroblast (attacks
+        {"plays-red"}) had positive correlational lift vs the UB mirror and was boarded IN.
+        A UB opponent presents no red target."""
+        from legacy_engine.advisory.sideboard import HOSER_CATALOG, _in_axis_verdict
+        hydroblast_axes = HOSER_CATALOG["Hydroblast"].attacks
+        assert hydroblast_axes == frozenset({"plays-red"})
+        ub_mirror_axes = frozenset({"plays-blue", "plays-black", "nonbasic-manabase"})
+        assert _in_axis_verdict(hydroblast_axes, ub_mirror_axes) == (False, "off-axis")
+
+    # -- _resolve_land_names (DB half) ---------------------------------------
+
+    def test_resolve_land_names_uses_type_line_not_is_land_column(self):
+        """The type-line rule exempts real lands and leaves modal-DFC spells alone.
+
+        If this ever starts returning Sink into Stupor, the land test has been switched to
+        the `cards.is_land` column and 34 spells (3,377 corpus maindecks for Sink into
+        Stupor alone) just became un-sideboardable.
+        """
+        from legacy_engine.advisory.sideboard import _resolve_land_names
+        con = self._cards_con()
+        try:
+            got = _resolve_land_names(con, [r[0] for r in self._CARD_ROWS])
+        finally:
+            con.close()
+        assert got == frozenset({"Scalding Tarn", "Dryad Arbor", "Westvale Abbey"})
+        assert "Sink into Stupor" not in got
+        assert "Boggart Trawler" not in got
+        assert "Ojer Pakpatiq, Deepest Epoch" not in got
+
+    def test_resolve_land_names_empty_input(self):
+        from legacy_engine.advisory.sideboard import _resolve_land_names
+        con = self._cards_con()
+        try:
+            assert _resolve_land_names(con, []) == frozenset()
+        finally:
+            con.close()
+
+    def test_resolve_land_names_degrades_on_missing_table(self):
+        """No cards table -> frozenset(), never a raise."""
+        import duckdb
+        from legacy_engine.advisory.sideboard import _resolve_land_names
+        con = duckdb.connect(":memory:")
+        try:
+            assert _resolve_land_names(con, ["Scalding Tarn"]) == frozenset()
+        finally:
+            con.close()
+
+    # -- OUT-side land exemption ---------------------------------------------
+
+    def test_land_never_sided_out_even_as_worst_card(self):
+        """Scalding Tarn has the most negative lift but is a land — never cut."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Izzet Delver"
+        maindeck = {"Brainstorm": 4, "Scalding Tarn": 4, "Sink into Stupor": 2}
+        sideboard_15 = {"Surgical Extraction": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Scalding Tarn": self._cv("Scalding Tarn", "main", opp, -0.20),
+                "Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.05),
+                "Brainstorm": self._cv("Brainstorm", "main", opp, +0.10),
+            },
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4,
+            )
+        finally:
+            con.close()
+        plan = plans[opp]
+        assert "Scalding Tarn" not in plan.side_out
+        assert plan.plan_status == "planned"
+        # The modal-DFC spell IS eligible and is what gets cut.
+        assert plan.side_out == {"Sink into Stupor": 2}
+        assert ("Scalding Tarn", -0.20, "land") in plan.out_suppressed
+        # 60-conservation invariants still hold.
+        assert sum(plan.side_out.values()) == sum(plan.side_in.values())
+        assert sum(plan.post_board.values()) == sum(maindeck.values())
+
+    def test_land_exemption_is_on_by_default_without_injected_land_names(self):
+        """land_names=None resolves from con — the exemption is never opt-in."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Combo"
+        maindeck = {"Scalding Tarn": 8, "Brainstorm": 4}
+        sideboard_15 = {"Surgical Extraction": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Scalding Tarn": self._cv("Scalding Tarn", "main", opp, -0.30),
+                "Brainstorm": self._cv("Brainstorm", "main", opp, -0.01),
+            },
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None)
+        finally:
+            con.close()
+        assert "Scalding Tarn" not in plans[opp].side_out
+        assert plans[opp].side_out == {"Brainstorm": 4}
+
+    # -- Honest no-flex degrade ----------------------------------------------
+
+    def test_no_legal_flex_degrades_honestly(self):
+        """All-land flex pool -> labeled degrade with a named reason, no fabricated cut."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Izzet Delver"
+        maindeck = {"Scalding Tarn": 4, "Westvale Abbey": 2}
+        sideboard_15 = {"Surgical Extraction": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Scalding Tarn": self._cv("Scalding Tarn", "main", opp, -0.20),
+                "Westvale Abbey": self._cv("Westvale Abbey", "main", opp, -0.11),
+            },
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4,
+            )
+        finally:
+            con.close()
+        plan = plans[opp]
+        assert plan.degraded is True
+        assert plan.plan_status == "no-legal-flex"
+        assert plan.side_out == {}
+        assert plan.side_in == {}
+        assert plan.post_board == maindeck
+        assert plan.n_basis == 0
+        assert plan.tier == "speculative"
+        # Named reason + suppressed magnitude + the declined signal (honest-degrade-marker).
+        assert "NO LEGAL FLEX" in plan.note
+        assert "land slot(s) exempt from cuts" in plan.note
+        assert "Scalding Tarn" in plan.note
+        assert "thin" not in plan.note.lower()
+        assert {c for c, _lift, _r in plan.out_suppressed} == {
+            "Scalding Tarn", "Westvale Abbey"
+        }
+
+    def test_no_legal_flex_when_every_slot_is_ineligible(self):
+        """The degrade is structural: it fires on slot eligibility, before any lift is read."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Combo"
+        maindeck = {"Brainstorm": 4}
+        sideboard_15 = {"Surgical Extraction": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Brainstorm": self._cv("Brainstorm", "main", opp, -0.09)},
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                land_names=frozenset({"Brainstorm"}),
+            )
+        finally:
+            con.close()
+        assert plans[opp].plan_status == "no-legal-flex"
+        assert plans[opp].degraded is True
+
+    def test_live_flex_pool_with_no_dead_cards_is_not_a_degrade(self):
+        """Flex exists but nothing is dead -> a real answer, not an honest-degrade."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Combo"
+        maindeck = {"Brainstorm": 4, "Scalding Tarn": 4}
+        sideboard_15 = {"Surgical Extraction": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Brainstorm": self._cv("Brainstorm", "main", opp, +0.10)},
+            side={"Surgical Extraction": self._cv("Surgical Extraction", "side", opp, +0.25)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None)
+        finally:
+            con.close()
+        plan = plans[opp]
+        assert plan.degraded is False
+        assert plan.plan_status == "no-dead-cards"
+        assert plan.side_out == {}
+
+    # -- IN-side axis relevance gate -----------------------------------------
+
+    def test_off_axis_in_candidate_is_declined_and_recorded(self):
+        """Hydroblast has the best lift vs the mirror but no red target -> declined."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Dimir Tempo"
+        maindeck = {"Brainstorm": 4, "Sink into Stupor": 2}
+        # Wasteland is on-axis vs a nonbasic manabase and outranked by Hydroblast on lift —
+        # so only the axis gate can produce the correct pick here.
+        sideboard_15 = {"Hydroblast": 2, "Wasteland": 2}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.08)},
+            side={
+                "Hydroblast": self._cv("Hydroblast", "side", opp, +0.30),
+                "Wasteland": self._cv("Wasteland", "side", opp, +0.05),
+            },
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                opponent_axes={
+                    opp: frozenset({"plays-blue", "plays-black", "nonbasic-manabase"})
+                },
+                card_axes={
+                    "Hydroblast": frozenset({"plays-red"}),
+                    "Wasteland": frozenset({"nonbasic-manabase"}),
+                },
+            )
+        finally:
+            con.close()
+        plan = plans[opp]
+        assert "Hydroblast" not in plan.side_in
+        assert plan.side_in == {"Wasteland": 2}
+        assert ("Hydroblast", 0.30, "off-axis") in plan.in_suppressed
+        assert "declined off-axis IN" in plan.note
+
+    def test_axis_gate_inactive_without_opponent_axes(self):
+        """opponent_axes=None -> the gate cannot be assessed -> nothing is suppressed."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Dimir Tempo"
+        maindeck = {"Brainstorm": 4, "Sink into Stupor": 2}
+        sideboard_15 = {"Hydroblast": 2}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.08)},
+            side={"Hydroblast": self._cv("Hydroblast", "side", opp, +0.30)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                card_axes={"Hydroblast": frozenset({"plays-red"})},
+            )
+        finally:
+            con.close()
+        assert plans[opp].side_in == {"Hydroblast": 2}
+        assert plans[opp].in_suppressed == ()
+
+    def test_axis_gate_inactive_on_empty_opponent_axis_set(self):
+        """Absence of evidence (no tags derived) is not evidence of irrelevance."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Unknown Brew"
+        maindeck = {"Brainstorm": 4, "Sink into Stupor": 2}
+        sideboard_15 = {"Hydroblast": 2}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.08)},
+            side={"Hydroblast": self._cv("Hydroblast", "side", opp, +0.30)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                opponent_axes={opp: frozenset()},
+                card_axes={"Hydroblast": frozenset({"plays-red"})},
+            )
+        finally:
+            con.close()
+        assert plans[opp].side_in == {"Hydroblast": 2}
+        assert plans[opp].in_suppressed == ()
+
+    def test_all_in_candidates_off_axis_yields_no_in_status(self):
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Dimir Tempo"
+        maindeck = {"Brainstorm": 4, "Sink into Stupor": 2}
+        sideboard_15 = {"Hydroblast": 2}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.08)},
+            side={"Hydroblast": self._cv("Hydroblast", "side", opp, +0.30)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                opponent_axes={opp: frozenset({"plays-blue"})},
+                card_axes={"Hydroblast": frozenset({"plays-red"})},
+            )
+        finally:
+            con.close()
+        plan = plans[opp]
+        assert plan.plan_status == "no-in-candidates"
+        assert plan.degraded is False
+        assert "no sideboard card clears the gate on an axis" in plan.note
+
+    def test_card_axes_falls_back_to_catalog(self):
+        """No injected card_axes -> the catalog's own `attacks` is the axis source."""
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Dimir Tempo"
+        maindeck = {"Brainstorm": 4, "Sink into Stupor": 2}
+        sideboard_15 = {"Hydroblast": 2}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={"Sink into Stupor": self._cv("Sink into Stupor", "main", opp, -0.08)},
+            side={"Hydroblast": self._cv("Hydroblast", "side", opp, +0.30)},
+            cleared_gate=True,
+        )
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None,
+                opponent_axes={opp: frozenset({"plays-blue", "plays-black"})},
+            )
+        finally:
+            con.close()
+        assert plans[opp].side_in == {}
+        assert ("Hydroblast", 0.30, "off-axis") in plans[opp].in_suppressed
+
+    # -- MatchupPlan contract ------------------------------------------------
+
+    def test_legacy_eight_kwarg_construction_derives_plan_status(self):
+        from legacy_engine.advisory.sideboard import MatchupPlan
+        degraded = MatchupPlan(
+            opponent="X", side_out={}, side_in={}, post_board={}, n_basis=0,
+            tier="speculative", degraded=True, note="thin data",
+        )
+        assert degraded.plan_status == "thin-data"
+        assert degraded.out_suppressed == ()
+        assert degraded.in_suppressed == ()
+        planned = MatchupPlan(
+            opponent="X", side_out={"A": 1}, side_in={"B": 1}, post_board={"B": 1},
+            n_basis=50, tier="evolving", degraded=False, note="ok",
+        )
+        assert planned.plan_status == "planned"
+
+    def test_invalid_plan_status_fails_fast(self):
+        from legacy_engine.advisory.sideboard import MatchupPlan
+        with pytest.raises(ValueError, match="not in"):
+            MatchupPlan(
+                opponent="X", side_out={}, side_in={}, post_board={}, n_basis=0,
+                tier="speculative", degraded=True, note="n", plan_status="bogus",
+            )
+
+    def test_thin_data_path_keeps_its_status_and_note(self):
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+        opp = "Combo"
+        ov = _OppValues(opponent=opp, maindeck={}, side={}, cleared_gate=False)
+        con = self._cards_con()
+        try:
+            plans = _plan_matchups(
+                con, {"Brainstorm": 4}, {}, {opp: ov}, archetype=None,
+            )
+        finally:
+            con.close()
+        assert plans[opp].plan_status == "thin-data"
+        assert plans[opp].degraded is True
+        assert "thin data" in plans[opp].note
+
+    # -- Render honesty ------------------------------------------------------
+
+    def test_format_plan_declines_empty_for_clean_plan(self):
+        from legacy_engine.advisory.sideboard import MatchupPlan, format_plan_declines
+        plan = MatchupPlan(
+            opponent="X", side_out={}, side_in={}, post_board={}, n_basis=0,
+            tier="speculative", degraded=True, note="n",
+        )
+        assert format_plan_declines(plan) == ""
+
+    def test_format_plan_declines_caps_and_counts_residual(self):
+        from legacy_engine.advisory.sideboard import MatchupPlan, format_plan_declines
+        plan = MatchupPlan(
+            opponent="X", side_out={}, side_in={}, post_board={}, n_basis=0,
+            tier="speculative", degraded=True, note="n",
+            plan_status="no-legal-flex",
+            out_suppressed=tuple(
+                (f"Land {i}", -0.1 * i, "land") for i in range(1, 6)
+            ),
+        )
+        rendered = format_plan_declines(plan)
+        assert rendered.startswith("OUT Land 1")
+        assert "+2 more" in rendered
+        assert "Land 4" not in rendered
+
+
+class TestMatchupPlanFlexIntegration:
+    """recommend_sideboard actually supplies the eligibility inputs and never cuts lands."""
+
+    _SINCE = "2026-01-01"
+
+    # produced_mana on the basics is required: compute_deck_colors intersects land
+    # produced_mana with nonland colors, so a deck with no mana-producing lands reads as
+    # colorless and no hoser is castable.
+    _CARD_ROWS = (
+        ("Brainstorm", "Instant", "U", "", False),
+        ("Dark Ritual", "Instant", "B", "", False),
+        ("Island", "Basic Land — Island", "", "U", True),
+        ("Swamp", "Basic Land — Swamp", "", "B", True),
+        ("Scalding Tarn", "Land", "", "", True),
+        ("Surgical Extraction", "Instant", "B", "", False),
+        ("Demonic Tutor", "Sorcery", "B", "", False),
+    )
+
+    _MAINDECK = {
+        "Brainstorm": 4, "Dark Ritual": 4, "Island": 4, "Swamp": 4, "Scalding Tarn": 4,
+    }
+
+    @classmethod
+    def _seed_cards(cls, con):
+        con.executemany(
+            "INSERT OR REPLACE INTO cards (name, mana_cost, cmc, type_line, colors, "
+            "produced_mana, oracle_text, layout, is_land, power, toughness) "
+            "VALUES (?, NULL, 1.0, ?, ?, ?, '', 'normal', ?, NULL, NULL)",
+            list(cls._CARD_ROWS),
+        )
+
+    def test_recommend_sideboard_supplies_eligibility_inputs(
+        self, make_rounds_corpus, monkeypatch
+    ):
+        """Unit 5 wiring: the production path resolves lands + axes and passes them down.
+
+        Without this the correctness fix would still work via the in-function DB fallback for
+        lands, but the IN axis gate would silently never engage.
+        """
+        from legacy_engine.advisory import sideboard as sb_mod
+
+        captured: dict = {}
+        real_plan_matchups = sb_mod._plan_matchups
+
+        def _spy(*args, **kwargs):
+            captured.update(kwargs)
+            return real_plan_matchups(*args, **kwargs)
+
+        monkeypatch.setattr(sb_mod, "_plan_matchups", _spy)
+
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        self._seed_cards(con)
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Control": 0.5, "Combo": 0.5}), self._MAINDECK,
+                solver="greedy", since=self._SINCE,
+            )
+        finally:
+            con.close()
+
+        assert pkg.matchup_plans, "fixture stopped producing plans — test is now vacuous"
+        assert captured["land_names"] == frozenset({"Island", "Swamp", "Scalding Tarn"})
+        assert "Brainstorm" not in captured["land_names"]
+        assert set(captured["opponent_axes"]) == {"Control", "Combo"}
+        # card_axes must cover every card the solver actually chose, or the gate would
+        # fall through to "card-axes-unknown" for real recommendations.
+        assert set(pkg.cards) <= set(captured["card_axes"])
+        for card in pkg.cards:
+            assert captured["card_axes"][card] == sb_mod.HOSER_CATALOG[card].attacks
+
+    def test_no_land_reaches_side_out_end_to_end(self, make_rounds_corpus):
+        from legacy_engine.advisory import sideboard as sb_mod
+        con, _facts = make_rounds_corpus(n_repeats=50)
+        self._seed_cards(con)
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Control": 0.5, "Combo": 0.5}), self._MAINDECK,
+                solver="greedy", since=self._SINCE,
+            )
+        finally:
+            con.close()
+        assert pkg.matchup_plans, "fixture stopped producing plans — test is now vacuous"
+        lands = {"Island", "Swamp", "Scalding Tarn"}
+        for opp, plan in pkg.matchup_plans.items():
+            assert not (set(plan.side_out) & lands), (
+                f"{opp}: proposed cutting lands — {plan.side_out}"
+            )
+            assert sum(plan.side_out.values()) == sum(plan.side_in.values()), plan
+            assert sum(plan.post_board.values()) == sum(self._MAINDECK.values()), plan
+            assert plan.plan_status in sb_mod._VALID_PLAN_STATUSES
