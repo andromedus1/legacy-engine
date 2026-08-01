@@ -12,6 +12,7 @@ downstream consumers.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 
 import duckdb
@@ -171,6 +172,13 @@ class MatchResults:
 
     ``provenance`` records the filter that was applied: ``"online"``,
     ``"paper"``, or ``None`` (all sources).
+
+    ``camp_parent`` (feature-multi-split-matrix, additive): maps every relabeled camp
+    label back to the parent archetype it was split from (``"Doomsday [Murktide]" ->
+    "Doomsday"``). Populated whenever ``split_variant``/``split_variants`` relabels at
+    least one deck — including the single-archetype ``split_variant`` path, so a
+    single-split caller gets the same provenance for free. Empty when neither is set.
+    No existing consumer reads it.
     """
 
     matchups: dict[tuple[str, str], MatchupTally]  # keyed (archetype_a, archetype_b)
@@ -178,6 +186,7 @@ class MatchResults:
     coverage: MatchCoverage
     provenance: str | None  # "online" | "paper" | None
     mirror_n: dict[str, int] = field(default_factory=dict)  # per-archetype mirror count
+    camp_parent: dict[str, str] = field(default_factory=dict)  # camp label -> parent archetype
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +280,24 @@ def effective_label(
     return f"{archetype} [{variant or 'unlabeled'}]"
 
 
+def _split_set_label(
+    archetype: str | None, variant: str | None, split_set: frozenset[str]
+) -> str | None:
+    """Generalization of ``effective_label`` to a SET of split parents (feature-multi-split-matrix).
+
+    Same ``f"{archetype} [{variant or 'unlabeled'}]"`` convention, but the relabel test is
+    membership in ``split_set`` rather than equality to one archetype. With a singleton
+    ``split_set`` this is byte-identical to ``effective_label(archetype, variant, next(iter(split_set)))``
+    (the singleton-equivalence acceptance criterion); with ``split_set == frozenset()`` this is
+    the literal identity path — ``archetype`` is returned unchanged, matching ``effective_label``'s
+    own ``split_variant=None`` identity branch. ``effective_label`` itself is untouched; this is a
+    private, additive helper used only by ``compute_match_results``.
+    """
+    if archetype is None or archetype not in split_set:
+        return archetype
+    return f"{archetype} [{variant or 'unlabeled'}]"
+
+
 # ---------------------------------------------------------------------------
 # Unit 4: Join query + accumulator
 # ---------------------------------------------------------------------------
@@ -329,6 +356,7 @@ def compute_match_results(
     con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
     since: str | None = None, until: str | None = None,
     split_variant: str | None = None,
+    split_variants: Collection[str] | None = None,
 ) -> MatchResults:
     """Join rounds→archetype labels, parse results, accumulate directed + marginal tallies.
 
@@ -349,16 +377,30 @@ def compute_match_results(
     as if they were ordinary archetypes.  ``None`` (the default) leaves every label
     unchanged (byte-identical to the pre-split behavior).
 
+    ``split_variants`` (opt-in, feature-multi-split-matrix): the multi-parent
+    generalization of ``split_variant`` — every archetype in the collection is
+    relabeled to its camp on both sides of a pairing, in ONE scan (all staged parents
+    camp-labeled simultaneously). Passing BOTH ``split_variant`` and ``split_variants``
+    raises ``ValueError``. Internally both normalize to one ``split_set``: a singleton
+    ``split_variant="Doomsday"`` and ``split_variants=["Doomsday"]`` produce identical
+    ``matchups``/``archetypes``/``coverage``/``mirror_n``/``camp_parent`` output. Neither
+    given (the default) is the literal identity relabel path.
+
     Mirror matches (``arch1 == arch2``) are **not** written to directed
     ``matchups`` cells; their count is carried in
     ``coverage.mirror_matches``.  Each mirror match credits the matching
     archetype with ``+1 win`` and ``+1 loss`` in ``archetypes`` so its
     marginal win-rate remains honest.
     """
+    if split_variant is not None and split_variants is not None:
+        raise ValueError("pass split_variant or split_variants, not both")
+    split_set = frozenset((split_variant,)) if split_variant else frozenset(split_variants or ())
+
     cov = MatchCoverage()
     matchups: dict[tuple[str, str], MatchupTally] = {}
     archetypes: dict[str, ArchetypeRecord] = {}
     mirror_n: dict[str, int] = {}
+    camp_parent: dict[str, str] = {}
 
     rows = con.execute(
         _JOIN_SQL, [provenance, provenance, since, since, until, until]
@@ -366,8 +408,13 @@ def compute_match_results(
 
     for _prov, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
         cov.total_pairings += 1
-        arch1 = effective_label(arch1, var1, split_variant)
-        arch2 = effective_label(arch2, var2, split_variant)
+        orig1, orig2 = arch1, arch2
+        arch1 = _split_set_label(arch1, var1, split_set)
+        arch2 = _split_set_label(arch2, var2, split_set)
+        if orig1 is not None and orig1 in split_set:
+            camp_parent[arch1] = orig1
+        if orig2 is not None and orig2 in split_set:
+            camp_parent[arch2] = orig2
 
         # ── #7 Blank-opponent bye: not a real pairing ───────────────────────
         # A bye row has an empty/None player2; classifying it here prevents the
@@ -437,6 +484,7 @@ def compute_match_results(
         coverage=cov,
         provenance=provenance,
         mirror_n=mirror_n,
+        camp_parent=camp_parent,
     )
 
 
