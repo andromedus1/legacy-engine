@@ -37,6 +37,11 @@ __all__ = [
     "DeckVector",
     "FeatureMatrix",
     "build_feature_matrix",
+    "project_flex_vector",
+    "camp_centroid",
+    "NearestCampResult",
+    "nearest_camp",
+    "DEFAULT_MIN_SIMILARITY",
     "reduce_dims",
     "Camp",
     "DiscoveredSplit",
@@ -124,6 +129,139 @@ def build_feature_matrix(
 
 
 # ---------------------------------------------------------------------------
+# Frozen flex-band projection + nearest-camp assignment (pure, DB-free)
+#
+# The representation a *post-staging* deck is compared against. Deliberately simpler than the
+# clustering embedding above: raw L2-normalized counts over the split's frozen flex vocabulary,
+# no TF-IDF reweighting and no SVD reduction — neither the fitted `idf_` vector nor the SVD
+# `components_` matrix is persisted, so neither is reproducible at assignment time. Validated by
+# the reconstruction-accuracy floor in tests/analytics/test_discovery.py (nearest-centroid must
+# recover a split's own members' camp labels); if real-corpus dogfooding shows misassignment,
+# `idf_` can be persisted additively alongside `flex_cards` without a breaking schema change.
+# ---------------------------------------------------------------------------
+
+DEFAULT_MIN_SIMILARITY = 0.35
+# Uncalibrated initial default — cosine-similarity floor on raw L2-normalized flex-band vectors.
+# Unlike _TEMPORAL_GAP_DAYS this has no calibration fixture: no real staged split carried a
+# centroid before this path existed. CLI-tunable (`discover apply --min-similarity`) until a
+# real-corpus pass calibrates it; err conservative (false-unlabeled beats false-camp).
+
+
+def project_flex_vector(counts: dict[str, int], flex_cards: list[str]) -> "np.ndarray":
+    """Project raw mainboard ``counts`` onto the frozen ``flex_cards`` vocabulary, L2-normalized.
+
+    Missing cards count as 0. Returns an all-zero vector (never raises, never NaN) when the deck
+    shares no card with ``flex_cards`` — ``nearest_camp`` reads an all-zero vector as "no
+    similarity to anything", never a fabricated match.
+    """
+    vec = np.array([float(counts.get(card, 0)) for card in flex_cards], dtype=float)
+    norm = float(np.linalg.norm(vec))
+    if norm == 0.0:
+        return vec
+    return vec / norm
+
+
+def camp_centroid(member_counts: list[dict[str, int]], flex_cards: list[str]) -> list[float]:
+    """Mean of a camp's members' L2-normalized flex vectors, renormalized.
+
+    Goes through the SAME ``project_flex_vector`` a candidate deck is projected through — the
+    invariant nearest-camp assignment rests on: centroid and candidate always live in the
+    identical representation by construction, never two independently-derived spaces.
+    Empty ``member_counts`` -> a zero vector (degenerate camp; ``nearest_camp`` can never assign
+    to it, since cosine similarity against a zero vector is 0.0).
+    """
+    if not flex_cards:
+        return []
+    if not member_counts:
+        return [0.0] * len(flex_cards)
+    stacked = np.array(
+        [project_flex_vector(counts, flex_cards) for counts in member_counts], dtype=float
+    )
+    mean = stacked.mean(axis=0)
+    norm = float(np.linalg.norm(mean))
+    if norm == 0.0:
+        return [0.0] * len(flex_cards)
+    return (mean / norm).tolist()
+
+
+@dataclass(frozen=True)
+class NearestCampResult:
+    """Outcome of one candidate deck's nearest-camp lookup.
+
+    ``camp`` is ``None`` when the honest-degrade floor isn't cleared — ``reason`` names why,
+    always. ``runner_up`` is the second-nearest camp, a diagnostic only: it never gates.
+    """
+
+    camp: str | None
+    best_similarity: float
+    runner_up: str | None
+    reason: str
+
+
+def nearest_camp(
+    counts: dict[str, int],
+    flex_cards: list[str],
+    centroids: dict[str, list[float]],
+    *,
+    min_similarity: float = DEFAULT_MIN_SIMILARITY,
+) -> NearestCampResult:
+    """Assign ``counts`` to the nearest camp centroid in the frozen flex-band space, or decline.
+
+    Both sides are pre-L2-normalized (``project_flex_vector`` / ``camp_centroid``), so a plain
+    dot product IS the cosine similarity — no renormalization here.
+
+    Empty ``flex_cards``/``centroids`` (a staged record written before this path existed) ->
+    honest decline with a named reason, nothing fabricated. A centroid whose length disagrees
+    with ``flex_cards`` is corrupt persisted state, not thin data: fail fast.
+    """
+    if not flex_cards:
+        return NearestCampResult(
+            camp=None, best_similarity=0.0, runner_up=None,
+            reason="staged split carries no frozen flex vocabulary",
+        )
+    if not centroids:
+        return NearestCampResult(
+            camp=None, best_similarity=0.0, runner_up=None,
+            reason="staged split carries no camp centroid",
+        )
+
+    vec = project_flex_vector(counts, flex_cards)
+    if not vec.any():
+        return NearestCampResult(
+            camp=None, best_similarity=0.0, runner_up=None,
+            reason="deck shares no card with the staged split's frozen flex vocabulary",
+        )
+
+    scored: list[tuple[float, str]] = []
+    for name, centroid in centroids.items():
+        if len(centroid) != len(flex_cards):
+            raise ValueError(
+                f"nearest_camp: camp {name!r} centroid has {len(centroid)} dimension(s) but the "
+                f"frozen flex vocabulary has {len(flex_cards)} — re-run `discover run` for this "
+                "parent to restage a consistent split"
+            )
+        scored.append((float(np.dot(vec, np.asarray(centroid, dtype=float))), name))
+
+    # Name as the secondary key so ties resolve deterministically rather than by dict order.
+    scored.sort(key=lambda s: (-s[0], s[1]))
+    best_similarity, best_name = scored[0]
+    runner_up = scored[1][1] if len(scored) > 1 else None
+
+    if best_similarity < min_similarity:
+        return NearestCampResult(
+            camp=None, best_similarity=best_similarity, runner_up=runner_up,
+            reason=(
+                f"best similarity {best_similarity:.3f} < min_similarity {min_similarity} "
+                f"(nearest was {best_name!r})"
+            ),
+        )
+    return NearestCampResult(
+        camp=best_name, best_similarity=best_similarity, runner_up=runner_up,
+        reason=f"cosine similarity {best_similarity:.3f} >= min_similarity {min_similarity}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Unit 2 — reducer (pure, injectable)
 # ---------------------------------------------------------------------------
 
@@ -184,6 +322,11 @@ class Camp:
     # wasn't given — an honest "we don't know" rather than a fabricated 0%/100%).
     median_date: str | None = None
     pct_current: float | None = None
+    # Mean L2-normalized flex vector over this camp's member decks (see camp_centroid), in the
+    # exact space nearest_camp projects candidate decks into. None on hand-built Camp()s and on
+    # any camp formed before this field existed — incremental assignment declines rather than
+    # comparing against a fabricated position.
+    centroid: list[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +346,10 @@ class DiscoveredSplit:
     # refuse, per the epic's honesty convention (surface, don't silently hide or auto-fail).
     temporal_mixing: bool = False
     temporal_note: str | None = None
+    # The frozen flex-band vocabulary this split clustered on (FeatureMatrix.cards) — the fixed
+    # column space Camp.centroid lives in and nearest-camp assignment projects new decks into.
+    # Empty on the degenerate paths (no separable structure) and on hand-built splits.
+    flex_cards: list[str] = dataclasses.field(default_factory=list)
 
 
 _DOUBLE_DIPPING_GUARD_NOTE = (
@@ -430,6 +577,7 @@ def cluster_and_validate(
             silhouette=None,
             passed=False,
             reasons=reasons + ["no separable structure: fewer than 2 flex-band cards"],
+            flex_cards=list(fm.cards),
         )
 
     from sklearn.cluster import HDBSCAN
@@ -526,13 +674,21 @@ def cluster_and_validate(
     # Gate C prerequisite: stamp each camp's median date / %-current now that member_keys are
     # final. Noise decks are excluded by construction — camp_keys only ever holds non-noise
     # cluster members (label != -1), so noise never enters a Gate C comparison.
+    #
+    # The camp centroid — the frozen-space position incremental assignment compares fresh decks
+    # against — is stamped in the same pass, over the same final membership.
     enriched_camps: list[Camp] = []
     for camp in camps:
         median_date, pct_current = _camp_temporal_stats(
             decks_by_key, camp.member_keys, current_since,
         )
+        centroid = camp_centroid(
+            [decks_by_key[k].counts for k in camp.member_keys], fm.cards,
+        )
         enriched_camps.append(
-            dataclasses.replace(camp, median_date=median_date, pct_current=pct_current)
+            dataclasses.replace(
+                camp, median_date=median_date, pct_current=pct_current, centroid=centroid,
+            )
         )
     camps = enriched_camps
 
@@ -609,6 +765,7 @@ def cluster_and_validate(
         reasons=reasons,
         temporal_mixing=temporal_mixing,
         temporal_note=temporal_note,
+        flex_cards=list(fm.cards),
     )
 
 
