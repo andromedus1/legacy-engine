@@ -1,7 +1,7 @@
 ---
 id: feature-camp-incremental-assignment
 kind: feature
-stage: review
+stage: done
 tags: [analytics]
 parent: null
 depends_on: []

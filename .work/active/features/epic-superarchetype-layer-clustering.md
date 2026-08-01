@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-clustering
 kind: feature
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: epic-superarchetype-layer
 depends_on: []
