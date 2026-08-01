@@ -49,6 +49,18 @@ data split that does not exist yet.
 - **Opponent-boarding-response**: Deferred — stays an absorbed member, not decomposed into
   v1 features; revisit when a game-level pre/post-board data path exists.
 
+## Decomposition status — PARTIAL (do not short-circuit)
+
+An `epic-design` pass was interrupted by an API spend limit on 2026-07-31 after writing exactly
+ONE child feature (`epic-sb-advisor-correctness-backtest-ci-gate`) and before writing the
+`## Decomposition` section or advancing the stage. The decomposition is therefore INCOMPLETE:
+the model-level members below (the `_hate:` impact factor, per-deck castability gating, the
+alpha/option-value near-miss, the OUT-side adoption lock, the creature-interaction triage) still
+need child features.
+
+When epic-design next runs on this epic it MUST NOT take the Phase 1.5 children-already-exist
+short-circuit — one child is not the decomposition. Finish it.
+
 ## Member findings (absorbed from backlog; full text below)
 
 ---
