@@ -17,12 +17,30 @@ from legacy_engine.analytics.superarchetype.aggregate import (
     Heterogeneity,
     MemberTally,
     _logit_with_correction,
+    aggregate_cluster_cell,
     concentration,
     dersimonian_laird,
     effective_n,
     heterogeneity,
     prior_strength,
 )
+from legacy_engine.confidence import tier_for_sample
+
+
+def _walk_values(obj):
+    """Every leaf value reachable from a (nested) dataclass result, for honesty scans."""
+    import dataclasses
+
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        obj = dataclasses.asdict(obj)
+    if isinstance(obj, dict):
+        for value in obj.values():
+            yield from _walk_values(value)
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            yield from _walk_values(value)
+    else:
+        yield obj
 
 
 class TestMemberTally:
@@ -445,3 +463,211 @@ class TestPriorStrength:
         re = dersimonian_laird(headline_pair)
         with pytest.raises(ValueError, match="no member tallies"):
             prior_strength([], re)
+
+
+class TestAggregateClusterCell:
+    def test_headline_fixture_is_refused_by_both_gates(self, headline_pair):
+        # THE validation this feature exists for (brief §6.3): naive pooling gives a confident
+        # 66.7% on n=42; both gates refuse it independently and the number appears nowhere.
+        cell = aggregate_cluster_cell("Dimir Tempo", "sa-009", headline_pair)
+        assert cell.pooled_p is None
+        assert cell.ci_low is None and cell.ci_high is None
+        assert cell.refused_reason is not None
+        assert "heterogeneity gate" in cell.refused_reason
+        assert "concentration gate also fails" in cell.refused_reason
+        assert "dominated by Show and Tell" in cell.refused_reason
+        # The member split is what the surface renders instead.
+        assert [(s.archetype, s.wins, s.n) for s in cell.member_split] == [
+            ("Aluren", 4, 13),
+            ("Show and Tell", 24, 29),
+        ]
+        assert all(s.tier == "speculative" for s in cell.member_split)
+
+    def test_headline_pooled_number_appears_nowhere_in_the_result(self, headline_pair):
+        cell = aggregate_cluster_cell("Dimir Tempo", "sa-009", headline_pair)
+        for value in _walk_values(cell):
+            if isinstance(value, bool) or value is None:
+                continue
+            if isinstance(value, (int, float)):
+                assert value != 42, "raw pooled n leaked into the result"
+                assert abs(float(value) - 28 / 42) > 0.005, "pooled 66.7% leaked into the result"
+                assert abs(float(value) - 66.7) > 0.05, "pooled 66.7 leaked into the result"
+            elif isinstance(value, str):
+                assert "66.7" not in value
+                assert "0.667" not in value
+
+    def test_headline_gate_diagnostics_ride_the_refused_cell(self, headline_pair):
+        cell = aggregate_cluster_cell("Dimir Tempo", "sa-009", headline_pair)
+        assert cell.concentration is not None and cell.concentration.passed is False
+        assert cell.concentration.m_eff == pytest.approx(1.75, abs=5e-3)
+        assert cell.heterogeneity is not None and cell.heterogeneity.band == "refused"
+        assert cell.heterogeneity.one_sided_note == I2_ONE_SIDED_NOTE
+        assert cell.n_eff == pytest.approx(3.3, abs=0.1)
+        assert cell.tier == "speculative"
+
+    def test_dilution_fixtures_serve_with_labels_never_a_free_pool(self, make_tally):
+        # Real-corpus dilution cells (feature file, 2026-07-31): thin members of different shape
+        # produce large swings; the cell must carry an honesty label, never pool freely.
+        fixtures = {
+            "Cradle Control": [
+                make_tally("Mystic Forge", wins=1, n=4),
+                make_tally("Tron", wins=5, n=9),
+            ],
+            "Aluren": [
+                make_tally("Mystic Forge", wins=3, n=3),
+                make_tally("Tron", wins=3, n=9),
+            ],
+        }
+        for subject, members in fixtures.items():
+            cell = aggregate_cluster_cell(subject, "sa-046", members)
+            assert cell.heterogeneity is not None
+            assert cell.heterogeneity.band != "free"
+            assert cell.heterogeneity.band == "not-computable"
+            assert cell.heterogeneity.one_sided_note == I2_ONE_SIDED_NOTE
+            # Served (coverage is the point) but under the concentration label fallback.
+            assert cell.pooled_p is not None
+            assert any("dominated by Tron" in line for line in cell.provenance)
+
+    def test_tier_derives_from_n_eff_never_raw_pooled_n(self, make_tally):
+        # Sum(n) = 32 would read "evolving"; the heterogeneous pool's n_eff ~ 12 reads
+        # "speculative". The tier must follow n_eff.
+        members = [
+            make_tally("A", wins=2, n=9),
+            make_tally("B", wins=7, n=14),
+            make_tally("C", wins=7, n=9),
+        ]
+        cell = aggregate_cluster_cell("Subject", "sa-001", members)
+        raw_n = sum(m.n for m in members)
+        assert cell.pooled_p is not None  # labelled band — served, not refused
+        assert cell.n_eff < raw_n
+        assert cell.tier == tier_for_sample(round(cell.n_eff)) == "speculative"
+        assert tier_for_sample(raw_n) == "evolving"
+        assert cell.tier != tier_for_sample(raw_n)
+
+    def test_served_cell_carries_re_pooled_rate_and_ci(self, make_tally):
+        members = [make_tally("A", wins=5, n=12), make_tally("B", wins=6, n=13)]
+        cell = aggregate_cluster_cell("Subject", "sa-001", members)
+        assert cell.refused_reason is None
+        assert cell.pooled_p is not None and 0.0 < cell.pooled_p < 1.0
+        assert cell.ci_low is not None and cell.ci_high is not None
+        assert 0.0 <= cell.ci_low < cell.pooled_p < cell.ci_high <= 1.0
+
+    def test_self_mirror_is_excluded_and_reported_siblings_count_flagged(self, make_tally):
+        # Subject vs its own 3-member cluster: the exact self-mirror leaves the rate (n reported),
+        # sibling tallies count and stay flagged (epic decision: counted, never silently excluded).
+        members = [
+            make_tally("Aluren", wins=5, n=10),  # the exact self-mirror
+            make_tally("Show and Tell", wins=11, n=19, intra_cluster=True),
+            make_tally("Sneak Attack", wins=6, n=12, intra_cluster=True),
+        ]
+        cell = aggregate_cluster_cell("Aluren", "sa-009", members)
+        assert cell.mirror_n == 10
+        assert cell.intra_cluster_n == 31
+        assert cell.intra_cluster_share == pytest.approx(1.0)
+        assert any("self-mirror excluded" in line for line in cell.exclusions)
+        assert {s.archetype for s in cell.member_split} == {"Show and Tell", "Sneak Attack"}
+        assert all(s.intra_cluster for s in cell.member_split)
+        assert cell.pooled_p is not None  # served: siblings are real matches vs the family
+
+    def test_assignee_tallies_are_excluded_with_a_named_reason(self, make_tally):
+        # Era addendum #2 rule 1 (contribute-vs-receive): assignees never contribute.
+        members = [
+            make_tally("Definer A", wins=5, n=12),
+            make_tally("Definer B", wins=6, n=13),
+            make_tally("Maverick", wins=9, n=10, definer=False),
+        ]
+        cell = aggregate_cluster_cell("Subject", "sa-004", members)
+        assert {s.archetype for s in cell.member_split} == {"Definer A", "Definer B"}
+        assert any(
+            "Maverick: assignee tally excluded" in line and "contribute-vs-receive" in line
+            for line in cell.exclusions
+        )
+        # The 90% assignee tally must not have polluted the pool.
+        assert cell.pooled_p is not None and cell.pooled_p < 0.6
+
+    def test_all_assignee_pool_is_refused_with_a_named_reason(self, make_tally):
+        members = [
+            make_tally("Maverick", wins=9, n=10, definer=False),
+            make_tally("Elves", wins=2, n=10, definer=False),
+        ]
+        cell = aggregate_cluster_cell("Subject", "sa-004", members)
+        assert cell.pooled_p is None
+        assert cell.refused_reason is not None
+        assert "no contributor tallies remain" in cell.refused_reason
+        assert len(cell.exclusions) == 2
+
+    def test_single_member_cluster_is_refused_not_a_pool(self, make_tally):
+        cell = aggregate_cluster_cell("Subject", "sa-020", [make_tally("Solo", wins=20, n=40)])
+        assert cell.pooled_p is None
+        assert cell.refused_reason is not None
+        assert "single-member cluster — not a pool at all" in cell.refused_reason
+        assert "Solo" in cell.refused_reason
+        # Diagnostics still ride: the caller can see what the one member looks like.
+        assert cell.member_split[0].archetype == "Solo"
+        assert cell.heterogeneity is not None and cell.heterogeneity.band == "not-computable"
+
+    def test_empty_input_is_refused_with_a_named_reason(self):
+        cell = aggregate_cluster_cell("Subject", "sa-001", [])
+        assert cell.pooled_p is None
+        assert cell.refused_reason == "no member tallies supplied — nothing to pool"
+        assert cell.member_split == ()
+        assert cell.concentration is None and cell.heterogeneity is None and cell.prior is None
+        assert cell.n_eff == 0.0
+
+    @pytest.mark.parametrize(
+        "tallies",
+        [
+            [],
+            [("Solo", 20, 40, True)],
+            [("A", 0, 3, True), ("B", 3, 3, True)],
+            [("Aluren", 4, 13, True), ("Show and Tell", 24, 29, True)],
+            [("A", 5, 12, True), ("B", 6, 13, True), ("C", 9, 10, False)],
+        ],
+    )
+    def test_no_nan_or_inf_ever_escapes(self, make_tally, tallies):
+        members = [make_tally(a, wins=w, n=n, definer=d) for a, w, n, d in tallies]
+        cell = aggregate_cluster_cell("Dimir Tempo", "sa-001", members)
+        for value in _walk_values(cell):
+            if isinstance(value, float):
+                assert math.isfinite(value), f"non-finite {value!r} escaped into the cell"
+        # And every refusal is named, never silent.
+        if cell.pooled_p is None:
+            assert cell.refused_reason
+
+    def test_freshness_passthrough_rides_untouched(self, make_tally, headline_pair):
+        # Era addendum #2 rule 3: the kernel never computes windows and never drops them. A pool
+        # below the page's muting floor still returns, with the share attached for the surface.
+        served = aggregate_cluster_cell(
+            "Subject",
+            "sa-001",
+            [make_tally("A", wins=5, n=12), make_tally("B", wins=6, n=13)],
+            window_note="2026-05-11..2026-07-31 (adaptive multi-split)",
+            current_regime_share=0.12,
+        )
+        assert served.window_note == "2026-05-11..2026-07-31 (adaptive multi-split)"
+        assert served.current_regime_share == 0.12
+        assert served.pooled_p is not None
+        refused = aggregate_cluster_cell(
+            "Dimir Tempo",
+            "sa-009",
+            headline_pair,
+            window_note="w",
+            current_regime_share=0.05,
+        )
+        assert refused.window_note == "w"
+        assert refused.current_regime_share == 0.05
+
+    def test_blank_subject_or_cluster_fails_fast(self, headline_pair):
+        with pytest.raises(ValueError, match="subject"):
+            aggregate_cluster_cell(" ", "sa-001", headline_pair)
+        with pytest.raises(ValueError, match="cluster_id"):
+            aggregate_cluster_cell("Subject", "", headline_pair)
+
+    def test_calibration_audit_note_always_rides(self, make_tally, headline_pair):
+        for cell in (
+            aggregate_cluster_cell("Dimir Tempo", "sa-009", headline_pair),
+            aggregate_cluster_cell(
+                "S", "sa-001", [make_tally("A", wins=5, n=12), make_tally("B", wins=6, n=13)]
+            ),
+        ):
+            assert any("project calibrations" in line for line in cell.provenance)
