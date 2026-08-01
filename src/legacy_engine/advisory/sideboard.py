@@ -162,6 +162,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field as dc_field, replace as _dc_replace
 from pathlib import Path
 from typing import Callable, Optional
@@ -211,6 +212,37 @@ log = logging.getLogger(__name__)
 # Extension A: MatchupPlan + per-card matchup-value adapter (maindeck-aware rework)
 # ---------------------------------------------------------------------------
 
+# MatchupPlan.plan_status: the closed vocabulary naming WHY a plan looks the way it does.
+# Two of the six mean "degraded" (see _DEGRADED_PLAN_STATUSES); the rest are real answers.
+# "no-legal-flex" is structural (the eligible-slot pool is empty before any data is read);
+# "no-dead-cards" / "no-in-candidates" / "no-legal-swap" are data answers over a live pool.
+_PLAN_STATUS_PLANNED = "planned"
+_PLAN_STATUS_THIN_DATA = "thin-data"
+_PLAN_STATUS_NO_FLEX = "no-legal-flex"
+_PLAN_STATUS_NO_DEAD_CARDS = "no-dead-cards"
+_PLAN_STATUS_NO_IN = "no-in-candidates"
+_PLAN_STATUS_NO_LEGAL_SWAP = "no-legal-swap"
+
+_VALID_PLAN_STATUSES: frozenset[str] = frozenset({
+    _PLAN_STATUS_PLANNED,
+    _PLAN_STATUS_THIN_DATA,
+    _PLAN_STATUS_NO_FLEX,
+    _PLAN_STATUS_NO_DEAD_CARDS,
+    _PLAN_STATUS_NO_IN,
+    _PLAN_STATUS_NO_LEGAL_SWAP,
+})
+
+# Statuses that set degraded=True: no plan was produced for a reason that is not "the data
+# says keep the 60".  Both suppress the magnitude and carry a named reason in ``note``.
+_DEGRADED_PLAN_STATUSES: frozenset[str] = frozenset({
+    _PLAN_STATUS_THIN_DATA,
+    _PLAN_STATUS_NO_FLEX,
+})
+
+# Max declined candidates named inline in a plan note; the full list stays on the dataclass.
+_SUPPRESSED_NOTE_CAP = 3
+
+
 @dataclass(frozen=True)
 class MatchupPlan:
     """Per-opponent OUT/IN swap plan for the maindeck.
@@ -221,8 +253,16 @@ class MatchupPlan:
     ``post_board``: the resulting 60 (maindeck − out + in).
     ``n_basis``:    min matchup-cell n backing this plan (0 when degraded).
     ``tier``:       weakest tier among the cells used ("speculative" when degraded).
-    ``degraded``:   True when matchup data below gate — no OUT/IN, rely on 15 composition.
+    ``degraded``:   True when no plan was produced for a reason in ``_DEGRADED_PLAN_STATUSES``.
     ``note``:       human-readable explanation of the plan or degradation reason.
+
+    ``plan_status``: token from ``_VALID_PLAN_STATUSES`` naming WHY the plan looks like this.
+        Accepts ``None`` at construction (legacy 8-arg callers) and is then derived from
+        ``degraded``; readers may treat it as always-``str``.
+    ``out_suppressed`` / ``in_suppressed``: ``(card, lift, reason)`` for candidates the
+        correlational signal favored but eligibility declined — divergence-as-diagnostic:
+        an overruled signal stays visible instead of vanishing.  Empty for callers/paths
+        that decline nothing.
     """
 
     opponent: str
@@ -233,6 +273,19 @@ class MatchupPlan:
     tier: str
     degraded: bool
     note: str
+    plan_status: str | None = None
+    out_suppressed: tuple[tuple[str, float, str], ...] = ()
+    in_suppressed: tuple[tuple[str, float, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.plan_status is None:
+            derived = _PLAN_STATUS_THIN_DATA if self.degraded else _PLAN_STATUS_PLANNED
+            object.__setattr__(self, "plan_status", derived)
+        elif self.plan_status not in _VALID_PLAN_STATUSES:
+            raise ValueError(
+                f"MatchupPlan.plan_status {self.plan_status!r} not in "
+                f"{sorted(_VALID_PLAN_STATUSES)}"
+            )
 
 
 @dataclass
@@ -2573,6 +2626,97 @@ def _ilp_solve(
 # Extension B: Per-matchup OUT/IN planner (maindeck-aware rework)
 # ---------------------------------------------------------------------------
 
+def _resolve_land_names(
+    con: duckdb.DuckDBPyConnection, names: "Iterable[str]"
+) -> frozenset[str]:
+    """Names among ``names`` whose ``cards.type_line`` contains "Land".
+
+    The land test is the TYPE LINE, never the ``cards.is_land`` column.  ``is_land`` is TRUE
+    for modal-DFC face-alias rows whose front face is a spell (``store.load_cards`` sets
+    ``face_is_land`` for every face of a both-castable layout when ANY face is a land), so
+    gating on the column would exempt Sink into Stupor (``type_line = 'Instant'``),
+    Shatterskull Smashing, Fell the Profane and 31 other spells from ever being sided out.
+    The type-line test still catches Dryad Arbor (``'Land Creature — Forest Dryad'``) and
+    transform lands like Westvale Abbey (``'Land'``), whose front face IS a land drop.
+
+    Returns ``frozenset()`` on any lookup failure — an unresolvable card list degrades to the
+    pre-exemption behavior rather than crashing the planner.
+    """
+    unique = sorted({n for n in names if n})
+    if not unique:
+        return frozenset()
+    try:
+        placeholders = ", ".join("?" for _ in unique)
+        rows = con.execute(
+            # placeholders is a "?, ?, …" run sized to `unique`; every NAME is bound, never
+            # interpolated.
+            f"SELECT name FROM cards WHERE name IN ({placeholders}) "
+            "AND type_line ILIKE '%land%'",
+            unique,
+        ).fetchall()
+    except Exception as exc:
+        log.debug("_resolve_land_names: type_line lookup failed: %s", exc)
+        return frozenset()
+    return frozenset(row[0] for row in rows)
+
+
+def _in_axis_verdict(
+    card_axes: frozenset[str], opp_axes: frozenset[str]
+) -> tuple[bool, str]:
+    """``(allowed, reason)`` for one IN candidate against one opponent's axis set.
+
+    Correlational lift alone promoted cards with no target in the matchup (a Hydroblast
+    ``{"plays-red"}`` IN against a UB mirror).  This adds the axis check; it never promotes,
+    only declines.
+
+    Absence of evidence never suppresses: an empty ``opp_axes`` (no vulnerability tags derived
+    for that opponent) or an empty ``card_axes`` (card outside the catalog and un-derived)
+    leaves the gate open with the reason naming which side was unknown.
+
+    ``_hate`` is allowed against every opponent: ``_hate:<tag>`` pseudo-elements are keyed by
+    the DECK's own vulnerability tags and weighted by field-wide interactive share — they carry
+    no archetype key, so there is no per-opponent axis a ``_hate``-only card (Veil of Summer,
+    Defense Grid, Carpet of Flowers) could be tested against.
+    """
+    if not opp_axes:
+        return True, "opponent-axes-unknown"
+    if not card_axes:
+        return True, "card-axes-unknown"
+    if card_axes & opp_axes:
+        return True, "on-axis"
+    if "_hate" in card_axes:
+        return True, "hate-axis-field-wide"
+    return False, "off-axis"
+
+
+def _format_suppressed(entries: "tuple[tuple[str, float, str], ...]") -> str:
+    """Render up to ``_SUPPRESSED_NOTE_CAP`` declined candidates plus a residual count."""
+    if not entries:
+        return ""
+    shown = entries[:_SUPPRESSED_NOTE_CAP]
+    parts = [f"{card} (lift {lift:+.3f}, {reason})" for card, lift, reason in shown]
+    rest = len(entries) - len(shown)
+    if rest > 0:
+        parts.append(f"+{rest} more")
+    return ", ".join(parts)
+
+
+def format_plan_declines(plan: "MatchupPlan") -> str:
+    """One-line summary of what a plan's eligibility gates declined, "" when nothing.
+
+    Renderers emit this only when non-empty, so a plan that declined nothing renders
+    byte-identically to the pre-feature output.
+    """
+    parts: list[str] = []
+    out_s = _format_suppressed(plan.out_suppressed)
+    if out_s:
+        parts.append(f"OUT {out_s}")
+    in_s = _format_suppressed(plan.in_suppressed)
+    if in_s:
+        parts.append(f"IN {in_s}")
+    return "; ".join(parts)
+
+
 def _plan_matchups(
     con: duckdb.DuckDBPyConnection,
     deck_maindeck: dict[str, int],
@@ -2586,6 +2730,9 @@ def _plan_matchups(
     until: str | None = None,
     catalog: Optional[dict[str, HoserCard]] = None,
     adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
+    land_names: "frozenset[str] | None" = None,
+    opponent_axes: "dict[str, frozenset[str]] | None" = None,
+    card_axes: "dict[str, frozenset[str]] | None" = None,
 ) -> dict[str, MatchupPlan]:
     """Build per-opponent OUT/IN swap plans for the maindeck.
 
@@ -2597,16 +2744,37 @@ def _plan_matchups(
         - Locked core: maindeck cards run by ≥ lock_threshold of the archetype's decks
           (from card_frequencies) — never sided out.  When archetype is None all
           maindeck cards are flex (degraded locked-core protection, noted).
-        - OUT candidates: (maindeck \\ locked) ranked ascending by matchup lift (most
-          dead vs opponent first), only gate-clearing cards with lift ≤ 0, capped at
-          max_swaps copies total.
+        - Lands are exempt from the OUT pool.  Cutting lands from a 60-card maindeck is
+          not a sideboard decision; it is what an unconstrained optimizer does when the
+          locked core leaves nothing else unlocked.
+        - Flex pool = maindeck − locked core − lands, computed on slot eligibility ALONE
+          before any lift is read.  Empty flex pool → degraded ``no-legal-flex`` plan:
+          no amount of data could produce a legal cut, so say that rather than
+          manufacture one.
+        - OUT candidates: flex-pool cards ranked ascending by matchup lift (most dead vs
+          opponent first), only gate-clearing cards with lift ≤ 0, capped at max_swaps
+          copies total.
         - IN candidates: sideboard_15 ranked descending by matchup lift, gate-clearing,
-          lift > 0, capped at max_swaps copies total.
+          lift > 0, AND attaching to an axis the opponent actually presents
+          (``_in_axis_verdict``), capped at max_swaps copies total.
         - Pairs OUT[i] ↔ IN[i] up to min(available_out, available_in) copies.
         - Enforces legality: post_board sums to exactly 60; per-card copies ≤
           max(catalog max_copies, 4).  Illegal swaps are skipped (fewer swaps is
           always legal).
         - side_out and side_in must have equal total copies (a swap conserves 60).
+
+    Eligibility inputs (``objective-search-split`` — resolved once by the caller, consumed
+    as plain collections here):
+
+    - ``land_names``: maindeck cards that are lands.  ``None`` → resolved from ``con`` via
+      ``_resolve_land_names``.  There is deliberately no "no exemption" default: the land
+      exemption is a correctness fix, not an opt-in overlay.
+    - ``opponent_axes``: opponent archetype → its vulnerability tags.  ``None`` → the IN axis
+      gate is inactive (the tags need a ``FieldDistribution`` only the caller holds).  A
+      present-but-empty tag set for one opponent also leaves the gate open for that opponent —
+      absence of evidence is not evidence of irrelevance.
+    - ``card_axes``: card → the vulnerability tags it attacks.  Falls back to ``catalog``
+      per card; a card with neither is un-assessable and passes the gate.
 
     Returns dict[opponent -> MatchupPlan].
     """
@@ -2618,6 +2786,15 @@ def _plan_matchups(
         if card in catalog:
             return max(catalog[card].max_copies, 4)
         return 4
+
+    def _axes_for(card: str) -> frozenset[str]:
+        if card_axes is not None and card in card_axes:
+            return card_axes[card]
+        hoser = catalog.get(card)
+        return frozenset(hoser.attacks) if hoser is not None else frozenset()
+
+    if land_names is None:
+        land_names = _resolve_land_names(con, deck_maindeck)
 
     plans: dict[str, MatchupPlan] = {}
 
@@ -2647,6 +2824,22 @@ def _plan_matchups(
     else:
         lock_note = " (archetype=None — all maindeck cards are flex; locked-core protection skipped)"
 
+    # Structural flex pool: eligibility ALONE, computed once, before any lift is read.  Empty
+    # here means no data could ever produce a legal cut — a degrade, not a "no dead cards"
+    # answer.  Conflating the two is what let land cuts read as a real plan.
+    flex_pool: frozenset[str] = frozenset(
+        card for card, copies in deck_maindeck.items()
+        if copies > 0 and card not in locked_core and card not in land_names
+    )
+    maindeck_land_count = sum(
+        copies for card, copies in deck_maindeck.items()
+        if copies > 0 and card in land_names
+    )
+    locked_maindeck_count = sum(
+        1 for card, copies in deck_maindeck.items()
+        if copies > 0 and card in locked_core
+    )
+
     for opp, ov in opp_values.items():
         if not ov.cleared_gate:
             # Build an honest degraded note: name the adaptive window if one was used,
@@ -2672,16 +2865,16 @@ def _plan_matchups(
                 tier="speculative",
                 degraded=True,
                 note=note,
+                plan_status=_PLAN_STATUS_THIN_DATA,
             )
             continue
 
         # ── Compute OUT candidates ─────────────────────────────────────────
-        # Only flex maindeck cards (not in locked_core) that clear the gate (tier in
-        # _VALUE_GATE) and have lift ≤ 0 (genuinely weak vs opponent).
+        # Gate + lift are read FIRST so out_suppressed records only signal-bearing declines
+        # (a card the correlational signal actually favored cutting), not the whole locked core.
         out_candidates: list[tuple[str, float, int, str]] = []  # (card, lift, copies, tier)
+        out_suppressed: list[tuple[str, float, str]] = []
         for card, cv in ov.maindeck.items():
-            if card in locked_core:
-                continue
             if cv.tier not in _VALUE_GATE:
                 continue
             if cv.lift > 0:
@@ -2689,14 +2882,27 @@ def _plan_matchups(
             copies_available = deck_maindeck.get(card, 0)
             if copies_available <= 0:
                 continue
+            if card in land_names:
+                out_suppressed.append((card, cv.lift, "land"))
+                continue
+            if card in locked_core:
+                out_suppressed.append((card, cv.lift, "locked-core"))
+                continue
             out_candidates.append((card, cv.lift, copies_available, cv.tier))
 
         # Sort ascending by lift (most dead first); tie-break by card name for stability
         out_candidates.sort(key=lambda x: (x[1], x[0]))
+        out_suppressed.sort(key=lambda x: (x[1], x[0]))
 
         # ── Compute IN candidates ──────────────────────────────────────────
-        # Sideboard_15 cards that clear the gate and have lift > 0 vs this opponent.
+        # Sideboard_15 cards that clear the gate, have lift > 0 vs this opponent, AND attach
+        # to an axis this opponent presents.  Correlational lift alone boarded a Hydroblast
+        # into a UB mirror; the axis check declines that without touching the ranking.
+        opp_axis_set: frozenset[str] = (
+            opponent_axes.get(opp, frozenset()) if opponent_axes is not None else frozenset()
+        )
         in_candidates: list[tuple[str, float, int, str]] = []  # (card, lift, copies, tier)
+        in_suppressed: list[tuple[str, float, str]] = []
         for card, cv in ov.side.items():
             if cv.tier not in _VALUE_GATE:
                 continue
@@ -2705,10 +2911,51 @@ def _plan_matchups(
             copies_available = sideboard_15.get(card, 0)
             if copies_available <= 0:
                 continue
+            allowed, reason = _in_axis_verdict(_axes_for(card), opp_axis_set)
+            if not allowed:
+                in_suppressed.append((card, cv.lift, reason))
+                continue
             in_candidates.append((card, cv.lift, copies_available, cv.tier))
 
         # Sort descending by lift (best first)
         in_candidates.sort(key=lambda x: (-x[1], x[0]))
+        in_suppressed.sort(key=lambda x: (-x[1], x[0]))
+
+        out_suppressed_t = tuple(out_suppressed)
+        in_suppressed_t = tuple(in_suppressed)
+
+        if not flex_pool:
+            # Honest degrade: the OUT pool is structurally empty, so no plan exists at this
+            # consensus level.  Name both causes with counts and surface what was declined —
+            # never a silent empty plan, never a fabricated cut.
+            reasons = [
+                (
+                    f"{locked_maindeck_count} card(s) locked core "
+                    f"(≥{lock_threshold:.0%} archetype adoption)"
+                ),
+                f"{maindeck_land_count} land slot(s) exempt from cuts",
+            ]
+            note = (
+                f"vs {opp}: NO LEGAL FLEX — {'; '.join(reasons)}. No OUT/IN proposed; "
+                f"the 15's composition carries this matchup"
+            )
+            declined = _format_suppressed(out_suppressed_t)
+            if declined:
+                note += f". Declined despite negative lift: {declined}"
+            plans[opp] = MatchupPlan(
+                opponent=opp,
+                side_out={},
+                side_in={},
+                post_board=dict(deck_maindeck),
+                n_basis=0,
+                tier="speculative",
+                degraded=True,
+                note=note,
+                plan_status=_PLAN_STATUS_NO_FLEX,
+                out_suppressed=out_suppressed_t,
+                in_suppressed=in_suppressed_t,
+            )
+            continue
 
         # ── Pair OUT ↔ IN up to max_swaps total copies ────────────────────
         side_out: dict[str, int] = {}
@@ -2813,10 +3060,24 @@ def _plan_matchups(
             tier = "speculative"
 
         if out_total == 0:
-            note = (
-                f"vs {opp}: data cleared gate but no flex dead cards found "
-                f"(or no high-lift sideboard IN candidates){lock_note}"
-            )
+            # Live flex pool, zero swaps — a real answer, not a degrade.  Name WHICH of the
+            # three causes it was rather than the old "no dead cards (or no IN candidates)".
+            if not out_candidates:
+                status = _PLAN_STATUS_NO_DEAD_CARDS
+                cause = "no flex maindeck card is dead vs this opponent"
+            elif not in_candidates:
+                status = _PLAN_STATUS_NO_IN
+                cause = "no sideboard card clears the gate on an axis this opponent presents"
+            else:
+                status = _PLAN_STATUS_NO_LEGAL_SWAP
+                cause = "every candidate pairing would break a copy limit"
+            note = f"vs {opp}: data cleared gate but {cause}{lock_note}"
+            declined_in = _format_suppressed(in_suppressed_t)
+            if declined_in:
+                note += f". Declined off-axis IN: {declined_in}"
+            declined_out = _format_suppressed(out_suppressed_t)
+            if declined_out:
+                note += f". Declined OUT: {declined_out}"
             plans[opp] = MatchupPlan(
                 opponent=opp,
                 side_out={},
@@ -2826,6 +3087,9 @@ def _plan_matchups(
                 tier=tier,
                 degraded=False,
                 note=note,
+                plan_status=status,
+                out_suppressed=out_suppressed_t,
+                in_suppressed=in_suppressed_t,
             )
         else:
             lock_str = f"; locked={sorted(locked_core)}" if locked_core else lock_note
@@ -2833,6 +3097,9 @@ def _plan_matchups(
                 f"vs {opp}: {out_total} swap(s); "
                 f"tier={tier}, n_basis={n_basis}{lock_str}"
             )
+            declined_in = _format_suppressed(in_suppressed_t)
+            if declined_in:
+                note += f"; declined off-axis IN: {declined_in}"
             plans[opp] = MatchupPlan(
                 opponent=opp,
                 side_out=dict(side_out),
@@ -2842,6 +3109,9 @@ def _plan_matchups(
                 tier=tier,
                 degraded=False,
                 note=note,
+                plan_status=_PLAN_STATUS_PLANNED,
+                out_suppressed=out_suppressed_t,
+                in_suppressed=in_suppressed_t,
             )
 
     return plans
@@ -4357,6 +4627,18 @@ def recommend_sideboard(
                 opp_values_final = {
                     k: v for k, v in opp_values_final.items() if k in opponents
                 }
+            # Eligibility inputs, resolved once here (objective-search-split): the land set
+            # costs one type_line query; the opponent axis sets and the card→attacks map are
+            # already in hand from Step 3 and the catalog/promotion pass.
+            _plan_land_names = _resolve_land_names(con, deck_maindeck)
+            _plan_card_axes: dict[str, frozenset[str]] = {
+                name: frozenset(hoser.attacks) for name, hoser in catalog.items()
+            }
+            if promoted_candidates:
+                _plan_card_axes.update(
+                    {name: frozenset(hoser.attacks)
+                     for name, hoser in promoted_candidates.items()}
+                )
             matchup_plans = _plan_matchups(
                 con, deck_maindeck, final_cards, opp_values_final, archetype,
                 max_swaps=max_swaps,
@@ -4364,6 +4646,9 @@ def recommend_sideboard(
                 until=eff_until,
                 catalog=catalog,
                 adaptive_windows=computed_adaptive_windows,
+                land_names=_plan_land_names,
+                opponent_axes=archetype_tags,
+                card_axes=_plan_card_axes,
             )
         except Exception as exc:
             log.warning("recommend_sideboard: _plan_matchups failed: %s", exc)
