@@ -382,7 +382,7 @@ class TestInteractionAnnotationWiring:
        confirm the annotation is present and oracle-text-grounded."
 
     This class exercises the wiring that was previously broken (hardcoded 3-card cache).
-    Now every graveyard-reliant hoser in the HOSER_CATALOG with a DB record gets annotated.
+    Now every graveyard-recursion hoser in the HOSER_CATALOG with a DB record gets annotated.
     """
 
     def _con_with_card(self, name: str, type_line: str, oracle_text: str):
@@ -395,7 +395,7 @@ class TestInteractionAnnotationWiring:
         return con
 
     def test_surgical_extraction_annotated_from_db(self):
-        """Surgical Extraction is a graveyard-reliant hoser; with its real oracle_text in the DB
+        """Surgical Extraction is a graveyard-recursion hoser; with its real oracle_text in the DB
         _interaction_annotation should return a non-None annotation containing scope info."""
         from legacy_engine.advisory.report import _interaction_annotation
 
@@ -439,7 +439,7 @@ class TestInteractionAnnotationWiring:
         assert annotation is None
 
     def test_non_graveyard_hoser_returns_none(self):
-        """A card that doesn't attack graveyard-reliant archetypes returns None regardless of DB state."""
+        """A card that doesn't attack graveyard-recursion archetypes returns None regardless of DB state."""
         from legacy_engine.advisory.report import _interaction_annotation
         from legacy_engine.ingestion import store
         from legacy_engine.models.card import Card
