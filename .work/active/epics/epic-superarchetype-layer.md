@@ -1,8 +1,8 @@
 ---
 id: epic-superarchetype-layer
 kind: epic
-stage: drafting
-tags: [analytics, archetype, needs-brief]
+stage: implementing
+tags: [analytics, archetype]
 parent: null
 depends_on: []
 release_binding: null
@@ -64,19 +64,155 @@ Tell), which is why this arc outranks the presentation-layer honesty work in the
   archetype → camp) at scope time. SPEC/ARCHITECTURE roll forward during epic-design once
   the brief pins the method.
 
-## Open method questions for the brief
-- Clustering representation: full 75 vs maindeck-only vs the flex-band representation
-  discovery already uses; distance metric; how to handle archetypes too small to cluster.
-- Aggregation: how a subject's record against a cluster is computed from per-archetype cells
-  — pooled raw counts vs a weighted mean of shrunk cells vs a hierarchical prior with the
-  superarchetype as an intermediate shrinkage target (the existing chain is camp → parent′ →
-  marginal′; this inserts a level).
-- Uneven coverage inside a cluster: a cluster whose matches are 90% one member is not really
-  a read on the cluster — needs a concentration/representativeness gate.
-- Validation: how to know a superarchetype cell is *honest* (does pooling across genuinely
-  different strategies smuggle in bias worse than the thin cell it replaced?).
-- Interaction with stable eras: clusters shift over time; whether cluster membership is
-  era-scoped like camps are.
+## Method — answered by the brief
+
+The five open method questions raised at scope time are **answered** by
+[`docs/briefs/superarchetype-aggregation.md`](../../../docs/briefs/superarchetype-aggregation.md)
+(attested, corpus-measured, `blocks_phase: epic-superarchetype-layer`). Child feature designs
+implement **that** method; they do not re-open these:
+
+| Question | Answer (brief §) |
+|---|---|
+| Representation + distance | Per-archetype maindeck **core set** (>=50% inclusion) **minus format staples** (core to >=30% of definers — hard removal, TF-IDF is not enough); **Jaccard** on the stripped cores (§3.1-3.2) |
+| Algorithm + cut | **Average-linkage agglomerative** — NOT HDBSCAN, and the decisive reason is the noise class alone: an archetype called noise gets **no superarchetype at all**, a coverage failure aimed precisely at the thin rows this epic exists to serve (the "no density contrast at N~30" argument is the brief's own judgment, flagged there as unsourced — do not lean on it). Cut at the deepest height where every retained branch clears **multiscale-bootstrap AU p > 0.95** over resampled CARD features, cross-checked with co-membership stability > 0.9 (§3.3-3.4) |
+| Too small to cluster | **Definers** >=30 decks AND >=8 core cards (~30 archetypes, 83.7% of field) may define; everything else with >=5 core cards is **assigned** by nearest centroid (~182 archetypes, 98.3% of field, zero unassignable) (§3.5) |
+| Aggregation | **Random-effects (DerSimonian-Laird) inverse-variance pooling** on continuity-corrected logits, feeding an **`n_eff`** derived from the random-effects variance into the existing `tier_for_sample()` / display gate — heterogeneity can never buy tier (§4) |
+| Uneven coverage | **`m_eff` = 1/HHI >= 2.0** AND max member share <= 0.60; failing cells still served, labeled `dominated by <member>` (§5) |
+| Validity of pooling | **I² gate** (<=0.40 pool freely / 0.40-0.75 label `heterogeneous pool` / >0.75 refuse the pooled number and show the member split), plus a direction/spread guard and a minimum-computability rule. All three fire on the epic's own motivating pair (§6) |
+| Era scoping | Clusters do **not** need era-scoping (co-membership agreement 0.957 across windows spanning the Flow State step and the Candelabra ban); recompute membership per window, keep identity stable, surface churn as a diagnostic (§9) |
+
+**Provenance discipline.** The brief distinguishes what is *sourced*, what is *measured on our
+corpus*, and what is the author's engineering judgment — and several of the numbers above are the
+third kind (`n_eff`'s construction, the `m_eff >= 2.0` / max-share `<= 0.60` cutoffs, the *actions*
+attached to the I² bands, the spread and computability guards, the prior-strength floor of 5, and
+the feature-axis bootstrap port). Implement them as named constants with the rationale at the
+definition site; they are the recalibration candidates after dogfooding, and a design that hardcodes
+them as if they were established results has lost the distinction the brief worked to preserve.
+
+**The honesty item that must survive into every child design:** `I²` is **one-sided evidence** — a
+high value is a reliable stop, a low value is **never** a certificate of exchangeability (median I²
+is exactly 0.000 across poolable cells, but Q has low power at these counts). A pooled cell that
+merely passes the gate is still superarchetype-sourced and must carry its provenance. This has to
+reach the UI, not just the code.
+
+## Design decisions
+<!-- resolved with judgment during the 2026-07-31 epic-design pass (autopilot delegation);
+rationale inline. Cross-model peer review skipped per orchestrator instruction (non-blocking).
+Child feature designs treat these as fixed inputs — do not re-ask. -->
+
+1. **Rung 2 (cluster × cluster) ships as a PRIOR rung only in v1; the display ladder stops at rung 1
+   (subject × opponent-cluster).** Rung 2 is where the coverage really is (cluster×cluster cells
+   reaching n>=30 go 12.8% → 70.3% at K=8) but coarsening the subject changes *whose* win rate is
+   reported, and the best-call page's row IS the user's deck. Prior-only captures the estimation
+   benefit for every thin cell while deferring the irreversible presentation commitment; promoting
+   rung 2 to a display rung is a follow-up gated on dogfooding rung 1. Consistent with VISION, which
+   states the fallback as "the cell falls back to the superarchetype aggregate" — opponent-side.
+2. **The superarchetype layer coarsens the OPPONENT axis only; the subject axis is whatever the host
+   matrix already carries** (camp label or parent label). This is what lets the layer compose with
+   `MultiSplitMatrix` instead of forking it — subject-side inclusion, force-inclusion, era windows,
+   and cross-era priors stay exactly where they are.
+3. **Offline `superarchetype run` writes the registry; matrix builders READ it and never cluster
+   inline.** The brief pulls two ways here (§10 "never in a query hot path" vs §9 "no reason to
+   cache a stale taxonomy"). Resolution: the registry records the window it was derived over, and a
+   mismatch with the window a consumer is sourcing over is a loud `//` audit line — no hot-path
+   clustering, no silent staleness. `superarchetype run` joins the refresh cycle before the
+   best-call page.
+4. **Registry storage mirrors the existing split exactly**: curated JSON inside the package
+   (`PACKAGE_DATA_DIR/superarchetypes/legacy.json`, path constant in `config.py`, fail-fast
+   path-taking loader per curated-json-resource-loader); derived JSON under `DATA_DIR`, written by
+   the run pass, like `DISCOVERED_VARIANTS_PATH`. Curated wins by key; each override records the
+   derived assignment it replaced.
+5. **Cluster identity persists across refreshes by max-overlap matching** against the previous
+   registry (unmatched clusters get a new id; the remap is reported in the run audit). Curated
+   entries own both id and display name outright. Membership moves, identity does not — otherwise
+   every consuming surface churns window-over-window.
+6. **Superarchetype-sourced cells feed the best-call page's `adj` and `coverage` but never its
+   `floor`**, and a row covered only by fallback lands in its own labeled stratum rather than being
+   promoted to `grounded`. The floor is the page's harshest claim ("this deck has a proven hole")
+   and a pooled family cell is not proof of a specific hole; the brief is explicit that passing the
+   heterogeneity gate never promotes a pooled estimate to measured status.
+7. **The no-registry path is byte-identical** (gated-additive-augmentation): absent or empty
+   registry ⇒ no rung, no ladder, no field changes, existing goldens and the multi-split parity
+   tests green untouched.
+
+## Decomposition
+
+Split along the method's own data flow — **taxonomy → estimator → integration → surface** — because
+each stage has a genuinely different failure mode and a different test shape, and because the two
+middle stages are the ones with irreversible methodology content. `-clustering` is pure composition
+work (`deck_cards` in, a registry out) and by construction never touches match outcomes, which is
+what keeps the cut height from ever being tuned against the coverage it unlocks. `-aggregation` is a
+DB-free numeric kernel whose correctness is provable against the brief's own worked examples as
+fixtures. `-chain` is the only feature that changes existing numbers, and it does so by extending
+the seam `feature-multi-split-matrix` already generalized rather than forking it. `-best-call-
+fallback` is the consumer that validates the arc end-to-end on the live corpus.
+
+Alternatives rejected: **splitting by rung** (rung 1 feature, rung 2 feature) — the two rungs share
+every type, gate, and label and would double the integration cost for no parallelism; **merging
+clustering and aggregation** into one "superarchetype engine" feature — that is 20+ units and, worse,
+it puts composition data and match-outcome data inside one module boundary, which is the exact
+adjacency the double-dipping warning is about; **a separate registry/CLI feature** — the registry is
+the clustering pass's own output and splitting it would leave `-clustering` with nothing to persist.
+
+### Child features
+
+- `epic-superarchetype-layer-clustering` — core-set + staple-strip representation, Jaccard /
+  average-linkage / AU-bootstrap cut, definer-vs-assignee membership, curated override registry,
+  `superarchetype` CLI + churn diagnostic — depends on: `[]`
+- `epic-superarchetype-layer-aggregation` — DerSimonian-Laird random-effects pooled cell, `n_eff`,
+  the concentration + heterogeneity gates (with the spread and computability guards), the
+  intra-cluster flag, moment-matched prior strength — depends on:
+  `[epic-superarchetype-layer-clustering]`
+- `epic-superarchetype-layer-chain` — cluster-pooled cells on the opponent axis (extending
+  `_pool_opponent_tallies` / the `build_multi_split_*` entry points), the new leave-opponent-out rung
+  in `_cell_prior` + `prior_source` labels, the display ladder — depends on:
+  `[epic-superarchetype-layer-aggregation, feature-multi-split-matrix]`
+- `epic-superarchetype-layer-best-call-fallback` — per-cell labeled fallback + provenance chip on
+  the best-call page, member-split rendering for refused pools, stratum rules, the I² one-sidedness
+  caveat in the definitional card, runbook roll-forward — depends on:
+  `[epic-superarchetype-layer-chain, feature-multi-split-matrix]`
+
+### Decomposition risks
+
+- **Riskiest feature is `-clustering`, and it is risky by position, not by difficulty.** The
+  taxonomy is the input to every pooled number in the epic; a wrong cluster silently corrupts cells
+  that look perfectly well-gated. Mitigation: the brief supplies measured expectations that become
+  pinned regression fixtures (the 14-card staple list, K≈8 in a 6-12 band, the Aluren + Show and Tell
+  branch recovered unprompted, cophenetic 0.916 as a change tripwire *only*, 0.957 cross-window
+  co-membership), and the curated layer is the escape hatch for the four known-wrong assignments the
+  brief already enumerates.
+- **Coverage-tuning double-dip is the sharpest methodological hazard in the epic.** Coverage is
+  monotone in coarseness (4.5% → 36.8% as K goes 17 → 4), so any pressure to "get more cells" pushes
+  the cut upward, and tuning the cut on the same match data the cells are drawn from is exactly the
+  selective-inference trap. Mitigation is architectural: `-clustering` reads `deck_cards` and never
+  `rounds`, so the objective is not even reachable from that module; outcome-side statistics are
+  gates, never objectives.
+- **The critical path is fully serial** (clustering → aggregation → chain → best-call), which
+  defeats parallelism inside the epic. Accepted deliberately: the sequencing directive is
+  membership-before-aggregation-before-consumption, and the edges are genuine type-producer edges.
+  Note for the queue: `-aggregation`'s kernel is pure and hand-testable, so if the queue stalls on
+  `-clustering` it can be started early against hand-built member tallies at the cost of validating
+  on real clusters later.
+- **Straddle risk with `feature-multi-split-matrix` (in flight).** Its `-adaptive-window` and
+  `-best-call-onepass` children are still open and own the exact seams `-chain` and
+  `-best-call-fallback` extend (`_pool_opponent_tallies`, the `build_multi_split_*` entry points,
+  `make_cells`, the template). Mitigated by hard `depends_on` edges on both features plus the
+  explicit instruction to extend, not fork, the pooling seam and the migrated one-pass script.
+- **Second co-editor on the same surface: `feature-agency-page-methodology`** (lean view,
+  path-to-grounding, stability column, floor fix) rewrites the same script and template and is
+  another answer to the same thin-data problem. No substrate edge — neither blocks the other's
+  design — but they must be sequenced at implement time, and their overlap should be reconciled
+  rather than double-implemented (a lean view that soft-weights thin cells and a superarchetype
+  fallback that pools them are complementary, not redundant, but only if the page states which one
+  a number came from).
+- **The I² one-sidedness caveat can fall between two features.** It is computed in `-aggregation`
+  and rendered in `-best-call-fallback`; the failure mode is that it ships as a number in one and a
+  docstring in the other and never reaches a user. Called out as an explicit deliverable in both
+  feature briefs, and it is the one acceptance criterion that spans them.
+- **Gap accepted, not solved: no outcome-side validation of the pooled cell.** The gates answer
+  "should we pool" but nothing in this decomposition backtests a pooled prediction against the
+  archetype cell that later clears n>=30. That is a natural divergence-as-diagnostic follow-up and
+  is deliberately out of v1 scope — noting it so a later reader knows it was considered, not missed.
 
 ## Member ideas (absorbed from backlog; full text below)
 
