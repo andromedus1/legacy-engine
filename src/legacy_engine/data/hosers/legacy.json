@@ -172,7 +172,7 @@
     },
     {
       "name": "Blood Moon",
-      "attacks": ["greedy-manabase"],
+      "attacks": ["nonbasic-manabase"],
       "colors": ["R"],
       "max_copies": 4,
       "swing": "dedicated",
@@ -181,7 +181,7 @@
     },
     {
       "name": "Back to Basics",
-      "attacks": ["greedy-manabase"],
+      "attacks": ["nonbasic-manabase"],
       "colors": ["U"],
       "max_copies": 4,
       "swing": "dedicated",
@@ -190,7 +190,7 @@
     },
     {
       "name": "Wasteland",
-      "attacks": ["greedy-manabase"],
+      "attacks": ["nonbasic-manabase"],
       "colors": [],
       "max_copies": 4,
       "swing": "soft",
@@ -199,21 +199,21 @@
     },
     {
       "name": "Force of Vigor",
-      "attacks": ["greedy-manabase"],
+      "attacks": ["artifact-mana-reliant"],
       "colors": ["G"],
       "max_copies": 4,
       "swing": "dedicated",
       "symmetry": "asymmetric",
-      "_comment": "Answers Blood Moon / Back to Basics / Chalice. Destroys up to two chosen artifacts/enchantments — the caster picks the targets."
+      "_comment": "'Destroy up to two target artifacts and/or enchantments' — reaches artifact mana sources (Lotus Petal, Chrome Mox, Lion's Eye Diamond), never lands, so it attacks artifact-mana-reliant and not nonbasic-manabase. Its value in answering an opposing Blood Moon / Back to Basics / Chalice is protection of the caster's own manabase, which this attack vocabulary does not model."
     },
     {
       "name": "Krosan Grip",
-      "attacks": ["greedy-manabase"],
+      "attacks": ["artifact-mana-reliant"],
       "colors": ["G"],
       "max_copies": 3,
       "swing": "soft",
       "symmetry": "asymmetric",
-      "_comment": "Destroys a chosen artifact or enchantment — the caster picks the target."
+      "_comment": "'Destroy target artifact or enchantment' — reaches artifact mana sources, never lands, so it attacks artifact-mana-reliant and not nonbasic-manabase. Its value in answering an opposing Blood Moon / Back to Basics is protection of the caster's own manabase, which this attack vocabulary does not model."
     },
     {
       "name": "Pyroblast",
@@ -233,7 +233,7 @@
       "swing": "soft",
       "symmetry": "asymmetric",
       "functional_group": "red-blast",
-      "_comment": "Corrected mis-tag (was greedy-manabase/low-interaction). 'Counter target spell if it's red' / 'Destroy target permanent if it's red' — counters/destroys RED, functionally identical to Blue Elemental Blast."
+      "_comment": "'Counter target spell if it's red' / 'Destroy target permanent if it's red' — counters/destroys RED, functionally identical to Blue Elemental Blast."
     },
     {
       "name": "Blue Elemental Blast",
@@ -275,7 +275,7 @@
     },
     {
       "name": "Engineered Explosives",
-      "attacks": ["combo", "greedy-manabase", "creature-based"],
+      "attacks": ["combo", "artifact-mana-reliant", "creature-based"],
       "colors": [],
       "max_copies": 3,
       "swing": "soft",
@@ -329,7 +329,7 @@
     },
     {
       "name": "Null Rod",
-      "attacks": ["ramp", "greedy-manabase"],
+      "attacks": ["ramp", "artifact-mana-reliant"],
       "colors": [],
       "max_copies": 4,
       "swing": "soft",

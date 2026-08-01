@@ -154,17 +154,6 @@ class TestCardRoles:
         roles = _card_roles(reanimate)
         assert "graveyard_recursion" in roles
 
-    @pytest.mark.xfail(
-        reason=(
-            "REAL GAP found while draining gate-cruft-test-unused-locals (2026-07-04): "
-            "_RE_GRAVEYARD's third alternative only matches 'from (?:a|any|your) graveyard "
-            "...onto the battlefield', but Exhume's actual oracle text is symmetric ('each "
-            "player ... from THEIR graveyard'), which the regex does not recognize — "
-            "_card_roles(exhume) returns an EMPTY set today, not {'graveyard_recursion'}. "
-            "Not fixed here: this drain's scope is tests-only (no whattoplay.py src changes)."
-        ),
-        strict=True,
-    )
     def test_exhume_has_graveyard_recursion(self):
         exhume = _make_card(
             name="Exhume",
@@ -1341,6 +1330,101 @@ class TestNoncreatureReliantTag:
 # measured densities that calibrated the 0.15 threshold.
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Manabase axis split: nonbasic-manabase (LAND side, reached by Wasteland/Blood Moon/
+# Back to Basics) vs artifact-mana-reliant (nonland ARTIFACT fast mana, reached by
+# Null Rod / artifact removal). The two are independent — neither implies the other.
+# ---------------------------------------------------------------------------
+
+class TestManabaseAxisSplit:
+    def test_dual_and_fetch_heavy_deck_is_nonbasic_manabase_only(self):
+        """A dual/fetch-heavy manabase with NO artifact mana fires nonbasic-manabase and
+        must NOT fire artifact-mana-reliant — Wasteland/Blood Moon reach this deck, Null
+        Rod does not."""
+        con = _con()
+        cards = [
+            Card(name="Underground Sea", type_line="Land — Island Swamp",
+                 oracle_text="{T}: Add {U} or {B}.", cmc=0.0,
+                 produced_mana=["U", "B"]),
+            Card(name="Polluted Delta", type_line="Land",
+                 oracle_text="{T}, Pay 1 life, Sacrifice this land: Search your library "
+                 "for an Island or Swamp card, put it onto the battlefield, then shuffle.",
+                 cmc=0.0, produced_mana=[]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Underground Sea": 4, "Polluted Delta": 8, "Brainstorm": 4}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "nonbasic-manabase" in tags, f"Expected nonbasic-manabase in {tags}"
+        assert "artifact-mana-reliant" not in tags, (
+            f"No artifact mana in this deck; got {tags}"
+        )
+
+    def test_artifact_fast_mana_deck_is_artifact_mana_reliant_only(self):
+        """Artifact fast mana over a BASIC-land manabase fires artifact-mana-reliant and
+        must NOT fire nonbasic-manabase — Null Rod reaches this deck, Blood Moon does not."""
+        con = _con()
+        cards = [
+            Card(name="Lotus Petal", type_line="Artifact",
+                 oracle_text="{T}, Sacrifice this artifact: Add one mana of any color.",
+                 cmc=0.0, colors=[]),
+            Card(name="Island", type_line="Basic Land — Island",
+                 oracle_text="{T}: Add {U}.", cmc=0.0, produced_mana=["U"]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Lotus Petal": 4, "Island": 20, "Brainstorm": 12}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "artifact-mana-reliant" in tags, f"Expected artifact-mana-reliant in {tags}"
+        assert "nonbasic-manabase" not in tags, (
+            f"Basic-land manabase must not fire nonbasic-manabase; got {tags}"
+        )
+
+    def test_a_deck_can_carry_both_axes(self):
+        """The axes are independent, not mutually exclusive: an artifact-fast-mana shell
+        on a dual/fetch manabase is exposed to BOTH Wasteland-style and Null Rod-style hate."""
+        con = _con()
+        cards = [
+            Card(name="Lotus Petal", type_line="Artifact",
+                 oracle_text="{T}, Sacrifice this artifact: Add one mana of any color.",
+                 cmc=0.0, colors=[]),
+            Card(name="Underground Sea", type_line="Land — Island Swamp",
+                 oracle_text="{T}: Add {U} or {B}.", cmc=0.0,
+                 produced_mana=["U", "B"]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Lotus Petal": 4, "Underground Sea": 8, "Brainstorm": 12}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "nonbasic-manabase" in tags, f"Expected nonbasic-manabase in {tags}"
+        assert "artifact-mana-reliant" in tags, f"Expected artifact-mana-reliant in {tags}"
+
+    def test_neither_axis_fires_on_a_basic_land_no_artifact_deck(self):
+        """Negative control: basics only, no artifact mana -> neither manabase axis."""
+        con = _con()
+        cards = [
+            Card(name="Island", type_line="Basic Land — Island",
+                 oracle_text="{T}: Add {U}.", cmc=0.0, produced_mana=["U"]),
+            Card(name="Brainstorm", type_line="Instant",
+                 oracle_text="Draw three cards, then put two cards from your hand on top "
+                 "of your library.", cmc=1.0, colors=["U"]),
+        ]
+        store.load_cards(con, cards)
+        maindeck = {"Island": 24, "Brainstorm": 36}
+        tags = vulnerability_tags_for_deck(con, maindeck)
+        assert "nonbasic-manabase" not in tags, f"Unexpected nonbasic-manabase in {tags}"
+        assert "artifact-mana-reliant" not in tags, (
+            f"Unexpected artifact-mana-reliant in {tags}"
+        )
+
+
 class TestColorlessReliantTag:
     def test_eldrazi_style_composition_gets_colorless_reliant(self):
         """A colorless-spell-heavy composition (Eldrazi-style: colorless creatures/lands)
@@ -2016,7 +2100,7 @@ class TestRampBigManaTag:
         field = _make_field({"Urzatron": 0.09, "Dimir Tempo": 0.15, "Storm": 0.10})
         archetype_tags = {
             "Urzatron": frozenset({"ramp", "low-interaction"}),
-            "Dimir Tempo": frozenset({"creature-based", "greedy-manabase"}),
+            "Dimir Tempo": frozenset({"creature-based", "nonbasic-manabase"}),
             "Storm": frozenset({"storm-reliant", "combo"}),
         }
         equity = hate_equity(field, archetype_tags)

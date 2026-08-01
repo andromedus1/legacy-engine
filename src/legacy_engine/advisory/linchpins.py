@@ -93,6 +93,14 @@ class Linchpin:
     ``neutralized_by``: frozenset of capability tokens describing HOW it can be answered (see
                         module docstring's vocabulary). This is a NEW vocabulary distinct from
                         the hoser ``attacks`` tag space — bridging the two is Feature B's job.
+    ``colors``:         frozenset of WUBRG single-char color strings (empty = colorless).
+                        Lets Feature B gate color-CONDITIONAL capability credit (Pyroblast/
+                        Hydroblast-style "destroy target permanent if it's <color>" effects
+                        can only ever answer a linchpin of that one color — see
+                        ``impact.hoser_capabilities_for``). Defaults to ``frozenset()`` so
+                        existing curated/derived entries that don't set it are treated as
+                        colorless/unknown, same honest-unknown convention as an empty
+                        ``neutralized_by``.
     """
 
     archetype: str
@@ -100,6 +108,7 @@ class Linchpin:
     role: str
     centrality: float
     neutralized_by: "frozenset[str]"
+    colors: "frozenset[str]" = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +117,11 @@ class Linchpin:
 
 _LINCHPIN_INCLUSION = 0.90  # near-mandatory inclusion% to auto-qualify a card as derived
 _DERIVED_CENTRALITY = 0.6   # default centrality for a derived (non-curated) linchpin
+
+# Closed vocabulary for the optional curated ``colors`` field — mirrors
+# advisory.sideboard._VALID_COLORS (not imported directly: sideboard.py imports FROM this
+# module, so importing back would be circular; WUBRG is a stable, tiny constant).
+_VALID_COLORS = frozenset("WUBRG")
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +138,13 @@ def load_linchpin_overrides(path: "Path | str") -> "dict[str, list[Linchpin]]":
       ``role``             (str, non-empty)
       ``centrality``       (number in (0, 1])
       ``neutralized_by``   (list of strings; may be empty)
+      ``colors``           (OPTIONAL list of single-char WUBRG strings; defaults to empty
+                            i.e. colorless/unset — see ``Linchpin.colors``)
 
     Raises ``ValueError`` naming the offending archetype/entry on any schema violation
     (missing/empty ``name``/``role``, ``centrality`` outside ``(0, 1]``, non-list
-    ``neutralized_by``), or when the top-level ``linchpins`` key is absent/not a dict.
+    ``neutralized_by``, non-list ``colors`` or a token outside WUBRG), or when the top-level
+    ``linchpins`` key is absent/not a dict.
     Raises ``FileNotFoundError`` when ``path`` does not exist.
 
     Standalone and path-taking (no config import) so it is hand-testable with a tmp file and
@@ -184,6 +201,21 @@ def load_linchpin_overrides(path: "Path | str") -> "dict[str, list[Linchpin]]":
                 )
             neutralized_by = frozenset(str(t) for t in neutralized_by_raw)
 
+            colors_raw = entry.get("colors", [])
+            if not isinstance(colors_raw, list):
+                raise ValueError(
+                    f"load_linchpin_overrides: {archetype!r}/{name!r} 'colors' must be a list "
+                    f"in {path}"
+                )
+            colors = frozenset(str(c) for c in colors_raw)
+            invalid_colors = colors - _VALID_COLORS
+            if invalid_colors:
+                raise ValueError(
+                    f"load_linchpin_overrides: {archetype!r}/{name!r} 'colors' has invalid "
+                    f"token(s) {sorted(invalid_colors)!r}; allowed: {sorted(_VALID_COLORS)!r} "
+                    f"in {path}"
+                )
+
             built.append(
                 Linchpin(
                     archetype=archetype,
@@ -191,6 +223,7 @@ def load_linchpin_overrides(path: "Path | str") -> "dict[str, list[Linchpin]]":
                     role=role,
                     centrality=centrality,
                     neutralized_by=neutralized_by,
+                    colors=colors,
                 )
             )
 
@@ -319,7 +352,8 @@ def derive_linchpins(
     a blowup (see the parent feature's "Linchpin derivation false positives" risk note).
 
     ``archetype`` is stamped onto every emitted ``Linchpin`` (there is no cross-archetype
-    inference here — this is per-archetype composition analysis).
+    inference here — this is per-archetype composition analysis). ``colors`` is stamped
+    straight from ``card.colors`` (empty for a colorless card) — no inference needed.
     """
     result: "list[Linchpin]" = []
     for card, _count in cards_with_counts:
@@ -343,6 +377,7 @@ def derive_linchpins(
                 role=label,
                 centrality=_DERIVED_CENTRALITY,
                 neutralized_by=_infer_neutralized_by(card),
+                colors=frozenset(card.colors or ()),
             )
         )
 
