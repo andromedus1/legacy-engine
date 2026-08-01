@@ -46,12 +46,14 @@ from typing import TYPE_CHECKING
 from legacy_engine.confidence import ConfidenceLevel, tier_for_sample
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
 __all__ = [
     "I2_ONE_SIDED_NOTE",
     "Concentration",
     "Heterogeneity",
+    "ImputationLicense",
+    "ImputedCell",
     "MemberSplit",
     "MemberTally",
     "PooledCell",
@@ -62,6 +64,8 @@ __all__ = [
     "dersimonian_laird",
     "effective_n",
     "heterogeneity",
+    "imputation_license",
+    "impute_cell",
     "prior_strength",
 ]
 
@@ -918,6 +922,361 @@ def aggregate_cluster_cell(
         member_split=_split_of(contributors),
         exclusions=tuple(exclusions),
         provenance=tuple(provenance),
+        window_note=window_note,
+        current_regime_share=current_regime_share,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 7 — profile-coherence imputation license (pure)
+#
+# Implements the epic's subject-axis licensed-imputation addendum: the license is EARNED at
+# profile level where data exists and SPENT at empty cells where it does not. Composition defines
+# membership (cluster.py never reads rounds — unchanged); behavior only LICENSES imputation, which
+# preserves the double-dip guard. Per-cell local veto: a column with significant measured member
+# divergence never imputes, license or not. The license runs on era-windowed profiles SUPPLIED BY
+# THE CALLER — the API takes profiles, not dates (era addendum #2 rule 4), and the 2026-01-01
+# probe numbers (LOO MAE 0.075 family vs 0.107 marginal, 15/21 wins) are directional expectations,
+# never fixtures.
+# ---------------------------------------------------------------------------
+
+_LICENSE_MIN_COLS = 3
+"""CALIBRATION: minimum evaluable opponent columns before profile coherence can be claimed —
+below this the family is a comparability desert (6 of 12 measured families) and gets the
+family-range display, not imputed points."""
+
+_LICENSE_COL_MIN_MEMBERS = 2
+_LICENSE_COL_MIN_MEMBER_N = 12
+"""CALIBRATION: an opponent column is evaluable when at least this many contributor members have
+at least this n against it — the same floor the epic's coherence probe used (chi2 with >= 2
+members at n >= 12)."""
+
+_LICENSE_SIG_MAX_FRAC = 0.25
+"""CALIBRATION: maximum share of evaluable columns that may show significant member divergence
+before the license is refused."""
+
+_LICENSE_SIG_ALPHA = 0.05
+"""Significance level for the per-column chi-square divergence test (the probe's p < .05)."""
+
+_IMPUTE_MIN_POOL = 25
+"""CALIBRATION: pooled sibling n floor to impute one cell (the epic's fillable-cell prize was
+measured at pooled sibling support n >= 25)."""
+
+_JEFFREYS_MAX_N = 40
+"""Mirror of ``matchup.JEFFREYS_MAX_N`` — Jeffreys CI for n <= 40, Wilson above (parity is pinned
+by a test; the import is refused because ``matchup`` transitively imports duckdb)."""
+
+
+@dataclass(frozen=True)
+class ImputationLicense:
+    """One family's earned (or refused) imputation license.
+
+    ``cols_evaluated`` counts opponent columns with >= ``_LICENSE_COL_MIN_MEMBERS`` contributor
+    members at n >= ``_LICENSE_COL_MIN_MEMBER_N``; ``sig_divergent_cols`` how many of those show
+    chi-square member divergence at p < ``_LICENSE_SIG_ALPHA``. ``tau_profile`` is the median
+    member-rate spread across evaluable columns (``None`` when none are evaluable) — the
+    dispersion every imputed CI is widened by. ``reason`` is named, always, granted or not.
+    """
+
+    cluster_id: str
+    cols_evaluated: int
+    sig_divergent_cols: int
+    tau_profile: float | None
+    granted: bool
+    reason: str
+
+
+def _column_divergence(
+    tallies: Sequence[MemberTally],
+) -> tuple[bool, float | None, float | None]:
+    """One opponent column's (evaluable, chi2 p-value, member-rate spread).
+
+    Only contributor tallies (``definer=True``) at n >= ``_LICENSE_COL_MIN_MEMBER_N`` qualify —
+    assignees never contribute evidence, to the license either (contribute-vs-receive). A column
+    whose qualifying members all sit at the same extreme (total wins or total losses zero) has a
+    zero chi-square margin; that degenerate branch is named here and reported as p = 1.0 — the
+    members literally agree, and no NaN reaches a verdict.
+    """
+    qualified = [t for t in tallies if t.definer and t.n >= _LICENSE_COL_MIN_MEMBER_N]
+    if len(qualified) < _LICENSE_COL_MIN_MEMBERS:
+        return False, None, None
+
+    rates = [t.p_hat for t in qualified]
+    spread = max(rates) - min(rates)
+    total_wins = sum(t.wins for t in qualified)
+    total_losses = sum(t.n - t.wins for t in qualified)
+    if total_wins == 0 or total_losses == 0:
+        return True, 1.0, spread
+
+    from scipy.stats import chi2_contingency
+
+    table = [
+        [t.wins for t in qualified],
+        [t.n - t.wins for t in qualified],
+    ]
+    return True, float(chi2_contingency(table).pvalue), spread
+
+
+def imputation_license(
+    cluster_id: str, profile: Mapping[str, Sequence[MemberTally]]
+) -> ImputationLicense:
+    """Earn (or refuse) a family's imputation license from its era-windowed behaviour profile.
+
+    ``profile`` maps opponent name -> the family members' tallies against that opponent, drawn
+    from the caller's era-windowed build (this kernel never computes windows). Granted only when
+    at least ``_LICENSE_MIN_COLS`` columns are evaluable AND at most ``_LICENSE_SIG_MAX_FRAC`` of
+    them show significant member divergence. The power caveat is structural: thin columns cannot
+    prove coherence, which is why this is a LICENSE that must be re-earned per window, never an
+    assumption.
+    """
+    if not cluster_id.strip():
+        raise ValueError("imputation_license: cluster_id must be a non-empty id")
+
+    cols_evaluated = 0
+    sig_divergent = 0
+    spreads: list[float] = []
+    for opponent in sorted(profile):
+        evaluable, p_value, spread = _column_divergence(profile[opponent])
+        if not evaluable:
+            continue
+        cols_evaluated += 1
+        spreads.append(spread if spread is not None else 0.0)
+        if p_value is not None and p_value < _LICENSE_SIG_ALPHA:
+            sig_divergent += 1
+
+    tau_profile = median(spreads) if spreads else None
+
+    if cols_evaluated < _LICENSE_MIN_COLS:
+        return ImputationLicense(
+            cluster_id=cluster_id,
+            cols_evaluated=cols_evaluated,
+            sig_divergent_cols=sig_divergent,
+            tau_profile=tau_profile,
+            granted=False,
+            reason=(
+                f"insufficient shared columns ({cols_evaluated} < {_LICENSE_MIN_COLS}) — "
+                "comparability desert; serve the family-range display, not imputed points"
+            ),
+        )
+    sig_frac = sig_divergent / cols_evaluated
+    if sig_frac > _LICENSE_SIG_MAX_FRAC:
+        return ImputationLicense(
+            cluster_id=cluster_id,
+            cols_evaluated=cols_evaluated,
+            sig_divergent_cols=sig_divergent,
+            tau_profile=tau_profile,
+            granted=False,
+            reason=(
+                f"divergent profile: {sig_divergent} of {cols_evaluated} evaluable column(s) "
+                f"significantly divergent ({sig_frac:.2f} > {_LICENSE_SIG_MAX_FRAC}) — the "
+                "family does not behave as one"
+            ),
+        )
+    return ImputationLicense(
+        cluster_id=cluster_id,
+        cols_evaluated=cols_evaluated,
+        sig_divergent_cols=sig_divergent,
+        tau_profile=tau_profile,
+        granted=True,
+        reason=(
+            f"license granted: {cols_evaluated} evaluable column(s), {sig_divergent} "
+            f"significantly divergent ({sig_frac:.2f} <= {_LICENSE_SIG_MAX_FRAC}); median "
+            f"profile spread {tau_profile:.3f} widens every imputed CI"
+        ),
+    )
+
+
+def _pooled_ci(wins: int, n: int, *, alpha: float = 0.05) -> tuple[float, float]:
+    """95% CI for a pooled count cell — a mirror of ``matchup.wilson_or_jeffreys_ci`` (Jeffreys
+    for n <= ``_JEFFREYS_MAX_N``, Wilson above; Wald never), reimplemented because that module
+    transitively imports duckdb and this kernel must stay DB-free. Parity is pinned by a test so
+    the two cannot drift silently.
+    """
+    if n == 0:
+        return (0.0, 1.0)
+    if n <= _JEFFREYS_MAX_N:
+        from scipy.stats import beta
+
+        # No boundary special-casing: statsmodels' jeffreys does not clip at w = 0 or w = n,
+        # and the parity test pins this mirror to its exact values.
+        low = float(beta.ppf(alpha / 2.0, wins + 0.5, n - wins + 0.5))
+        high = float(beta.ppf(1.0 - alpha / 2.0, wins + 0.5, n - wins + 0.5))
+    else:
+        from scipy.stats import norm
+
+        z = float(norm.ppf(1.0 - alpha / 2.0))
+        p_hat = wins / n
+        denominator = 1.0 + z * z / n
+        center = (p_hat + z * z / (2.0 * n)) / denominator
+        half = z * math.sqrt(p_hat * (1.0 - p_hat) / n + z * z / (4.0 * n * n)) / denominator
+        low, high = center - half, center + half
+    return (max(0.0, low), min(1.0, high))
+
+
+@dataclass(frozen=True)
+class ImputedCell:
+    """One family-imputed (or refused) subject-vs-opponent cell.
+
+    ``p is None`` exactly when imputation is refused; ``reason`` names the refusal
+    (intra-family / no license / no contributor siblings / local veto / pool too thin). The CI is
+    the pooled sibling CI widened by ``tau_profile`` — never a raw pooled CI — so an imputed cell
+    is a labeled lean, never a grounded row. ``p`` never travels without ``license`` attached.
+    ``exclusions`` names every sibling tally that did not contribute (assignees, the subject's own
+    tally); ``window_note``/``current_regime_share`` are freshness passthrough (era addendum #2).
+    """
+
+    subject: str
+    opponent: str
+    p: float | None
+    ci_low: float | None
+    ci_high: float | None
+    pool_n: int
+    siblings: tuple[str, ...]
+    license: ImputationLicense
+    reason: str | None
+    exclusions: tuple[str, ...]
+    window_note: str
+    current_regime_share: float | None
+
+
+def impute_cell(
+    subject: str,
+    opponent: str,
+    license: ImputationLicense,  # parameter name pinned by the feature design (Unit 7 signature)
+    sibling_tallies: Sequence[MemberTally],
+    *,
+    window_note: str = "",
+    current_regime_share: float | None = None,
+) -> ImputedCell:
+    """Spend a family license on one empty subject-vs-opponent cell, or refuse with a name.
+
+    ``sibling_tallies`` are the subject's family siblings' tallies against ``opponent``, drawn
+    era-windowed by the caller. Refusal ladder (each named, honest-degrade):
+
+    1. intra-family target — ``opponent`` inside the subject's own family never imputes;
+    2. no license — the family never earned one (see ``license.reason``);
+    3. no contributor siblings — assignee tallies and the subject's own tally are excluded
+       (contribute-vs-receive; leave-subject-out) and nothing remains;
+    4. local veto — this column's members measurably diverge (chi2 p < ``_LICENSE_SIG_ALPHA``
+       with >= ``_LICENSE_COL_MIN_MEMBERS`` members at n >= ``_LICENSE_COL_MIN_MEMBER_N``), so
+       the cell never imputes even under a granted license;
+    5. pool too thin — pooled sibling n below ``_IMPUTE_MIN_POOL``.
+
+    A granted cell carries the pooled sibling rate with its CI widened by ``tau_profile/2`` per
+    side (total widening = the family's profile dispersion) — a labeled lean, never a raw pool.
+    """
+    if not subject.strip():
+        raise ValueError("impute_cell: subject must be a non-empty archetype name")
+    if not opponent.strip():
+        raise ValueError("impute_cell: opponent must be a non-empty archetype name")
+
+    def _refused(
+        reason: str,
+        *,
+        pool_n: int = 0,
+        siblings: tuple[str, ...] = (),
+        exclusions: tuple[str, ...] = (),
+    ) -> ImputedCell:
+        return ImputedCell(
+            subject=subject,
+            opponent=opponent,
+            p=None,
+            ci_low=None,
+            ci_high=None,
+            pool_n=pool_n,
+            siblings=siblings,
+            license=license,
+            reason=reason,
+            exclusions=exclusions,
+            window_note=window_note,
+            current_regime_share=current_regime_share,
+        )
+
+    family = {t.archetype for t in sibling_tallies} | {subject}
+    if opponent in family:
+        return _refused(
+            f"intra-family target: {opponent} is inside {subject}'s own cluster "
+            f"{license.cluster_id} — a family never imputes its own internal cell"
+        )
+    if not license.granted:
+        return _refused(f"no license: {license.reason}")
+
+    exclusions: list[str] = []
+    contributors: list[MemberTally] = []
+    for t in sibling_tallies:
+        if t.archetype == subject:
+            exclusions.append(
+                f"{subject}: the subject's own tally (n={t.n}) is not sibling evidence "
+                "(leave-subject-out)"
+            )
+        elif not t.definer:
+            exclusions.append(
+                f"{t.archetype}: assignee tally excluded (n={t.n}) — assignees receive "
+                "imputation but never contribute (contribute-vs-receive, era addendum)"
+            )
+        else:
+            contributors.append(t)
+
+    if not contributors:
+        return _refused(
+            (
+                f"no contributor siblings: {len(sibling_tallies)} tally(ies) supplied, all "
+                "excluded (see exclusions) — definers and curated members are the only "
+                "imputation sources"
+            ),
+            exclusions=tuple(exclusions),
+        )
+
+    sibling_names = tuple(sorted(t.archetype for t in contributors))
+    pool_n = sum(t.n for t in contributors)
+
+    evaluable, p_value, _spread = _column_divergence(contributors)
+    if evaluable and p_value is not None and p_value < _LICENSE_SIG_ALPHA:
+        return _refused(
+            (
+                f"local veto: sibling rates vs {opponent} measurably diverge "
+                f"(chi2 p = {p_value:.4f} < {_LICENSE_SIG_ALPHA}) — this column never imputes, "
+                "license or not"
+            ),
+            pool_n=pool_n,
+            siblings=sibling_names,
+            exclusions=tuple(exclusions),
+        )
+
+    if pool_n < _IMPUTE_MIN_POOL:
+        return _refused(
+            f"pool too thin ({pool_n} < {_IMPUTE_MIN_POOL})",
+            pool_n=pool_n,
+            siblings=sibling_names,
+            exclusions=tuple(exclusions),
+        )
+
+    if license.tau_profile is None:
+        # Unreachable under a granted license (granted requires evaluable columns, which produce
+        # a median spread) — named so a hand-built license can never smuggle an unwidened CI.
+        return _refused(
+            "license carries no profile dispersion (tau_profile is None) — cannot widen the "
+            "imputed CI honestly",
+            pool_n=pool_n,
+            siblings=sibling_names,
+            exclusions=tuple(exclusions),
+        )
+
+    pool_wins = sum(t.wins for t in contributors)
+    p = pool_wins / pool_n
+    base_low, base_high = _pooled_ci(pool_wins, pool_n)
+    pad = license.tau_profile / 2.0
+    return ImputedCell(
+        subject=subject,
+        opponent=opponent,
+        p=p,
+        ci_low=max(0.0, base_low - pad),
+        ci_high=min(1.0, base_high + pad),
+        pool_n=pool_n,
+        siblings=sibling_names,
+        license=license,
+        reason=None,
+        exclusions=tuple(exclusions),
         window_note=window_note,
         current_regime_share=current_regime_share,
     )
