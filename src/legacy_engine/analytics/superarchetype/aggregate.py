@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from statistics import median
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -50,11 +51,13 @@ __all__ = [
     "Concentration",
     "Heterogeneity",
     "MemberTally",
+    "PriorStrength",
     "RandomEffects",
     "concentration",
     "dersimonian_laird",
     "effective_n",
     "heterogeneity",
+    "prior_strength",
 ]
 
 
@@ -523,4 +526,102 @@ def heterogeneity(members: Sequence[MemberTally], re: RandomEffects) -> Heteroge
         note=None,
         one_sided_note=I2_ONE_SIDED_NOTE,
         reason=reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 5 — evidence-gated prior strength (REPLACES the brief's inverted §4.5)
+#
+# The brief reads tau^2 = 0 as "coherent cluster" and awards the MAXIMUM strength (30). Its own
+# §6.4 shows why that is inverted: at these member sizes tau^2 = 0 was measured on 58.7% of
+# poolable cells and mostly means "we cannot SEE spread", not that spread is absent — so §4.5 as
+# written hands maximum prior influence to the majority of cells on the WEAKEST evidence. Here
+# strength is gated on EVIDENCE SUFFICIENCY (member count and per-member n) and then only REDUCED
+# by observed dispersion; tau^2 = 0 alone never buys the maximum.
+# ---------------------------------------------------------------------------
+
+_PRIOR_MIN = 5.0
+"""CALIBRATION, UNCALIBRATED FLOOR (the brief says so): an incoherent cluster still beats a bare
+0.5 prior but barely nudges the cell. Validate against the existing ``SHRINK_STRENGTH = 15``
+during dogfooding — see the feature file's implementation notes for the shipped check."""
+
+_PRIOR_MAX = 30.0
+"""Project-grounded ceiling: equals ``DISPLAY_GATE_N`` — a superarchetype prior may carry at most
+one displayable cell's worth of evidence."""
+
+_PRIOR_FULL_MEMBERS = 3
+_PRIOR_FULL_N = 30
+"""CALIBRATION: evidence sufficiency for full prior strength — at least this many members AND a
+median per-member n at this floor (one displayable cell each) before the ceiling is reachable.
+Evidence, NOT ``tau^2 == 0``, is what buys strength (adversarial-read finding 1)."""
+
+
+@dataclass(frozen=True)
+class PriorStrength:
+    """Strength for using the pooled cluster cell as a Beta prior (two-level-empirical-bayes:
+    this feature supplies a ``prior_mean`` and a ``strength``; ``beta_binomial_shrink_to`` stays
+    untouched).
+
+    ``ceiling`` is the evidence-gated maximum; ``moment_matched`` is the brief's §4.5 dispersion
+    figure ``s = 1/(tau^2 * mu(1-mu)) - 1`` (``None`` at ``tau^2 = 0``, where it is unbounded and
+    deliberately NOT read as coherence). ``strength`` is ``min(ceiling, moment_matched)`` clamped
+    to ``[_PRIOR_MIN, _PRIOR_MAX]``. ``reason`` names the rule so the prior_source label can carry
+    it verbatim.
+    """
+
+    strength: float
+    ceiling: float
+    moment_matched: float | None
+    reason: str
+
+
+def prior_strength(members: Sequence[MemberTally], re: RandomEffects) -> PriorStrength:
+    """Evidence-gated prior strength: sufficiency sets the ceiling, dispersion only lowers it.
+
+    - Evidence factor = ``min(1, K/_PRIOR_FULL_MEMBERS) * min(1, median(n_k)/_PRIOR_FULL_N)``;
+      the ceiling interpolates ``[_PRIOR_MIN, _PRIOR_MAX]`` on it. Two tiny members land near the
+      FLOOR even at ``tau^2 = 0`` — a zero computed from too few / too small members maps to LOW
+      strength (the inversion fix).
+    - ``tau^2 > 0`` moment-matches the brief's ``s`` and binds when it is below the ceiling, so
+      strength is non-increasing in ``tau^2`` at fixed evidence and an incoherent cluster falls to
+      the floor.
+    """
+    if not members:
+        raise ValueError("prior_strength: no member tallies supplied")
+
+    k = len(members)
+    median_n = float(median(m.n for m in members))
+    evidence = min(1.0, k / _PRIOR_FULL_MEMBERS) * min(1.0, median_n / _PRIOR_FULL_N)
+    ceiling = _PRIOR_MIN + (_PRIOR_MAX - _PRIOR_MIN) * evidence
+
+    mu = _logistic(re.logit_mean)
+    pq = mu * (1.0 - mu)
+    if re.tau2 > 0.0 and pq > 0.0:
+        # Brief §4.5 moment match, tau^2 mapped to the probability scale:
+        # tau2_p = tau2 * (mu(1-mu))^2, s = mu(1-mu)/tau2_p - 1 = 1/(tau2 * mu(1-mu)) - 1.
+        moment_matched: float | None = 1.0 / (re.tau2 * pq) - 1.0
+        raw = min(ceiling, moment_matched)
+    else:
+        # tau^2 = 0 is "spread not visible", never "coherent" — the moment match is unbounded
+        # and the evidence-gated ceiling is the binding constraint.
+        moment_matched = None
+        raw = ceiling
+
+    strength = min(_PRIOR_MAX, max(_PRIOR_MIN, raw))
+
+    reason = (
+        f"evidence-gated (replaces the brief's inverted §4.5): {k} member(s) toward "
+        f"{_PRIOR_FULL_MEMBERS} and median n {median_n:.0f} toward {_PRIOR_FULL_N} set the "
+        f"ceiling at {ceiling:.1f}; tau^2 = 0 is read as 'spread not visible', never as coherence"
+    )
+    if moment_matched is not None and moment_matched < ceiling:
+        reason += (
+            f"; dispersion moment-match s = {moment_matched:.1f} at tau^2 = {re.tau2:.3f} "
+            "binds below the ceiling"
+        )
+    if raw < _PRIOR_MIN:
+        reason += f"; clamped to the floor {_PRIOR_MIN:.0f} (floor is uncalibrated — brief §4.5)"
+
+    return PriorStrength(
+        strength=strength, ceiling=ceiling, moment_matched=moment_matched, reason=reason
     )
