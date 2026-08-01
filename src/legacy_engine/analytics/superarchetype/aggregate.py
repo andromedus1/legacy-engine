@@ -46,12 +46,15 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "I2_ONE_SIDED_NOTE",
     "Concentration",
+    "Heterogeneity",
     "MemberTally",
     "RandomEffects",
     "concentration",
     "dersimonian_laird",
     "effective_n",
+    "heterogeneity",
 ]
 
 
@@ -333,4 +336,191 @@ def concentration(members: Sequence[MemberTally]) -> Concentration:
         passed=passed,
         label=label,
         calibration_note=_CONCENTRATION_CALIBRATION_NOTE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit 4 — heterogeneity gate + direction/spread guard + minimum computability (pure)
+# ---------------------------------------------------------------------------
+
+_I2_FREE = 0.40
+_I2_REFUSE = 0.75
+"""Band EDGES from Cochrane's published interpretation guidance; the ACTIONS attached to them are
+this project's (CALIBRATION), mapped onto the three-state honesty vocabulary: ``<= 0.40`` pool
+freely, ``(0.40, 0.75]`` pool with a heterogeneous-pool note naming the spread, ``> 0.75`` refuse
+the pooled number and emit the member split instead."""
+
+_SPREAD_FORCE = 0.25
+_SPREAD_MIN_N = 10
+"""CALIBRATION (author's engineering rule, grounded in Cochrane's caveat that I^2 thresholds "can
+be misleading"): among members with ``n >= _SPREAD_MIN_N``, an observed rate spread of
+``>= _SPREAD_FORCE`` forces the refuse band regardless of I^2."""
+
+_HET_MIN_MEMBERS = 2
+_HET_MIN_MEMBER_N = 5
+"""CALIBRATION (author's rule): a heterogeneity claim — in EITHER direction — requires at least
+``_HET_MIN_MEMBERS`` members with ``n >= _HET_MIN_MEMBER_N`` each (a 1-match member carries no
+usable variance). Below that the band is ``not-computable`` and the cell falls back to the
+concentration labelling of the §5 gate."""
+
+_VALID_HET_BANDS = frozenset({"free", "labelled", "refused", "not-computable"})
+"""Closed vocabulary (closed-vocabulary-fail-fast-token)."""
+
+I2_ONE_SIDED_NOTE = (
+    "I^2 is one-sided evidence: a high value is a reliable stop signal, but a low value is never "
+    "a certificate of exchangeability (Q has low power at these member counts and sizes) — a "
+    "pooled cell that merely passes this gate is still a superarchetype-sourced estimate"
+)
+"""The honesty caveat that must reach the UI (brief §6.4). Rides on every ``Heterogeneity`` as
+structured provenance — the epic flags this deliverable as able to fall between features, so it is
+a field, not a docstring."""
+
+
+@dataclass(frozen=True)
+class Heterogeneity:
+    """Heterogeneity verdict for one pooled cell.
+
+    ``band`` is the closed vocabulary ``free | labelled | refused | not-computable`` (fail-fast on
+    anything else). ``i2`` is ``None`` exactly when no heterogeneity claim may be made
+    (``not-computable``) — reporting a number there would itself be a claim. ``spread`` is the raw
+    member-rate range (max - min) across all members, ``None`` below two members. ``note`` carries
+    the labelled band's ``heterogeneous pool`` message. ``one_sided_note`` always carries
+    ``I2_ONE_SIDED_NOTE``. ``reason`` names the branch taken — including the degenerate ``Q = 0``
+    case — so a surface can print the verdict verbatim.
+    """
+
+    band: str
+    i2: float | None
+    q: float
+    spread: float | None
+    note: str | None
+    one_sided_note: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.band not in _VALID_HET_BANDS:
+            raise ValueError(
+                f"Heterogeneity: band {self.band!r} must be one of {sorted(_VALID_HET_BANDS)}"
+            )
+
+
+def heterogeneity(members: Sequence[MemberTally], re: RandomEffects) -> Heterogeneity:
+    """The heterogeneity gate (brief §6): I^2 bands + the two guards that do not depend on I^2.
+
+    Decision order:
+
+    1. **Minimum computability** — fewer than ``_HET_MIN_MEMBERS`` members with
+       ``n >= _HET_MIN_MEMBER_N`` -> ``not-computable``, no homogeneity claim in either direction.
+    2. **Direction/spread guard** — among members with ``n >= _SPREAD_MIN_N`` (needs at least two),
+       a rate spread ``>= _SPREAD_FORCE`` forces ``refused`` regardless of I^2.
+    3. **I^2 bands** — ``> _I2_REFUSE`` refused; ``(_I2_FREE, _I2_REFUSE]`` labelled with a
+       ``heterogeneous pool`` note naming the spread; ``<= _I2_FREE`` free, with the ``Q = 0``
+       degenerate branch named explicitly.
+
+    The one-sided caveat rides every result: passing this gate is never a certificate.
+    """
+    if not members:
+        raise ValueError("heterogeneity: no member tallies supplied")
+
+    rates = [m.p_hat for m in members]
+    spread = max(rates) - min(rates) if len(members) >= 2 else None
+
+    counted = [m for m in members if m.n >= _HET_MIN_MEMBER_N]
+    if len(counted) < _HET_MIN_MEMBERS:
+        return Heterogeneity(
+            band="not-computable",
+            i2=None,
+            q=re.q,
+            spread=spread,
+            note=None,
+            one_sided_note=I2_ONE_SIDED_NOTE,
+            reason=(
+                f"heterogeneity not computable: {len(counted)} member(s) with "
+                f"n >= {_HET_MIN_MEMBER_N} (need >= {_HET_MIN_MEMBERS}) — no homogeneity claim "
+                "in either direction; the cell falls back to the concentration labelling"
+            ),
+        )
+
+    guarded = [m for m in members if m.n >= _SPREAD_MIN_N]
+    if len(guarded) >= 2:
+        guarded_rates = [m.p_hat for m in guarded]
+        guarded_spread = max(guarded_rates) - min(guarded_rates)
+        if guarded_spread >= _SPREAD_FORCE:
+            return Heterogeneity(
+                band="refused",
+                i2=re.i2,
+                q=re.q,
+                spread=spread,
+                note=None,
+                one_sided_note=I2_ONE_SIDED_NOTE,
+                reason=(
+                    f"direction/spread guard: member rates span {min(guarded_rates):.3f}-"
+                    f"{max(guarded_rates):.3f} among members with n >= {_SPREAD_MIN_N} "
+                    f"(spread {guarded_spread:.2f} >= {_SPREAD_FORCE}) — treated as "
+                    f"I^2 > {_I2_REFUSE} regardless of I^2"
+                ),
+            )
+
+    if re.i2 is None:
+        # Defensive: a RandomEffects fitted on fewer members than were passed here. Making a
+        # band claim from it would be unfounded — degrade with a name rather than guess.
+        return Heterogeneity(
+            band="not-computable",
+            i2=None,
+            q=re.q,
+            spread=spread,
+            note=None,
+            one_sided_note=I2_ONE_SIDED_NOTE,
+            reason=(
+                "heterogeneity not computable: the supplied RandomEffects carries no I^2 "
+                "(single-member fit) — no homogeneity claim in either direction"
+            ),
+        )
+
+    i2 = re.i2
+    if i2 > _I2_REFUSE:
+        return Heterogeneity(
+            band="refused",
+            i2=i2,
+            q=re.q,
+            spread=spread,
+            note=None,
+            one_sided_note=I2_ONE_SIDED_NOTE,
+            reason=(
+                f"I^2 = {i2:.2f} > {_I2_REFUSE}: considerable heterogeneity — the pooled number "
+                "is refused; serve the per-member split instead"
+            ),
+        )
+    if i2 > _I2_FREE:
+        note = (
+            f"heterogeneous pool: member rates span {min(rates):.3f}-{max(rates):.3f} "
+            f"(I^2 = {i2:.2f})"
+        )
+        return Heterogeneity(
+            band="labelled",
+            i2=i2,
+            q=re.q,
+            spread=spread,
+            note=note,
+            one_sided_note=I2_ONE_SIDED_NOTE,
+            reason=(
+                f"I^2 = {i2:.2f} in ({_I2_FREE}, {_I2_REFUSE}]: pooled, with the heterogeneous-"
+                "pool note naming the spread (the random-effects n_eff already widens the gate)"
+            ),
+        )
+    if re.q <= _EPS:
+        reason = (
+            "Q = 0.0 — no observed dispersion on the logit scale; I^2 = 0.00 is absence of "
+            "evidence of spread, not evidence of absence (one-sided)"
+        )
+    else:
+        reason = f"I^2 = {i2:.2f} <= {_I2_FREE}: pooled and displayed normally (one-sided — see note)"
+    return Heterogeneity(
+        band="free",
+        i2=i2,
+        q=re.q,
+        spread=spread,
+        note=None,
+        one_sided_note=I2_ONE_SIDED_NOTE,
+        reason=reason,
     )
