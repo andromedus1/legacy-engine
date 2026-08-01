@@ -359,6 +359,7 @@ def acquire_plan(
     *,
     archetype: str | None = None,
     deck: dict[str, int] | None = None,
+    colors: str | None = None,
     collection: "CollectionView",
     price_fn: "Callable[[str], Optional[object]] | None" = None,
     since: str | None = None,
@@ -371,11 +372,24 @@ def acquire_plan(
     **Step A** — Candidate universe: union of:
     - consensus maindeck + sideboard cards for the target archetype (via
       ``card_frequencies``).
-    - HOSER_CATALOG candidates relevant to the field (via ``recommend_sideboard``
-      with a dummy empty maindeck to capture the hoser candidates).
+    - HOSER_CATALOG candidates relevant to the field, restricted to the deck's own
+      color identity plus colorless (see Step A2) — a buy-list meant to optimize
+      *this* deck's sideboard must not suggest cards it cannot cast.
 
     When ``deck`` is provided instead of ``archetype``, it is used as the target
     board; ``archetype`` may still be provided for the consensus inclusion lookup.
+
+    **Step A2** — Deck color identity (feature: acquire-color-filter): reuses the
+    project's one color rule — ``lands.produced_mana ∩ nonlands.colors``
+    (``legacy_engine.colors.compute_deck_colors``; NOT Scryfall ``color_identity`` —
+    see ``docs/ARCHITECTURE.md``). Resolution order: explicit ``colors`` override >
+    the supplied ``deck`` > the target archetype's own modal maindeck consensus >
+    undetermined (honest-degrade: no filter, labeled in ``warnings``). HOSER_CATALOG
+    candidates whose ``colors`` is not a subset of the deck's colors are dropped from
+    the universe; ``castable_any_color`` (Phyrexian mana / free-activation costs,
+    e.g. Surgical Extraction's ``{B/P}``) bypasses the filter — the exact convention
+    ``sideboard._build_coverage_model`` already uses for ``recommend_sideboard``'s
+    own candidate pool. Colorless hosers (``colors=frozenset()``) always pass.
 
     **Step B** — Impact scores: reuse ``field_weighted_values`` for the win-rate
     term; fall back to per-card field adoption when signal is absent.
@@ -389,8 +403,12 @@ def acquire_plan(
     - No win-rate signal → adoption fallback, labeled.
     - No price_fn → all prices None, total_cost None.
     - No archetype + no deck → empty candidate universe, returns empty plan.
+    - No colors/deck/archetype at all → color identity undetermined, catalog
+      candidates are NOT filtered (labeled in ``warnings``, never silently narrowed).
     """
     from legacy_engine.advisory.sideboard import HOSER_CATALOG, recommend_sideboard
+    from legacy_engine.advisory.whattoplay import _load_deck_cards
+    from legacy_engine.colors import WUBRG, compute_deck_colors
     from legacy_engine.generation.consensus import _latest_regime_window, card_frequencies
     from legacy_engine.generation.tuning import field_weighted_values
 
@@ -411,7 +429,11 @@ def acquire_plan(
         for card, copies in deck.items():
             candidates[card] = max(candidates.get(card, 0), copies)
 
-    # From archetype consensus (main + side).
+    # From archetype consensus (main + side). main_consensus tracks JUST the modal
+    # maindeck (name → modal copies), independent of `candidates` (which also folds
+    # in `deck` and sideboard cards) — Step A2 uses it to derive deck colors when no
+    # explicit `deck`/`colors` is supplied.
+    main_consensus: dict[str, int] = {}
     if archetype is not None:
         try:
             main_freqs = card_frequencies(
@@ -420,6 +442,7 @@ def acquire_plan(
             for cf in main_freqs:
                 modal = max(1, round(cf.modal_count)) if hasattr(cf, "modal_count") else 1
                 candidates[cf.name] = max(candidates.get(cf.name, 0), modal)
+                main_consensus[cf.name] = modal
         except Exception as exc:
             log.debug("acquire_plan: card_frequencies(main) failed: %s", exc)
             warnings.append(f"consensus maindeck unavailable: {exc}")
@@ -435,12 +458,63 @@ def acquire_plan(
             log.debug("acquire_plan: card_frequencies(side) failed: %s", exc)
             warnings.append(f"consensus sideboard unavailable: {exc}")
 
-    # From HOSER_CATALOG (always include as candidates; filtered by color/anti-synergy
-    # inside recommend_sideboard, but we want them in the candidate universe so the
-    # advisor can surface "acquire Leyline of the Void" etc.).
+    # ── Step A2: Deck color identity ────────────────────────────────────────
+    # Resolution order: explicit override > supplied target board > archetype's own
+    # modal maindeck consensus > undetermined (honest-degrade — see docstring).
+    deck_colors: "frozenset[str] | None" = None
+    if colors is not None:
+        invalid = sorted(c for c in colors if c not in WUBRG)
+        if invalid:
+            raise ValueError(
+                f"acquire_plan: --colors has unrecognized color char(s) {invalid} "
+                f"(expected a subset of {''.join(WUBRG)})"
+            )
+        deck_colors = frozenset(colors)
+    elif deck:
+        try:
+            deck_colors = frozenset(
+                compute_deck_colors(card for card, _count in _load_deck_cards(con, deck))
+            )
+        except Exception as exc:
+            log.debug("acquire_plan: compute_deck_colors(deck) failed: %s", exc)
+            warnings.append(f"deck color identity unavailable from --deck: {exc}")
+    elif main_consensus:
+        try:
+            deck_colors = frozenset(
+                compute_deck_colors(
+                    card for card, _count in _load_deck_cards(con, main_consensus)
+                )
+            )
+        except Exception as exc:
+            log.debug("acquire_plan: compute_deck_colors(archetype consensus) failed: %s", exc)
+            warnings.append(f"deck color identity unavailable from archetype consensus: {exc}")
+
+    if deck_colors is None:
+        warnings.append(
+            "deck color identity undetermined (no --colors, --deck, or --archetype maindeck "
+            "data) — catalog candidates are NOT color-filtered"
+        )
+    elif not deck_colors:
+        warnings.append(
+            "deck has no detected colors (colorless deck, or empty) — only colorless / "
+            "castable-any-color catalog candidates are included"
+        )
+
+    # From HOSER_CATALOG. Restricted to {deck colors} ∪ {colorless} when deck_colors is
+    # known (Step A2) — a buy-list meant to optimize THIS deck's sideboard must not
+    # recommend cards it cannot cast. `castable_any_color` bypasses the filter (Phyrexian
+    # mana / free-activation costs), same convention `_build_coverage_model` uses for
+    # `recommend_sideboard`'s own candidate pool.
     for card_name, hoser in HOSER_CATALOG.items():
-        if card_name not in candidates:
-            candidates[card_name] = hoser.max_copies
+        if card_name in candidates:
+            continue
+        if (
+            deck_colors is not None
+            and not hoser.castable_any_color
+            and not hoser.colors <= deck_colors
+        ):
+            continue
+        candidates[card_name] = hoser.max_copies
 
     if not candidates:
         warnings.append("empty candidate universe — no archetype, no deck, no catalog")
