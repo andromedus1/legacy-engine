@@ -4558,6 +4558,15 @@ def identify_track(
     help="Path to a custom field file (<share> <archetype> lines).",
 )
 @click.option(
+    "--colors",
+    default=None,
+    help=(
+        "Override the deck's color identity for the acquire/catalog candidate filter "
+        "(WUBRG chars, e.g. 'UB'). Defaults to the color derived from --deck, or from "
+        "the --archetype's modal maindeck when --deck is absent."
+    ),
+)
+@click.option(
     "--budget",
     type=float,
     default=None,
@@ -4577,6 +4586,7 @@ def advise_acquire(
     archetype: str | None,
     deck_file: str | None,
     field_file: str | None,
+    colors: str | None,
     budget: float | None,
     db: str | None,
     provenance: str | None,
@@ -4590,7 +4600,9 @@ def advise_acquire(
 
     Outputs a buy list ranked by impact (field_relevance × archetype_relevance),
     flags redundant/over-quantity owns and overpriced printings, and shows how each
-    buy slots into the board.
+    buy slots into the board. Catalog candidates are restricted to the deck's own
+    color identity plus colorless (see ``advisory.acquire.acquire_plan`` Step A2);
+    use ``--colors`` to override when the derived identity is wrong or unavailable.
 
     Example:
       legacy-engine advise acquire --collection binder.txt --archetype "Dimir Tempo"
@@ -4652,6 +4664,7 @@ def advise_acquire(
             field,
             archetype=archetype,
             deck=deck,
+            colors=colors,
             collection=cv,
             price_fn=price_fn,
             since=win.since,

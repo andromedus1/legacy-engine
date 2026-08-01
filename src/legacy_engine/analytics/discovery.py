@@ -526,6 +526,7 @@ def _bootstrap_stability(
 
         mask = present & non_noise & (labels_full != -1)
         pair_mask = mask[:, None] & mask[None, :]
+        np.fill_diagonal(pair_mask, False)  # self-pairs always agree — exclude, or stability biases upward
         if not pair_mask.any():
             continue
 

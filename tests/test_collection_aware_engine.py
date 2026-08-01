@@ -209,7 +209,7 @@ class TestByteIdenticalNoOp:
         con = store.connect(":memory:")
         store.init_schema(con)
 
-        field = build_custom_field({"graveyard-reliant": 0.6, "combo": 0.4})
+        field = build_custom_field({"graveyard-recursion": 0.6, "combo": 0.4})
         maindeck: dict[str, int] = {}  # empty deck (colorless hosers only)
 
         # Without collection.
@@ -233,7 +233,7 @@ class TestByteIdenticalNoOp:
         con = store.connect(":memory:")
         store.init_schema(con)
 
-        field = build_custom_field({"graveyard-reliant": 0.6, "combo": 0.4})
+        field = build_custom_field({"graveyard-recursion": 0.6, "combo": 0.4})
 
         pkg_no_cv = recommend_sideboard(con, field, {}, solver="greedy")
         assert pkg_no_cv.collection_aware is False
@@ -555,7 +555,7 @@ class TestAcquirePlanOrchestrator:
         con = store.connect(":memory:")
         store.init_schema(con)
 
-        field = build_custom_field({"graveyard-reliant": 0.6, "combo": 0.4})
+        field = build_custom_field({"graveyard-recursion": 0.6, "combo": 0.4})
         cv = CollectionView.from_text("2 Surgical Extraction\n")
 
         plan = acquire_plan(
@@ -582,7 +582,7 @@ class TestAcquirePlanOrchestrator:
         con = store.connect(":memory:")
         store.init_schema(con)
 
-        field = build_custom_field({"graveyard-reliant": 0.8, "combo": 0.2})
+        field = build_custom_field({"graveyard-recursion": 0.8, "combo": 0.2})
         cv = CollectionView.from_text(
             "4 Grafdigger's Cage\n4 Leyline of the Void\n4 Faerie Macabre\n"
             "4 Surgical Extraction\n4 Endurance\n4 Containment Priest\n"

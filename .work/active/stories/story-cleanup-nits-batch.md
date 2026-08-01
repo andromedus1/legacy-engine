@@ -1,14 +1,14 @@
 ---
 id: story-cleanup-nits-batch
 kind: story
-stage: implementing
+stage: review
 tags: [analytics, cleanup]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-01
 ---
 
 # Cleanup-nits batch — four small low-risk polish items
@@ -80,3 +80,74 @@ sweep). Recommendation: keep; revisit only if the never-raises contract is ever 
 3. **Stale `graveyard-reliant` synthetic fixtures** in test_collection_aware_engine.py (4),
    test_generation_tuning.py (5), test_interaction_facts.py prose — vacuous w.r.t. the vocab
    migration; rename the synthetic labels (cheap hygiene, no new tests).
+
+## Implementation notes
+
+**Item 1 — `_bootstrap_stability` diagonal bug** (`analytics/discovery.py:528`, right after
+`pair_mask = mask[:, None] & mask[None, :]`): applied the exact fix,
+`np.fill_diagonal(pair_mask, False)`. Self-pairs (`i == j`) always "agree" (a label always
+equals itself in both the base and bootstrap labeling), so including the diagonal biases
+the mean upward by exactly `(1 - true_off_diagonal_agreement) / n` per resample — verified
+arithmetically with a standalone 10-point hand-built example (5/5 split, one point flipped
+in the resampled run): WITH diagonal → 0.820000, WITHOUT → 0.800000 (Δ = +0.02, matches the
+closed-form `(1-p)/n = 0.2/10 = 0.02` exactly).
+
+Re-measured the shipped ground-truth fixtures BEFORE and AFTER the fix:
+- `tests/analytics/test_discovery.py::_two_camp_decks()` (n=70, seed=0, n_boot=30):
+  **before = 1.0, after = 1.0** (unchanged).
+- `TestDiscoverSubarchetypesDB::test_discover_subarchetypes_finds_the_split` — the Doomsday
+  ground truth (35/35 synthetic split via the hermetic in-memory DB, seed=0, n_boot=20):
+  **before = 1.0, after = 1.0** (unchanged), `split.passed` stays `True`, still clears the
+  0.90 gate with room to spare.
+
+No regression: these fixtures are perfectly separable (every bootstrap resample recovers
+the identical 2-cluster partition), so their true off-diagonal agreement was already 1.0 —
+there was nothing for the diagonal to inflate. The bug's effect is real but only shows up
+when the underlying split is imperfectly stable (off-diagonal agreement < 1.0); confirmed
+this is a real, non-vacuous code change via the standalone arithmetic example above, not
+via the (unaffected) shipped fixtures. Full `tests/analytics/test_discovery.py` suite
+(67 passed, 1 skipped) stays green.
+
+**Item 2 — docstring historical prose** (`advisory/sideboard.py`, `_build_coverage_model`'s
+"Impact-modulated element weights" section, found at line ~1827 on current main — the story
+cited line 1646 from an older revision): reworded "removed by feature-sfv-weights" /
+"the exact bug feature-sfv-weights fixes" framing to present-tense — `draw_prob` is
+described as *intentionally excluded* via `score_without_draw_prob()` (to avoid
+double-counting the draw dimension, which is exclusively Unit B4's per-copy taper job),
+not narrated as a fix to a past bug. No behavior change (docstring only).
+
+**Item 3 — sweep.py belt-and-braces except**: re-verified on current main.
+`backtest_board`'s docstring claims "Honest-degrade: never raises," but its body (lines
+402/414/415: `_qualifying_top_finisher_decks`, `_observed_sideboard_frequency`,
+`_observed_copy_distribution`) is NOT wrapped in try/except — only the internal
+`recommend_sideboard` call is (lines 419-434). So the "never raises" contract is
+documented intent, not a mechanically-enforced guarantee for every code path; a genuine DB
+read failure in one of those three unwrapped helpers WOULD propagate up through
+`backtest_board`. `run_sweep`'s except around `backtest_board` (sweep.py:428) is therefore
+not pure superstition-over-can't-throw — it is real defense for a real (if narrow) failure
+mode, and matches the honest-degrade batch posture (one archetype's DB hiccup must not
+abort the whole sweep). **Decision: KEEP, unchanged.** No code touched for this item.
+
+**Item 4 — gate-tests coverage gaps**:
+- (a) `tests/advisory/test_compare.py::TestMonteCarlo::test_identical_configs_p_half`:
+  added `assert r.ev_a_base_ci == r.ev_b_base_ci`. Since both configs share the archetype
+  "TempoA", `_mc_base`'s `row_cache` reuses ONE draw array for both, so the base CIs are not
+  merely overlapping but element-wise identical — verified the CI is non-degenerate
+  (`(0.478, 0.521)`, width ≈4.3%, not a trivial constant) before asserting equality, so the
+  new assertion is a real check, not a vacuous tautology.
+- (b) Strengthened two single-sentinel "byte-identical when off" assertions to full
+  `SideboardPackage` equality against a captured baseline (the pre-feature call with the
+  kwarg omitted entirely, not just set to its default value):
+  `TestGating.test_smart_off_is_baseline` (`tests/test_sideboard.py`) now asserts
+  `pkg == baseline` (baseline = `self._pkg()`, no `smart` kwarg) in addition to the original
+  `natural_budget_count is None`; `TestHedgeAllocator.test_recommend_sideboard_hedge_off_no_insurance`
+  now asserts `pkg == baseline` (baseline = the same call with `hedge` omitted) in addition
+  to the original `insurance_cards == frozenset()`. Both pass (`recommend_sideboard` is
+  deterministic — closed-form Beta/Dirichlet math, no unseeded RNG).
+- (c) Renamed stale `graveyard-reliant` synthetic labels to `graveyard-recursion` (the real,
+  current HOSER_CATALOG tag for the same conceptual cards, e.g. Surgical Extraction) in
+  `tests/test_collection_aware_engine.py` (4 occurrences), `tests/test_generation_tuning.py`
+  (5 occurrences), `tests/test_interaction_facts.py` (3 prose occurrences). Pure rename, no
+  new tests, no behavior change — confirmed `grep -rn "graveyard-reliant" tests/ src/` finds
+  zero remaining test hits (one pre-existing historical-prose comment in
+  `advisory/whattoplay.py:748` was left untouched — out of this item's stated file scope).
