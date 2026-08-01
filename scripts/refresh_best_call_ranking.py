@@ -23,8 +23,17 @@ Method (the page's definitional card is the authoritative prose):
     upper bound < 50%) — a thin cell must prove its hole; agency = min(adj, floor).
   - coverage = measured share-mass / total opponent share-mass; grounded = the
     top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
-  - Camps: one split matrix per staged parent in the discovery registry; camp
-    field share = parent share x camp fraction among the parent's window decks.
+  - Camps: ONE multi-split adaptive matrix over every staged parent in the discovery
+    registry (``build_multi_split_adaptive`` — camp cells field-for-field identical to
+    the per-parent split builds, parity-tested), plus one multi-split fallback matrix
+    per distinct ban-scoped window date serving all parents at once; camp field share =
+    parent share x camp fraction among the parent's window decks.
+  - Cross-camp P(best): ONE shared-field MC (``rank_decks``) with candidates = all camp
+    labels + unsplit field archetypes and a parent-level Dirichlet field (fixed seed) —
+    P(best) is comparable across camps of DIFFERENT parents because every candidate is
+    scored against the same sampled field. The MC ranks on the PAGE-USED cells (the
+    ledger's own era-preferred, ban-scoped-fallback selection), so the column shares the
+    page's Nadu-rule windows and its coverage-suppression honesty gates.
 
 Run after every data refresh cycle (refresh all -> label -> discover apply x N ->
 eras run) — the matchup matrices read eras + variants, so refresh THIS page LAST:
@@ -39,17 +48,38 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import time
 from pathlib import Path
 
 import duckdb
 
+from legacy_engine.advisory.field import build_custom_field
+from legacy_engine.advisory.positioning import (
+    _COVERAGE_RESTRICT_THRESHOLD,
+    _DEFAULT_DRAWS,
+    _PBEST_SUPPRESS_COVERAGE,
+    _compute_data_coverage,
+    rank_decks,
+)
 from legacy_engine.analytics.affectedness import archetype_valid_since
-from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
-from legacy_engine.config import DISCOVERED_VARIANTS_PATH, DUCKDB_PATH
+from legacy_engine.analytics.matchup import (
+    MatchupMatrix,
+    build_adaptive_matrix,
+    build_matrix,
+    build_multi_split_adaptive,
+    build_multi_split_matrix,
+)
+from legacy_engine.archetype.discovered import staged_split_parents
+from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.ingestion.banlist import BAN_EVENTS
 
 TEMPLATE_PATH = Path(__file__).parent / "best_call_ranking_template.html"
 DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
+
+# Fixed MC seed so the cross-camp P(best) column is reproducible run-to-run on the same
+# corpus (rank_decks is deterministic under a fixed seed; a refresh changes numbers only
+# because the DATA changed, never because the sampler did).
+RANK_SEED = 20260731
 
 
 def r4(x: float | None) -> float | None:
@@ -63,13 +93,17 @@ def horizon_text(h) -> str:
 
 
 def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground_n,
-               subj_ban=None):
+               subj_ban=None, out_used=None):
     """One row's cells vs every current-field opponent (mirror excluded).
 
     ``fb_by_date`` maps a window-start ISO date (or ``None`` = full corpus) to that
     window's ``MatchupMatrix`` cells. Each pair's fallback window starts at the later
     of the two decks' ban-affectedness dates (``subj_ban``/``ban_since[opp]``) — the
     Nadu rule: a banned engine's matches never blend into a fallback cell.
+
+    ``out_used`` (optional): a dict this function populates ``{opp: MatchupCell}`` with
+    the cell actually used per opponent — the cross-camp shared-field MC ranks on
+    exactly these page-used cells, so its numbers share the ledger's window selection.
     """
     cells = []
     for opp in field_opps:
@@ -89,6 +123,8 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             cells.append({"opp": opp, "share": r4(shares[opp]), "p": None, "raw": None,
                           "n": 0, "window": "era", "tier": "speculative", "measured": False})
             continue
+        if out_used is not None:
+            out_used[opp] = use
         cells.append({
             "opp": opp, "share": r4(shares[opp]), "p": r4(use.p_shrunk), "raw": r4(use.p_raw),
             "ci_low": r4(use.ci_low), "ci_high": r4(use.ci_high),
@@ -136,7 +172,7 @@ def row_stats(cells, top_k, cover_min):
 
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
-                 regime_card):
+                 regime_card, parents):
     corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
     corpus_decks, corpus_events = con.execute(
@@ -184,9 +220,11 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         print(f"  fallback matrix since={d or 'full corpus'}...", flush=True)
         fb_by_date[d] = build_matrix(con, min_row_share=min_row_share, since=d).cells
     arch_out = []
+    arch_used: dict[str, dict] = {}
     for i, subj in enumerate(rows):
+        arch_used[subj] = {}
         cells = make_cells(subj, field_opps, sh, ad.matrix.cells, fb_by_date, ban_since,
-                           ground_n, subj_ban=ban_since.get(subj))
+                           ground_n, subj_ban=ban_since.get(subj), out_used=arch_used[subj])
         arch_out.append({
             "subject": subj, **row_stats(cells, top_k, cover_min),
             "since": ad.valid_since.get(subj),
@@ -198,29 +236,46 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         })
     print(f"  {len(arch_out)} archetype rows, {len(field_opps)} field opponents", flush=True)
 
-    # ── Camp level: one split matrix per staged parent ──
-    parents = sorted({s["parent"] for s in json.load(open(DISCOVERED_VARIANTS_PATH))["splits"]})
+    # ── Camp level: ONE multi-split pass over every staged parent ──
+    # Camp cells are field-for-field identical to the per-parent split builds (the
+    # engine's parity tests carry that guarantee); this is a batching win, not a
+    # methodology change.
+    t_camp = time.perf_counter()
+    print(f"building multi-split matrices for {len(parents)} staged parents...", flush=True)
+    msa = build_multi_split_adaptive(con, parents=parents, min_row_share=min_row_share)
+    camp_parent = msa.multi.camp_parent
+    camp_labels = [s for s in msa.multi.subjects if s in camp_parent]
+    # Fallback windows (the Nadu rule): each pair pools since max(parent_ban, opp_ban) —
+    # camp labels inherit the parent's ban-affectedness date. One multi-split matrix per
+    # DISTINCT date serves every parent's pairs at that date.
+    camp_fb_dates = {
+        max((d for d in (ban_since.get(camp_parent[c]), ban_since.get(o)) if d), default=None)
+        for c in camp_labels for o in field_opps
+    }
+    camp_fb = {}
+    for d in sorted(camp_fb_dates, key=lambda x: x or ""):
+        print(f"  multi-split fallback since={d or 'full corpus'}...", flush=True)
+        camp_fb[d] = build_multi_split_matrix(
+            con, parents=parents, min_row_share=min_row_share, since=d).cells
+    t_rank = time.perf_counter()
+    print(f"  camp matrices: {t_rank - t_camp:.1f}s ({len(camp_labels)} camp rows, "
+          f"{len(camp_fb)} ban-scoped fallback windows)", flush=True)
+
     camps_out = []
-    for p, parent in enumerate(parents):
-        print(f"[{p + 1}/{len(parents)}] split matrices for {parent!r}...", flush=True)
-        adp = build_adaptive_matrix(con, min_row_share=min_row_share, split_variant=parent)
-        # Camp labels inherit the parent's ban-affectedness date; build only the fallback
-        # windows this parent's pairs can actually need: max(parent_ban, opp_ban) per opponent.
+    camp_used: dict[str, dict] = {}
+    for parent in parents:
         p_ban = ban_since.get(parent)
-        p_dates = {max((d for d in (p_ban, ban_since.get(o)) if d), default=None)
-                   for o in field_opps}
-        fbp = {d: build_matrix(con, min_row_share=min_row_share, split_variant=parent,
-                               since=d).cells for d in p_dates}
         prefix = f"{parent} ["
-        for lbl in (r for r in adp.matrix.archetypes if r.startswith(prefix)):
+        for lbl in (c for c in camp_labels if camp_parent[c] == parent):
             camp = lbl[len(prefix):-1]
-            cells = make_cells(lbl, field_opps, sh, adp.matrix.cells, fbp, ban_since,
-                               ground_n, subj_ban=p_ban)
+            camp_used[lbl] = {}
+            cells = make_cells(lbl, field_opps, sh, msa.multi.cells, camp_fb, ban_since,
+                               ground_n, subj_ban=p_ban, out_used=camp_used[lbl])
             frac = camp_frac.get((parent, camp), 0.0)
             camps_out.append({
                 "subject": lbl, **row_stats(cells, top_k, cover_min),
-                "since": adp.valid_since.get(lbl),
-                "horizon": horizon_text(adp.horizon_meta.get(lbl)),
+                "since": msa.valid_since.get(lbl),
+                "horizon": horizon_text(msa.horizon_meta.get(lbl)),
                 "cells": cells,
                 "parent": parent, "camp": camp,
                 "field_share": r4(shares.get(parent, 0.0) * frac),
@@ -228,6 +283,52 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "recent_4wk": camp_recent.get((parent, camp), 0),
                 "_idx": len(camps_out),
             })
+
+    # ── Cross-camp P(best): ONE shared-field MC over all camps + unsplit archetypes ──
+    # Every candidate is scored against the same sampled parent-level Dirichlet field, so
+    # P(best) is comparable across camps of DIFFERENT parents (the per-parent matrices
+    # never were). The MC ranks on the PAGE-USED cells — the same era-preferred,
+    # ban-scoped-fallback selection the ledger shows (raw era-windowed camp cells are
+    # near-universally n<30, which would suppress the whole column as imputation noise).
+    # Candidacy is gated by the SAME coverage threshold that gates display: a candidate
+    # below _PBEST_SUPPRESS_COVERAGE has (near-)zero measured cells, its S is pure
+    # imputation, and in the shared argmax such candidates spuriously absorb the entire
+    # P(best) mass (observed: 100% of mass on suppressed rows when they are included) —
+    # so they are excluded from candidacy, not just from display, and their rows carry
+    # p_best=None with the coverage that explains why. A camp's cell vs its own parent
+    # is absent by design and imputed by the MC — data_coverage counts that hole.
+    field_counts = dict(win_rows)
+    rank_field = build_custom_field(
+        {o: shares[o] for o in field_opps},
+        counts={o: field_counts[o] for o in field_opps},
+    )
+    split_set = set(msa.multi.parents)
+    potential = [*camp_labels, *(o for o in field_opps if o not in split_set)]
+    used_by_subject = {**arch_used, **camp_used}  # label sets are disjoint by construction
+    rank_cells = {
+        (subj, opp): cell
+        for subj in potential
+        for opp, cell in used_by_subject.get(subj, {}).items()
+    }
+    rank_matrix = MatchupMatrix(
+        cells=rank_cells, provenance=None, total_matches=ad.matrix.total_matches,
+        archetypes=sorted({*potential, *field_opps}), caveat=ad.matrix.caveat,
+    )
+    coverage = {d: _compute_data_coverage(rank_matrix, rank_field, d) for d in potential}
+    candidates = [d for d in potential if coverage[d] >= _PBEST_SUPPRESS_COVERAGE]
+    ranking = rank_decks(rank_matrix, rank_field, candidates, seed=RANK_SEED)
+    for r in camps_out:
+        lbl = r["subject"]
+        ranked = lbl in ranking.p_best
+        # Additive cross-camp columns (the pre-existing row fields are untouched).
+        r["p_best"] = r4(ranking.p_best[lbl]) if ranked else None
+        r["s_q"] = r4(ranking.s_quantile[lbl]) if ranked else None
+        r["s_cov"] = r4(coverage[lbl])
+        r["s_caveated"] = coverage[lbl] < _COVERAGE_RESTRICT_THRESHOLD
+    print(f"  shared-field ranking: {time.perf_counter() - t_rank:.1f}s "
+          f"({len(candidates)} candidates, {_DEFAULT_DRAWS:,} draws)", flush=True)
+    print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
+          f"({len(camps_out)} camp rows)", flush=True)
 
     return {
         "meta": {
@@ -240,7 +341,23 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             "corpus_decks": corpus_decks, "corpus_events": corpus_events,
             "field_events": field_events, "field_archetypes": len(shares),
             "matches_total": ad.matrix.total_matches,
-            "audit": [],
+            # Cross-camp ranking parameters (the template's P(best) column reads these).
+            "rank": {
+                "seed": RANK_SEED, "n_draws": _DEFAULT_DRAWS,
+                "quantile": ranking.quantile_level,
+                "suppress_cov": _PBEST_SUPPRESS_COVERAGE,
+                "caveat_cov": _COVERAGE_RESTRICT_THRESHOLD,
+                "candidates": len(candidates), "potential": len(potential),
+                "basis": "page-used cells (era preferred, ban-scoped fallback)",
+            },
+            "audit": [
+                f"// multi-split: one pass over {len(parents)} staged parents — "
+                f"{len(camp_labels)} camp rows, {len(camp_fb)} ban-scoped fallback windows",
+                f"// cross-camp P(best): shared-field MC over {len(candidates)} of "
+                f"{len(potential)} candidates (camps + unsplit archetypes with >= "
+                f"{_PBEST_SUPPRESS_COVERAGE:.0%} measured coverage) on the page-used "
+                f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
+            ],
         },
         "arch": arch_out,
         "camps": camps_out,
@@ -261,12 +378,13 @@ def main() -> None:
     args = ap.parse_args()
 
     regime_card = latest_ban[1] if args.field_since == latest_ban[0].isoformat() else None
+    parents = staged_split_parents()
     con = duckdb.connect(args.db, read_only=True)
     try:
         blob = compute_blob(
             con, field_since=args.field_since, ground_n=args.ground_n, top_k=args.top_k,
             cover_min=args.cover_min, min_row_share=args.min_row_share,
-            regime_card=regime_card,
+            regime_card=regime_card, parents=parents,
         )
     finally:
         con.close()
