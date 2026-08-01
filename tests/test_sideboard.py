@@ -51,6 +51,9 @@ from legacy_engine.advisory.sideboard import (
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
     _maindeck_answer_coverage,
+    _maindeck_copy_caps,
+    _fourof_legality_warnings,
+    _FORMAT_MAX_COPIES,
     _MAINDECK_DISCOUNT,
     _MAINDECK_SATURATION,
     empirical_swing_proxy,
@@ -4636,8 +4639,14 @@ class TestMaindeckAwareCoverageIntegration:
                     castable_any_color=True,
                 ),
             }
+            # The 4-of guard drops Reanimate from the candidate pool in the with_answers
+            # run (4 maindeck copies leave 0 legal). To isolate the DISCOUNT — this test's
+            # subject — the baseline is built over the same effective candidate set
+            # {Surgical Extraction}; otherwise the two runs would differ by both the
+            # discount and the dropped candidate.
             baseline = recommend_sideboard(
-                con, field, {"Swamp": 14}, solver="greedy", catalog=catalog,
+                con, field, {"Swamp": 14}, solver="greedy",
+                catalog={"Surgical Extraction": catalog["Surgical Extraction"]},
             )
             with_answers = recommend_sideboard(
                 con, field, {"Reanimate": 4, "Swamp": 10}, solver="greedy", catalog=catalog,
@@ -4650,6 +4659,10 @@ class TestMaindeckAwareCoverageIntegration:
             for w in with_answers.warnings
         ), f"expected maindeck-aware audit line: {with_answers.warnings}"
         assert not any(w.startswith("// maindeck-aware:") for w in baseline.warnings)
+        # 4-of guard: 4 maindeck Reanimate leaves no legal copy to offer.
+        assert "Reanimate" not in with_answers.cards, (
+            f"4 maindeck Reanimate must not yield a 5th copy: {with_answers.cards}"
+        )
         assert with_answers.covered_weight == pytest.approx(
             baseline.covered_weight * (1.0 - _MAINDECK_DISCOUNT)
         )
@@ -8551,3 +8564,229 @@ class TestOptionValueRecommendSideboardIntegration:
         # insurance is a subset of the final package, and the package never exceeds budget.
         assert default.insurance_cards <= set(default.cards)
         assert sum(default.cards.values()) <= default.budget
+
+
+# ---------------------------------------------------------------------------
+# epic-sb-advisor-correctness-fourof-guard — combined main+SB 4-of legality.
+#
+# Motivating bug: the candidate pool solved per-card max_copies from the catalog
+# (or the empirical modal count) WITHOUT subtracting maindeck copies, so a deck
+# already running 4 Thoughtseize could be offered a 5th — a format-illegal board.
+# ---------------------------------------------------------------------------
+
+
+class TestMaindeckCopyCaps:
+    """Unit: ``_maindeck_copy_caps`` — remaining format-legal copies per maindeck card."""
+
+    def test_four_of_leaves_zero_remaining(self):
+        caps = _maindeck_copy_caps({"Thoughtseize": 4}, lambda name: None)
+        assert caps["Thoughtseize"] == 0
+
+    def test_two_of_leaves_two_remaining(self):
+        caps = _maindeck_copy_caps({"Thoughtseize": 2}, lambda name: None)
+        assert caps["Thoughtseize"] == 2
+
+    def test_absent_card_is_unconstrained(self):
+        """A card the maindeck does not run gets no entry — unconstrained downstream."""
+        caps = _maindeck_copy_caps({"Thoughtseize": 2}, lambda name: None)
+        assert "Force of Will" not in caps
+
+    def test_basic_lands_are_exempt(self):
+        """Basics have no 4-of limit, so they must not appear in the caps map at all."""
+        def get_card(name):
+            return Card(name=name, type_line="Basic Land — Swamp",
+                        oracle_text="{T}: Add {B}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Swamp": 14}, get_card)
+        assert caps == {}, f"basics must be exempt; got {caps}"
+
+    def test_snow_covered_basic_is_exempt(self):
+        """Detection is on the 'Basic' supertype in type_line, not a hardcoded name list."""
+        def get_card(name):
+            return Card(name=name, type_line="Basic Snow Land — Island",
+                        oracle_text="{T}: Add {U}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Snow-Covered Island": 12}, get_card)
+        assert caps == {}
+
+    def test_nonbasic_land_is_not_exempt(self):
+        """'Land' without the Basic supertype is still 4-of limited."""
+        def get_card(name):
+            return Card(name=name, type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Wasteland": 4}, get_card)
+        assert caps["Wasteland"] == 0
+
+    def test_unresolvable_card_is_not_treated_as_basic(self):
+        """A card absent from the DB must NOT silently bypass the cap."""
+        caps = _maindeck_copy_caps({"Mystery Card": 4}, lambda name: None)
+        assert caps["Mystery Card"] == 0
+
+    def test_over_four_maindeck_copies_floors_at_zero(self):
+        """Defensive: a malformed >4 maindeck count floors at 0, never negative."""
+        caps = _maindeck_copy_caps({"Relentless Rats": 9}, lambda name: None)
+        assert caps["Relentless Rats"] == 0
+
+
+class TestFourOfLegalityPostCheck:
+    """Unit: ``_fourof_legality_warnings`` — the assembled-package backstop."""
+
+    def test_legal_package_produces_no_warning(self):
+        out = _fourof_legality_warnings(
+            {"Surgical Extraction": 2}, {"Surgical Extraction": 2}, lambda name: None,
+        )
+        assert out == []
+
+    def test_exactly_four_combined_is_legal(self):
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 1}, {"Thoughtseize": 3}, lambda name: None,
+        )
+        assert out == []
+
+    def test_crafted_illegal_package_fires(self):
+        """A package that slipped past the candidate cap is surfaced explicitly."""
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 1}, {"Thoughtseize": 4}, lambda name: None,
+        )
+        assert len(out) == 1
+        assert out[0].startswith("// ILLEGAL: Thoughtseize")
+        assert "4 main + 1 SB = 5 copies" in out[0]
+
+    def test_basics_exempt_from_post_check(self):
+        def get_card(name):
+            return Card(name=name, type_line="Basic Land — Swamp",
+                        oracle_text="{T}: Add {B}.", cmc=0.0)
+
+        out = _fourof_legality_warnings({"Swamp": 4}, {"Swamp": 20}, get_card)
+        assert out == []
+
+    def test_multiple_offenders_each_reported(self):
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 2, "Pyroblast": 3},
+            {"Thoughtseize": 4, "Pyroblast": 4},
+            lambda name: None,
+        )
+        assert len(out) == 2
+
+
+class TestFourOfGuardIntegration:
+    """End-to-end: the guard binds through the real recommend_sideboard pipeline."""
+
+    @staticmethod
+    def _catalog(max_copies=4):
+        return {
+            "Surgical Extraction": HoserCard(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(), max_copies=max_copies, swing=_SWING_DEDICATED,
+                castable_any_color=True,
+            ),
+        }
+
+    def test_four_maindeck_copies_yields_no_fifth(self):
+        """The motivating bug: 4 maindeck copies must not produce a 5th in the board."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Surgical Extraction": 4, "Swamp": 10},
+                solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        assert "Surgical Extraction" not in pkg.cards, (
+            f"4 maindeck copies must leave no legal 5th: {pkg.cards}"
+        )
+        assert any(w.startswith("// 4-of guard: dropped") for w in pkg.warnings), (
+            f"expected 4-of guard audit line: {pkg.warnings}"
+        )
+
+    @staticmethod
+    def _overflow_catalog():
+        """More candidate copies than the 15-slot budget, so the considering (bubble) pool
+        is genuinely populated. Surgical Extraction carries the lowest swing, so it lands on
+        the bubble rather than in the board — the exact slot the refill bug appeared in."""
+        def mk(name, swing):
+            return HoserCard(
+                name=name, attacks=frozenset({"graveyard-recursion"}), colors=frozenset(),
+                max_copies=4, swing=swing, castable_any_color=True,
+            )
+
+        catalog = {f"Filler{i}": mk(f"Filler{i}", _SWING_DEDICATED) for i in range(5)}
+        catalog["Surgical Extraction"] = mk("Surgical Extraction", _SWING_SOFT)
+        return catalog
+
+    def _considering_for(self, maindeck):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), maindeck,
+                solver="greedy", catalog=self._overflow_catalog(),
+            )
+        finally:
+            con.close()
+        return {c.card for c in pkg.considering}
+
+    def test_four_maindeck_copies_also_excluded_from_considering(self):
+        """The considering/refill path reads the SAME capped candidate_meta, so the illegal
+        5th copy cannot reappear as a bubble suggestion.
+
+        Non-vacuous by construction: the paired assertion below proves the card DOES reach
+        the bubble pool when the maindeck runs none of it."""
+        assert "Surgical Extraction" in self._considering_for({"Swamp": 14}), (
+            "fixture no longer puts the card on the bubble — the guard assertion "
+            "below would be vacuous"
+        )
+        assert "Surgical Extraction" not in self._considering_for(
+            {"Surgical Extraction": 4, "Swamp": 10}
+        ), "considering pool offered an illegal 5th copy"
+
+    def test_two_maindeck_copies_caps_the_board_at_two_more(self):
+        """A 2-of maindeck card may still be boarded, but at most 2 more copies."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Surgical Extraction": 2, "Swamp": 12},
+                solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        boarded = pkg.cards.get("Surgical Extraction", 0)
+        assert boarded <= 2, f"2 main + {boarded} SB exceeds 4 combined: {pkg.cards}"
+        assert 2 + boarded <= _FORMAT_MAX_COPIES
+
+    def test_zero_maindeck_copies_is_unconstrained(self):
+        """Control: with none in the maindeck the catalog max_copies still applies fully,
+        so the guard is a no-op rather than a blanket suppressor."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Swamp": 14}, solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        assert pkg.cards.get("Surgical Extraction", 0) > 0, (
+            f"guard must not suppress a card the maindeck does not run: {pkg.cards}"
+        )
+        assert not any(w.startswith("// 4-of guard:") for w in pkg.warnings)
+
+    def test_no_recommendation_is_ever_combined_illegal(self):
+        """Invariant sweep: for every maindeck count 0..4, the post-check finds nothing."""
+        for main_copies in range(5):
+            con = TestRedundancyDecay._gy_field_corpus()
+            try:
+                maindeck = {"Swamp": 14 - main_copies}
+                if main_copies:
+                    maindeck["Surgical Extraction"] = main_copies
+                pkg = recommend_sideboard(
+                    con, _make_field({"Reanimator": 1.0}), maindeck,
+                    solver="greedy", catalog=self._catalog(),
+                )
+            finally:
+                con.close()
+            total = main_copies + pkg.cards.get("Surgical Extraction", 0)
+            assert total <= _FORMAT_MAX_COPIES, (
+                f"{main_copies} main + board = {total} copies: {pkg.cards}"
+            )
+            assert not any(w.startswith("// ILLEGAL:") for w in pkg.warnings), pkg.warnings

@@ -1610,6 +1610,77 @@ def _maindeck_answer_coverage(
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 4-of legality guard (epic-sb-advisor-correctness-fourof-guard).
+# ---------------------------------------------------------------------------
+
+# Format copy limit. Basic lands are exempt (CR 100.2a / the "any number of basic lands"
+# carve-out); every other card is capped at 4 across maindeck + sideboard COMBINED.
+_FORMAT_MAX_COPIES = 4
+
+
+def _is_basic_land(card: "Card | None") -> bool:
+    """True for basic lands, which the 4-of rule exempts.
+
+    Detected from ``type_line`` containing "Basic" (the supertype), so snow-covered basics
+    and Wastes are covered without a hardcoded name list. Unknown cards (``None``) are NOT
+    treated as basics — an unresolvable card must not silently bypass the legality cap.
+    """
+    if card is None:
+        return False
+    return "basic" in (card.type_line or "").lower()
+
+
+def _maindeck_copy_caps(
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+) -> "dict[str, int]":
+    """Remaining format-legal copies per maindeck card name.
+
+    ``{name: 4 - maindeck_copies}`` for every non-basic card the maindeck already runs,
+    floored at 0. A name absent from the result is unconstrained (the maindeck runs none).
+    Basics are omitted entirely — they are exempt from the 4-of rule.
+
+    Pure function (objective-search-split): the caller resolves Card objects once and
+    passes a lookup, so no DB access happens inside the loop.
+    """
+    caps: dict[str, int] = {}
+    for name, copies in main_cards.items():
+        if copies <= 0:
+            continue
+        if _is_basic_land(get_card(name)):
+            continue
+        caps[name] = max(0, _FORMAT_MAX_COPIES - copies)
+    return caps
+
+
+def _fourof_legality_warnings(
+    sideboard_cards: "dict[str, int]",
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+) -> "list[str]":
+    """Post-check the assembled package: combined main+SB copies must not exceed 4.
+
+    Returns one honest-degrade warning per offending card (empty list = legal). This is a
+    backstop, not the primary mechanism — the candidate cap in ``_build_coverage_model``
+    should prevent an illegal package from ever being assembled. It fires only if some path
+    bypasses that cap, which is exactly when a silent illegal board would otherwise ship.
+    """
+    out: list[str] = []
+    for name, sb_copies in sorted(sideboard_cards.items()):
+        main_copies = main_cards.get(name, 0)
+        total = main_copies + sb_copies
+        if total <= _FORMAT_MAX_COPIES:
+            continue
+        if _is_basic_land(get_card(name)):
+            continue
+        out.append(
+            f"// ILLEGAL: {name} {main_copies} main + {sb_copies} SB = {total} copies "
+            f"(max {_FORMAT_MAX_COPIES})"
+        )
+    return out
+
+
 @dataclass
 class CoverageModel:
     """Abstraction shared by both solvers.
@@ -1641,6 +1712,7 @@ def _build_coverage_model(
     opponent_linchpins: "dict[str, list[Linchpin]] | None" = None,
     opponent_cards: "dict[str, dict[str, int]] | None" = None,
     maindeck_coverage: "dict[str, float] | None" = None,
+    maindeck_copy_caps: "dict[str, int] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -1918,6 +1990,30 @@ def _build_coverage_model(
     candidate_covers: dict[str, frozenset[str]] = {}
     candidate_meta: dict[str, HoserCard] = {}
 
+    # 4-of legality cap (epic-sb-advisor-correctness-fourof-guard): a candidate's usable
+    # copies are bounded by what the MAINDECK leaves legal, not by the catalog/modal count
+    # alone. Applied here at candidate_meta assembly — the single point every consumer
+    # (_greedy_solve, _ilp_solve, _rank_considering_pool) reads max_copies from — so the
+    # solver and the considering pool are capped by one rule instead of two.
+    # Element weights are deliberately NOT touched: how valuable answering a tag is does not
+    # depend on how many copies THIS deck may still add.
+    # Gated-additive: maindeck_copy_caps None/{} -> no-op -> byte-identical.
+    _capped_out: list[str] = []
+    _capped_down: list[str] = []
+
+    def _apply_copy_cap(name: str, hoser: HoserCard) -> "HoserCard | None":
+        """Cap a candidate at its remaining format-legal copies; None = drop entirely."""
+        if not maindeck_copy_caps:
+            return hoser
+        cap = maindeck_copy_caps.get(name)
+        if cap is None or cap >= hoser.max_copies:
+            return hoser
+        if cap <= 0:
+            _capped_out.append(name)
+            return None
+        _capped_down.append(f"{name} ({hoser.max_copies}->{cap})")
+        return _dc_replace(hoser, max_copies=cap)
+
     for card_name, hoser in catalog.items():
         # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
         # This grounds OPPONENT-facing recommendations in what real archetype sideboards
@@ -1974,8 +2070,11 @@ def _build_coverage_model(
                     covered.add(hate_key)
 
         if covered:
+            _capped = _apply_copy_cap(card_name, hoser)
+            if _capped is None:
+                continue
             candidate_covers[card_name] = frozenset(covered)
-            candidate_meta[card_name] = hoser
+            candidate_meta[card_name] = _capped
 
     # --- Step 4b: Promoted empirical candidates (gated-additive) ---
     # Cards from the empirical pool that were NOT in the catalog.  They bypass the
@@ -2014,8 +2113,11 @@ def _build_coverage_model(
                         covered_promoted.add(hate_key)
 
             if covered_promoted:
+                _capped_p = _apply_copy_cap(card_name, hoser)
+                if _capped_p is None:
+                    continue
                 candidate_covers[card_name] = frozenset(covered_promoted)
-                candidate_meta[card_name] = hoser
+                candidate_meta[card_name] = _capped_p
                 log.debug(
                     "_build_coverage_model: admitted promoted %r covering %d elements",
                     card_name, len(covered_promoted),
@@ -2025,6 +2127,19 @@ def _build_coverage_model(
                     "_build_coverage_model: promoted %r covers no live elements — skipped",
                     card_name,
                 )
+
+    # Audit lines for the 4-of cap — emitted once, after BOTH the catalog and promoted
+    # candidate loops, so a card capped on either path is reported the same way.
+    if _capped_out:
+        warnings.append(
+            "// 4-of guard: dropped "
+            + ", ".join(sorted(set(_capped_out)))
+            + " (maindeck already runs 4)"
+        )
+    if _capped_down:
+        warnings.append(
+            "// 4-of guard: capped " + ", ".join(sorted(set(_capped_down))) + " by maindeck copies"
+        )
 
     # --- Step 4c: cap UNCOVERED `_hate:` weight (feature-sfv-weights) ---
     # The epic's locked decision is to make protective/counter-hoser cards actually COVER the
@@ -4095,6 +4210,12 @@ def recommend_sideboard(
         deck_maindeck, _card_by_name.get, catalog=catalog
     )
 
+    # --- Step 3h: 4-of legality caps (epic-sb-advisor-correctness-fourof-guard) ---
+    # Resolved from the same already-fetched deck_card_objects. Threaded into
+    # _build_coverage_model so a card the maindeck already runs 4 of can never be offered
+    # as a 5th copy by the solver OR the considering pool.
+    maindeck_copy_caps = _maindeck_copy_caps(deck_maindeck, _card_by_name.get)
+
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
         field,
@@ -4110,6 +4231,7 @@ def recommend_sideboard(
         opponent_linchpins=opponent_linchpins,
         opponent_cards=opponent_cards,
         maindeck_coverage=maindeck_coverage,
+        maindeck_copy_caps=maindeck_copy_caps,
     )
     warnings.extend(model.warnings)
 
@@ -4313,6 +4435,14 @@ def recommend_sideboard(
         for card_name, hoser in model.candidate_meta.items()
         if card_name in final_cards
     }
+
+    # --- Step 6f: 4-of legality post-check (epic-sb-advisor-correctness-fourof-guard) ---
+    # Backstop over the ALREADY-SOLVED final_cards. The candidate cap should make this
+    # unreachable; if it ever fires, the board is format-illegal and the user is told so
+    # explicitly rather than shipping a silently illegal list.
+    warnings.extend(
+        _fourof_legality_warnings(final_cards, deck_maindeck, _card_by_name.get)
+    )
 
     return SideboardPackage(
         cards=final_cards,
