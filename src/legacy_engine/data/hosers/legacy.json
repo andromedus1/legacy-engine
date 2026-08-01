@@ -61,11 +61,11 @@
     {
       "name": "Nihil Spellbomb",
       "attacks": ["graveyard-recursion", "graveyard-fuel"],
-      "colors": ["B"],
+      "colors": [],
       "max_copies": 4,
       "swing": "soft",
       "symmetry": "asymmetric",
-      "_comment": "Sacrifice: exile a chosen player's entire graveyard — a one-shot full reset like Endurance, denying both recursion targets and fuel count for the targeted player."
+      "_comment": "Corrected mis-color (catalog-lint finding, feature-data-autonomy-catalog-lint): colorless artifact, mana_cost {1} — the {B} is an optional draw-a-card activation cost when it dies, not part of its cast cost. Sacrifice: exile a chosen player's entire graveyard — a one-shot full reset like Endurance, denying both recursion targets and fuel count for the targeted player."
     },
     {
       "name": "Dauthi Voidwalker",

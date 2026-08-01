@@ -70,6 +70,7 @@ _TAGS = {
     "Fatal Push": frozenset({"creature-based"}),
     "Snuff Out": frozenset({"creature-based"}),
     "Defense Grid": frozenset({"combo", "storm-reliant"}),
+    "Solo Combo Card": frozenset({"combo"}),
     "Mystery Card": frozenset(),
 }
 
@@ -121,10 +122,18 @@ class TestClusterDivergences:
         assert [m.adoption_pct for m in so.members] == [pytest.approx(0.15)]
 
     def test_multi_tag_card_contributes_to_every_tag(self):
-        entries = [_entry("A", _bt("A", scorer_only=("Defense Grid",)))]
+        # Solo Combo Card (combo only) keeps the two tags' membership DIFFERENT (Jaccard
+        # 1/2 = 0.5, below the near-duplicate merge floor — see TestMergeNearDuplicateClusters)
+        # so both clusters stay visible and this test can check per-tag propagation in
+        # isolation from the merge behavior.
+        entries = [_entry("A", _bt("A", scorer_only=("Defense Grid", "Solo Combo Card")))]
         clusters = cluster_divergences(entries, _lookup)
         tags = {c.tag for c in clusters}
         assert tags == {"combo", "storm-reliant"}
+        combo = next(c for c in clusters if c.tag == "combo")
+        storm = next(c for c in clusters if c.tag == "storm-reliant")
+        assert {m.card for m in combo.members} == {"Defense Grid", "Solo Combo Card"}
+        assert {m.card for m in storm.members} == {"Defense Grid"}
 
     def test_untagged_card_lands_in_unclassified_never_dropped(self):
         entries = [_entry("A", _bt("A", winners_only=("Mystery Card",),
@@ -151,6 +160,66 @@ class TestClusterDivergences:
         c = cluster_divergences(entries, _lookup)[0]
         assert c.tier_breakdown == {"evolving": 1, "speculative": 1}
         assert c.n_archetypes_nonspeculative == 1
+
+
+class TestMergeNearDuplicateClusters:
+    """Same-direction clusters whose member sets are near-identical fold into one
+    ``tagA+tagB``-keyed cluster (the combo/storm-reliant duplicate-rendering fix)."""
+
+    def test_identical_membership_merges_with_sorted_tag_key(self):
+        # Defense Grid is the ONLY divergent card here, so its two tags' per-tag clusters
+        # have IDENTICAL membership (Jaccard 1.0) and fold into one.
+        entries = [_entry("A", _bt("A", scorer_only=("Defense Grid",)))]
+        clusters = cluster_divergences(entries, _lookup)
+        assert len(clusters) == 1
+        assert clusters[0].tag == "combo+storm-reliant"
+        assert clusters[0].direction == "scorer_only"
+        assert [m.card for m in clusters[0].members] == ["Defense Grid"]
+
+    def test_merge_deduplicates_members_no_double_counted_adoption(self):
+        entries = [_entry("A", _bt("A", winners_only=("Defense Grid",),
+                                   observed={"Defense Grid": 0.5}))]
+        c = cluster_divergences(entries, _lookup)[0]
+        # One member, not one per constituent tag — total_adoption must not double-count.
+        assert len(c.members) == 1
+        assert c.total_adoption == pytest.approx(0.5)
+        assert c.n_archetypes == 1
+
+    def test_below_threshold_overlap_does_not_merge(self):
+        entries = [_entry("A", _bt("A", scorer_only=("Defense Grid", "Solo Combo Card")))]
+        clusters = cluster_divergences(entries, _lookup)
+        # combo={Defense Grid, Solo Combo Card}, storm-reliant={Defense Grid}:
+        # Jaccard 1/2 = 0.5, below the 0.8 floor -> stays two distinct clusters.
+        assert {c.tag for c in clusters} == {"combo", "storm-reliant"}
+
+    def test_transitive_merge_bridges_low_pairwise_similarity(self):
+        """Union-find, not single-pass pairwise merging: A merges with B (Jaccard 0.8),
+        B merges with C (Jaccard 0.8), and A+C (Jaccard ~0.636, below the floor on its
+        own) still ends up in the same cluster via B."""
+        # card i (1-indexed) tags: in tagA if 1<=i<=9, tagB if 2<=i<=10, tagC if 3<=i<=11.
+        tags_by_card: dict[str, frozenset[str]] = {}
+        for i in range(1, 12):
+            card_tags = set()
+            if 1 <= i <= 9:
+                card_tags.add("tagA")
+            if 2 <= i <= 10:
+                card_tags.add("tagB")
+            if 3 <= i <= 11:
+                card_tags.add("tagC")
+            tags_by_card[f"Card{i}"] = frozenset(card_tags)
+
+        def lookup(name: str) -> frozenset[str]:
+            return tags_by_card.get(name, frozenset())
+
+        card_names = tuple(tags_by_card.keys())
+        entries = [_entry("A", _bt(
+            "A", winners_only=card_names,
+            observed={name: 0.5 for name in card_names},
+        ))]
+        clusters = cluster_divergences(entries, lookup)
+        assert len(clusters) == 1
+        assert clusters[0].tag == "tagA+tagB+tagC"
+        assert {m.card for m in clusters[0].members} == set(card_names)
 
 
 class TestRankClusters:
@@ -353,6 +422,38 @@ class TestAdviseSweepCLI:
             "// divergence is a signal to investigate, not proof of error "
             "(winning boards are self-selected + metagame-lagged)" in out
         )
+
+    def test_cluster_line_shows_average_not_summed_adoption(self, tmp_path, runner, monkeypatch):
+        """Σ adoption over cluster members can exceed 100% and read as broken (a 2-member
+        unclassified cluster here sums to 100% — 75% + 25% — but averages 50%); the CLI
+        must show the bounded per-member average, not the raw sum, and drop the old Σ
+        label entirely."""
+        db_path = _build_backtest_db(tmp_path)
+        monkeypatch.setattr(
+            backtest_mod,
+            "recommend_sideboard",
+            lambda *a, **k: _fake_package({"Toxic Deluge": 1}),
+        )
+        field_file = tmp_path / "field.txt"
+        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+
+        result = runner.invoke(
+            main,
+            [
+                "advise", "sweep",
+                "--field", str(field_file),
+                "--since", "2026-01-01",
+                "--min-decks", "7",
+                "--db", db_path,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert "Σ adoption" not in out
+        # graveyard-recursion: single 100%-adopted member -> mean equals that value.
+        assert "graveyard-recursion — 1 archetype(s) (1 speculative), avg adoption 100%" in out
+        # unclassified: Ravenous Trap 75% + Rest in Peace 25% -> Σ would read 100%, mean 50%.
+        assert "unclassified — 1 archetype(s) (1 speculative), avg adoption 50%" in out
 
     def test_json_payload_round_trips_with_copy_histograms(self, tmp_path, runner, monkeypatch):
         db_path = _build_backtest_db(tmp_path)
