@@ -13,11 +13,14 @@ from itertools import pairwise
 import pytest
 
 from legacy_engine.analytics.superarchetype.aggregate import (
+    I2_ONE_SIDED_NOTE,
+    Heterogeneity,
     MemberTally,
     _logit_with_correction,
     concentration,
     dersimonian_laird,
     effective_n,
+    heterogeneity,
 )
 
 
@@ -253,3 +256,124 @@ class TestConcentration:
     def test_duplicate_member_names_fail_fast(self, make_tally):
         with pytest.raises(ValueError, match="duplicate member archetype"):
             concentration([make_tally("A", wins=1, n=5), make_tally("A", wins=2, n=5)])
+
+
+class TestHeterogeneity:
+    def test_headline_fixture_is_refused_on_i2(self, headline_pair):
+        # I^2 = 0.89 > 0.75: the refuse band — but note the spread guard would ALSO fire here;
+        # the guard is checked first, so pin the I^2 branch on a guard-silent variant below.
+        re = dersimonian_laird(headline_pair)
+        result = heterogeneity(headline_pair, re)
+        assert result.band == "refused"
+        assert result.one_sided_note == I2_ONE_SIDED_NOTE
+
+    def test_i2_refuse_band_fires_without_the_spread_guard(self, make_tally):
+        # Spread 0.24 stays under the 0.25 guard, but the members are big enough that the
+        # disagreement is far beyond sampling error: I^2 > 0.75 refuses on its own.
+        members = [make_tally("A", wins=76, n=200), make_tally("B", wins=124, n=200)]
+        re = dersimonian_laird(members)
+        result = heterogeneity(members, re)
+        assert max(m.p_hat for m in members) - min(m.p_hat for m in members) < 0.25
+        assert result.i2 is not None and result.i2 > 0.75
+        assert result.band == "refused"
+        assert "I^2" in result.reason and "refused" in result.reason
+
+    def test_direction_guard_forces_refusal_even_at_low_i2(self, make_tally):
+        # Two n>=10 members 0.30 vs 0.60: I^2 = 0.38 (would pool freely), but the spread guard
+        # treats the cell as if I^2 exceeded 0.75 regardless.
+        members = [make_tally("A", wins=3, n=10), make_tally("B", wins=6, n=10)]
+        re = dersimonian_laird(members)
+        assert re.i2 is not None and re.i2 <= 0.40
+        result = heterogeneity(members, re)
+        assert result.band == "refused"
+        assert "direction/spread guard" in result.reason
+        assert result.spread == pytest.approx(0.30)
+
+    def test_spread_guard_ignores_thin_members(self, make_tally):
+        # A wild 0% member at n=5 (computable, but under the guard's n>=10 floor) must not trip
+        # the guard: among the n>=10 members the spread is 0.08, and the cell pools freely.
+        members = [
+            make_tally("A", wins=0, n=5),
+            make_tally("B", wins=6, n=12),
+            make_tally("C", wins=5, n=12),
+        ]
+        re = dersimonian_laird(members)
+        result = heterogeneity(members, re)
+        assert result.spread == pytest.approx(0.5)
+        assert "direction/spread guard" not in result.reason
+        assert result.band == "free"
+
+    def test_below_computability_floor_makes_no_claim_either_way(self, make_tally):
+        # One member at n>=5 is not enough: band is not "free" (that would be a homogeneity
+        # claim), i2 is None, and the one-sided note still rides.
+        members = [make_tally("A", wins=1, n=4), make_tally("B", wins=5, n=9)]
+        re = dersimonian_laird(members)
+        result = heterogeneity(members, re)
+        assert result.band == "not-computable"
+        assert result.band != "free"
+        assert result.i2 is None
+        assert result.one_sided_note == I2_ONE_SIDED_NOTE
+        assert "no homogeneity claim in either direction" in result.reason
+
+    def test_dilution_fixtures_from_the_real_corpus_do_not_pool_freely(self, make_tally):
+        # Feature file, 2026-07-31 measurement: Cradle vs colorless prison 25.0% (n=4) ->
+        # 46.2% (n=13) and Aluren vs same 100% (n=3) -> 50.0% (n=12) — large swings driven by
+        # adding a differently-shaped member. Low-power I^2 would wave both through; the
+        # computability floor is what stops the confident wrong number.
+        cradle = [make_tally("Mystic Forge", wins=1, n=4), make_tally("Tron", wins=5, n=9)]
+        aluren = [make_tally("Mystic Forge", wins=3, n=3), make_tally("Tron", wins=3, n=9)]
+        for members in (cradle, aluren):
+            result = heterogeneity(members, dersimonian_laird(members))
+            assert result.band != "free"
+            assert result.band == "not-computable"
+            assert result.one_sided_note == I2_ONE_SIDED_NOTE
+
+    def test_labelled_band_carries_a_note_naming_the_spread(self, make_tally):
+        members = [
+            make_tally("A", wins=2, n=9),
+            make_tally("B", wins=7, n=14),
+            make_tally("C", wins=7, n=9),
+        ]
+        re = dersimonian_laird(members)
+        assert re.i2 is not None and 0.40 < re.i2 <= 0.75
+        result = heterogeneity(members, re)
+        assert result.band == "labelled"
+        assert result.note is not None
+        assert "heterogeneous pool" in result.note
+        assert "0.222" in result.note and "0.778" in result.note
+
+    def test_free_band_at_low_i2(self, make_tally):
+        members = [make_tally("A", wins=5, n=12), make_tally("B", wins=6, n=13)]
+        re = dersimonian_laird(members)
+        result = heterogeneity(members, re)
+        assert result.band == "free"
+        assert result.note is None
+        assert result.one_sided_note == I2_ONE_SIDED_NOTE
+
+    def test_q_zero_branch_is_named_not_nan(self, make_tally):
+        members = [make_tally("A", wins=5, n=10), make_tally("B", wins=5, n=10)]
+        re = dersimonian_laird(members)
+        result = heterogeneity(members, re)
+        assert result.band == "free"
+        assert "Q = 0.0" in result.reason
+        assert "absence of evidence" in result.reason
+
+    def test_band_vocabulary_fails_fast(self):
+        with pytest.raises(ValueError, match="band 'bogus' must be one of"):
+            Heterogeneity(
+                band="bogus", i2=None, q=0.0, spread=None, note=None,
+                one_sided_note=I2_ONE_SIDED_NOTE, reason="x",
+            )
+
+    def test_mismatched_single_member_fit_degrades_with_a_name(self, make_tally):
+        # Defensive branch: two computable members but a RandomEffects fitted on one.
+        members = [make_tally("A", wins=5, n=10), make_tally("B", wins=6, n=10)]
+        re = dersimonian_laird(members[:1])
+        result = heterogeneity(members, re)
+        assert result.band == "not-computable"
+        assert "carries no I^2" in result.reason
+
+    def test_empty_input_fails_fast(self, headline_pair):
+        re = dersimonian_laird(headline_pair)
+        with pytest.raises(ValueError, match="no member tallies"):
+            heterogeneity([], re)
