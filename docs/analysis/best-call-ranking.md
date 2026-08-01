@@ -3,19 +3,22 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-07-28
+updated: 2026-08-01
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
   tracked HTML template: scripts/refresh_best_call_ranking.py +
-  scripts/best_call_ranking_template.html. Defines Agency % and the grounded/current
-  strata; the page itself carries the authoritative definitional prose.
+  scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
+  strata, and the cross-camp P(best) column; the page itself carries the authoritative
+  definitional prose.
 decisions:
   - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
   - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the shrunk estimate, not raw."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
+  - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
+  - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
   - "Refresh THIS page last in the data cycle: its matrices read eras + variants, so it inherits whatever labeling state exists when it runs."
 ---
@@ -53,12 +56,30 @@ latest confirmed ban event date), `--ground-n 8`, `--top-k 8`, `--cover-min 0.8`
 ## What the script does
 
 `scripts/refresh_best_call_ranking.py` computes the embedded data blob —
-archetype rows from one `build_adaptive_matrix` + `build_matrix` pair, camp rows
-from one pair per staged discovery parent (`split_variant`), field shares and
-camp fractions from the ban-regime window — and splices it into
-`scripts/best_call_ranking_template.html` at the `__D_BLOB__` placeholder.
-All rendering (strata, sorting, blowout tallies, scatter) is client-side JS in
-the template; the blob carries data only.
+archetype rows from one `build_adaptive_matrix` + one `build_matrix` per distinct
+ban-affectedness fallback date; camp rows from ONE `build_multi_split_adaptive`
+pass over every staged discovery parent (`staged_split_parents()`) plus one
+`build_multi_split_matrix` per distinct ban-scoped fallback date serving all
+parents at once; field shares and camp fractions from the ban-regime window —
+and splices it into `scripts/best_call_ranking_template.html` at the
+`__D_BLOB__` placeholder. Camp cells are field-for-field identical to per-parent
+`split_variant` builds — the engine parity suite plus the script-level parity
+test (`tests/test_refresh_best_call_ranking.py`, old path reconstructed in-test
+and diffed row-for-row) enforce it — and the one-pass sweep keeps the per-pair
+`max(subj_ban, opp_ban)` Nadu-rule fallback windows.
+
+The camp table's **P(best) column** comes from one shared-field `rank_decks` MC
+(fixed seed `RANK_SEED`, parameters in the blob's `meta.rank` + audit lines):
+every camp and every unsplit field archetype is scored against the same sampled
+parent-level Dirichlet field, on the page-used cells (era preferred, ban-scoped
+fallback), so values are comparable across camps of different parents.
+Candidacy is gated at the display-suppression coverage threshold — a candidate
+below 5% measured coverage shows n/a with its coverage instead of an
+imputation-noise score.
+
+The full refresh runs in ~40s on the current corpus (~11s archetype matrices +
+~13s one-pass camp matrices + ~2s shared-field ranking); the script echoes each
+phase's wall time.
 
 Metric definitions live in the page's "What is Agency %?" card and in the
 frontmatter decisions above — the page prose is authoritative.
@@ -82,3 +103,10 @@ frontmatter decisions above — the page prose is authoritative.
   Candelabra-era data).
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).
+- **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
+  archetypes compete in ONE argmax, so the values are comparable across parents
+  and can never sum past 1. n/a means the row failed the 5% measured-coverage
+  candidacy gate (its score would be pure imputation); S* means the supporting
+  field WR is a full-field estimate leaning on imputation for unmeasured share,
+  which always includes the camp's own parent (that cell is absent by
+  construction).
