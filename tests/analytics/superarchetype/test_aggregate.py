@@ -264,6 +264,17 @@ class TestConcentration:
         assert result.label is None
         assert result.m_eff == pytest.approx(2.0)
 
+    def test_m_eff_arm_binds_alone_under_the_share_cap(self, make_tally):
+        # 55/45: top share clears the 0.60 cap, so only m_eff = 1.98 < 2.0 refuses — this pins
+        # the m_eff arm independently of the cap (the headline fixture trips both).
+        members = [make_tally("A", wins=5, n=11), make_tally("B", wins=4, n=9)]
+        result = concentration(members)
+        assert result.top_share == pytest.approx(0.55)
+        assert result.top_share < 0.60
+        assert result.m_eff == pytest.approx(1.98, abs=5e-3)
+        assert result.passed is False
+        assert result.label == "dominated by A (55% of pooled n)"
+
     def test_single_member_concentrates_fully(self, make_tally):
         result = concentration([make_tally("Solo", wins=4, n=10)])
         assert result.hhi == pytest.approx(1.0)
