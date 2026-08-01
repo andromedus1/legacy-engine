@@ -12,6 +12,9 @@ Units covered:
 - epic-stable-era-windows-shrinkage Units 1+2: hierarchical + cross-era cell prior —
   ``_cell_prior``, ``_camp_hierarchy_inputs`` (Unit 1); ``build_adaptive_matrix``'s
   ``_cross_era_prior`` (Unit 2)
+- feature-multi-split-matrix Unit 2: pooling + multi-parent hierarchy —
+  ``_pool_opponent_tallies``, ``_multi_hierarchy_inputs``, ``MultiSplitMatrix``,
+  ``build_multi_split_matrix``
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from legacy_engine.confidence import tier_for_sample
 from legacy_engine.models.matchup import MatchupCell
 
 if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping
+
     from legacy_engine.analytics.eras.consume import EraHorizon
     from legacy_engine.analytics.match_results import MatchResults
 
@@ -435,6 +440,265 @@ def build_matrix(
         provenance=provenance,
         total_matches=total_matches,
         archetypes=included,
+        caveat=_CAVEAT,
+    )
+
+
+# ---------------------------------------------------------------------------
+# feature-multi-split-matrix Unit 2: pooling + multi-parent hierarchy + uniform builder
+# ---------------------------------------------------------------------------
+
+
+def _pool_opponent_tallies(
+    mr: "MatchResults", camp_parent: "Mapping[str, str]",
+) -> dict[tuple[str, str], tuple[int, int]]:
+    """Pool a maximal camp×camp tally's OPPONENT side back to parent level.
+
+    Returns ``(subject_label, parent_opponent) -> (wins, n)``.  ``subject_label`` keeps whatever
+    granularity the scan produced (camp labels for split parents, plain labels otherwise);
+    ``parent_opponent`` is ``camp_parent.get(b, b)`` — camps of a split parent Q collapse back
+    onto Q.
+
+    Exact by the camp-partition property: every deck of a split parent maps to exactly one camp
+    (``NULL`` variant → ``"unlabeled"``), so summing a subject's tallies over Q's camps
+    reproduces the tally that a ``split_variant=<subject's parent>``-only scan would have
+    recorded against the unsplit Q.
+
+    Pairs whose opponent pools to the SUBJECT's own parent are excluded — the ``(camp,
+    own_parent)`` cell is deliberately absent (feature decision 2), matching per-parent
+    behavior where the parent label does not exist at all.
+
+    Pure — no DB access.
+    """
+    pooled: dict[tuple[str, str], tuple[int, int]] = {}
+    for (a, b), tally in mr.matchups.items():
+        parent_b = camp_parent.get(b, b)
+        if camp_parent.get(a) == parent_b:
+            continue
+        wins, n = pooled.get((a, parent_b), (0, 0))
+        pooled[(a, parent_b)] = (wins + tally.wins, n + tally.n)
+    return pooled
+
+
+def _multi_split_inclusion(
+    mr: "MatchResults", min_row_share: float,
+) -> tuple[list[str], list[str], list[str]]:
+    """Row/column inclusion for one maximal camp-granularity scan → ``(subjects, opponents,
+    parents)``.
+
+    ``subjects``: every observed camp (force-included, the single-split semantics — a split
+    parent's pooled row is replaced by its camp rows) plus every unsplit archetype clearing
+    ``min_row_share``.  ``opponents``: the PLAIN matrix's row-inclusion set — parent-level
+    labels only, with each split parent's record reconstructed as the sum over its camps.
+    ``parents``: the split parents actually observed in this window.
+
+    Inclusion matches the plain/per-parent builds exactly: a parent's reconstructed wins/losses
+    equal its unsplit record (a cross-camp match is a directed camp-level win/loss pair but a
+    parent-level mirror, i.e. +1 win AND +1 loss, so summing wins and losses separately is
+    exact), and the ``2 * (decisive + mirror)`` denominator is relabel-invariant (a cross-camp
+    pairing moves from the mirror counter to the decisive counter; the sum is fixed).
+    """
+    camp_parent = mr.camp_parent
+    parent_records: dict[str, tuple[int, int]] = {}
+    for label, rec in mr.archetypes.items():
+        key = camp_parent.get(label, label)
+        wins, losses = parent_records.get(key, (0, 0))
+        parent_records[key] = (wins + rec.wins, losses + rec.losses)
+
+    _denom_base = mr.coverage.decisive_matched + mr.coverage.mirror_matches
+    denom = 2 * _denom_base if _denom_base > 0 else 1
+
+    camps = sorted(a for a in mr.archetypes if a in camp_parent)
+    parents = sorted({camp_parent[c] for c in camps})
+    parent_set = set(parents)
+
+    opponents = sorted(
+        label
+        for label, (wins, losses) in parent_records.items()
+        if (wins + losses) / denom >= min_row_share
+    )
+    subjects = sorted(
+        camps
+        + [
+            label
+            for label, (wins, losses) in parent_records.items()
+            if label not in parent_set and (wins + losses) / denom >= min_row_share
+        ]
+    )
+    return subjects, opponents, parents
+
+
+def _multi_hierarchy_inputs(
+    mr: "MatchResults",
+    subjects: list[str],
+    opponents: list[str],
+    camp_parent: "Mapping[str, str]",
+    pooled: dict[tuple[str, str], tuple[int, int]],
+) -> "tuple[dict[str, float], dict[tuple[str, str], tuple[int, int]], dict[str, str]]":
+    """``_camp_hierarchy_inputs`` generalized to MANY split parents at once.
+
+    Same three outputs, same semantics, consumed by the UNCHANGED ``_cell_prior``:
+
+    ``marginals``: ``label -> shrunk marginal WR`` for every subject, plus every observed split
+    parent, whose raw wins/losses are the exact sum over its camp siblings' own
+    ``ArchetypeRecord``s (see ``_camp_hierarchy_inputs`` for why summing wins and losses
+    separately is exact).  Sibling sets come from the explicit ``camp_parent`` map, never prefix
+    parsing — the registry contains both ``Painter`` and ``Blue Painter``.
+
+    ``parent_cells_lco``: ``(camp, parent_opponent) -> (lco_wins, lco_n)``, the parent's pooled
+    totals vs that opponent minus the camp's own pooled tally, for every camp × every opponent
+    that is not the camp's own parent.  Asserted ``>= 0`` (never clamped) — a negative result
+    means the camp tallies are not a partition of the parent's, a data-integrity bug.
+
+    ``camp_of``: ``subject -> parent-or-self``.
+
+    Pure — no DB access; ``pooled`` is ``_pool_opponent_tallies``'s output over the SAME scan.
+    """
+    marginals: dict[str, float] = {}
+    for label in subjects:
+        rec = mr.archetypes.get(label)
+        w, n = (rec.wins, rec.n) if rec is not None else (0, 0)
+        marginals[label] = beta_binomial_shrink(w, n)
+
+    camp_of = {label: camp_parent.get(label, label) for label in subjects}
+
+    siblings_by_parent: dict[str, list[str]] = {}
+    for label in sorted(mr.archetypes):
+        parent = camp_parent.get(label)
+        if parent is not None:
+            siblings_by_parent.setdefault(parent, []).append(label)
+
+    parent_cells_lco: dict[tuple[str, str], tuple[int, int]] = {}
+    for parent, siblings in siblings_by_parent.items():
+        p_wins = sum(mr.archetypes[s].wins for s in siblings)
+        p_losses = sum(mr.archetypes[s].losses for s in siblings)
+        marginals[parent] = beta_binomial_shrink(p_wins, p_wins + p_losses)
+
+        for opponent in opponents:
+            if opponent == parent:
+                continue  # own-parent column is absent by design — no reference cell to build
+            parent_wins = sum(pooled.get((s, opponent), (0, 0))[0] for s in siblings)
+            parent_n = sum(pooled.get((s, opponent), (0, 0))[1] for s in siblings)
+            for camp in siblings:
+                camp_wins, camp_n = pooled.get((camp, opponent), (0, 0))
+                lco_wins = parent_wins - camp_wins
+                lco_n = parent_n - camp_n
+                assert lco_wins >= 0 and lco_n >= 0, (
+                    f"LCO subtraction went negative for {camp!r} vs {opponent!r}: "
+                    f"parent=({parent_wins},{parent_n}) camp=({camp_wins},{camp_n}) — "
+                    "camp counts are not a partition of the parent's"
+                )
+                parent_cells_lco[(camp, opponent)] = (lco_wins, lco_n)
+
+    return marginals, parent_cells_lco, camp_of
+
+
+@dataclass
+class MultiSplitMatrix:
+    """Every split parent's camps and every unsplit archetype in ONE rectangular matrix.
+
+    ``cells`` is keyed ``(subject, parent_opponent)`` plus ``(subject, subject)`` mirrors.  The
+    matrix is RECTANGULAR, not square: ``subjects`` are all observed camps (force-included) +
+    the included unsplit archetypes; ``opponents`` are parent-level labels only (the plain
+    matrix's row-inclusion set).  ``(camp, own_parent)`` is deliberately ABSENT — the per-parent
+    ``split_variant`` build has no parent label either, so the pair has never had a cell.
+
+    ``camp_parent`` maps each camp subject back to its parent; ``parents`` are the split parents
+    actually observed.  ``total_matches`` is the decisive-match count at CAMP granularity — it
+    differs from the plain matrix's (a cross-camp pairing counts as decisive here and as a
+    mirror there); the sum ``decisive + mirror`` is what stays invariant.
+
+    Every camp cell is field-for-field identical to ``build_matrix(split_variant=parent)``'s and
+    every unsplit-subject cell to the plain ``build_matrix``'s (parity test:
+    tests/test_matchup_multi_split.py).
+    """
+
+    cells: dict[tuple[str, str], MatchupCell]
+    subjects: list[str]
+    opponents: list[str]
+    camp_parent: dict[str, str]
+    parents: list[str]
+    provenance: str | None
+    total_matches: int
+    caveat: str
+
+    def ranking_view(self) -> MatchupMatrix:
+        """A ``MatchupMatrix`` view for the shared-field MC rankers (``rank_decks`` /
+        ``positioning_score``), which only ever do ``cells.get(...)`` plus field iteration.
+
+        ``archetypes`` is ``sorted(subjects | opponents)`` and ``cells`` is THIS object's dict —
+        so the view is NOT square and has no cell for ``(camp, own_parent)``.  Never feed it to
+        a square-matrix consumer (``best_deck_vs_best_call``, the matrix printers): they index
+        ``archetypes × archetypes`` and would KeyError or silently mis-render.
+        """
+        return MatchupMatrix(
+            cells=self.cells,
+            provenance=self.provenance,
+            total_matches=self.total_matches,
+            archetypes=sorted(set(self.subjects) | set(self.opponents)),
+            caveat=self.caveat,
+        )
+
+
+def build_multi_split_matrix(
+    con,
+    *,
+    parents: "Collection[str]",
+    provenance: str | None = None,
+    min_row_share: float = 0.02,
+    since: str | None = None,
+    until: str | None = None,
+) -> MultiSplitMatrix:
+    """Build a ``MultiSplitMatrix`` over a uniform window — every parent split in ONE scan.
+
+    One ``compute_match_results(split_variants=parents)` call produces the maximal camp×camp
+    tally; the opponent side is then pooled back to parent level (``_pool_opponent_tallies``)
+    and the hierarchy inputs are reconstructed from camp sums (``_multi_hierarchy_inputs``) and
+    fed to the UNCHANGED ``_cell_prior``.  The result is numerically identical to running
+    ``build_matrix(split_variant=P)`` once per parent and the plain ``build_matrix`` for the
+    unsplit rows — this is a batching win, not a methodology change.
+
+    ``since``/``until`` window by ``tournaments.date`` (half-open) exactly as ``build_matrix``.
+    Parents absent from the corpus (or from this window) are dropped gracefully — they simply
+    contribute no camps, mirroring the single-split no-op precedent.  An empty ``parents`` is
+    the plain rectangular matrix.
+
+    No cross-era prior here — that belongs to the adaptive builder, which alone carries
+    per-entity horizon provenance.
+    """
+    mr = compute_match_results(
+        con, provenance=provenance, since=since, until=until, split_variants=parents,
+    )
+    subjects, opponents, observed_parents = _multi_split_inclusion(mr, min_row_share)
+    pooled = _pool_opponent_tallies(mr, mr.camp_parent)
+    marginals, parent_cells_lco, camp_of = _multi_hierarchy_inputs(
+        mr, subjects, opponents, mr.camp_parent, pooled,
+    )
+
+    cells: dict[tuple[str, str], MatchupCell] = {}
+    for subject in subjects:
+        cells[(subject, subject)] = build_mirror_cell(subject, mr.mirror_n.get(subject, 0))
+        own_parent = mr.camp_parent.get(subject)
+        for opponent in opponents:
+            if opponent == subject or opponent == own_parent:
+                continue
+            prior_mean, prior_source = _cell_prior(
+                subject, opponent, marginals=marginals,
+                parent_cells_lco=parent_cells_lco, camp_of=camp_of,
+            )
+            wins, n = pooled.get((subject, opponent), (0, 0))
+            cells[(subject, opponent)] = build_cell(
+                subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+            )
+
+    return MultiSplitMatrix(
+        cells=cells,
+        subjects=subjects,
+        opponents=opponents,
+        camp_parent=dict(mr.camp_parent),
+        parents=observed_parents,
+        provenance=provenance,
+        total_matches=mr.coverage.decisive_matched,
         caveat=_CAVEAT,
     )
 
