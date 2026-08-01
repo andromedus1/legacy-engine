@@ -907,6 +907,32 @@ _VALID_SYMMETRY = frozenset({"asymmetric", "symmetric"})
 # catalog entry), so no shipped entry uses this token yet — the loader must still accept it.
 _VALID_CAST_REQUIRES = frozenset({"opp_controls_plains"})
 
+# HoserCard.attacks: the closed vulnerability-tag vocabulary a curated entry may claim.
+# MUST stay in sync with the tags emitted by whattoplay._vulnerability_from_composition and
+# whattoplay._color_contingent_tags — a curated tag outside this set can never match a derived
+# vulnerability tag, so the entry would silently cover nothing. "_hate" is the counter-hoser
+# pseudo-attack (see _HATE_ELEMENT_PREFIX), not a derived vulnerability tag.
+_VALID_ATTACK_TAGS: frozenset[str] = frozenset({
+    "_hate",
+    "artifact-mana-reliant",
+    "colorless-reliant",
+    "combo",
+    "creature-based",
+    "graveyard-fuel",
+    "graveyard-recursion",
+    "low-curve",
+    "low-interaction",
+    "nonbasic-manabase",
+    "noncreature-reliant",
+    "ramp",
+    "storm-reliant",
+    "plays-black",
+    "plays-blue",
+    "plays-green",
+    "plays-red",
+    "plays-white",
+})
+
 
 def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
     """Load and validate a hoser catalog from a JSON data file.
@@ -915,7 +941,7 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
     Each hoser entry must have:
       ``name``          (str)
-      ``attacks``       (list of tag strings; non-empty)
+      ``attacks``       (list of tag strings; non-empty, each in ``_VALID_ATTACK_TAGS``)
       ``colors``        (list of WUBRG single-char strings; empty = colorless)
       ``max_copies``    (int ≥ 1)
       ``swing``         (float in (0,1) OR the aliases "dedicated" / "soft")
@@ -960,6 +986,12 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
                 f"load_hoser_catalog: {name!r} 'attacks' must be a non-empty list"
             )
         attacks = frozenset(str(t) for t in attacks_raw)
+        unknown_attacks = sorted(attacks - _VALID_ATTACK_TAGS)
+        if unknown_attacks:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'attacks' has unknown tag(s) "
+                f"{unknown_attacks}; allowed: {sorted(_VALID_ATTACK_TAGS)}"
+            )
 
         colors_raw = entry.get("colors")
         if not isinstance(colors_raw, list):
@@ -1310,7 +1342,7 @@ def _derive_attacks_for_promoted(
     3. Graveyard exile: "exile" AND "graveyard" present
        → {graveyard-recursion}
     3b. Land destruction: "destroy target land" / "destroy target nonbasic land" (Wasteland,
-        Ghost Quarter) → {greedy-manabase}   (checked, and skipped for rule 4, the same way
+        Ghost Quarter) → {nonbasic-manabase}   (checked, and skipped for rule 4, the same way
         rule 2's ``is_color_blast`` short-circuits rule 4 — otherwise the bare "destroy
         target" substring in rule 4 would mislabel a land-destruction spell creature-based)
     4. Removal: "destroy target" / "exile target creature" / "exile target attacking"
@@ -1318,7 +1350,10 @@ def _derive_attacks_for_promoted(
     5. staple_role == "free_interaction" (card_tags lookup)
        → {combo, storm-reliant}   (Force of Negation, Daze, etc.)
     6. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
-       → {greedy-manabase}        (answers Blood Moon, Back to Basics, Chalice)
+       → {artifact-mana-reliant}  (reaches artifact mana sources — Lotus Petal, Chrome
+       Mox, Lion's Eye Diamond. It cannot reach lands, so it does NOT credit nonbasic-manabase. Such a card's
+       value in answering an opposing Blood Moon / Back to Basics is PROTECTION of its own
+       controller's manabase, a relation this attack vocabulary does not express.)
     7. Fallback: {combo}  (conservative — labeled in warning by caller).
 
     Returns a frozenset of tag strings.  Never returns the empty frozenset so
@@ -1363,7 +1398,7 @@ def _derive_attacks_for_promoted(
     # which would otherwise mislabel Wasteland/Ghost Quarter-style effects creature-based.
     is_land_destruction = bool(_RE_LAND_DESTRUCTION.search(text_lower))
     if is_land_destruction:
-        tags.add("greedy-manabase")
+        tags.add("nonbasic-manabase")
 
     # 4. Creature removal (skip when already attributed as a color blast — see #2 — or as
     # land destruction — see #3b)
@@ -1378,14 +1413,14 @@ def _derive_attacks_for_promoted(
     if staple_role(card_name) == "free_interaction":
         tags.update({"combo", "storm-reliant"})
 
-    # 6. Artifact/enchantment removal → answers lock pieces / mana hosers
+    # 6. Artifact/enchantment removal → reaches artifact mana sources only, never lands
     if (
         "destroy target artifact" in text_lower
         or "destroy target enchantment" in text_lower
         or ("exile target" in text_lower and "artifact" in text_lower)
         or ("exile target" in text_lower and "enchantment" in text_lower)
     ):
-        tags.add("greedy-manabase")
+        tags.add("artifact-mana-reliant")
 
     return frozenset(tags) if tags else _FALLBACK_ATTACKS
 
@@ -1520,7 +1555,7 @@ def _maindeck_answer_coverage(
 
     Attribution, in priority order:
       1. Catalog lookup — when the maindeck card is itself a curated ``HOSER_CATALOG``
-         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"greedy-manabase"}``),
+         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"nonbasic-manabase"}``),
          its hand-curated ``attacks`` are authoritative. This is the common case for the
          motivating bug (maindeck utility lands/interaction that double as catalog hosers).
       2. Oracle-text derivation — for maindeck cards NOT in the catalog, reuse
@@ -1692,7 +1727,7 @@ def _build_coverage_model(
     When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
     (archetype, tag) element's weight is additionally multiplied by
     ``(1 - _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0))`` — an axis the maindeck
-    already answers (e.g. 4 maindeck Wasteland covering "greedy-manabase") should not also
+    already answers (e.g. 4 maindeck Wasteland covering "nonbasic-manabase") should not also
     claim a full-weight dedicated SB slot for the same axis. ``_hate:`` pseudo-elements are
     EXEMPT (mirrors the ``"|" not in key`` skip in the ``matchup_pressure`` pass above) —
     they represent field-wide interaction pressure against the DECK's own vulnerabilities,
@@ -1855,7 +1890,7 @@ def _build_coverage_model(
     # Unit C2) ---
     # When maindeck_coverage is not None, discount each (archetype, tag) element's weight
     # by how much the MAINDECK already answers that tag — stops the solver from double-
-    # counting an axis (e.g. 4 maindeck Wasteland already covering "greedy-manabase" ->
+    # counting an axis (e.g. 4 maindeck Wasteland already covering "nonbasic-manabase" ->
     # the SB shouldn't also spend a full-weight slot on Ghost Quarter for the same axis).
     # `_hate:` pseudo-elements are exempt (same "|" not in key skip as Step 3b) — they
     # model field-wide interactive pressure against the deck's OWN vulnerabilities, not an
@@ -4053,7 +4088,7 @@ def recommend_sideboard(
     # Computed ONCE here from the already-resolved deck_card_objects (objective-search-split
     # — no extra DB round-trip inside the pure _maindeck_answer_coverage loop) and threaded
     # into _build_coverage_model so it can discount element weights for axes the maindeck
-    # itself already answers (e.g. 4 maindeck Wasteland -> "greedy-manabase"). Empty when the
+    # itself already answers (e.g. 4 maindeck Wasteland -> "nonbasic-manabase"). Empty when the
     # deck answers no tracked vulnerability tags -> _build_coverage_model no-ops (byte-identical).
     _card_by_name: "dict[str, Card]" = {card.name: card for card in deck_card_objects}
     maindeck_coverage = _maindeck_answer_coverage(
