@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-01T02:50:56Z'
+generated_at: '2026-08-01T17:05:20Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -120,9 +120,11 @@ documents:
 
       tracked HTML template: scripts/refresh_best_call_ranking.py +
 
-      scripts/best_call_ranking_template.html. Defines Agency % and the grounded/current
+      scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
 
-      strata; the page itself carries the authoritative definitional prose.
+      strata, and the cross-camp P(best) column; the page itself carries the authoritative
+
+      definitional prose.
 
       '
     decisions:
@@ -143,6 +145,15 @@ documents:
     - Field basis = the current ban-regime window; --field-since defaults to the latest
       confirmed ban event so regime changes auto-track; its confidence tier is computed
       from window size, never hardcoded.
+    - Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform
+      multi-split matrix per distinct ban-fallback date) — numerically identical to
+      per-parent split builds (parity-tested at engine and script level, ~25x cheaper),
+      keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows.
+    - Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps
+      + unsplit field archetypes on the page-used cells; candidacy is gated at the
+      same coverage threshold that suppresses display (<5% measured coverage -> n/a
+      + reason) because zero-coverage candidates otherwise absorb the whole argmax
+      as imputation noise; S* labels full-field values below 85% coverage.
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).
