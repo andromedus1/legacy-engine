@@ -16,8 +16,10 @@ decisions:
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
   - "Per-entity stable eras: every per-archetype/per-camp statistic windows to the entity's own detected stable era (change-point detection on composition/play-rate/win-rate — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint detection self-heals banlist announcement lag; every windowed figure names its window and triggering disturbance."
+  - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. The superarchetype level exists to fight thin data: when an archetype-level matchup cell can't clear its tier gate, the cell falls back to the superarchetype aggregate with a labeled provenance chip, so every row gets signal against every major strategy. Intra-cluster matches count but carry an intra-cluster flag."
+  - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). Andrew-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
-updated: 2026-07-11
+updated: 2026-07-31
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -41,7 +43,7 @@ Legacy deckbuilding and metagaming are largely experience- and forum-driven. Tie
 scattered "This Week in Legacy" articles; matchup knowledge lives in Discord and individual reps;
 "what should I play this weekend?" is answered by feel. There is no rigorous, reproducible way to:
 
-- Track the metagame from raw tournament results under a *consistent, auditable* **two-level** archetype taxonomy — parent archetype plus data-driven subarchetype (camp) resolution, so decks that share a label but play differently are not pooled into one matchup row or one card-win-rate denominator
+- Track the metagame from raw tournament results under a *consistent, auditable* **three-level** archetype taxonomy — superarchetype (strategy cluster) above, parent archetype in the middle, data-driven subarchetype (camp) below — so decks that share a label but play differently are not pooled into one matchup row or one card-win-rate denominator, *and* decks that play alike under different labels can still be pooled when a cell is too thin to speak on its own
 - Window every per-entity statistic to that entity's own **stable era** — bans *and* new-card releases rebuild decks mid-regime, so pooling across a disturbance mixes generations of the same label into one number; each figure should draw on the largest window of still-solid data and name the disturbance that bounds it
 - Compute matchup matrices and a deck's **expected win rate against the weighted field**
 - Recommend a sideboard package that maximally covers the expected field (hosers → targets)
@@ -92,6 +94,14 @@ A **meta-positioning score** (expected win rate vs the weighted field), a **side
 anti-hate second order), and a **"what to play" advisor** (proactive vs reactive, best-deck vs
 best-metagame-call). Lets a competitive player supply their *expected local field* and get an
 actionable read.
+
+**Cross-cutting: the persistent coach.** The pillars' outputs do not evaporate at the end of a
+session. Meta knowledge (tier reads, matchup insight, field trends), per-deck critical findings,
+and the curated consensus-deck corpus with primers persist as maintained engine state, surfaced
+automatically when relevant — a session starts from accumulated knowledge, not from scratch. Advice
+is grounded in a **user profile** (decks owned and played, collection, local meta, preferences).
+Built Andrew-first; multi-user-ready by design — the profile is data, so serving another player is
+a config swap, not a rewrite.
 
 ## Non-goals (for now)
 - Not an interactive deck-building *editor* GUI, and not a web app yet — a hosted web UI is deferred pending its own research. The engine **does** model the user's personal collection and own decks as a first-class *local* layer (so advice is buildable and actionable from what you actually own), but it stays CLI-first analytics, not a deckbuilding editor.
