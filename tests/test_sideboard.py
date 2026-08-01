@@ -5,7 +5,7 @@ arithmetic (no DB needed for most ILP/greedy tests).  A :memory: corpus is used 
 recommend_sideboard integration seam (resolves deck colors + vulnerability tags).
 
 Design decisions tested:
-- HOSER_CATALOG seeds: §6 graveyard / combo / counter-hoser / greedy-manabase entries.
+- HOSER_CATALOG seeds: §6 graveyard / combo / counter-hoser / nonbasic-manabase entries.
 - _build_coverage_model: element weights = share × swing; color pre-filter; anti-hate pseudo-elements.
 - _greedy_solve: dominant-tag first pick; trace ordering; budget/copy bounds.
 - _ilp_solve: objective ≥ greedy; budget/copy respected; non-Optimal → _ILPFailed.
@@ -51,6 +51,9 @@ from legacy_engine.advisory.sideboard import (
     _build_promoted_candidates,
     _FALLBACK_ATTACKS,
     _maindeck_answer_coverage,
+    _maindeck_copy_caps,
+    _fourof_legality_warnings,
+    _FORMAT_MAX_COPIES,
     _MAINDECK_DISCOUNT,
     _MAINDECK_SATURATION,
     empirical_swing_proxy,
@@ -177,24 +180,34 @@ class TestHoserCatalog:
         assert "Carpet of Flowers" in HOSER_CATALOG
         assert "_hate" in HOSER_CATALOG["Carpet of Flowers"].attacks
 
-    def test_blood_moon_attacks_greedy_manabase(self):
+    def test_blood_moon_attacks_nonbasic_manabase(self):
         assert "Blood Moon" in HOSER_CATALOG
-        assert "greedy-manabase" in HOSER_CATALOG["Blood Moon"].attacks
+        assert "nonbasic-manabase" in HOSER_CATALOG["Blood Moon"].attacks
 
-    def test_back_to_basics_attacks_greedy_manabase(self):
+    def test_back_to_basics_attacks_nonbasic_manabase(self):
         assert "Back to Basics" in HOSER_CATALOG
-        assert "greedy-manabase" in HOSER_CATALOG["Back to Basics"].attacks
+        assert "nonbasic-manabase" in HOSER_CATALOG["Back to Basics"].attacks
 
-    def test_wasteland_attacks_greedy_manabase(self):
+    def test_wasteland_attacks_nonbasic_manabase(self):
         assert "Wasteland" in HOSER_CATALOG
-        assert "greedy-manabase" in HOSER_CATALOG["Wasteland"].attacks
+        assert "nonbasic-manabase" in HOSER_CATALOG["Wasteland"].attacks
 
-    def test_force_of_vigor_present(self):
-        """Force of Vigor → greedy-manabase (§6 seed)."""
+    def test_force_of_vigor_attacks_artifact_mana_reliant(self):
+        """'Destroy up to two target artifacts and/or enchantments' reaches artifact mana,
+        never lands — so Force of Vigor must NOT claim the nonbasic-manabase land axis.
+        Its value against an opposing Blood Moon is protection, which `attacks` does not model."""
         assert "Force of Vigor" in HOSER_CATALOG
+        attacks = HOSER_CATALOG["Force of Vigor"].attacks
+        assert "artifact-mana-reliant" in attacks
+        assert "nonbasic-manabase" not in attacks
 
-    def test_krosan_grip_present(self):
+    def test_krosan_grip_attacks_artifact_mana_reliant(self):
+        """'Destroy target artifact or enchantment' — same land-unreachable argument as
+        Force of Vigor."""
         assert "Krosan Grip" in HOSER_CATALOG
+        attacks = HOSER_CATALOG["Krosan Grip"].attacks
+        assert "artifact-mana-reliant" in attacks
+        assert "nonbasic-manabase" not in attacks
 
     def test_all_entries_have_nonempty_attacks(self):
         for name, h in HOSER_CATALOG.items():
@@ -380,16 +393,16 @@ class TestCoverageModel:
     def test_red_hoser_dropped_when_deck_has_no_red(self):
         """Blood Moon (R) is dropped when deck_colors lacks R."""
         field = _make_field({"Greedy": 1.0})
-        archetype_tags = {"Greedy": frozenset({"greedy-manabase"})}
+        archetype_tags = {"Greedy": frozenset({"nonbasic-manabase"})}
         catalog = {
             "Blood Moon": _minimal_hoser(
                 "Blood Moon",
-                frozenset({"greedy-manabase"}),
+                frozenset({"nonbasic-manabase"}),
                 colors=frozenset({"R"}),
             ),
             "Wasteland": _minimal_hoser(
                 "Wasteland",
-                frozenset({"greedy-manabase"}),
+                frozenset({"nonbasic-manabase"}),
                 colors=frozenset(),   # colorless
             ),
         }
@@ -3668,7 +3681,7 @@ class TestBuildCoverageModelAntiSynergy:
         field = _make_field({"GY": 0.4, "Greedy": 0.3, "Combo": 0.3})
         archetype_tags = {
             "GY": frozenset({"graveyard-recursion"}),
-            "Greedy": frozenset({"greedy-manabase"}),
+            "Greedy": frozenset({"nonbasic-manabase"}),
             "Combo": frozenset({"combo", "low-curve"}),
         }
         catalog = self._full_catalog()
@@ -3698,7 +3711,7 @@ class TestBuildCoverageModelAntiSynergy:
     def test_back_to_basics_filtered_on_nonbasic_heavy_deck(self):
         """Back to Basics is dropped when nonbasic_heavy=True."""
         field = _make_field({"Greedy": 1.0})
-        archetype_tags = {"Greedy": frozenset({"greedy-manabase"})}
+        archetype_tags = {"Greedy": frozenset({"nonbasic-manabase"})}
         catalog = {"Back to Basics": HOSER_CATALOG["Back to Basics"]}
         signals = DeckAntiSynergySignals(low_curve=False, nonbasic_heavy=True, reactive=False)
         model = _build_coverage_model(
@@ -4164,6 +4177,25 @@ class TestDeriveAttacksForPromoted:
         )
         assert "colorless-reliant" not in attacks, f"Unexpected 'colorless-reliant' in {attacks}"
 
+    def test_counter_colorless_regex_does_not_span_sentences(self):
+        """`_RE_COUNTER_COLORLESS` regression (item 2c): the old `.*` + DOTALL let the match
+        span unrelated SENTENCES. A crafted two-sentence card — "Counter target spell." as
+        its own complete sentence, with "colorless spell" only appearing in a LATER, unrelated
+        sentence — must NOT get colorless-reliant; the counter effect here does not actually
+        restrict to colorless spells."""
+        attacks = _derive_attacks_for_promoted(
+            "Test Two-Sentence Card",
+            "Counter target spell. This deals 1 damage to you for each colorless spell "
+            "you've cast this game.",
+            "Instant",
+        )
+        assert "colorless-reliant" not in attacks, (
+            f"Regex must not span the sentence boundary between 'Counter target spell.' and "
+            f"the unrelated later 'colorless spell' mention; got {attacks}"
+        )
+        # The generic counter-magic rule (1) still fires — this IS a counterspell.
+        assert "combo" in attacks and "storm-reliant" in attacks
+
     def test_graveyard_exile_maps_to_graveyard_recursion(self):
         """A card that exiles from graveyard → graveyard-recursion."""
         attacks = _derive_attacks_for_promoted(
@@ -4173,6 +4205,52 @@ class TestDeriveAttacksForPromoted:
         )
         assert "graveyard-recursion" in attacks, f"Expected 'graveyard-recursion' in {attacks}"
 
+    def test_ghost_quarter_maps_to_nonbasic_manabase_not_creature_based(self):
+        """Ghost Quarter (epic-card-semantics-ir-fix-ld-mislabel): NOT a curated HOSER_CATALOG
+        entry, so a promoted Ghost Quarter goes through this derivation. Real oracle text
+        (data/legacy.duckdb): '{T}: Add {C}.\\n{T}, Sacrifice this land: Destroy target land.
+        Its controller may search their library for a basic land card, put it onto the
+        battlefield, then shuffle.' Rule 3b must fire (land destruction) and rule 4 (bare
+        'destroy target' -> creature-based) must be skipped for it."""
+        attacks = _derive_attacks_for_promoted(
+            "Ghost Quarter",
+            "{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target land. Its controller "
+            "may search their library for a basic land card, put it onto the battlefield, "
+            "then shuffle.",
+            "Land",
+        )
+        assert "nonbasic-manabase" in attacks, f"Expected 'nonbasic-manabase' in {attacks}"
+        assert "creature-based" not in attacks, (
+            f"Land destruction must not false-positive creature-based; got {attacks}"
+        )
+
+    def test_wasteland_style_nonbasic_land_destruction_maps_to_nonbasic_manabase(self):
+        """The 'destroy target NONBASIC land' phrasing (Wasteland's real oracle text) must
+        also be caught, not just the bare 'destroy target land' Ghost Quarter uses."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Wasteland-Style Land",
+            "{T}: Add {C}.\n{T}, Sacrifice this land: Destroy target nonbasic land.",
+            "Land",
+        )
+        assert "nonbasic-manabase" in attacks, f"Expected 'nonbasic-manabase' in {attacks}"
+        assert "creature-based" not in attacks, (
+            f"Land destruction must not false-positive creature-based; got {attacks}"
+        )
+
+    def test_normal_removal_spell_still_maps_to_creature_based(self):
+        """Sanity: the land-destruction carve-out must not swallow ordinary creature
+        removal — 'Destroy target creature' (no 'land' anywhere) still tags creature-based."""
+        attacks = _derive_attacks_for_promoted(
+            "Some Removal Spell", "Destroy target creature.", "Instant",
+        )
+        assert "creature-based" in attacks, f"Expected 'creature-based' in {attacks}"
+        assert "nonbasic-manabase" not in attacks, (
+            f"Ordinary creature removal must not false-positive nonbasic-manabase; got {attacks}"
+        )
+        assert "artifact-mana-reliant" not in attacks, (
+            f"Ordinary creature removal must not false-positive artifact-mana-reliant; got {attacks}"
+        )
+
     def test_red_blast_oracle_text_maps_to_plays_red(self):
         """Hydroblast-style 'if it's red' phrasing → plays-red, not manabase/combo."""
         attacks = _derive_attacks_for_promoted(
@@ -4181,7 +4259,10 @@ class TestDeriveAttacksForPromoted:
             "Instant",
         )
         assert "plays-red" in attacks, f"Expected 'plays-red' in {attacks}"
-        assert "greedy-manabase" not in attacks, f"Blast must not attack manabase; got {attacks}"
+        assert "nonbasic-manabase" not in attacks, f"Blast must not attack manabase; got {attacks}"
+        assert "artifact-mana-reliant" not in attacks, (
+            f"Blast must not attack artifact mana; got {attacks}"
+        )
         assert "creature-based" not in attacks, (
             f"'destroy target permanent' must not false-positive creature-based; got {attacks}"
         )
@@ -4225,14 +4306,20 @@ class TestDeriveAttacksForPromoted:
             f"Expected combo/storm-reliant from free_interaction role; got {attacks}"
         )
 
-    def test_artifact_removal_maps_to_greedy_manabase(self):
-        """Destroy target artifact → greedy-manabase (answers lock pieces)."""
+    def test_artifact_removal_maps_to_artifact_mana_reliant(self):
+        """Destroy target artifact → artifact-mana-reliant (reaches Moxen/Sol Ring, never
+        lands, so it must NOT claim the nonbasic-manabase land axis)."""
         attacks = _derive_attacks_for_promoted(
             "Smash to Dust",
             "Destroy target artifact.",
             "Sorcery",
         )
-        assert "greedy-manabase" in attacks, f"Expected 'greedy-manabase' in {attacks}"
+        assert "artifact-mana-reliant" in attacks, (
+            f"Expected 'artifact-mana-reliant' in {attacks}"
+        )
+        assert "nonbasic-manabase" not in attacks, (
+            f"Artifact removal cannot reach lands; got {attacks}"
+        )
 
     def test_fallback_returns_conservative_set_on_unknown(self):
         """Unrecognized oracle_text → _FALLBACK_ATTACKS (conservative, non-empty)."""
@@ -4276,14 +4363,15 @@ class TestMaindeckAnswerCoverage:
     """Unit C1: ``_maindeck_answer_coverage`` — pure, saturating [0,1] per-tag coverage
     the maindeck already provides."""
 
-    def test_wasteland_maps_to_greedy_manabase_via_catalog_short_circuit(self):
-        """Wasteland is itself a curated HOSER_CATALOG entry (attacks={'greedy-manabase'});
-        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup
-        is used rather than the oracle->attacks derivation, which would mislabel
-        'Destroy target nonbasic land' as creature-based (it contains the bare substring
-        'destroy target' — see TestDeriveAttacksForPromoted's removal rule)."""
+    def test_wasteland_maps_to_nonbasic_manabase_via_catalog_short_circuit(self):
+        """Wasteland is itself a curated HOSER_CATALOG entry (attacks={'nonbasic-manabase'});
+        4 maindeck copies saturate that tag's coverage to 1.0. The catalog-first lookup is
+        used rather than the oracle->attacks derivation — the derivation also correctly maps
+        'Destroy target nonbasic land' to nonbasic-manabase (rule 3b, see
+        TestDeriveAttacksForPromoted's land-destruction tests), but the catalog entry is
+        authoritative and skips the derivation call entirely for catalog cards."""
         coverage = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
-        assert coverage == {"greedy-manabase": pytest.approx(1.0)}
+        assert coverage == {"nonbasic-manabase": pytest.approx(1.0)}
 
     def test_copy_count_saturates_at_four(self):
         """Coverage scales linearly with copies up to _MAINDECK_SATURATION (4), then holds
@@ -4292,9 +4380,9 @@ class TestMaindeckAnswerCoverage:
         at_two = _maindeck_answer_coverage({"Wasteland": 2}, lambda name: None)
         at_four = _maindeck_answer_coverage({"Wasteland": 4}, lambda name: None)
         at_five = _maindeck_answer_coverage({"Wasteland": 5}, lambda name: None)
-        assert at_two["greedy-manabase"] == pytest.approx(0.5)
-        assert at_four["greedy-manabase"] == pytest.approx(1.0)
-        assert at_five["greedy-manabase"] == pytest.approx(1.0)  # saturated, not > 1.0
+        assert at_two["nonbasic-manabase"] == pytest.approx(0.5)
+        assert at_four["nonbasic-manabase"] == pytest.approx(1.0)
+        assert at_five["nonbasic-manabase"] == pytest.approx(1.0)  # saturated, not > 1.0
 
     def test_oracle_text_derivation_used_for_non_catalog_cards(self):
         """A maindeck card NOT in the catalog falls back to the same oracle->attacks
@@ -4354,7 +4442,7 @@ class TestBuildCoverageModelMaindeckDiscount:
     @staticmethod
     def _tron_field_and_tags():
         field = _make_field({"Tron": 1.0})
-        archetype_tags = {"Tron": frozenset({"greedy-manabase"})}
+        archetype_tags = {"Tron": frozenset({"artifact-mana-reliant"})}
         return field, archetype_tags
 
     def test_maindeck_coverage_none_is_byte_identical(self, make_hoser):
@@ -4364,7 +4452,7 @@ class TestBuildCoverageModelMaindeckDiscount:
         field, archetype_tags = self._tron_field_and_tags()
         catalog = {
             "Force of Vigor": make_hoser(
-                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                name="Force of Vigor", attacks=frozenset({"artifact-mana-reliant"}),
                 colors=frozenset({"G"}), swing=0.30,
             ),
         }
@@ -4390,7 +4478,7 @@ class TestBuildCoverageModelMaindeckDiscount:
         field, archetype_tags = self._tron_field_and_tags()
         catalog = {
             "Force of Vigor": make_hoser(
-                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                name="Force of Vigor", attacks=frozenset({"artifact-mana-reliant"}),
                 colors=frozenset({"G"}), swing=0.30,
             ),
         }
@@ -4399,14 +4487,14 @@ class TestBuildCoverageModelMaindeckDiscount:
         )
         discounted = _build_coverage_model(
             field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
-            maindeck_coverage={"greedy-manabase": 1.0},
+            maindeck_coverage={"artifact-mana-reliant": 1.0},
         )
-        key = "Tron|greedy-manabase"
+        key = "Tron|artifact-mana-reliant"
         assert discounted.element_weight[key] == pytest.approx(
             baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT)
         )
         assert discounted.warnings == (
-            "// maindeck-aware: discounted greedy-manabase by 60% (deck already answers it)",
+            "// maindeck-aware: discounted artifact-mana-reliant by 60% (deck already answers it)",
         )
 
     def test_partial_coverage_scales_the_discount(self, make_hoser):
@@ -4416,7 +4504,7 @@ class TestBuildCoverageModelMaindeckDiscount:
         field, archetype_tags = self._tron_field_and_tags()
         catalog = {
             "Force of Vigor": make_hoser(
-                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                name="Force of Vigor", attacks=frozenset({"artifact-mana-reliant"}),
                 colors=frozenset({"G"}), swing=0.30,
             ),
         }
@@ -4425,9 +4513,9 @@ class TestBuildCoverageModelMaindeckDiscount:
         )
         half = _build_coverage_model(
             field, archetype_tags, frozenset({"U", "B", "G"}), frozenset(), catalog=catalog,
-            maindeck_coverage={"greedy-manabase": 0.5},
+            maindeck_coverage={"artifact-mana-reliant": 0.5},
         )
-        key = "Tron|greedy-manabase"
+        key = "Tron|artifact-mana-reliant"
         assert half.element_weight[key] == pytest.approx(
             baseline.element_weight[key] * (1.0 - _MAINDECK_DISCOUNT * 0.5)
         )
@@ -4439,7 +4527,7 @@ class TestBuildCoverageModelMaindeckDiscount:
         field, archetype_tags = self._tron_field_and_tags()
         catalog = {
             "Force of Vigor": make_hoser(
-                name="Force of Vigor", attacks=frozenset({"greedy-manabase"}),
+                name="Force of Vigor", attacks=frozenset({"artifact-mana-reliant"}),
                 colors=frozenset({"G"}), swing=0.30,
             ),
         }
@@ -4484,18 +4572,18 @@ class TestBuildCoverageModelMaindeckDiscount:
 
 class TestMaindeckAwareCoverageIntegration:
     """Integration: the motivating dogfooding bug — a deck's maindeck already answers an
-    axis (e.g. 4 maindeck Wasteland -> greedy-manabase); the SB should stop padding a
+    axis (e.g. 4 maindeck Wasteland -> nonbasic-manabase); the SB should stop padding a
     redundant Ghost-Quarter-style candidate for that same axis."""
 
     def test_ghost_quarter_style_pick_drops_when_maindeck_already_answers(self, make_hoser):
         field = _make_field({"BigMana": 0.9, "Storm": 0.55})
         archetype_tags = {
-            "BigMana": frozenset({"greedy-manabase"}),
+            "BigMana": frozenset({"nonbasic-manabase"}),
             "Storm": frozenset({"storm-reliant"}),
         }
         catalog = {
             "Ghost Quarter": make_hoser(
-                name="Ghost Quarter", attacks=frozenset({"greedy-manabase"}),
+                name="Ghost Quarter", attacks=frozenset({"nonbasic-manabase"}),
                 colors=frozenset(), swing=0.20, max_copies=4,
             ),
             "Damping Sphere": make_hoser(
@@ -4508,11 +4596,11 @@ class TestMaindeckAwareCoverageIntegration:
         )
         with_wasteland = _build_coverage_model(
             field, archetype_tags, frozenset(), frozenset(), catalog=catalog,
-            maindeck_coverage={"greedy-manabase": 1.0},
+            maindeck_coverage={"nonbasic-manabase": 1.0},
         )
 
         # At a 1-slot budget, BigMana's higher pre-discount weight wins Ghost Quarter the
-        # only slot; once the maindeck already answers greedy-manabase, that same slot
+        # only slot; once the maindeck already answers nonbasic-manabase, that same slot
         # goes to the still-undiscounted storm-reliant axis instead.
         no_answers_picks, _ = _greedy_solve(no_answers, budget=1)
         with_wasteland_picks, _ = _greedy_solve(with_wasteland, budget=1)
@@ -4522,7 +4610,7 @@ class TestMaindeckAwareCoverageIntegration:
         )
         assert with_wasteland_picks.get("Ghost Quarter", 0) == 0, (
             f"Ghost Quarter must no longer be padded once the maindeck already answers "
-            f"greedy-manabase: {with_wasteland_picks}"
+            f"nonbasic-manabase: {with_wasteland_picks}"
         )
         assert with_wasteland_picks == {"Damping Sphere": 1}
 
@@ -4551,8 +4639,14 @@ class TestMaindeckAwareCoverageIntegration:
                     castable_any_color=True,
                 ),
             }
+            # The 4-of guard drops Reanimate from the candidate pool in the with_answers
+            # run (4 maindeck copies leave 0 legal). To isolate the DISCOUNT — this test's
+            # subject — the baseline is built over the same effective candidate set
+            # {Surgical Extraction}; otherwise the two runs would differ by both the
+            # discount and the dropped candidate.
             baseline = recommend_sideboard(
-                con, field, {"Swamp": 14}, solver="greedy", catalog=catalog,
+                con, field, {"Swamp": 14}, solver="greedy",
+                catalog={"Surgical Extraction": catalog["Surgical Extraction"]},
             )
             with_answers = recommend_sideboard(
                 con, field, {"Reanimate": 4, "Swamp": 10}, solver="greedy", catalog=catalog,
@@ -4565,6 +4659,10 @@ class TestMaindeckAwareCoverageIntegration:
             for w in with_answers.warnings
         ), f"expected maindeck-aware audit line: {with_answers.warnings}"
         assert not any(w.startswith("// maindeck-aware:") for w in baseline.warnings)
+        # 4-of guard: 4 maindeck Reanimate leaves no legal copy to offer.
+        assert "Reanimate" not in with_answers.cards, (
+            f"4 maindeck Reanimate must not yield a 5th copy: {with_answers.cards}"
+        )
         assert with_answers.covered_weight == pytest.approx(
             baseline.covered_weight * (1.0 - _MAINDECK_DISCOUNT)
         )
@@ -5278,6 +5376,42 @@ class TestPitchSpellExclusionFromLowCurve:
         signals = compute_deck_anti_synergy_signals(cards)
         assert signals.low_curve is True
 
+    def test_their_variant_pitch_spell_excluded_from_low_curve(self):
+        """`_PITCH_SPELL_RE`'s "their" branch must actually match (regression for the
+        escaped-paren bug: `without paying \\(its|their\\) mana cost` matched literal
+        parens, so the "their" alternative was dead — only the "its" wording worked).
+
+        Ground truth (data/legacy.duckdb): Aluren's oracle_text is "Any player may cast
+        creature spells with mana value 3 or less without paying their mana costs and as
+        though they had flash." — the exact "their mana costs" possessive template.  Aluren
+        is CMC 4; without the fix its CMC would inflate the average like FoW's bug did.
+        """
+        brainstorm = Card(
+            name="Brainstorm",
+            type_line="Instant",
+            oracle_text="Draw three cards, then put two cards from your hand on top of your library in any order.",
+            cmc=1.0,
+            colors=["U"],
+        )
+        aluren = Card(
+            name="Aluren",
+            type_line="Enchantment",
+            oracle_text=(
+                "Any player may cast creature spells with mana value 3 or less "
+                "without paying their mana costs and as though they had flash."
+            ),
+            cmc=4.0,
+            colors=["G"],
+        )
+        cards = [(brainstorm, 4), (aluren, 4)]
+        # Without exclusion: avg = (1.0*4 + 4.0*4) / 8 = 2.5 -> low_curve False.
+        # With Aluren excluded as a pitch spell: avg = 1.0*4 / 4 = 1.0 -> low_curve True.
+        signals = compute_deck_anti_synergy_signals(cards)
+        assert signals.low_curve is True, (
+            "Aluren's 'without paying their mana costs' text must match _PITCH_SPELL_RE "
+            f"and be excluded from the CMC average (signals={signals})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestReportPathArchetypeForwarded — item 1 (archetype forwarded in report path)
@@ -5489,6 +5623,56 @@ class TestHoserCatalogExpansion:
         finally:
             os.unlink(fname)
 
+    def test_load_hoser_catalog_rejects_unknown_attack_tag(self):
+        """`attacks` is a closed vocabulary: a tag outside _VALID_ATTACK_TAGS can never match
+        a derived vulnerability tag, so the entry would silently cover nothing. Fail loud,
+        naming the offending tag and the allowed set. Guards against a retired tag name
+        (e.g. the pre-split monolithic manabase tag) being reintroduced by hand."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "Bogus", "attacks": ["greedy-manabase"], "colors": [],
+                 "max_copies": 2, "swing": "soft"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            with pytest.raises(ValueError, match="greedy-manabase"):
+                load_hoser_catalog(fname)
+        finally:
+            os.unlink(fname)
+
+    def test_load_hoser_catalog_accepts_both_manabase_axes(self):
+        """Both split manabase tags are in the closed vocabulary."""
+        import json, tempfile, os
+        from legacy_engine.advisory.sideboard import load_hoser_catalog
+
+        data = {
+            "version": "test",
+            "hosers": [
+                {"name": "LandHate", "attacks": ["nonbasic-manabase"], "colors": [],
+                 "max_copies": 4, "swing": "soft"},
+                {"name": "ArtifactHate", "attacks": ["artifact-mana-reliant"], "colors": [],
+                 "max_copies": 4, "swing": "soft"},
+            ],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            fname = f.name
+        try:
+            catalog = load_hoser_catalog(fname)
+            assert catalog["LandHate"].attacks == frozenset({"nonbasic-manabase"})
+            assert catalog["ArtifactHate"].attacks == frozenset({"artifact-mana-reliant"})
+        finally:
+            os.unlink(fname)
+
     def test_load_hoser_catalog_rejects_bad_swing_alias(self):
         """Unknown swing alias raises ValueError."""
         import json, tempfile, os
@@ -5689,12 +5873,14 @@ class TestHoserCatalogExpansion:
         )
         assert not fon.attacks <= consign.attacks
 
-    def test_engineered_explosives_attacks_combo_and_greedy_manabase(self):
-        """Engineered Explosives → combo + greedy-manabase + creature-based; colorless."""
+    def test_engineered_explosives_attacks_combo_and_artifact_mana_reliant(self):
+        """Engineered Explosives → combo + artifact-mana-reliant + creature-based; colorless.
+        'Destroy each NONLAND permanent with mana value equal to ...' cannot hit lands."""
         assert "Engineered Explosives" in HOSER_CATALOG
         h = HOSER_CATALOG["Engineered Explosives"]
         assert "combo" in h.attacks
-        assert "greedy-manabase" in h.attacks
+        assert "artifact-mana-reliant" in h.attacks
+        assert "nonbasic-manabase" not in h.attacks
         assert "creature-based" in h.attacks
         assert h.colors == frozenset(), "Engineered Explosives must be colorless"
 
@@ -5895,7 +6081,7 @@ class TestHoserCatalogExpansion:
             f"{survivor} must cover plays-red, not a manabase/combo element"
         )
         assert not any(
-            "greedy-manabase" in key or "|combo" in key
+            "nonbasic-manabase" in key or "|combo" in key
             for key in model.candidate_covers[survivor]
         ), f"{survivor} must not cover manabase/combo elements post-retag"
 
@@ -7531,7 +7717,7 @@ class TestMatchupMaxEquityGain:
 
     def test_no_coverage_for_opponent_returns_zero(self):
         """A field opponent no catalog candidate answers at all: honest 0.0, not fabricated."""
-        model = _make_model({"Lands|greedy-manabase": 0.07}, {}, {})
+        model = _make_model({"Lands|nonbasic-manabase": 0.07}, {}, {})
         gain, first = _matchup_max_equity_gain("Delver", 0.4, model)
         assert gain == 0.0
         assert first == 0.0
@@ -7632,7 +7818,7 @@ class TestSlotROITable:
     def test_ranked_descending_by_roi_per_slot(self):
         field = _make_field({"Delver": 0.6, "Lands": 0.4})
         model = _make_model(
-            {"Delver|plays-blue": 0.6 * 0.10, "Lands|greedy-manabase": 0.4 * 0.10},
+            {"Delver|plays-blue": 0.6 * 0.10, "Lands|nonbasic-manabase": 0.4 * 0.10},
             {}, {},
         )
         cells = {
@@ -7650,7 +7836,7 @@ class TestSlotROITable:
     def test_punt_a_when_cant_cross_half_even_at_max_dedication(self):
         """base_equity so low that even the capped max_equity_gain can't reach 0.5."""
         field = _make_field({"Lands": 1.0})
-        model = _make_model({"Lands|greedy-manabase": 1.0 * 0.10}, {}, {})
+        model = _make_model({"Lands|nonbasic-manabase": 1.0 * 0.10}, {}, {})
         cell = build_cell("MyDeck", "Lands", wins=12, n=120)  # established, badly losing
         matrix = _make_matrix({("MyDeck", "Lands"): cell}, ["MyDeck", "Lands"])
         rows = _slot_roi_table("MyDeck", field, matrix, model)
@@ -7694,7 +7880,7 @@ class TestSlotROITable:
         legitimately hedge across several worthwhile matchups."""
         field = _make_field({"Delver": 0.55, "Lands": 0.45})
         model = _make_model(
-            {"Delver|plays-blue": 0.55 * 0.10, "Lands|greedy-manabase": 0.45 * 0.10},
+            {"Delver|plays-blue": 0.55 * 0.10, "Lands|nonbasic-manabase": 0.45 * 0.10},
             {}, {},
         )
         cells = {
@@ -8378,3 +8564,229 @@ class TestOptionValueRecommendSideboardIntegration:
         # insurance is a subset of the final package, and the package never exceeds budget.
         assert default.insurance_cards <= set(default.cards)
         assert sum(default.cards.values()) <= default.budget
+
+
+# ---------------------------------------------------------------------------
+# epic-sb-advisor-correctness-fourof-guard — combined main+SB 4-of legality.
+#
+# Motivating bug: the candidate pool solved per-card max_copies from the catalog
+# (or the empirical modal count) WITHOUT subtracting maindeck copies, so a deck
+# already running 4 Thoughtseize could be offered a 5th — a format-illegal board.
+# ---------------------------------------------------------------------------
+
+
+class TestMaindeckCopyCaps:
+    """Unit: ``_maindeck_copy_caps`` — remaining format-legal copies per maindeck card."""
+
+    def test_four_of_leaves_zero_remaining(self):
+        caps = _maindeck_copy_caps({"Thoughtseize": 4}, lambda name: None)
+        assert caps["Thoughtseize"] == 0
+
+    def test_two_of_leaves_two_remaining(self):
+        caps = _maindeck_copy_caps({"Thoughtseize": 2}, lambda name: None)
+        assert caps["Thoughtseize"] == 2
+
+    def test_absent_card_is_unconstrained(self):
+        """A card the maindeck does not run gets no entry — unconstrained downstream."""
+        caps = _maindeck_copy_caps({"Thoughtseize": 2}, lambda name: None)
+        assert "Force of Will" not in caps
+
+    def test_basic_lands_are_exempt(self):
+        """Basics have no 4-of limit, so they must not appear in the caps map at all."""
+        def get_card(name):
+            return Card(name=name, type_line="Basic Land — Swamp",
+                        oracle_text="{T}: Add {B}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Swamp": 14}, get_card)
+        assert caps == {}, f"basics must be exempt; got {caps}"
+
+    def test_snow_covered_basic_is_exempt(self):
+        """Detection is on the 'Basic' supertype in type_line, not a hardcoded name list."""
+        def get_card(name):
+            return Card(name=name, type_line="Basic Snow Land — Island",
+                        oracle_text="{T}: Add {U}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Snow-Covered Island": 12}, get_card)
+        assert caps == {}
+
+    def test_nonbasic_land_is_not_exempt(self):
+        """'Land' without the Basic supertype is still 4-of limited."""
+        def get_card(name):
+            return Card(name=name, type_line="Land", oracle_text="{T}: Add {C}.", cmc=0.0)
+
+        caps = _maindeck_copy_caps({"Wasteland": 4}, get_card)
+        assert caps["Wasteland"] == 0
+
+    def test_unresolvable_card_is_not_treated_as_basic(self):
+        """A card absent from the DB must NOT silently bypass the cap."""
+        caps = _maindeck_copy_caps({"Mystery Card": 4}, lambda name: None)
+        assert caps["Mystery Card"] == 0
+
+    def test_over_four_maindeck_copies_floors_at_zero(self):
+        """Defensive: a malformed >4 maindeck count floors at 0, never negative."""
+        caps = _maindeck_copy_caps({"Relentless Rats": 9}, lambda name: None)
+        assert caps["Relentless Rats"] == 0
+
+
+class TestFourOfLegalityPostCheck:
+    """Unit: ``_fourof_legality_warnings`` — the assembled-package backstop."""
+
+    def test_legal_package_produces_no_warning(self):
+        out = _fourof_legality_warnings(
+            {"Surgical Extraction": 2}, {"Surgical Extraction": 2}, lambda name: None,
+        )
+        assert out == []
+
+    def test_exactly_four_combined_is_legal(self):
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 1}, {"Thoughtseize": 3}, lambda name: None,
+        )
+        assert out == []
+
+    def test_crafted_illegal_package_fires(self):
+        """A package that slipped past the candidate cap is surfaced explicitly."""
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 1}, {"Thoughtseize": 4}, lambda name: None,
+        )
+        assert len(out) == 1
+        assert out[0].startswith("// ILLEGAL: Thoughtseize")
+        assert "4 main + 1 SB = 5 copies" in out[0]
+
+    def test_basics_exempt_from_post_check(self):
+        def get_card(name):
+            return Card(name=name, type_line="Basic Land — Swamp",
+                        oracle_text="{T}: Add {B}.", cmc=0.0)
+
+        out = _fourof_legality_warnings({"Swamp": 4}, {"Swamp": 20}, get_card)
+        assert out == []
+
+    def test_multiple_offenders_each_reported(self):
+        out = _fourof_legality_warnings(
+            {"Thoughtseize": 2, "Pyroblast": 3},
+            {"Thoughtseize": 4, "Pyroblast": 4},
+            lambda name: None,
+        )
+        assert len(out) == 2
+
+
+class TestFourOfGuardIntegration:
+    """End-to-end: the guard binds through the real recommend_sideboard pipeline."""
+
+    @staticmethod
+    def _catalog(max_copies=4):
+        return {
+            "Surgical Extraction": HoserCard(
+                name="Surgical Extraction", attacks=frozenset({"graveyard-recursion"}),
+                colors=frozenset(), max_copies=max_copies, swing=_SWING_DEDICATED,
+                castable_any_color=True,
+            ),
+        }
+
+    def test_four_maindeck_copies_yields_no_fifth(self):
+        """The motivating bug: 4 maindeck copies must not produce a 5th in the board."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Surgical Extraction": 4, "Swamp": 10},
+                solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        assert "Surgical Extraction" not in pkg.cards, (
+            f"4 maindeck copies must leave no legal 5th: {pkg.cards}"
+        )
+        assert any(w.startswith("// 4-of guard: dropped") for w in pkg.warnings), (
+            f"expected 4-of guard audit line: {pkg.warnings}"
+        )
+
+    @staticmethod
+    def _overflow_catalog():
+        """More candidate copies than the 15-slot budget, so the considering (bubble) pool
+        is genuinely populated. Surgical Extraction carries the lowest swing, so it lands on
+        the bubble rather than in the board — the exact slot the refill bug appeared in."""
+        def mk(name, swing):
+            return HoserCard(
+                name=name, attacks=frozenset({"graveyard-recursion"}), colors=frozenset(),
+                max_copies=4, swing=swing, castable_any_color=True,
+            )
+
+        catalog = {f"Filler{i}": mk(f"Filler{i}", _SWING_DEDICATED) for i in range(5)}
+        catalog["Surgical Extraction"] = mk("Surgical Extraction", _SWING_SOFT)
+        return catalog
+
+    def _considering_for(self, maindeck):
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}), maindeck,
+                solver="greedy", catalog=self._overflow_catalog(),
+            )
+        finally:
+            con.close()
+        return {c.card for c in pkg.considering}
+
+    def test_four_maindeck_copies_also_excluded_from_considering(self):
+        """The considering/refill path reads the SAME capped candidate_meta, so the illegal
+        5th copy cannot reappear as a bubble suggestion.
+
+        Non-vacuous by construction: the paired assertion below proves the card DOES reach
+        the bubble pool when the maindeck runs none of it."""
+        assert "Surgical Extraction" in self._considering_for({"Swamp": 14}), (
+            "fixture no longer puts the card on the bubble — the guard assertion "
+            "below would be vacuous"
+        )
+        assert "Surgical Extraction" not in self._considering_for(
+            {"Surgical Extraction": 4, "Swamp": 10}
+        ), "considering pool offered an illegal 5th copy"
+
+    def test_two_maindeck_copies_caps_the_board_at_two_more(self):
+        """A 2-of maindeck card may still be boarded, but at most 2 more copies."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Surgical Extraction": 2, "Swamp": 12},
+                solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        boarded = pkg.cards.get("Surgical Extraction", 0)
+        assert boarded <= 2, f"2 main + {boarded} SB exceeds 4 combined: {pkg.cards}"
+        assert 2 + boarded <= _FORMAT_MAX_COPIES
+
+    def test_zero_maindeck_copies_is_unconstrained(self):
+        """Control: with none in the maindeck the catalog max_copies still applies fully,
+        so the guard is a no-op rather than a blanket suppressor."""
+        con = TestRedundancyDecay._gy_field_corpus()
+        try:
+            pkg = recommend_sideboard(
+                con, _make_field({"Reanimator": 1.0}),
+                {"Swamp": 14}, solver="greedy", catalog=self._catalog(),
+            )
+        finally:
+            con.close()
+        assert pkg.cards.get("Surgical Extraction", 0) > 0, (
+            f"guard must not suppress a card the maindeck does not run: {pkg.cards}"
+        )
+        assert not any(w.startswith("// 4-of guard:") for w in pkg.warnings)
+
+    def test_no_recommendation_is_ever_combined_illegal(self):
+        """Invariant sweep: for every maindeck count 0..4, the post-check finds nothing."""
+        for main_copies in range(5):
+            con = TestRedundancyDecay._gy_field_corpus()
+            try:
+                maindeck = {"Swamp": 14 - main_copies}
+                if main_copies:
+                    maindeck["Surgical Extraction"] = main_copies
+                pkg = recommend_sideboard(
+                    con, _make_field({"Reanimator": 1.0}), maindeck,
+                    solver="greedy", catalog=self._catalog(),
+                )
+            finally:
+                con.close()
+            total = main_copies + pkg.cards.get("Surgical Extraction", 0)
+            assert total <= _FORMAT_MAX_COPIES, (
+                f"{main_copies} main + board = {total} copies: {pkg.cards}"
+            )
+            assert not any(w.startswith("// ILLEGAL:") for w in pkg.warnings), pkg.warnings

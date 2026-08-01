@@ -161,7 +161,7 @@ class TestNameExists:
     def test_existing_names_no_error(self, tmp_path, con_factory):
         con = con_factory([_WASTELAND])
         hosers_path = _write_hosers(tmp_path, [
-            {"name": "Wasteland", "attacks": ["greedy-manabase"], "colors": [], "max_copies": 4,
+            {"name": "Wasteland", "attacks": ["nonbasic-manabase"], "colors": [], "max_copies": 4,
              "swing": "soft", "symmetry": "asymmetric"},
         ])
         findings = lint_catalogs(con, hosers_path=hosers_path, linchpins_path=_empty_linchpins(tmp_path))
@@ -175,7 +175,7 @@ class TestColorsMatch:
         """The Null Rod bug, reproduced: curated ["G"] on an actually-colorless card."""
         con = con_factory([_NULL_ROD])
         hosers_path = _write_hosers(tmp_path, [
-            {"name": "Null Rod", "attacks": ["greedy-manabase"], "colors": ["G"], "max_copies": 4,
+            {"name": "Null Rod", "attacks": ["artifact-mana-reliant"], "colors": ["G"], "max_copies": 4,
              "swing": "soft", "symmetry": "symmetric"},
         ])
         findings = lint_catalogs(con, hosers_path=hosers_path, linchpins_path=_empty_linchpins(tmp_path))
@@ -190,7 +190,7 @@ class TestColorsMatch:
     def test_correct_colors_no_finding(self, tmp_path, con_factory):
         con = con_factory([_NULL_ROD])
         hosers_path = _write_hosers(tmp_path, [
-            {"name": "Null Rod", "attacks": ["greedy-manabase"], "colors": [], "max_copies": 4,
+            {"name": "Null Rod", "attacks": ["artifact-mana-reliant"], "colors": [], "max_copies": 4,
              "swing": "soft", "symmetry": "symmetric"},
         ])
         findings = lint_catalogs(con, hosers_path=hosers_path, linchpins_path=_empty_linchpins(tmp_path))
@@ -362,9 +362,9 @@ class TestFunctionalGroupCoherence:
         should warn."""
         con = con_factory([_NULL_ROD, _WASTELAND])
         hosers_path = _write_hosers(tmp_path, [
-            {"name": "Null Rod", "attacks": ["greedy-manabase"], "colors": [], "max_copies": 4,
+            {"name": "Null Rod", "attacks": ["artifact-mana-reliant"], "colors": [], "max_copies": 4,
              "swing": "soft", "symmetry": "symmetric", "functional_group": "nonsense-group"},
-            {"name": "Wasteland", "attacks": ["greedy-manabase"], "colors": [], "max_copies": 4,
+            {"name": "Wasteland", "attacks": ["nonbasic-manabase"], "colors": [], "max_copies": 4,
              "swing": "soft", "symmetry": "asymmetric", "functional_group": "nonsense-group"},
         ])
         findings = lint_catalogs(con, hosers_path=hosers_path, linchpins_path=_empty_linchpins(tmp_path))
@@ -405,7 +405,7 @@ class TestFunctionalGroupCoherence:
         """A functional_group with only one member has nothing to compare — never fires."""
         con = con_factory([_NULL_ROD])
         hosers_path = _write_hosers(tmp_path, [
-            {"name": "Null Rod", "attacks": ["greedy-manabase"], "colors": [], "max_copies": 4,
+            {"name": "Null Rod", "attacks": ["artifact-mana-reliant"], "colors": [], "max_copies": 4,
              "swing": "soft", "symmetry": "symmetric", "functional_group": "lonely-group"},
         ])
         findings = lint_catalogs(con, hosers_path=hosers_path, linchpins_path=_empty_linchpins(tmp_path))

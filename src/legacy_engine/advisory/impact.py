@@ -171,6 +171,14 @@ def _clamp01(value: float) -> float:
 #     NO capability credit — the OPPONENT chooses what to lose, so the effect cannot reliably
 #     be credited with answering one SPECIFIC named linchpin the way a targeted removal spell
 #     can. This is the single most deliberate under-crediting choice in this table.
+#   - Pyroblast/Hydroblast/Blue Elemental Blast/Red Elemental Blast are COLOR-CONDITIONAL:
+#     each mode reads "if it's <color>" / "target <color> spell/permanent" (Pyroblast: "Choose
+#     one — Counter target spell if it's blue. Destroy target permanent if it's blue.";
+#     Hydroblast is the mirror for red). The capability tokens below are still claimed
+#     unconditionally in this table — the color gate is applied per-linchpin in
+#     ``hoser_capabilities_for`` (via ``_BLAST_TARGET_COLOR``), not here, so a colorless card
+#     (Chalice of the Void) or an off-color one gets no credit from these four entries even
+#     though the raw capability set below still lists them.
 _CAPABILITY_BY_NAME: "dict[str, frozenset[str]]" = {
     "surgical extraction": frozenset({"exile-graveyard"}),
     "faerie macabre": frozenset({"exile-graveyard"}),
@@ -225,6 +233,39 @@ def hoser_capabilities(hoser: "HoserCard") -> "frozenset[str]":
     return _CAPABILITY_BY_NAME.get(hoser.name.lower(), frozenset())
 
 
+# Color-conditional blast effects: card name (lowercase) -> the ONE color their removal/
+# counter modes require the target to be. Grounded oracle text (data/legacy.duckdb):
+#   Pyroblast / Red Elemental Blast — "...if it's blue." / "...target blue spell/permanent."
+#   Hydroblast / Blue Elemental Blast — "...if it's red." / "...target red spell/permanent."
+# Each hoser's OWN printed color is the opposite of what it hoses (Pyroblast is red, hoses
+# blue) — the map value is the REQUIRED TARGET color, not the hoser's own color.
+_BLAST_TARGET_COLOR: "dict[str, str]" = {
+    "pyroblast": "U",
+    "red elemental blast": "U",
+    "hydroblast": "R",
+    "blue elemental blast": "R",
+}
+
+
+def hoser_capabilities_for(hoser: "HoserCard", linchpin: "Linchpin") -> "frozenset[str]":
+    """``hoser_capabilities(hoser)``, gated by ``linchpin.colors`` for the four color-
+    conditional blast effects (see ``_BLAST_TARGET_COLOR``).
+
+    Every other capability in ``_CAPABILITY_BY_NAME`` is unconditional (color-blind), as
+    before — this only strips credit for the four blast cards when the linchpin isn't the one
+    color they can actually hit. A colorless linchpin (Chalice of the Void: ``colors=frozenset()``)
+    never matches, since no color is ever a member of an empty set — Hydroblast can never kill
+    a colorless artifact regardless of what ``_CAPABILITY_BY_NAME`` claims.
+    """
+    caps = hoser_capabilities(hoser)
+    if not caps:
+        return caps
+    required_color = _BLAST_TARGET_COLOR.get(hoser.name.lower())
+    if required_color is not None and required_color not in linchpin.colors:
+        return frozenset()
+    return caps
+
+
 # ---------------------------------------------------------------------------
 # Unit B1 — the four decomposed factors
 # ---------------------------------------------------------------------------
@@ -239,8 +280,10 @@ def centrality_factor(
 
     The max ``centrality`` among ``opp_linchpins`` (filtered to ``opp_archetype``, defensively
     — callers are expected to already pass a per-archetype list from
-    ``linchpins_for_archetype``) whose ``neutralized_by`` intersects this hoser's
-    ``hoser_capabilities()``. Falls back to ``_CENTRALITY_BASELINE`` when the hoser doesn't
+    ``linchpins_for_archetype``) whose ``neutralized_by`` intersects this hoser's capabilities
+    for THAT linchpin (``hoser_capabilities_for``, which is ``hoser_capabilities()`` except
+    color-gated for Pyroblast/Hydroblast/Blue Elemental Blast/Red Elemental Blast — see
+    ``_BLAST_TARGET_COLOR``). Falls back to ``_CENTRALITY_BASELINE`` when the hoser doesn't
     confirmed-neutralize any linchpin (either because it genuinely doesn't, or because
     ``hoser_capabilities`` doesn't yet have it graded — both cases degrade to "unknown",
     not "zero").
@@ -252,7 +295,7 @@ def centrality_factor(
     hits = [
         lp.centrality
         for lp in opp_linchpins
-        if lp.archetype == opp_archetype and lp.neutralized_by & caps
+        if lp.archetype == opp_archetype and lp.neutralized_by & hoser_capabilities_for(hoser, lp)
     ]
     if not hits:
         return _CENTRALITY_BASELINE
@@ -264,7 +307,8 @@ def symmetry_factor(hoser: "HoserCard", my_vulnerability_tags: "frozenset[str]")
 
     ``hoser.attacks`` and the vulnerability-tag vocabulary (``whattoplay.VulnerabilityTag``)
     are the SAME tag space (graveyard-recursion, graveyard-fuel, plays-<color>, combo,
-    low-curve, greedy-manabase, creature-based, low-interaction, storm-reliant, ramp) — a
+    low-curve, nonbasic-manabase, artifact-mana-reliant, creature-based, low-interaction,
+    storm-reliant, ramp) — a
     symmetric hoser "shares the hosed axis" with my deck exactly when
     ``hoser.attacks & my_vulnerability_tags`` is non-empty (e.g. a symmetric
     graveyard-recursion hoser boarded in by a deck that ALSO carries the graveyard-recursion

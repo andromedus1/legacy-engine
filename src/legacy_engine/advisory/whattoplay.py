@@ -86,10 +86,15 @@ _RE_TUTOR = re.compile(
 )
 _RE_STORM = re.compile(r"\bstorm\b", re.IGNORECASE)
 _RE_GRAVEYARD = re.compile(
-    # "return ... from [your/a/the] graveyard" or "from [a/the/your] graveyard to the battlefield"
-    r"return .+? from (?:your|a|the) graveyard"
-    r"|from (?:your|a|the) graveyard to (?:the battlefield|your hand|your library)"
-    r"|put .+? from (?:a|any|your) graveyard (?:onto the battlefield|into your hand)",
+    # "return ... from [your/a/the/their] graveyard" or "from [a/the/your/their] graveyard to
+    # the battlefield" — the "their" alternative covers the possessive templates used by
+    # symmetric/each-player effects (Exhume: "each player PUTS a creature card from THEIR
+    # graveyard onto the battlefield"; Magister of Worth, Roar of Reclamation, etc.). "puts?"
+    # covers both the imperative ("Put target creature card...", Reanimate) and the
+    # third-person singular verb form each-player templates use ("each player puts...").
+    r"return .+? from (?:your|a|the|their) graveyard"
+    r"|from (?:your|a|the|their) graveyard to (?:the battlefield|your hand|your library)"
+    r"|puts? .+? from (?:a|any|your|their) graveyard (?:onto the battlefield|into your hand)",
     re.IGNORECASE,
 )
 # graveyard_fuel: the graveyard is consumed as a QUANTITY resource (delve, delirium,
@@ -124,7 +129,7 @@ def _card_roles(card: Card) -> set[str]:
     graveyard-recursion.
 
     Pure function — auditable from card text.  A card may carry several roles.
-    Lands return an empty set (rely on ``mana_base_tags`` at deck level for greedy-manabase).
+    Lands return an empty set (rely on ``mana_base_tags`` at deck level for nonbasic-manabase).
     ``compact_combo`` is a deck-level signal (Unit 3), not a single-card role.
     """
     if card.is_land:
@@ -412,9 +417,10 @@ def proactivity_score(
 
 VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         # | plays-red | plays-blue | plays-white | plays-black | plays-green
-                        # | combo | low-curve | greedy-manabase
+                        # | combo | low-curve
                         # | creature-based | low-interaction | storm-reliant | ramp
                         # | noncreature-reliant | colorless-reliant
+                        # | nonbasic-manabase | artifact-mana-reliant
                         #
                         # graveyard-recursion: deck recurs/casts cards FROM its graveyard
                         #   (reanimate, escape, flashback, regrowth-effects)
@@ -452,6 +458,21 @@ VulnerabilityTag = str  # graveyard-recursion | graveyard-fuel
                         #   creature-light (Blue Artifacts), so this is an independent axis, not a
                         #   refinement of either existing one. See the constant's docstring for the
                         #   measured corpus densities that calibrated the threshold.
+                        # nonbasic-manabase / artifact-mana-reliant: two INDEPENDENT manabase
+                        #   fragilities, split because different hosers reach them.
+                        #   `nonbasic-manabase` fires on nonbasic/dual/fetch/fast-mana-LAND
+                        #   density — reachable by Wasteland/Blood Moon/Back to Basics, which
+                        #   deny or tax nonbasic LANDS and cannot touch artifact mana.
+                        #   `artifact-mana-reliant` fires on nonland ARTIFACT fast-mana density
+                        #   (Lotus Petal, Chrome Mox, Lion's Eye Diamond) —
+                        #   reachable by Null Rod and artifact removal (Force of Vigor, Krosan
+                        #   Grip, Engineered Explosives), which cannot touch lands.
+                        #   A deck carries either, both, or neither: a dual-heavy Delver deck is
+                        #   nonbasic-manabase only; an artifact-accelerated dual-base shell is both.
+                        #   These tags model only what an OPPONENT can attack. A card's value in
+                        #   PROTECTING its controller's own manabase (Force of Vigor answering an
+                        #   opposing Blood Moon) is a distinct relation this vocabulary does not
+                        #   express — see the parent epic's protection-model work.
                         #
                         # DECLINED: a companion `trigger-reliant` axis (the OTHER half of Consign's
                         #   text — "counter target triggered ability") was considered and rejected as
@@ -483,8 +504,18 @@ _NONCREATURE_RELIANT_MAX = 0.15  # creature slots / total maindeck < threshold �
 _LOW_INTERACTION_MAX = 0.08    # (counter + removal) / total <= threshold → low-interaction
 _COMBO_AVG_MV_MAX = 2.5        # avg nonland MV must be below this for combo tag
 _COMBO_TUTOR_DENSITY = 0.05    # tutor slots / total maindeck >= threshold for combo
-_GREEDY_MANABASE_MIN_FAST = 4  # cards with fast_mana/dual land tags >= threshold → greedy manabase
-_GREEDY_NONBASIC_MIN = 8       # nonbasic lands count >= threshold → greedy manabase
+_NONBASIC_MANABASE_MIN_LAND = 4  # dual/fetch/fast-mana LAND copies >= threshold → nonbasic-manabase
+_NONBASIC_MANABASE_MIN_COUNT = 8 # nonbasic land copies >= threshold → nonbasic-manabase
+_ARTIFACT_MANA_RELIANT_MIN = 4   # nonland ARTIFACT fast-mana copies >= threshold →
+                                 # artifact-mana-reliant. Same numeric threshold as
+                                 # _NONBASIC_MANABASE_MIN_LAND, deliberately: both descend from the
+                                 # single pre-split fast-mana cutoff and neither has been
+                                 # independently recalibrated. Kept as separate named constants so
+                                 # the two axes can be tuned apart without touching the other.
+_COMBO_FAST_MANA_MIN = 4       # (land + artifact) fast-mana copies >= threshold → combo's
+                               # "broken signal" leg. Sums BOTH split counters so the combo tag is
+                               # unchanged by the nonbasic/artifact manabase split — combo cares
+                               # that the deck accelerates at all, not which half accelerates it.
 _STORM_DENSITY = 0.08          # storm slots / total nonland >= threshold → storm-reliant
                                # (density gate kills false positives from stray storm cards in aggregates)
 _RAMP_BIGMANA_LAND_MIN = 4     # big-mana land copies >= threshold → ramp tag
@@ -547,7 +578,7 @@ def _color_contingent_tags(cards_with_counts: list[tuple[Card, int]]) -> set[str
 # Urzatron pieces, Cloudpost/Glimmerpost, Eldrazi accelerants.
 # Detection by name (not oracle text) — these cards have no common textual signature.
 # Kept tight to archetypes that specifically exploit colorless ramp (not general fast-mana lands
-# like Ancient Tomb, which already seed greedy-manabase via fast_mana_cards).
+# like Ancient Tomb, which already seed nonbasic-manabase via land_manabase_fast_count).
 _BIGMANA_LAND_NAMES: frozenset[str] = frozenset({
     # Urzatron
     "Urza's Tower",
@@ -630,7 +661,11 @@ def _vulnerability_from_composition(
     - colorless-reliant: colorless-nonland-spell slot density >= _COLORLESS_RELIANT_DENSITY
       (feature-sfv-colorless-axis — see VulnerabilityTag's docstring note and the constant's
       docstring for the corpus calibration)
-    - greedy-manabase: high fast/dual lands + nonbasic heavy
+    - nonbasic-manabase: nonbasic land count OR dual/fetch/fast-mana-LAND copies over
+      threshold — the LAND-side manabase axis (see VulnerabilityTag's docstring note)
+    - artifact-mana-reliant: nonland ARTIFACT fast-mana (Lotus Petal / Chrome Mox /
+      Lion's Eye Diamond) copies over threshold — the ARTIFACT-side manabase axis,
+      independent of the land side
     - low-interaction: low (counter + removal) density
     """
     if not composition:
@@ -643,7 +678,11 @@ def _vulnerability_from_composition(
     tutor_slots = 0
     counter_removal_slots = 0
     creature_slots = 0
-    fast_mana_cards = 0
+    # Counted apart because different hosers reach each (Wasteland/Blood Moon reach only the
+    # land side; Null Rod/artifact removal reach only the artifact side). Summed back together
+    # for combo's fast-mana leg — see _COMBO_FAST_MANA_MIN.
+    land_manabase_fast_count = 0   # dual/fetch/fast-mana LANDS (mana_base_tags subset)
+    artifact_fast_mana_count = 0   # nonland ARTIFACT fast mana (Lotus Petal, Chrome Mox)
     nonbasic_land_count = 0
     bigmana_land_count = 0   # copies of diagnostic big-mana / ramp lands
     colorless_nonland_slots = 0  # feature-sfv-colorless-axis: colorless (colors==[]) nonland spells
@@ -666,7 +705,7 @@ def _vulnerability_from_composition(
         if card.is_land:
             mb_tags = mana_base_tags(card)
             if mb_tags & {"dual", "fast_mana_land", "fetchland"}:
-                fast_mana_cards += count
+                land_manabase_fast_count += count
             # Nonbasic land detection: not a Plains/Island/Swamp/Mountain/Forest basic
             type_line_lower = (card.type_line or "").lower()
             if "land" in type_line_lower and not (
@@ -700,7 +739,7 @@ def _vulnerability_from_composition(
         if "counter" in roles or "removal" in roles:
             counter_removal_slots += count
         if "fast_mana" in roles:
-            fast_mana_cards += count
+            artifact_fast_mana_count += count
 
     # avg nonland MV — shared threshold with proactivity low_curve_score sigmoid center
     avg_mv = total_nonland_mv / total_nonland if total_nonland > 0 else 3.0
@@ -719,7 +758,7 @@ def _vulnerability_from_composition(
     # combo: low avg MV + tutors + some broken signal (storm/graveyard-recursion/fast mana)
     has_broken_signal = storm_slots > 0 or (
         total_cards > 0 and gy_recursion_slots / total_cards >= _GY_RECURSION_DENSITY
-    ) or fast_mana_cards >= _GREEDY_MANABASE_MIN_FAST
+    ) or (land_manabase_fast_count + artifact_fast_mana_count) >= _COMBO_FAST_MANA_MIN
     if (
         avg_mv < _COMBO_AVG_MV_MAX
         and total_cards > 0
@@ -754,9 +793,19 @@ def _vulnerability_from_composition(
     if total_cards > 0 and colorless_nonland_slots / total_cards >= _COLORLESS_RELIANT_DENSITY:
         tags.add("colorless-reliant")
 
-    # greedy-manabase
-    if fast_mana_cards >= _GREEDY_MANABASE_MIN_FAST or nonbasic_land_count >= _GREEDY_NONBASIC_MIN:
-        tags.add("greedy-manabase")
+    # nonbasic-manabase: LAND-side fragility — what Wasteland / Blood Moon / Back to Basics
+    # attack (they deny or tax nonbasic LANDS and cannot touch artifact mana).
+    if (
+        land_manabase_fast_count >= _NONBASIC_MANABASE_MIN_LAND
+        or nonbasic_land_count >= _NONBASIC_MANABASE_MIN_COUNT
+    ):
+        tags.add("nonbasic-manabase")
+
+    # artifact-mana-reliant: ARTIFACT-side fragility — what Null Rod / artifact removal
+    # (Force of Vigor, Krosan Grip, Engineered Explosives) attack. Independent of the land
+    # side: a dual-heavy Delver deck is nonbasic-manabase only; a Moxen-heavy shell can be both.
+    if artifact_fast_mana_count >= _ARTIFACT_MANA_RELIANT_MIN:
+        tags.add("artifact-mana-reliant")
 
     # low-interaction
     if total_cards > 0 and counter_removal_slots / total_cards <= _LOW_INTERACTION_MAX:
