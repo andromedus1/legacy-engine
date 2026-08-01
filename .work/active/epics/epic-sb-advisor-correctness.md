@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness
 kind: epic
-stage: drafting
+stage: implementing
 tags: [advisory]
 parent: null
 depends_on: []
@@ -49,17 +49,116 @@ data split that does not exist yet.
 - **Opponent-boarding-response**: Deferred — stays an absorbed member, not decomposed into
   v1 features; revisit when a game-level pre/post-board data path exists.
 
-## Decomposition status — PARTIAL (do not short-circuit)
+<!-- resolved 2026-07-31 during epic-design (autopilot delegation, judgment-resolved) -->
+- **Element-gate form**: Take the MAX impact over the candidates that actually COVER the element
+  for this deck — not "the best CASTABLE-for-this-deck hoser" as the member finding proposed.
+  Reading the code showed the global-best gate has two faces, not one: the hard-zero
+  (off-color best → `castability_factor` 0.0 → element dies for castable colorless alternatives)
+  AND a symmetry-floor face (a `symmetric` global best sharing an axis with the deck's own
+  vulnerability tags → `_SYMMETRY_FLOOR` 0.15 → that tag's elements deflate ~6.7x for every
+  archetype). `creature-based` is attacked by Toxic Deluge (`symmetric`) and Sheoldred's Edict
+  (`asymmetric`) at identical `dedicated` swing, so Step 1's arbitrary tie-break decides which
+  regime the whole model runs in — the leading hypothesis for the winners-only creature cluster.
+  Max-over-covering fixes both faces with one change; "best castable hoser" fixes only one.
+- **Self-cost representation home**: A curated schema extension on `data/hosers/legacy.json`
+  (protection/self-cost with scope semantics) lands in THIS epic; `epic-card-semantics-ir`'s
+  validated IR later becomes a derivation source for the same field per
+  hybrid-derived-curated-registry. Rationale: `docs/briefs/card-semantics-ir.md` already specifies
+  the `polarity` / `owner_scope` vocabulary and names the Defense Grid case, but that epic is
+  unscoped and brief-gated — the scorer fix must not wait on it, and anticipating the IR's
+  vocabulary means no second migration.
+- **`_hate:` objective structure**: Keep `_hate:` pseudo-elements inside the SINGLE coverage
+  objective, priced by an impact multiplier. Do not split protective coverage into its own
+  sub-objective with a separate slot budget (`docs/briefs/scorer-flexibility-valuation.md`'s open
+  question). The multiplier is smaller, reversible, and does not perturb the τ / core+hedge
+  machinery; the budget split stays available if it proves insufficient.
+- **No alpha tuning**: `_DEFAULT_OPTION_VALUE_ALPHA` is NOT a lever for the Damping Sphere
+  divergence. The near-miss is pre-existing in the base greedy model at alpha=1.0, so tuning alpha
+  would be adoption-matching by another name — exactly what the calibration philosophy locks out.
+- **Matchup-plan OUT-side form**: Hard-exempt lands from the OUT/flex pool and degrade honestly
+  when no legal non-land flex remains, rather than lowering `lock_threshold` globally. Lowering the
+  threshold unlocks spells indiscriminately across every archetype; the land exemption is targeted
+  at the verified failure and preserves the consensus-core protection the threshold exists for.
+- **Winners-only work is diagnosis, not calibration**: The winners-only member becomes an
+  explain-absence surface plus a missing-mechanic / engine-edge classification whose findings emit
+  substrate items. It is explicitly NOT a "make the scorer match winners" feature — that would
+  violate the locked calibration philosophy.
 
-An `epic-design` pass was interrupted by an API spend limit on 2026-07-31 after writing exactly
-ONE child feature (`epic-sb-advisor-correctness-backtest-ci-gate`) and before writing the
-`## Decomposition` section or advancing the stage. The decomposition is therefore INCOMPLETE:
-the model-level members below (the `_hate:` impact factor, per-deck castability gating, the
-alpha/option-value near-miss, the OUT-side adoption lock, the creature-interaction triage) still
-need child features.
+## Decomposition
 
-When epic-design next runs on this epic it MUST NOT take the Phase 1.5 children-already-exist
-short-circuit — one child is not the decomposition. Finish it.
+Split by **mechanism**, not by symptom. The three headline divergences (Defense Grid 0%, Damping
+Sphere 2.7%, the winners-only creature cluster) are three faces of two code defects plus one
+representability gap, so the decomposition follows the defects: a measuring stick that lands first,
+one element-weight gate fix, one self-cost representability fix that builds on it, an independent
+matchup-plan fix that shares no code with either, and a residual triage that runs after the gate
+fix so it triages a repaired engine rather than a known-broken one.
+
+Why this shape over the alternatives. **One "scorer correctness" feature** was rejected as far past
+the 5-15-unit sizing rule — a curated schema extension with load-time validation, an impact-model
+change, an element-gate change, a graded self-cost, and the goldens for all of it. **Splitting per
+symptom card** (a Defense Grid feature, a Damping Sphere feature) was rejected because both cards
+share one root cause and would fight over the same ~80 lines of `_build_coverage_model`. **Folding
+the triage into the gate fix** was rejected because the triage's un-catalogued half (Snuff Out,
+Barrowgoyf, Feed the Cycle) is an attack-derivation gap owned by `epic-card-semantics-ir` — it
+needs a classification-and-park surface, not a scorer change. The one deliberate serialization is
+`hate-self-cost` after `per-deck-castability`: both edit the same element-weight block, and the
+per-candidate impact evaluation the gate fix introduces is exactly the seam the `_hate:` modulation
+consumes. `matchup-plan-flex` is fully parallel — `_plan_matchups` output is not part of the
+backtest's recommended-board partition, so it neither depends on nor perturbs the ratchet.
+
+### Child features
+
+- `epic-sb-advisor-correctness-backtest-ci-gate` — hermetic backtest fixture + pinned divergence
+  budget in CI (the measuring stick every mechanism fix proves itself against) — depends on:
+  `[epic-sb-advisor-correctness-fourof-guard, epic-sb-advisor-correctness-acquire-color-filter]`
+- `epic-sb-advisor-correctness-per-deck-castability` — replace the global-best-hoser element gate
+  with max impact over the candidates that actually cover the element for this deck (fixes both the
+  hard-zero and symmetry-floor faces) — depends on:
+  `[epic-sb-advisor-correctness-backtest-ci-gate]`
+- `epic-sb-advisor-correctness-hate-self-cost` — representable protection/self-cost semantics on
+  the curated catalog + impact-modulated `_hate:` coverage + graded (not cliff) reactive self-cost;
+  the shared Defense Grid / Damping Sphere root cause — depends on:
+  `[epic-sb-advisor-correctness-per-deck-castability]`
+- `epic-sb-advisor-correctness-matchup-plan-flex` — exempt lands from the OUT/flex pool, degrade
+  honestly when no flex remains, gate IN candidates on coverage-axis relevance not correlation
+  alone — depends on: `[]`
+- `epic-sb-advisor-correctness-winners-only-triage` — explain-absence diagnostic + cluster
+  classification (missing mechanic vs engine edge) over the residual blind spots — depends on:
+  `[epic-sb-advisor-correctness-per-deck-castability]`
+
+Not decomposed: `idea-opponent-boarding-response` stays an absorbed member per the locked deferral
+(needs a game-level pre/post-board data split that does not exist).
+
+### Decomposition risks
+
+1. **The cheap version of `hate-self-cost` is a silent no-op.** Simply "turning on impact
+   modulation for `_hate:` coverage" without the new self-cost representation yields
+   `symmetry_factor == 1.0` for every `_hate`-only card — the symmetry gate fires on
+   `hoser.attacks & my_vulnerability_tags` and `"_hate"` is never a vulnerability tag, so Defense
+   Grid's `symmetric` flag is dead data on every code path today. The representable self-cost is
+   load-bearing, not polish. `feature-design` must not sequence the modulation before the schema.
+2. **`per-deck-castability` rescales the whole element-weight distribution.** Max-over-covering
+   only ever RAISES element weights, and the natural-budget τ stop and `_coverage_scale` read that
+   distribution's scale. Boards could get systematically larger or smaller for reasons unrelated to
+   the bug. The freshness-stripped CLI-body goldens will move loudly — that is the intended alarm;
+   re-baseline deliberately with the τ interaction checked, never silently.
+3. **`hate-self-cost` can over-correct.** Twelve of 37 catalog entries are `symmetry: "symmetric"`,
+   including cards that are genuinely correct picks (Engineered Explosives, Chalice, Blood Moon,
+   Toxic Deluge). A blunt symmetric tax would trade the `scorer_only` false positives for
+   `winners_only` blind spots. The ratchet must pin BOTH partition sides, and acceptance needs a
+   should-stay control case, not only a should-drop case.
+4. **Thin evidence on the winners-only side.** The sweep labels the creature-based cluster THIN
+   (speculative winner samples). The triage must not promote a thin cluster to "confirmed missing
+   mechanic", and the CI budget must not pin on a thin metric.
+5. **Boundary pressure against `epic-card-semantics-ir`.** Self-cost/protection semantics and
+   attack derivation both live at that seam. The split is: PRICING self-cost in the advisory scorer
+   (curated field, here) vs DERIVING polarity/owner-scope from oracle text at ingest (the IR,
+   there). `winners-only-triage` classifies and parks un-catalogued cards; it does not extend the
+   derivation rules.
+6. **Scope elasticity on `winners-only-triage`.** If `per-deck-castability` resolves the creature
+   cluster outright, the triage shrinks. That is a success, not a reason to drop the feature — the
+   un-catalogued residual (Barrowgoyf 83.7%, Feed the Cycle, Snuff Out) and the documented-dissent
+   cases still need the surface.
 
 ## Member findings (absorbed from backlog; full text below)
 
