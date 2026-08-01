@@ -17,11 +17,14 @@ from legacy_engine.analytics.superarchetype.aggregate import (
     Heterogeneity,
     MemberTally,
     _logit_with_correction,
+    _pooled_ci,
     aggregate_cluster_cell,
     concentration,
     dersimonian_laird,
     effective_n,
     heterogeneity,
+    imputation_license,
+    impute_cell,
     prior_strength,
 )
 from legacy_engine.confidence import tier_for_sample
@@ -671,3 +674,287 @@ class TestAggregateClusterCell:
             ),
         ):
             assert any("project calibrations" in line for line in cell.provenance)
+
+
+@pytest.fixture
+def sa024_profile(make_tally):
+    """A sa-024-shaped coherent profile: 10 evaluable columns, per-column spread 0.05, zero
+    significantly divergent (the white-creature family the epic's probe measured)."""
+    return {
+        f"Opponent {i:02d}": [
+            make_tally("Death & Taxes", wins=9, n=20),
+            make_tally("Energy", wins=10, n=20),
+        ]
+        for i in range(10)
+    }
+
+
+@pytest.fixture
+def granted_license(sa024_profile):
+    return imputation_license("sa-024", sa024_profile)
+
+
+class TestImputationLicense:
+    def test_coherent_profile_earns_the_license(self, granted_license):
+        assert granted_license.granted is True
+        assert granted_license.cols_evaluated == 10
+        assert granted_license.sig_divergent_cols == 0
+        assert granted_license.tau_profile == pytest.approx(0.05)
+        assert "license granted" in granted_license.reason
+
+    def test_comparability_desert_is_refused_with_a_named_reason(self, make_tally):
+        # Only 2 of 4 columns have >= 2 members at n >= 12 — one big member + long tail is the
+        # measured shape of 6 of 12 families. No evidence, no license.
+        profile = {
+            "Opp A": [make_tally("Big", wins=15, n=30), make_tally("Tail", wins=2, n=5)],
+            "Opp B": [make_tally("Big", wins=10, n=25), make_tally("Tail", wins=1, n=4)],
+            "Opp C": [make_tally("Big", wins=8, n=20), make_tally("Mid", wins=6, n=14)],
+            "Opp D": [make_tally("Big", wins=9, n=18), make_tally("Mid", wins=7, n=15)],
+        }
+        license_ = imputation_license("sa-046", profile)
+        assert license_.granted is False
+        assert license_.cols_evaluated == 2
+        assert license_.reason.startswith("insufficient shared columns (2 < 3)")
+
+    def test_divergent_profile_is_refused_with_a_named_reason(self, make_tally):
+        coherent = [make_tally("A", wins=9, n=20), make_tally("B", wins=10, n=20)]
+        divergent = [make_tally("A", wins=2, n=20), make_tally("B", wins=18, n=20)]
+        profile = {
+            "Opp 1": divergent,
+            "Opp 2": divergent,
+            "Opp 3": coherent,
+            "Opp 4": coherent,
+        }
+        license_ = imputation_license("sa-003", profile)
+        assert license_.granted is False
+        assert license_.sig_divergent_cols == 2
+        assert "divergent profile" in license_.reason
+        assert "0.50 > 0.25" in license_.reason
+
+    def test_divergence_share_at_the_cap_still_grants(self, make_tally):
+        coherent = [make_tally("A", wins=9, n=20), make_tally("B", wins=10, n=20)]
+        divergent = [make_tally("A", wins=2, n=20), make_tally("B", wins=18, n=20)]
+        profile = {
+            "Opp 1": divergent,
+            "Opp 2": coherent,
+            "Opp 3": coherent,
+            "Opp 4": coherent,
+        }
+        license_ = imputation_license("sa-024", profile)
+        assert license_.granted is True
+        assert license_.sig_divergent_cols == 1
+
+    def test_assignee_tallies_never_qualify_a_column(self, make_tally):
+        # Contribute-vs-receive applies to the license evidence too: three columns whose second
+        # member is an assignee are not evaluable, so the license is refused.
+        profile = {
+            f"Opp {i}": [
+                make_tally("Definer", wins=9, n=20),
+                make_tally("Assignee", wins=10, n=20, definer=False),
+            ]
+            for i in range(4)
+        }
+        license_ = imputation_license("sa-024", profile)
+        assert license_.granted is False
+        assert license_.cols_evaluated == 0
+        assert license_.tau_profile is None
+
+    def test_all_extreme_column_is_agreement_not_nan(self, make_tally):
+        # Total wins = 0 across qualifying members: the chi2 margin is degenerate; the named
+        # branch reads it as agreement (identical extreme rates), never NaN or a crash.
+        profile = {
+            f"Opp {i}": [make_tally("A", wins=0, n=15), make_tally("B", wins=0, n=15)]
+            for i in range(3)
+        }
+        license_ = imputation_license("sa-001", profile)
+        assert license_.granted is True
+        assert license_.sig_divergent_cols == 0
+        assert license_.tau_profile == pytest.approx(0.0)
+
+    def test_blank_cluster_id_fails_fast(self):
+        with pytest.raises(ValueError, match="cluster_id"):
+            imputation_license("  ", {})
+
+
+class TestImputeCell:
+    def test_granted_license_imputes_a_labeled_lean(self, granted_license, make_tally):
+        siblings = [
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        assert cell.reason is None
+        assert cell.p == pytest.approx(18 / 40)
+        assert cell.pool_n == 40
+        assert cell.siblings == ("Death & Taxes", "Energy")
+        assert cell.license is granted_license
+
+    def test_imputed_ci_is_strictly_wider_than_the_raw_pooled_ci(
+        self, granted_license, make_tally
+    ):
+        siblings = [
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        base_low, base_high = _pooled_ci(18, 40)
+        assert granted_license.tau_profile is not None and granted_license.tau_profile > 0
+        assert cell.ci_low is not None and cell.ci_high is not None
+        assert cell.ci_low < base_low
+        assert cell.ci_high > base_high
+        assert (cell.ci_high - cell.ci_low) - (base_high - base_low) == pytest.approx(
+            granted_license.tau_profile
+        )
+
+    def test_no_license_refuses_with_the_licenses_reason(self, make_tally):
+        desert = imputation_license(
+            "sa-046",
+            {"Only": [make_tally("Big", wins=15, n=30), make_tally("Mid", wins=7, n=15)]},
+        )
+        assert desert.granted is False
+        cell = impute_cell(
+            "Cradle Control",
+            "Delver",
+            desert,
+            [make_tally("Big", wins=15, n=30), make_tally("Mid", wins=7, n=15)],
+        )
+        assert cell.p is None
+        assert cell.reason is not None
+        assert cell.reason.startswith("no license: insufficient shared columns")
+
+    def test_local_veto_refuses_even_under_a_granted_license(
+        self, granted_license, make_tally
+    ):
+        # THE per-cell honesty rule: this column's members measurably diverge (chi2 p << .05),
+        # so it never imputes — the family-wide license does not override local evidence.
+        siblings = [
+            make_tally("Death & Taxes", wins=2, n=20),
+            make_tally("Energy", wins=18, n=20),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Doomsday", granted_license, siblings)
+        assert granted_license.granted is True
+        assert cell.p is None
+        assert cell.reason is not None and cell.reason.startswith("local veto")
+        assert "license or not" in cell.reason
+
+    def test_intra_family_target_is_refused(self, granted_license, make_tally):
+        siblings = [
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Energy", granted_license, siblings)
+        assert cell.p is None
+        assert cell.reason is not None and cell.reason.startswith("intra-family target")
+        mirror = impute_cell("Orzhov Midrange", "Orzhov Midrange", granted_license, siblings)
+        assert mirror.p is None
+        assert mirror.reason is not None and "intra-family target" in mirror.reason
+
+    def test_pool_too_thin_is_refused_by_the_floor(self, granted_license, make_tally):
+        siblings = [
+            make_tally("Death & Taxes", wins=6, n=12),
+            make_tally("Energy", wins=5, n=12),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        assert cell.p is None
+        assert cell.reason == "pool too thin (24 < 25)"
+        assert cell.pool_n == 24
+
+    def test_assignee_sibling_is_excluded_with_a_named_reason(
+        self, granted_license, make_tally
+    ):
+        # Era addendum: an assignee's 94% tally must not pollute the imputation pool.
+        siblings = [
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+            make_tally("Maverick", wins=15, n=16, definer=False),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        assert cell.p == pytest.approx(18 / 40)
+        assert cell.pool_n == 40
+        assert "Maverick" not in cell.siblings
+        assert any(
+            "Maverick: assignee tally excluded" in line and "contribute-vs-receive" in line
+            for line in cell.exclusions
+        )
+
+    def test_all_assignee_siblings_refuse_with_a_named_reason(
+        self, granted_license, make_tally
+    ):
+        siblings = [
+            make_tally("Maverick", wins=15, n=16, definer=False),
+            make_tally("Elves", wins=8, n=20, definer=False),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        assert cell.p is None
+        assert cell.reason is not None and cell.reason.startswith("no contributor siblings")
+        assert len(cell.exclusions) == 2
+
+    def test_subjects_own_tally_is_left_out(self, granted_license, make_tally):
+        siblings = [
+            make_tally("Orzhov Midrange", wins=12, n=14),  # the subject's own thin cell
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+        ]
+        cell = impute_cell("Orzhov Midrange", "Delver", granted_license, siblings)
+        assert cell.p == pytest.approx(18 / 40)
+        assert any("leave-subject-out" in line for line in cell.exclusions)
+
+    def test_freshness_passthrough_rides_untouched(self, granted_license, make_tally):
+        siblings = [
+            make_tally("Death & Taxes", wins=10, n=20),
+            make_tally("Energy", wins=8, n=20),
+        ]
+        cell = impute_cell(
+            "Orzhov Midrange",
+            "Delver",
+            granted_license,
+            siblings,
+            window_note="2026-05-11..2026-07-31 (adaptive)",
+            current_regime_share=0.08,
+        )
+        assert cell.window_note == "2026-05-11..2026-07-31 (adaptive)"
+        assert cell.current_regime_share == 0.08
+        assert cell.p is not None  # a below-muting-floor share still returns, share attached
+
+    def test_no_nan_or_inf_escapes_any_path(self, granted_license, make_tally):
+        cells = [
+            impute_cell("S", "Delver", granted_license, []),
+            impute_cell(
+                "S",
+                "Delver",
+                granted_license,
+                [make_tally("A", wins=0, n=20), make_tally("B", wins=20, n=20)],
+            ),
+            impute_cell(
+                "S",
+                "Delver",
+                granted_license,
+                [make_tally("A", wins=0, n=20), make_tally("B", wins=0, n=20)],
+            ),
+        ]
+        for cell in cells:
+            for value in _walk_values(cell):
+                if isinstance(value, float):
+                    assert math.isfinite(value)
+            if cell.p is None:
+                assert cell.reason
+
+    def test_blank_names_fail_fast(self, granted_license):
+        with pytest.raises(ValueError, match="subject"):
+            impute_cell(" ", "Delver", granted_license, [])
+        with pytest.raises(ValueError, match="opponent"):
+            impute_cell("S", "", granted_license, [])
+
+
+class TestPooledCiParity:
+    @pytest.mark.parametrize("n", [1, 5, 12, 25, 40, 41, 60, 150])
+    def test_mirror_matches_matchup_wilson_or_jeffreys(self, n):
+        # _pooled_ci reimplements matchup.wilson_or_jeffreys_ci (the import is refused: matchup
+        # transitively imports duckdb). This parity pin is what stops the two from drifting.
+        from legacy_engine.analytics.matchup import wilson_or_jeffreys_ci
+
+        for wins in {0, 1, n // 2, n - 1, n}:
+            ours = _pooled_ci(wins, n)
+            theirs = wilson_or_jeffreys_ci(wins, n)
+            assert ours[0] == pytest.approx(theirs[0], abs=1e-9)
+            assert ours[1] == pytest.approx(theirs[1], abs=1e-9)
