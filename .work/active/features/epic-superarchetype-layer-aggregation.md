@@ -133,3 +133,34 @@ From the epic's `## Strategic decisions` and `## Design decisions`. Fixed inputs
   `src/legacy_engine/analytics/matchup.py` (`beta_binomial_shrink_to`, `wilson_or_jeffreys_ci`,
   `build_cell`, `MatchupCell` fields, `DISPLAY_GATE_N`), `src/legacy_engine/analytics/card_value.py`
   (the existing two-level EB chain this must not contradict).
+
+## Must-resolve design inputs from the adversarial read (2026-07-31)
+
+The brief passed its groundedness audit (68/83 SUPPORTED, **0 UNSUPPORTED**) — but three findings
+land directly on this feature. Full report: `docs/briefs/superarchetype-aggregation-adversarial-read.md`.
+
+1. **BEHAVIOR-CHANGING — the prior-strength derivation is inverted, do not implement §4.5 as written.**
+   §4.5 reads `tau^2_hat = 0` as "coherent cluster" and awards the MAXIMUM prior strength (30).
+   §6.4 establishes — correctly, from three quoted passages — that at these member sizes a zero mostly
+   means "we cannot SEE spread", not that spread is absent. Under DerSimonian-Laird `tau^2_hat = 0`
+   just means `Q <= K-1`. That event was measured on **58.7% of poolable cells**. So the derivation as
+   written hands maximum prior influence to the majority of cells on the WEAKEST evidence — precisely
+   the inversion the heterogeneity gate exists to prevent. Resolve at design time: gate prior strength
+   on evidence sufficiency (member count and per-member n), not on `tau^2_hat = 0` alone; a zero
+   computed from too few/too small members must map to LOW strength, not 30.
+
+2. **`n_eff` does not equal `Sum(n_k)` when `tau^2_hat = 0`.** The brief's "returns Sum n_k" is false as
+   written: `tau^2_hat = 0` does not imply member rates coincide, and when rates differ `n_eff` sits
+   BELOW `Sum(n_k)` by concavity of `p(1-p)`. The error direction is safe (the gate is stricter than
+   advertised, never more generous). Pin the real behavior in a test rather than asserting the identity.
+
+3. **The `max member share <= 0.60` cap is ungrounded** — no source, no measurement, no stated
+   calibration; the "calibrated on measured data" paragraph beneath it calibrates only `m_eff >= 2.0`.
+   It is NOT decorative: at K=2 it is slack (60/40 already fails `m_eff`), but at **K>=3 it is the
+   binding constraint** (60/20/20 gives `m_eff` 2.27 — passes concentration, fails only the cap).
+   Ship it as a NAMED, commented calibration constant that is trivially re-tunable, and say in the
+   audit output that it is a project calibration rather than a sourced threshold.
+
+Also inherited: I2 is ONE-SIDED evidence — a high value is a reliable stop, a low value is NEVER a
+certificate of exchangeability. That caveat must reach the UI, not just the code (it spans this
+feature and `-best-call-fallback`; the epic's decomposition risks flag it as able to fall between them).
