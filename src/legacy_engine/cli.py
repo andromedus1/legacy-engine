@@ -3281,6 +3281,9 @@ def advise_sideboard(
 
         # --- Per-matchup OUT/IN plans (only when value_informed) ---
         if pkg.value_informed and pkg.matchup_plans:
+            from legacy_engine.advisory.sideboard import (
+                format_plan_declines as _format_plan_declines,
+            )
             click.echo("\n  Per-matchup plans (presence-correlational — see disclaimer):")
             for opp, plan in sorted(pkg.matchup_plans.items()):
                 if plan.degraded:
@@ -3296,6 +3299,9 @@ def advise_sideboard(
                         f"    vs {opp} [{plan.tier}, n≥{plan.n_basis}]: "
                         f"OUT {out_str} | IN {in_str}"
                     )
+                _declined = _format_plan_declines(plan)
+                if _declined:
+                    click.echo(f"      [declined] {_declined}")
             from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
             click.echo(f"\n  [disclaimer] {_VALUE_DISCLAIMER}")
 
@@ -5331,13 +5337,15 @@ def generate_tune(
 
     # ── Per-matchup OUT/IN plans (from reworked sideboard recommender) ────────
     if tuned.matchup_plans:
+        from legacy_engine.advisory.sideboard import (
+            format_plan_declines as _format_plan_declines,
+        )
         click.echo("\n// Per-matchup sideboard plans:")
         for opp, plan in sorted(tuned.matchup_plans.items()):
             if plan.degraded:
-                click.echo(
-                    f"//   vs {opp}: thin data — no per-matchup plan "
-                    "(rely on 15 composition)"
-                )
+                # plan.note carries the named degrade reason (thin-data vs no-legal-flex);
+                # re-deriving prose from `degraded` alone mislabels the structural case.
+                click.echo(f"//   vs {opp}: {plan.note}")
             else:
                 out_str = ", ".join(
                     f"{c}x {card}" for card, c in sorted(plan.side_out.items())
@@ -5349,6 +5357,9 @@ def generate_tune(
                     f"//   vs {opp} [{plan.tier}, n>={plan.n_basis}]: "
                     f"OUT {out_str} | IN {in_str}"
                 )
+            _declined = _format_plan_declines(plan)
+            if _declined:
+                click.echo(f"//     declined: {_declined}")
         # Presence-correlational disclaimer
         click.echo(
             "// [disclaimer] Per-card win-rates are PRESENCE-CORRELATIONAL "
