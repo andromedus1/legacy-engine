@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
     from legacy_engine.analytics.eras.consume import EraHorizon
     from legacy_engine.analytics.match_results import MatchResults
+    from legacy_engine.analytics.superarchetype.aggregate import ImputedCell, PooledCell
+    from legacy_engine.analytics.superarchetype.chain import LadderEntry
+    from legacy_engine.analytics.superarchetype.registry import SuperarchetypeRegistry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -129,6 +132,7 @@ def build_cell(
     *,
     prior_mean: float = 0.5,
     prior_source: str | None = None,
+    prior_strength: float = SHRINK_STRENGTH,
 ) -> MatchupCell:
     """Build a directed ``MatchupCell`` for ``archetype_a`` vs ``archetype_b``.
 
@@ -145,6 +149,11 @@ def build_cell(
     explicit hierarchical prior (see ``_cell_prior``); direct callers (tests, other consumers
     building hand-made cells) keep the flat-0.5 default.
 
+    ``prior_strength`` (epic-superarchetype-layer-chain, additive default ``SHRINK_STRENGTH`` —
+    byte-identical for every caller that doesn't pass one): the Beta prior's total strength. The
+    superarchetype rungs supply the estimator's evidence-gated ``[5, 30]`` strength so a coherent
+    cluster anchors harder than an incoherent one; every other rung keeps the default 15.
+
     ``n == 0``: ``p_raw``/``ci_low``/``ci_high`` stay ``None`` (no observations — an honest "no
     data" for the raw record), but ``p_shrunk`` becomes ``prior_mean`` itself (design decision:
     "n=0 cells return the prior mean with the source label" — never ``None``-only, since the
@@ -157,7 +166,9 @@ def build_cell(
     display = n >= DISPLAY_GATE_N
     if n > 0:
         p_raw: float | None = wins / n
-        p_shrunk: float | None = beta_binomial_shrink_to(wins, n, prior_mean=prior_mean)
+        p_shrunk: float | None = beta_binomial_shrink_to(
+            wins, n, prior_mean=prior_mean, strength=prior_strength,
+        )
         ci_low, ci_high = wilson_or_jeffreys_ci(wins, n)
     else:
         p_raw = None
@@ -960,6 +971,20 @@ class AdaptiveMultiSplitMatrix:
     ``cell_windows[(subject, opponent)]`` is the ``since`` actually used for that emitted cell
     (``max`` of the two members' horizons); ``horizon_meta``/``audit_preamble`` carry the same
     per-entity ``EraHorizon`` provenance and whole-path degrade line ``AdaptiveMatrix`` does.
+
+    Superarchetype overlay (epic-superarchetype-layer-chain; ALL empty unless the build was passed
+    a non-empty registry — the byte-identical default). Three DISTINCT cell kinds, never blended
+    into ``multi.cells``:
+
+    - ``cluster_cells[(subject, cluster_id)]`` — the display pool "subject vs that strategy
+      family" (opponent's own matches INCLUDED, refusals first-class, full gate/freshness
+      provenance on the ``PooledCell``);
+    - ``imputed_cells[(subject, opponent)]`` — licensed family imputation attempts for
+      sub-display cells (grants AND refusals; license/veto/window provenance on the
+      ``ImputedCell``);
+    - ``ladder[(subject, opponent)]`` — the resolved display fallback (measured -> imputed ->
+      pooled -> none) for every sub-display cell, every finer refusal named. Rendering is
+      -best-call-fallback's job; this is the data.
     """
 
     multi: MultiSplitMatrix
@@ -967,6 +992,9 @@ class AdaptiveMultiSplitMatrix:
     cell_windows: dict[tuple[str, str], str | None]
     horizon_meta: "dict[str, EraHorizon]" = field(default_factory=dict)
     audit_preamble: tuple[str, ...] = ()
+    cluster_cells: "dict[tuple[str, str], PooledCell]" = field(default_factory=dict)
+    imputed_cells: "dict[tuple[str, str], ImputedCell]" = field(default_factory=dict)
+    ladder: "dict[tuple[str, str], LadderEntry]" = field(default_factory=dict)
 
 
 def build_multi_split_adaptive(
@@ -977,6 +1005,7 @@ def build_multi_split_adaptive(
     min_row_share: float = 0.02,
     affect_threshold: float = 0.25,
     horizons: dict[str, str | None] | None = None,
+    superarchetypes: "SuperarchetypeRegistry | None" = None,
 ) -> AdaptiveMultiSplitMatrix:
     """``build_adaptive_matrix`` for every split parent at once — one scan per distinct horizon.
 
@@ -1001,6 +1030,27 @@ def build_multi_split_adaptive(
     Painter``). ``horizons`` (advanced/testing hook, default ``None``) bypasses ``era_horizons``
     entirely and is used verbatim, exactly as in ``build_adaptive_matrix``; ``horizon_meta`` is then
     empty, which also means no cell can take the cross-era prior (no era-sourced boundary to detect).
+
+    ``superarchetypes`` (opt-in, default ``None`` — epic-superarchetype-layer-chain): a
+    ``SuperarchetypeRegistry`` READ by the caller (``read_superarchetype_members``; never computed
+    here — epic decision 3). ``None`` or an empty registry is BYTE-IDENTICAL to the pre-layer
+    build (opt-in-analytics-overlay + gated-additive; pinned by
+    tests/test_matchup_superarchetype_golden.py). With a non-empty registry:
+
+    - the prior chain gains the superarchetype rungs on the marginal-fallthrough branch —
+      ``camp -> LCO parent' -> superarchetype cell (leave-opponent-out) -> cluster × cluster
+      (leave-S-out, leave-O-out; prior only) -> marginal' -> 0.5`` — with ``prior_source`` naming
+      the rung and the estimator's evidence-gated strength anchoring the shrink; a rung that
+      fails its concentration/heterogeneity gate is skipped (never blended). The cross-era prior
+      keeps precedence on thin era-truncated cells (``chain.FAMILY_FIRST_KINDS`` is the measured
+      young-era exception set — empty on today's corpus, see the LOO harness);
+    - the result carries the ``cluster_cells``/``imputed_cells``/``ladder`` overlay maps (see
+      ``AdaptiveMultiSplitMatrix``) and the registry-provenance ``//`` lines in
+      ``audit_preamble`` (window mismatch is loud, never silent).
+
+    Member tallies for every pool are drawn from THIS build's pairwise-windowed tally buckets
+    (era addendum #2: a member contributes only from its current stable era), which is why the
+    layer exists on the adaptive builder only — a uniform window cannot honor that rule.
     """
     # 1. Full maximal scan → subjects/opponents/parents inclusion (stable basis, as in the plain
     #    adaptive builder: only per-cell data sourcing is windowed).
@@ -1044,6 +1094,68 @@ def build_multi_split_adaptive(
         for s, mr in mr_by_since.items()
     }
 
+    # 3b'. Superarchetype layer setup (opt-in; view is None on the byte-identical default path).
+    # Everything below the view check reads the SAME pairwise-windowed buckets the cells use.
+    view = None
+    sa_audit: tuple[str, ...] = ()
+    regime_start: str | None = None
+    camps_of: dict[str, list[str]] = {}
+    sa_licenses: dict = {}
+    if superarchetypes is not None:
+        from legacy_engine.analytics.superarchetype import chain as _chain
+        from legacy_engine.analytics.superarchetype.aggregate import (
+            imputation_license,
+            impute_cell,
+        )
+        from legacy_engine.analytics.trends import resolve_regime
+
+        view = _chain.cluster_view(superarchetypes)
+        if view is None:
+            sa_audit = ("// superarchetype: registry empty — layer off",)
+        else:
+            regime_start, _regime_until = resolve_regime("current")
+            sa_audit = _chain.registry_audit_lines(superarchetypes, regime_start=regime_start)
+            for camp, parent in camp_parent.items():
+                camps_of.setdefault(parent, []).append(camp)
+            # Freshness shares read the regime-start bucket for pre-regime windows — scan it
+            # once if no entity horizon already produced it.
+            if regime_start is not None and regime_start not in pooled_by_since:
+                regime_mr = compute_match_results(
+                    con, provenance=provenance, since=regime_start, split_variants=parents,
+                )
+                pooled_by_since[regime_start] = _pool_opponent_tallies(
+                    regime_mr, regime_mr.camp_parent,
+                )
+            sa_licenses = {
+                cluster_id: imputation_license(cluster_id, _chain.family_profile(
+                    cluster_id, view,
+                    opponents=opponents, pooled_by_since=pooled_by_since,
+                    valid_since=valid_since, camps_of=camps_of,
+                ))
+                for cluster_id in view.cluster_ids
+            }
+
+    def _impute_for(subject: str, opponent: str):
+        """(ImputedCell | None, drawn tallies, skip reason | None) for one sub-display cell."""
+        base = _chain.subject_base(subject, camp_parent)
+        gs_id = view.cluster_of.get(base)
+        if gs_id is None:
+            return None, (), None  # resolve_ladder's default reason covers the no-cluster case
+        if view.cluster_of.get(opponent) == gs_id:
+            return None, (), (
+                f"imputation not attempted: {opponent} is inside {subject}'s own family {gs_id}"
+            )
+        drawn = _chain.draw_family_tallies(
+            base, gs_id, opponent, view,
+            pooled_by_since=pooled_by_since, valid_since=valid_since, camps_of=camps_of,
+            regime_start=regime_start,
+        )
+        cell = impute_cell(
+            base, opponent, sa_licenses[gs_id], drawn.tallies,
+            window_note=drawn.window_note, current_regime_share=drawn.current_regime_share,
+        )
+        return cell, drawn.tallies, None
+
     # 3c. Cross-era prior, lazily populated per distinct PRE-boundary date. One extra maximal scan
     # per boundary serves EVERY parent's cells at that boundary — the per-parent builds pay one
     # such scan each.
@@ -1061,6 +1173,15 @@ def build_multi_split_adaptive(
             and horizon_meta[x].source in ("era", "era-parent")
             for x in (a, b)
         )
+
+    def _subject_boundary_kind(subject: str, s_ab: str) -> str | None:
+        """The winning-boundary attribution kind when the SUBJECT's own era set this cell's
+        window — the young-era ladder-order rule keys on the subject's reset, never the
+        opponent's (era addendum #2 rule 5)."""
+        hm = horizon_meta.get(subject)
+        if hm is not None and valid_since[subject] == s_ab and hm.source in ("era", "era-parent"):
+            return hm.attribution_kind
+        return None
 
     def _cross_era_prior(a: str, b: str, boundary: str) -> tuple[float, str]:
         """The pooled pre-boundary hierarchical value for (a, b) — cross-era prior mean + label."""
@@ -1101,12 +1222,97 @@ def build_multi_split_adaptive(
                 subject, opponent, marginals=marginals,
                 parent_cells_lco=parent_cells_lco, camp_of=camp_of,
             )
+            prior_strength_value = SHRINK_STRENGTH
+            # Superarchetype rungs (epic-superarchetype-layer-chain) engage on the marginal-
+            # fallthrough branch only — a camp cell with an LCO parent reference keeps the finer
+            # existing anchor (the fixed chain order as anchor precedence; feature design
+            # decision 2). Gate-failing rungs are skipped inside `rung_prior`.
+            if view is not None and prior_source == "marginal":
+                rung = _chain.rung_prior(
+                    subject, opponent, view,
+                    pooled_by_since=pooled_by_since, valid_since=valid_since,
+                    camp_parent=camp_parent, camps_of=camps_of, regime_start=regime_start,
+                )
+                if rung is not None:
+                    prior_mean, prior_source = rung.mean, rung.source
+                    prior_strength_value = rung.strength
             if s_ab is not None and n < 100 and _era_sourced_boundary(subject, opponent, s_ab):
-                prior_mean, prior_source = _cross_era_prior(subject, opponent, s_ab)
+                # The cross-era anchor keeps precedence (epic decision) — except for a young era
+                # whose attribution kind measurably favors family-current imputation
+                # (chain.FAMILY_FIRST_KINDS; EMPTY on today's corpus per the LOO harness, so the
+                # anchor wins everywhere until a re-measure says otherwise).
+                family_first = False
+                if view is not None:
+                    kind = _subject_boundary_kind(subject, s_ab)
+                    if kind is not None and kind in _chain.FAMILY_FIRST_KINDS:
+                        family_prior, _tallies, _skip = _impute_for(subject, opponent)
+                        if family_prior is not None and family_prior.p is not None:
+                            prior_mean = family_prior.p
+                            prior_source = (
+                                f"family-current imputation (young {kind} era; "
+                                f"{family_prior.license.cluster_id}, "
+                                f"pool n={family_prior.pool_n}; LOO-harness order)"
+                            )
+                            prior_strength_value = SHRINK_STRENGTH
+                            family_first = True
+                if not family_first:
+                    prior_mean, prior_source = _cross_era_prior(subject, opponent, s_ab)
+                    prior_strength_value = SHRINK_STRENGTH
             cells[(subject, opponent)] = build_cell(
                 subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+                prior_strength=prior_strength_value,
             )
             cell_windows[(subject, opponent)] = s_ab
+
+    # 5. Superarchetype overlay (view is None on the default path — all three maps stay empty).
+    # Pooled display cells INCLUDE the opponent's own matches (unlike the leave-opponent-out
+    # prior above); imputed cells and ladder entries exist for every sub-display cell, refusals
+    # included — distinct cell kinds, never blended into `cells` (epic addendum #1).
+    cluster_cells: "dict[tuple[str, str], PooledCell]" = {}
+    imputed_cells: "dict[tuple[str, str], ImputedCell]" = {}
+    ladder: "dict[tuple[str, str], LadderEntry]" = {}
+    if view is not None:
+        from legacy_engine.analytics.superarchetype.aggregate import (
+            aggregate_cluster_cell,
+        )
+
+        for subject in subjects:
+            base = _chain.subject_base(subject, camp_parent)
+            subject_cluster_id = view.cluster_of.get(base)
+            mirror = mr_by_since[valid_since[subject]].mirror_n.get(subject, 0)
+            for cluster_id in view.cluster_ids:
+                drawn = _chain.draw_pool_tallies(
+                    subject, cluster_id, view,
+                    pooled_by_since=pooled_by_since, valid_since=valid_since,
+                    subject_cluster_id=subject_cluster_id, subject_mirror_n=mirror,
+                    regime_start=regime_start,
+                )
+                if not drawn.tallies:
+                    continue
+                cluster_cells[(subject, cluster_id)] = aggregate_cluster_cell(
+                    subject, cluster_id, drawn.tallies,
+                    window_note=drawn.window_note,
+                    current_regime_share=drawn.current_regime_share,
+                )
+            own_parent = camp_parent.get(subject)
+            for opponent in opponents:
+                if opponent == subject or opponent == own_parent:
+                    continue
+                measured_n = cells[(subject, opponent)].n
+                if measured_n >= DISPLAY_GATE_N:
+                    continue
+                imputed, imputed_tallies, imputed_skip = _impute_for(subject, opponent)
+                if imputed is not None:
+                    imputed_cells[(subject, opponent)] = imputed
+                go_id = view.cluster_of.get(opponent)
+                ladder[(subject, opponent)] = _chain.resolve_ladder(
+                    subject, opponent,
+                    measured_n=measured_n, display_gate_n=DISPLAY_GATE_N,
+                    opponent_cluster_id=go_id,
+                    pooled=cluster_cells.get((subject, go_id)) if go_id is not None else None,
+                    imputed=imputed, imputed_tallies=imputed_tallies,
+                    imputed_skip=imputed_skip,
+                )
 
     multi = MultiSplitMatrix(
         cells=cells,
@@ -1120,5 +1326,6 @@ def build_multi_split_adaptive(
     )
     return AdaptiveMultiSplitMatrix(
         multi=multi, valid_since=valid_since, cell_windows=cell_windows,
-        horizon_meta=horizon_meta, audit_preamble=audit_preamble,
+        horizon_meta=horizon_meta, audit_preamble=(*audit_preamble, *sa_audit),
+        cluster_cells=cluster_cells, imputed_cells=imputed_cells, ladder=ladder,
     )

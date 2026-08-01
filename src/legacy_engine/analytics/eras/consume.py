@@ -85,16 +85,20 @@ class EraHorizon:
     the winning boundary's attribution), or ``None`` when there is no disturbance to name
     (undisturbed entity, or a ban-only horizon with no affecting ban).
     ``alarm``: the entity's drift-alarm note when its alarm fired, else ``None``.
+    ``attribution_kind``: the winning boundary's attribution kind (``"ban"`` | ``"release"`` |
+    ``"unattributed"``), ``None`` when there is no era boundary behind the horizon (additive,
+    epic-superarchetype-layer-chain — the young-era ladder-order rule keys on it).
     """
 
     since: str | None
     source: str
     trigger: str | None
     alarm: str | None
+    attribution_kind: str | None = None
 
 
-def _winning_boundary_trigger(stored: StoredEntityEras) -> str | None:
-    """The attribution detail of the boundary that set ``stored.stable_since``.
+def _winning_boundary_attribution(stored: StoredEntityEras):
+    """The stored attribution of the boundary that set ``stored.stable_since``.
 
     ``None`` when ``stable_since`` is ``None`` (no accepted boundary — undisturbed) or the
     winning boundary's attribution wasn't recorded (shouldn't normally happen — every accepted
@@ -104,8 +108,14 @@ def _winning_boundary_trigger(stored: StoredEntityEras) -> str | None:
         return None
     for b in stored.boundaries:
         if b.bh_accepted and not b.floor_rejected and b.date == stored.stable_since:
-            return b.attribution.detail if b.attribution is not None else None
+            return b.attribution
     return None
+
+
+def _winning_boundary_trigger(stored: StoredEntityEras) -> str | None:
+    """The attribution DETAIL of the winning boundary (kept for external callers)."""
+    attribution = _winning_boundary_attribution(stored)
+    return attribution.detail if attribution is not None else None
 
 
 def era_horizons(
@@ -141,22 +151,26 @@ def era_horizons(
     for label in archetypes:
         entry = stored.get(label)
         if entry is not None:
+            attribution = _winning_boundary_attribution(entry)
             horizons[label] = EraHorizon(
                 since=entry.stable_since,
                 source="era",
-                trigger=_winning_boundary_trigger(entry),
+                trigger=attribution.detail if attribution is not None else None,
                 alarm=(entry.alarm_note if entry.alarm_fired else None),
+                attribution_kind=attribution.kind if attribution is not None else None,
             )
             continue
 
         parent = _resolve_parent(label, split_variant, camp_parent)
         parent_entry = stored.get(parent) if parent != label else None
         if parent_entry is not None:
+            attribution = _winning_boundary_attribution(parent_entry)
             horizons[label] = EraHorizon(
                 since=parent_entry.stable_since,
                 source="era-parent",
-                trigger=_winning_boundary_trigger(parent_entry),
+                trigger=attribution.detail if attribution is not None else None,
                 alarm=(parent_entry.alarm_note if parent_entry.alarm_fired else None),
+                attribution_kind=attribution.kind if attribution is not None else None,
             )
             continue
 
