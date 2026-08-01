@@ -45,7 +45,10 @@ from statistics import median
 import duckdb
 
 from legacy_engine.analytics.match_results import compute_match_results
-from legacy_engine.analytics.matchup import beta_binomial_shrink, beta_binomial_shrink_to
+from legacy_engine.analytics.matchup import (
+    beta_binomial_shrink,
+    beta_binomial_shrink_to,
+)
 from legacy_engine.analytics.superarchetype.registry import read_superarchetype_members
 from legacy_engine.config import DUCKDB_PATH
 
@@ -85,7 +88,7 @@ def _tally(mr, a: str, b: str) -> tuple[int, int]:
 
 
 def _pairwise_since(*dates: str | None) -> str | None:
-    return max((d or "" for d in dates)) or None
+    return max(d or "" for d in dates) or None
 
 
 def run_harness(

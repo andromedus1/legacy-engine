@@ -21,9 +21,12 @@ from __future__ import annotations
 import hashlib
 import json
 
-from legacy_engine.analytics.matchup import build_multi_split_adaptive
+from test_matchup_multi_split import (
+    PARENTS,
+    adaptive_con,
+)
 
-from test_matchup_multi_split import PARENTS, adaptive_con  # noqa: E402 (sibling test module)
+from legacy_engine.analytics.matchup import build_multi_split_adaptive
 
 # Every consumer-visible MatchupCell field (same pinned list as the parity suite).
 _CELL_FIELDS = (
