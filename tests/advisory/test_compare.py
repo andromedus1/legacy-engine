@@ -193,6 +193,10 @@ class TestMonteCarlo:
         b = DeckConfig("B", [ConfigMode("TempoA")])  # same archetype → shared draws → all ties
         r = compare_configs(m, f, a, b, n_draws=4000, seed=7)
         assert abs(r.p_a_beats_b_base - 0.5) < 1e-9
+        # Same archetype → _mc_base's row_cache reuses ONE draw array for both configs, so the
+        # base CIs must overlap; since the per-draw S arrays are element-wise identical this is
+        # exact equality, not mere overlap — a broken/unshared cache would desync the two CIs.
+        assert r.ev_a_base_ci == r.ev_b_base_ci
 
     def test_ci_shrinks_with_sample_size(self):
         thin = _matrix({("TempoA", "X"): (12, 20), ("TempoA", "Y"): (8, 20),

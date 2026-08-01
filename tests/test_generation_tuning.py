@@ -173,7 +173,7 @@ def con():
 
 @pytest.fixture
 def gy_field():
-    """Custom field: 80% Reanimator (graveyard-reliant), 20% Combo."""
+    """Custom field: 80% Reanimator (graveyard-recursion), 20% Combo."""
     return build_custom_field({"Reanimator": 0.80, "Combo": 0.20})
 
 
@@ -315,15 +315,15 @@ class TestCandidatePool:
 class TestCoverageValue:
     def _make_model_with_surgical(self) -> CoverageModel:
         """Build a hand-crafted CoverageModel where Surgical Extraction covers
-        'Reanimator|graveyard-reliant' with weight 0.16 (0.80 share x 0.20 swing).
+        'Reanimator|graveyard-recursion' with weight 0.16 (0.80 share x 0.20 swing).
         """
         return CoverageModel(
-            element_weight={"Reanimator|graveyard-reliant": 0.16},
-            candidate_covers={"Surgical Extraction": frozenset({"Reanimator|graveyard-reliant"})},
+            element_weight={"Reanimator|graveyard-recursion": 0.16},
+            candidate_covers={"Surgical Extraction": frozenset({"Reanimator|graveyard-recursion"})},
             candidate_meta={
                 "Surgical Extraction": HoserCard(
                     name="Surgical Extraction",
-                    attacks=frozenset({"graveyard-reliant"}),
+                    attacks=frozenset({"graveyard-recursion"}),
                     colors=frozenset({"B"}),
                     max_copies=2,
                     swing=0.20,
