@@ -342,3 +342,54 @@ provenance chip; they are labeled leans, never grounded rows.
 chip: "imputed from <family>, k sibs, pool n, MAE evidence") → family-range chip (unlicensed or
 vetoed: show member split/range) → marginal-imputed (last resort, quarantined per
 feature-ranking-honesty-guards).
+
+## Design decision addendum #2 (2026-08-01) — era discipline for pooling and imputation
+
+**Andrew's directive:** apply the era-windowing lessons when aggregating across a superarchetype.
+Reviewed against the shipped layer; five rules locked, one demonstrated live:
+
+**0. The taxonomy itself was era-mixed — fixed operationally today.** The first `superarchetype run`
+used the full-corpus default, so cores blended dead generations with current builds (the exact
+camp-as-era confound the stable-era epic documented). Re-ran windowed (`--since 2026-05-11`); the
+registry is now the windowed taxonomy and the CHURN DIAGNOSTIC fired as designed (0.933 vs ~0.96
+baseline). Consequences observed, both instructive:
+  - Multi-definer branches 14 → 5 (many small members drop below the 30-deck definer floor in an
+    81-day window) — but pooling membership largely SURVIVES via assignment (the Cradle family's
+    color labels all assigned back into sa-004).
+  - **The best behavioral family dissolved**: D&T + Energy + Orzhov (median within-family spread
+    0.05 over 10 columns — the tightest measured) split into singletons because their CURRENT
+    composition diverged while their behavior did not. Era-honest composition clustering cannot
+    see behavioral kinship — that is what the CURATED OVERRIDE layer is for, and the license
+    validates it independently. Curation from a measured coherence report is human judgment
+    (auditable per key, like `eras confirm`) — the double-dip guard forbids the ALGORITHM reading
+    rounds, not the human reading a report.
+  - **Curated-override candidates recorded**: ADD white-creature {Death & Taxes, Energy, Orzhov
+    Midrange, Orzhov Scam} (justification: the 0.05-spread probe); REVIEW the windowed sa-003
+    mega-branch (Dimir family + Doomsday + TES + Grixis Reanimator at BP 0.39) — behaviorally
+    implausible; expect the license/gates to refuse most of its pools, and split it by curation
+    if they do.
+
+**1. Contribute vs receive.** Pool contributions come from DEFINERS + CURATED members only.
+Assignees RECEIVE imputation but never contribute tallies — an assignee with meaningful data would
+have been a definer, and this rule makes assignment pollution (Maverick/Elves assigned into
+Cradle's cluster today) harmless to the pooled numbers.
+
+**2. Member tallies enter pools only from the member's CURRENT stable era** (entity_eras
+stable_since) — never a rebuilt member's pre-disturbance generation. Pairwise validity comes free:
+sibling-vs-opponent tallies are drawn from the adaptive multi-split build, whose cells are already
+(sibling-era ∩ opponent-era)-windowed with cell_windows/horizon_meta attached.
+
+**3. Pooled/imputed provenance carries freshness.** Window mix + current-regime share of the pool
+ride on every pooled/imputed cell; the page's existing not-current muting rules apply to them; a
+subject whose family membership churned on the latest run gets a churn flag (labeled, not hidden).
+
+**4. The license is era-windowed and re-earned.** Profile coherence is computed on era-windowed
+profiles and recomputed at refresh; the 2026-01-01 probe (LOO MAE 0.075 vs 0.107) is directional
+evidence only — Unit 7's harness re-measures on serving windows.
+
+**5. Young-regime rule (hypothesis, decided by measurement).** For a subject whose era just reset
+with COMPOSITION attribution (ban/release rebuild), family-current imputation plausibly beats the
+existing own-pre-disturbance anchor; where attribution is drift-only, the anchor stays first.
+-chain's design must decide the ladder order per attribution kind via a LOO harness over historical
+disturbances, not by assertion. This makes era-aware imputation the young-regime serving strategy
+the roadmap item asked for.
