@@ -108,3 +108,12 @@ From the epic's `## Strategic decisions` and `## Design decisions`. Fixed inputs
 - Code to read before designing: `scripts/refresh_best_call_ranking.py` (`make_cells`, `row_stats`,
   `_floor_eligible`, `compute_blob`) — **after** `feature-multi-split-matrix-best-call-onepass` has
   migrated it — and `scripts/best_call_ranking_template.html`.
+
+## Inherited addendum (2026-08-01): the display ladder
+Locked by the epic's licensed-imputation addendum. Per cell: measured (clears gate) → pooled
+opponent-cluster cell (existing design) → **family-imputed cell** (licensed; chip: "imputed from
+<family>, k sibs, pool n"; rendered as a lean, never a grounded row) → **family-range chip**
+(unlicensed/vetoed/refused pools: show the member split or range, no point estimate) →
+marginal-imputed (last resort, quarantined — compose with feature-ranking-honesty-guards).
+Copy discipline: the page promises "fewer blank cells and honest leans", not grounded coverage;
+the I² one-sidedness caveat must appear wherever a pooled or imputed number does.
