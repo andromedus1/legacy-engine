@@ -133,3 +133,17 @@ era-windowed through the multi-split machinery (never raw full-corpus) — and e
 cell kind (`imputed`), NEVER blended into measured cells and never a prior-only ghost. The existing
 prior rungs stay as designed; this ADDS a displayable, licensed value for cells the rungs alone
 would leave hidden. prior_source/provenance must name the family, sibling count, pool n, and license.
+
+## Inherited addendum #2 (2026-08-01): era discipline (epic addendum #2 — binding)
+- Sibling tallies: from the adaptive multi-split build ONLY (cells already pairwise era-windowed,
+  cell_windows/horizon_meta attached); member tallies only from the member's current stable era.
+- Contribute vs receive: definers + curated contribute; assignees receive.
+- Taxonomy consumption: the WINDOWED registry (regenerated 2026-08-01, `--since 2026-05-11`,
+  churn 0.933 flagged) is the serving artifact; full-corpus runs are exploratory. See also the
+  era-core-pools story for the per-entity endpoint.
+- Freshness provenance: every pooled/imputed cell carries window mix + current-regime share
+  (computed here, passed through the kernel).
+- **Ladder-order decision this feature OWNS**: own-pre-disturbance anchor vs family-current
+  imputation for young-era cells, decided per attribution kind by a LOO harness over historical
+  disturbances (predict held-out early-era cells both ways). Hypothesis: family-first for
+  composition-disturbed subjects, anchor-first for drift-only. Do not assert; measure.
