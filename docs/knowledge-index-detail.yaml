@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-07-29T03:44:48Z'
+generated_at: '2026-08-01T02:48:54Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -87,6 +87,20 @@ documents:
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
+    - 'SUPERARCHETYPES (in flight — epic-superarchetype-layer): analytics/superarchetype/
+      adds the third taxonomy level above parent archetype. An offline `superarchetype
+      run` pass clusters archetypes on staple-stripped maindeck core sets (Jaccard
+      + average-linkage agglomerative, AU multiscale-bootstrap cut over resampled
+      card features; definers >=30 decks/>=8 core cards, the tail assigned by nearest
+      centroid) and persists a derived registry merged under a package-shipped curated
+      override registry (hybrid-derived-curated-registry + curated-json-resource-loader).
+      Clustering reads deck_cards ONLY — never rounds — so the cut can never be tuned
+      against the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT
+      axis one more level (camp -> parent -> cluster, extending _pool_opponent_tallies)
+      and gains one shrinkage rung between the leave-camp-out parent cell and the
+      subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird
+      and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
+      gate. Empty/absent registry is byte-identical to today (gated-additive).'
     - 'STABLE ERAS: analytics/eras/ detects per-entity (archetype AND camp) era boundaries
       from the corpus itself (S1 presence cliffs/ramps, S2 composition CPD via ruptures,
       S3 share shifts, S4 WR corroboration; fleet BH-FDR + 30-deck era floor), persists
@@ -203,6 +217,17 @@ documents:
       — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint
       detection self-heals banlist announcement lag; every windowed figure names its
       window and triggering disturbance.'
+    - 'Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes,
+      curated overrides) → parent archetype → camp. The superarchetype level exists
+      to fight thin data: when an archetype-level matchup cell can''t clear its tier
+      gate, the cell falls back to the superarchetype aggregate with a labeled provenance
+      chip, so every row gets signal against every major strategy. Intra-cluster matches
+      count but carry an intra-cluster flag.'
+    - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
+      per-deck findings, consensus decklists with primers — persists across sessions
+      and is surfaced automatically; advice is grounded in a user profile (decks played,
+      collection, local meta). Andrew-first now, multi-user-ready by design: the profile
+      is data, not code.'
     related:
     - slug: docs/SPEC.md
       relationship: refines
@@ -356,6 +381,16 @@ documents:
       era-default discovery pools with Gate C); matchup cells carry hierarchical +
       cross-era priors with prior_source labels. Byte-identical ban-only fallback
       when no era data exists.'
+    - 'SUPERARCHETYPES: a third taxonomy level ABOVE parent archetype — strategy clusters
+      derived from staple-stripped maindeck core sets (Jaccard + average-linkage agglomerative,
+      AU-bootstrap cut) with a curated override layer, persisted as a registry by
+      an offline pass. A subject''s record against a cluster is a random-effects (DerSimonian-Laird)
+      pooled proportion whose effective sample n_eff — not raw pooled n — feeds tier_for_sample
+      and the display gate, gated on concentration (m_eff = 1/HHI >= 2.0, max member
+      share <= 0.60) and heterogeneity (I-squared bands, with I-squared treated as
+      ONE-SIDED evidence). Cells fall back archetype -> superarchetype per cell, labeled
+      with a provenance chip; intra-cluster matches count but carry an intra-cluster
+      flag.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on
@@ -449,11 +484,11 @@ documents:
     - 'What-to-play: derive a continuous PROACTIVITY score from card composition (reactive
       mass = counters+removal+stax+draw+protection; proactive mass = fast-mana+ritual+tutor+low-curve+compact-combo),
       tag archetypes with VULNERABILITY classes (graveyard-recursion, graveyard-fuel,
-      plays-<color>, combo, low-curve, greedy-manabase, creature-based, low-interaction,
-      storm-reliant, ramp, noncreature-reliant, colorless-reliant), compute hate-equity
-      = field share each hate category attacks (coverage, not naive sum), and classify
-      best-deck (low matchup-spread, robust) vs best-call (high-spread, field-specific
-      gamble).'
+      plays-<color>, combo, low-curve, nonbasic-manabase, artifact-mana-reliant, creature-based,
+      low-interaction, storm-reliant, ramp, noncreature-reliant, colorless-reliant),
+      compute hate-equity = field share each hate category attacks (coverage, not
+      naive sum), and classify best-deck (low matchup-spread, robust) vs best-call
+      (high-spread, field-specific gamble).'
     - No published prior art formulates sideboard-as-optimization (one NIU thesis
       403-blocked, flagged for manual pull); the OR theory (max-coverage, NWF 1978
       submodular greedy) is load-bearing and the MTG community confirms the inputs
@@ -501,6 +536,74 @@ documents:
       clustering) confirms decklist co-occurrence alone yields strong similarity,
       but is archetype-confounded — which is exactly why our role/color gating + value-transfer-by-role
       is the honest layer on top.
+  docs/briefs/card-semantics-ir.md:
+    summary: 'Curates the design space for a validated card-semantics intermediate
+      representation (IR)
+
+      replacing regex+memory in the new semantics/ module. Grounds the schema in the
+      actual
+
+      28-regex inventory and the four tag vocabularies the advisory layer consumes,
+      in the
+
+      Comprehensive Rules'' own template vocabulary (cost templates, keyword enumerations),
+      and in
+
+      prior art (Forge/XMage capability DSLs, Scryfall keywords/Tagger, grammar-parser
+      attempts).
+
+      Recommends clause-scoped typed facts over a closed capability vocabulary, extracted
+      in
+
+      tiers (deterministic templates → batched LLM → curated overrides), validated
+      by golden
+
+      fixtures per semantic cluster plus a full-corpus classification census.
+
+      '
+    key_findings:
+    - 'Every production machine-readable MTG semantics system converged on the same
+      shape: a closed vocabulary of parameterized capability predicates maintained
+      as reviewable per-card data (Forge''s `A:SP$ Counter | ValidTgts$ Card.nonCreature`
+      script DSL, XMage''s typed ability/cost/filter component library) — none parse
+      free text at runtime, and full-grammar attempts stall (a published ANTLR4 grammar
+      covers exactly one 273-card set with documented ambiguity failures; demystify
+      remains a perpetual project).'
+    - Scryfall's `keywords` array is free structured semantics for keyword mechanics
+      only — Murktide Regent returns ['Flying','Delve'] but Force of Negation (pitch)
+      and Leyline of the Void (opening-hand) return [] — precisely the templates the
+      advisory bugs live in; ingest the field (the Card model currently drops it)
+      but it cannot replace text-derived facts.
+    - 'The 28-regex layer fails on four MISSING DIMENSIONS, not 28 bad patterns: owner-scope
+      (Exhume''s ''their graveyard''), object-type (''destroy target land'' → creature-based),
+      clause-role (FoN''s cost-clause ''exile'' + replacement-clause ''graveyard''
+      → graveyard-hate false positive), and polarity (FoV carrying attacks={greedy-manabase}
+      when it PROTECTS greedy manabases; the catalog''s ''_hate'' pseudo-tag is the
+      same missing axis) — every verified bug maps to one, so the IR schema must carry
+      all four as first-class typed fields.'
+    - 'The highest-value templates are CR-canonical, not folklore: CR 118.9 names
+      the exact alternative-cost phrasings (''You may [action] rather than pay [this
+      object''s] mana cost'' / ''without paying its mana cost''), and the cost/effect
+      split is a rules concept (118.8/118.9 + casting rule 601.2b), so tier-1 deterministic
+      extractors can be specified against the rulebook; CR 701/702 enumerate 69 keyword
+      actions and 194 keyword abilities as a closed vocabulary (MTGJSON ships it as
+      data: 78/220 incl. variants).'
+    - Oracle text is a retroactively re-templated corpus — Wizards rewrote 'his or
+      her' to 'their' across Oracle in 2018 — so extraction must be versioned against
+      a dated card snapshot, golden fixtures must pin verbatim oracle text (a re-template
+      then breaks loudly), and possessive-scope vocabularies must include 'their'.
+    - 'Recommended IR: clause-scoped typed facts over a CLOSED capability enum (~20
+      capabilities cover the advisory-consumed scope) with typed params (object_type,
+      owner_scope, polarity, clause_role, timing, condition, magnitude) + verbatim
+      evidence quote + provenance + confidence per fact; all four consumer vocabularies
+      (hoser attacks, whattoplay vulnerability/roles, linchpin neutralized_by, InteractionFacts)
+      become pure derivations over facts.'
+    - 'Validation: hand-curated golden fixtures per semantic cluster are the ONLY
+      correctness gate; a full-corpus classification census over all 39,452 cards
+      (35,698 with oracle text) pins per-capability membership counts as the drift
+      regression; Scryfall Tagger via `otag:` search queries is a divergence DIAGNOSTIC
+      (community data, never gating); Forge''s card-script corpus is GPL-3.0 — read-only
+      prior art, no bulk import.'
   docs/briefs/change-point-detection.md:
     summary: 'Curates change-point detection methods for legacy-engine''s per-entity
       stable-era detection.
@@ -563,6 +666,77 @@ documents:
       a detected cliff with NO matching announcement is the drift alarm (banlist-currency
       check) — the mechanism that would have caught Candelabra 2 days after the ban
       instead of 6 weeks later.'
+  docs/briefs/data-autonomy-upstream.md:
+    summary: 'Reverse-engineers the upstream tournament-data pipeline legacy-engine
+      consumes (fbettega''s
+
+      mtg_decklist_scrapper → MTG_decklistcache), diagnoses the July 2026 outage (one
+      person''s home
+
+      server, no CI, no alerting — the second multi-day stall of 2026), and assesses
+      the epic''s fixed
+
+      hot-spare ambition: run the same scraper ourselves on a schedule, verify spare
+      output against
+
+      the existing cache parser, and flip CACHE_DIR only when upstream is down. Also
+      pins the
+
+      machine-readable sources and polling designs for B&R + set-release monitoring,
+      launchd
+
+      scheduling patterns for Andrew''s Mac, and a feasibility verdict on Card Kingdom
+      prices.
+
+      '
+    key_findings:
+    - 'The entire upstream is one person''s home server: no GitHub Actions in either
+      fbettega repo, and the July 2026 outage (26 days of missed daily updates, 07-02→07-28)
+      was caused by a house move + server hardware changes; April 2026 had a second
+      multi-day stall — hot-spare is justified by observed base rate, not paranoia.'
+    - 'Running the scraper ourselves is LOW effort: pure Python (beautifulsoup4/requests/dateutil/numpy),
+      one CLI entry point defaulting to a self-backfilling trailing 7-day window,
+      idempotent file writes; MTGO — the engine''s primary Legacy source — needs no
+      credentials at all (public pages with embedded JSON). Melee needs a real account
+      login (undocumented endpoints, unverifiable ToS — the one gray zone); Topdeck
+      has an official free-key API at 100 req/min.'
+    - The scraper repo has NO license (cache repo is GPL-3.0) — fork it on GitHub
+      and run it privately rather than vendoring/modifying/redistributing its code;
+      treat our spare's output tree as private infrastructure, never republish.
+    - 'Hot-spare verification is nearly free: our cache.py parse_cache_item + ingest_cache
+      already define the schema contract, so spare-vs-upstream divergence checking
+      is ''run both trees through the existing parser and diff tournaments/decks on
+      overlap days'' — no new contract machinery.'
+    - 'P0 side-finding: Scryfall bulk data is now JSONL-only (every /bulk-data entry
+      has jsonl_download_uri and no download_uri), and ingestion/scryfall.py reads
+      meta[''download_uri''] — the engine''s next cold `seed cards`/refresh will KeyError;
+      fix before (or as part of) the scheduled-refresh feature.'
+    - 'B&R monitoring should be two-signal: (a) detection = daily oracle_cards bulk
+      diff of legalities.legacy transitions (values are legal/not_legal/restricted/banned;
+      bulk collected every 12-24h, *.scryfall.io downloads unlimited); (b) attribution
+      = polling the WotC announcement page family, which is server-rendered, uses
+      fixed phrasing (''<Card> is banned.'', ''Changes effective as of <date>'', ''Next
+      announcement: <date>'') and pre-announces the next B&R date — both feed the
+      existing eras-confirm/append_ban_event registration loop, with the eras drift
+      alarm as backstop.'
+    - 'launchd: use StartCalendarInterval (jobs missed while the Mac sleeps fire once
+      on wake, coalesced — unlike StartInterval, which silently misses); gui/<uid>
+      LaunchAgents with absolute .venv paths, StandardOut/ErrPath logs, and a status
+      JSON the session-start surface reads; launchctl kickstart is the manual catch-up
+      verb.'
+    - 'Card Kingdom is OPEN: api.cardkingdom.com/api/v2/pricelist is a public unauthenticated
+      ~67 MB JSON (149,977 rows, scryfall_id join key, retail + buylist + per-condition),
+      regenerated at least daily; LED spot check $949.99 retail confirms the CK-vs-Scryfall
+      divergence that motivated the idea. MTGJSON (cardkingdom provider, retail+buylist,
+      90-day history) is the sanctioned-aggregator fallback; TCGplayer direct API
+      is moot.'
+    related:
+    - slug: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+      relationship: depends-on
+    - slug: docs/briefs/ingestion-archetype-contracts/parent.md
+      relationship: depends-on
+    - slug: docs/briefs/change-point-detection.md
+      relationship: parallel-to
   docs/briefs/deck-generation-and-moxfield.md:
     summary: 'Unblocks the deferred deck-generation pillar. Two halves: (1) the Moxfield
       integration path — there is
@@ -1417,6 +1591,81 @@ documents:
       reusing the existing Beta-Binomial shrinkage + speculative/evolving/established
       gates unchanged — every split cell surfaces at its own honest tier, never hidden,
       never blended.'
+  docs/briefs/superarchetype-aggregation.md:
+    summary: 'Curates the method for the superarchetype (strategy-cluster) layer:
+      clustering archetypes by card
+
+      composition at small N, aggregating member matchup cells into one cluster cell,
+      and gating that
+
+      cell for representativeness and pooling validity. Grounds every choice in the
+      real corpus (in the
+
+      2026-05-11 window only 4 of 1190 directed archetype cells clear n>=30; opponent-side
+      pooling into
+
+      ~8 clusters lifts that to ~16% and to 70% of cluster-vs-cluster cells) and in
+      the hierarchical-
+
+      models, paired-comparison, concentration-index and meta-analysis literatures.
+      Specifies a
+
+      random-effects pooled estimator, an effective-member concentration gate, an
+      I-squared
+
+      heterogeneity gate, the intra-cluster flag rule, and the exact rung the superarchetype
+      occupies
+
+      in the existing camp -> leave-camp-out parent'' -> marginal'' -> 0.5 shrinkage
+      chain.
+
+      '
+    key_findings:
+    - 'The epic''s premise is confirmed and worse than stated: in the 2026-05-11 window
+      only 4 of 1190 directed archetype-vs-archetype cells reach n>=30 (0.3%), none
+      reach n=100, 17.8% are literally n=0, and the median cell holds 2 matches —
+      Cradle Control''s largest opponent cell is n=10 across 82 matches.'
+    - 'Clustering must happen one level up in FEATURE space too: at the archetype
+      level the format staples (Force of Will, Brainstorm, Ponder, Daze, Wasteland,
+      the fetches, Underground Sea, Flow State — 14 cards that are core to >=30% of
+      archetypes) dominate the similarity and fuse 16 of 34 archetypes into one ''blue''
+      mega-cluster; TF-IDF''s soft down-weighting is NOT enough (cosine on IDF-weighted
+      centroids still fuses 14 of 30) — the staples must be HARD-removed, which is
+      the format-level analogue of the camp layer''s flex band.'
+    - 'HDBSCAN should not be the primary algorithm here, on one decisive ground: any
+      archetype pushed into the noise class gets no superarchetype at all — a coverage
+      failure aimed precisely at the thin archetypes the epic exists to serve. (The
+      secondary ''no density contrast at ~30 objects'' argument is author''s judgment
+      — neither sourced nor measured.) Average-linkage agglomerative on a precomputed
+      Jaccard dissimilarity assigns every archetype, and pvclust-style multiscale-bootstrap
+      AU p-values computed over the CARD features rather than the archetypes are the
+      proposed small-N branch validator.'
+    - 'Coverage rises monotonically with coarser clusters and so does the risk of
+      pooling unlike things: opponent-side pooled cells reaching n>=30 go 4.5% (K=17)
+      -> 10.4% (K=11) -> 15.8% (K=8) -> 24.5% (K=6) -> 36.8% (K=4), and cluster-vs-cluster
+      cells go 12.8% -> 70.3% at K=8 -> 93.8% at K=4. Granularity must be chosen by
+      a heterogeneity criterion, never by a coverage target.'
+    - 'Random-effects inverse-variance pooling is the estimator that self-degrades
+      correctly: with tau-squared = 0 (58.7% of poolable cells measured exactly zero)
+      its weights reduce to plain inverse variance, which for binomial cells is close
+      to the intuitive pooled-counts answer, and as members disagree its weights flatten
+      toward equality, automatically defusing the one-dominant-member problem instead
+      of needing a separate rule.'
+    - 'Both gates fire on the epic''s own motivating pair, which is the strongest
+      possible validation: Dimir Tempo is 4-9 (30.8%, n=13) vs Aluren and 24-5 (82.8%,
+      n=29) vs Show and Tell; the pooled cell reads 28-14 (66.7%, n=42) and would
+      clear the display gate, but HHI=0.573 (1.75 effective members, one member supplying
+      69% of n) and I-squared=0.89 both refuse it.'
+    - 'I-squared is one-sided evidence here: median I-squared across poolable cells
+      is exactly 0.000 and only 4.0% exceed 0.75, but Cochran''s Q has low power when
+      units are few and small, and I-squared depends on the precision of the units
+      — so a HIGH value is a reliable stop signal while a LOW value is never proof
+      of exchangeability.'
+    - 'Superarchetype membership does NOT need era-scoping the way camps do: co-membership
+      agreement across the Jan-Apr and Apr-Jul 2026 windows is 0.957 on the 26 archetypes
+      present in both, spanning both the Flow State adoption step and the Candelabra
+      ban. Recompute membership on the same window the matrix is sourced over, surface
+      churn as a diagnostic, and keep cluster identity stable.'
   docs/briefs/ingestion-archetype-contracts/parent.md:
     summary: 'Synthesizes a 7-specialist deep-research campaign into one buildable
       design for legacy-engine''s
