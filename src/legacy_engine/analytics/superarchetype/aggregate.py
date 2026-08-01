@@ -46,8 +46,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "Concentration",
     "MemberTally",
     "RandomEffects",
+    "concentration",
     "dersimonian_laird",
     "effective_n",
 ]
@@ -250,3 +252,85 @@ def effective_n(members: Sequence[MemberTally], re: RandomEffects) -> float:
         # no input can produce a ZeroDivisionError or an inf escaping into a cell.
         return total_n
     return min(1.0 / (variance * pq), total_n)
+
+
+# ---------------------------------------------------------------------------
+# Unit 3 — concentration gate: "is this really one member's record?" (pure)
+# ---------------------------------------------------------------------------
+
+_MEFF_MIN = 2.0
+"""CALIBRATION (measured): minimum effective number of members ``m_eff = 1/HHI`` for a pooled cell
+to be labelled a cluster read. Calibrated on the real corpus — median HHI across multi-member
+poolable cells is exactly 0.500, so this gate bisects the measured population (46% exceed it). The
+DOJ antitrust bands do NOT transfer (a perfectly even four-member cluster would be "highly
+concentrated"); only the effective-number reading of HHI is borrowed."""
+
+_MAX_MEMBER_SHARE = 0.60
+"""CALIBRATION, NOT SOURCED and NOT separately measured (adversarial-read finding 3): no single
+member may supply this share (or more) of the pooled n. Slack at K=2 (a 60/40 split already fails
+``m_eff``) but BINDING at K>=3 — a 60/20/20 split passes ``m_eff`` at 2.27 and fails only this cap,
+so the comparison is ``>=`` (a member at exactly 0.60 fails). Re-derive from the measured
+member-share distribution after dogfooding."""
+
+_CONCENTRATION_CALIBRATION_NOTE = (
+    f"m_eff >= {_MEFF_MIN} is calibrated on the measured corpus (median HHI 0.500 bisects the "
+    f"poolable population); the {_MAX_MEMBER_SHARE:.2f} top-share cap is a project calibration, "
+    "not a sourced threshold — binding at K>=3, where 60/20/20 passes m_eff (2.27) and fails "
+    "only the cap"
+)
+
+
+@dataclass(frozen=True)
+class Concentration:
+    """Concentration verdict for one pooled cell.
+
+    A failing cell is still SERVED — coverage is the point of the epic — but carries ``label``
+    (``dominated by <member> (...)``) that the surface must print (honest-degrade-marker).
+    ``calibration_note`` names both thresholds' provenance so the audit output can say which is
+    measured and which is a project calibration.
+    """
+
+    hhi: float
+    m_eff: float
+    top_share: float
+    top_member: str
+    passed: bool
+    label: str | None
+    calibration_note: str
+
+
+def concentration(members: Sequence[MemberTally]) -> Concentration:
+    """HHI over member shares of the pooled n, reported as ``m_eff = 1/HHI`` (brief §5).
+
+    Passes only when ``m_eff >= _MEFF_MIN`` AND the top member's share is under
+    ``_MAX_MEMBER_SHARE`` (a share of exactly 0.60 fails — the 60/20/20 case is the K>=3 shape the
+    cap exists to catch). A single member concentrates fully (HHI 1.0) and always fails; the
+    orchestrator refuses that case separately ("not a pool at all"). Ties for the top member break
+    to the alphabetically first name, for determinism.
+    """
+    if not members:
+        raise ValueError("concentration: no member tallies supplied")
+    names = [m.archetype for m in members]
+    if len(set(names)) != len(names):
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        raise ValueError(
+            f"concentration: duplicate member archetype(s) {duplicates} — a member appears at "
+            "most once per pooled cell"
+        )
+    total = sum(m.n for m in members)
+    shares = {m.archetype: m.n / total for m in members}
+    hhi = sum(share**2 for share in shares.values())
+    m_eff = 1.0 / hhi
+    top_member = min(shares, key=lambda a: (-shares[a], a))
+    top_share = shares[top_member]
+    passed = m_eff >= _MEFF_MIN and top_share < _MAX_MEMBER_SHARE
+    label = None if passed else f"dominated by {top_member} ({top_share:.0%} of pooled n)"
+    return Concentration(
+        hhi=hhi,
+        m_eff=m_eff,
+        top_share=top_share,
+        top_member=top_member,
+        passed=passed,
+        label=label,
+        calibration_note=_CONCENTRATION_CALIBRATION_NOTE,
+    )
