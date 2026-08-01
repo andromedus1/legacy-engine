@@ -111,6 +111,23 @@ def record_from_split(
     )
 
 
+def staged_split_parents(path: Path | str | None = None) -> list[str]:
+    """The sorted unique parents of every ``status == "candidate"`` split in the staging registry.
+
+    ``path`` defaults to ``DISCOVERED_VARIANTS_PATH``. An absent registry is the normal "nothing
+    staged yet" state and yields ``[]`` (``load_discovered``'s own contract); a MALFORMED registry
+    still raises, which is the same fail-fast the rest of this module keeps.
+
+    This is the parent set the multi-split matrix splits in one pass
+    (``analytics.matchup.build_multi_split_adaptive``) — promoted splits are excluded because their
+    camps already live in the curated taxonomy, i.e. ``decks.variant`` carries them without staging.
+    """
+    from legacy_engine.config import DISCOVERED_VARIANTS_PATH
+
+    reg = load_discovered(path if path is not None else DISCOVERED_VARIANTS_PATH)
+    return sorted({s.parent for s in reg.splits if s.status == "candidate"})
+
+
 def stage_split(
     reg: DiscoveredRegistry, split: DiscoveredSplitRecord
 ) -> tuple[DiscoveredRegistry, DiscoveredSplitRecord | None]:
