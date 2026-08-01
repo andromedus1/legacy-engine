@@ -1,7 +1,7 @@
 ---
 id: feature-camp-incremental-assignment
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics]
 parent: null
 depends_on: []
@@ -610,3 +610,85 @@ file-backed `tmp_path`-rooted DuckDB + `--db <path>` for every CLI-level test (m
   `assign_incremental` call clears ALL prior rows for `parent` before reassigning, so the
   table only ever holds the current generation's incremental rows per parent, never
   accumulating stale history.
+
+## Implementation notes
+<!-- 2026-07-31 -->
+
+All 5 units landed as designed, in the specified serial order. Files touched:
+`src/legacy_engine/analytics/discovery.py`, `src/legacy_engine/models/variant.py`,
+`src/legacy_engine/archetype/discovered.py`, `src/legacy_engine/cli.py`, plus
+`tests/analytics/test_discovery.py`, `tests/archetype/test_discovered.py`,
+`tests/test_discover_cli.py`.
+
+### Reconstruction accuracy — the riskiest assumption, measured
+
+The design's bar was **>=90%** nearest-centroid agreement with a split's own members' real camp
+labels, validating that raw L2-normalized flex-band cosine (dropping TF-IDF idf-reweighting and
+SVD reduction) is a trustworthy proxy for the space HDBSCAN clustered on.
+
+Measured against the **real corpus** (`data/legacy.duckdb`, read-only; all 30 staged splits in
+`data/variants/discovered.json`, pool reproduced from each record's own `params.since`, camps
+taken from persisted `member_keys`):
+
+**98.65% overall — 20,844 / 21,130 member decks.** Every split clears the bar individually;
+worst three: Lands 92.1%, Jeskai Midrange 92.4%, Grixis Midrange 94.7%. Best: eight splits at
+100.0%. Flex-band width ranged 8-50 dimensions.
+
+The assumption holds comfortably — the additive `idf_`-persistence fallback in Risks is NOT
+needed. `TestReconstructionAccuracy` in `tests/analytics/test_discovery.py` pins the >=90% floor
+hermetically (two-camp fixture and the harder three-camp shared-staples fixture, both 100%),
+carrying the real-corpus number in its docstring as the calibration record.
+
+### Deviations from the design (both narrow, behavior-preserving)
+
+- **`--min-similarity` default resolution.** The design specified
+  `default=DEFAULT_MIN_SIMILARITY, show_default=True` on the Click option. That requires
+  importing `analytics.discovery` at `cli.py` module scope, which costs **~1.0s of numpy import
+  on every CLI invocation** (`cli.py` currently has zero top-level `legacy_engine` imports — the
+  lazy-import half of the cli-nested-groups pattern). Implemented as `default=None` with in-body
+  resolution from `DEFAULT_MIN_SIMILARITY`, `show_default="0.35"`, and
+  `test_min_similarity_help_default_matches_the_engine_constant` pinning the displayed value to
+  the real constant so it cannot drift. Behavior is identical.
+- **Candidate mainboards read in one query, not one per deck.** Design step 6 specified a
+  per-candidate `SELECT`. Implemented as a single joined query into `counts_by_key`, then a pure
+  decision loop — the objective-search-split shape, materially cheaper on a real parent with
+  thousands of unlabeled decks, semantically identical.
+
+### Closed-vocabulary token — made load-bearing rather than ceremonial
+
+`assigned_by` is engine-written, so validating the literal at its own write site would be dead
+code. The guard was placed where the token actually crosses a trust boundary instead: reading
+prior rows back out of the DB. `assign_incremental` fails fast (naming the offending token and
+the sorted allow-set) if `variant_incremental_assignments` holds a row for the parent whose
+`assigned_by` is outside `_VALID_ASSIGNED_BY` — refusing to clear or reset state this path did
+not write.
+
+### Honest-degrade behavior for the ~30 pre-feature staged splits
+
+A split lacking `flex_cards` or any camp `centroid` returns
+`IncrementalAssignmentResult(degraded=True, ...)` with a note naming both the cause and the fix
+(`re-run 'discover run --archetype X'`); zero `decks` rows are touched and no side-table row is
+written. `discover apply` surfaces it as
+`// incremental assignment skipped: <reason>`. Covered at both the DB layer
+(`test_record_without_the_frozen_representation_degrades_honestly`) and the CLI layer
+(`test_pre_feature_staged_record_degrades_with_a_named_reason`). This is the state every real
+staged split is in until its next `discover run`.
+
+### Verification
+
+Full suite: **3055 passed, 1 skipped, 1 xfailed**. New coverage: 25 tests in
+`tests/analytics/test_discovery.py` (projection, centroid, nearest-camp, reconstruction floor,
+centroid stamping), 15 in `tests/archetype/test_discovered.py` (record plumbing, round-trip,
+assignment, both supersession branches, parent-scoping, closed-vocabulary refusal), 8 in
+`tests/test_discover_cli.py` (assignment + audit lines, `--no-incremental`, `--min-similarity`,
+end-to-end supersession, degrade path). `ruff check src/` adds no new finding *kinds* over
+`origin/main`: two new instances, `"np.ndarray"` (UP037) and `date.today()` (DTZ011), each
+matching the established convention in the file it lives in.
+
+### Follow-ups this feature deliberately does not do
+
+- `DEFAULT_MIN_SIMILARITY = 0.35` remains uncalibrated. The real-corpus decline rates now
+  observable (0-23 declines per split at 0.35) are the input a calibration pass would use.
+- No backfill for the 30 existing staged splits — each repopulates on its next `discover run`.
+- Margin-based tightening (decline on a thin top1-top2 gap) stays deferred; `runner_up` is
+  captured on every `NearestCampResult` as the diagnostic that would drive it.
