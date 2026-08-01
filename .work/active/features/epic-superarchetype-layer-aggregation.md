@@ -190,3 +190,37 @@ feature can deliver — plan against these numbers, not the brief's coverage tab
   derived behaviour is observable first), not a threshold change here.
 - Two one-line levers exist if coverage proves too thin in practice: `--au-min` / `--min-bp` on the
   clustering CLI, or curated entries. Prefer curated entries — they are auditable per key.
+
+## First real-corpus pooling measurement (2026-07-31, run after clustering shipped)
+
+Ran `superarchetype run` on the full corpus (70 clusters, 14 AU-supported multi-definer branches,
+56 singletons, 4 unassigned with named reasons) and measured the ACTUAL opponent-axis pooling gain
+by hand. **Temper expectations: this converts thin cells into evolving-tier leans, but on this corpus
+it rarely creates a DISPLAYING cell (n>=30) that did not already exist.**
+
+Subject `Cradle Control`, 2026 YTD, largest-member-alone → pooled-cluster:
+| opponent cluster | largest member | pooled | gate after |
+|---|---|---|---|
+| Dimir family (sa-027) | 38.2% n=55 | 38.6% n=70 | displays (already did) |
+| Delver family (sa-017) | 62.5% n=24 | 55.6% n=27 | evolving |
+| Reanimator family (sa-003) | 9.1% n=11 | 12.5% n=16 | evolving |
+| Stompy family (sa-001) | 40.0% n=10 | 50.0% n=20 | evolving |
+| White creature (sa-024) | 57.1% n=7 | 47.8% n=23 | evolving |
+| Colorless prison (sa-046) | 25.0% n=4 | 46.2% n=13 | evolving |
+
+Subject `Aluren`: colorless prison n=3 → 12, white creature n=10 → 24, Stompy n=7 → 16.
+
+**What this means for this feature:**
+1. The multiplier is real and largest exactly where it should be — **2x to 4x on the thinnest cells**
+   (n=3→12, n=4→13, n=7→23). Cells that were unmeasured or speculative become evolving-tier labeled
+   leans. That IS the honesty win the epic promised.
+2. But **almost nothing crosses n>=30 in this window**. Do not promise the page a new stratum of
+   grounded rows; promise it labeled leans where it currently shows nothing. Re-derive the coverage
+   claim on the SHIPPED taxonomy before `-best-call-fallback` writes any user-facing copy.
+3. **The dilution the gates exist for is visible immediately.** Cradle vs colorless prison moves
+   25.0% (n=4) → 46.2% (n=13); Aluren vs colorless prison 100% (n=3) → 50.0% (n=12). Those are large
+   swings driven by adding a differently-shaped member (Tron alongside Mystic Forge). Run the
+   heterogeneity and concentration gates on exactly these cells as acceptance fixtures — they are real,
+   they are thin, and they are the shape that would otherwise ship a confident wrong number.
+4. Combined with the singleton finding above (15 of 30 definers pool nothing), the realistic pitch for
+   this arc is **"fewer blank cells and honest leans", not "the thin-data problem is solved"**.
