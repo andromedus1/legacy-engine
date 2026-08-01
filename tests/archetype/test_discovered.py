@@ -21,6 +21,7 @@ from legacy_engine.analytics.discovery import Camp, DiscoveredSplit
 from legacy_engine.archetype.discovered import (
     TOP_SIGNATURE_CARDS,
     apply_split,
+    assign_incremental,
     load_discovered,
     promote_split,
     record_from_split,
@@ -180,6 +181,72 @@ class TestRecordFromSplit:
         assert record.temporal_note is None
         assert all(c.median_date is None for c in record.camps)
         assert all(c.pct_current is None for c in record.camps)
+
+    def test_carries_centroid_and_flex_cards(self):
+        """The frozen representation incremental assignment reads rides the record additively."""
+        camp_a = Camp(
+            name="A", member_keys=[("t1", 0)], signature_cards=[("X", 1.0)],
+            n=40, tier="evolving", centroid=[1.0, 0.0],
+        )
+        camp_b = Camp(
+            name="B", member_keys=[("t1", 1)], signature_cards=[("X", -1.0)],
+            n=120, tier="established", centroid=[0.0, 1.0],
+        )
+        split = DiscoveredSplit(
+            parent="Doomsday", camps=[camp_a, camp_b], n_noise=0,
+            stability=0.95, silhouette=0.8, passed=True, reasons=["ok"],
+            flex_cards=["Card A1", "Card B1"],
+        )
+        record = record_from_split(split, generated_from="t", params={})
+        assert record.flex_cards == ["Card A1", "Card B1"]
+        assert [c.centroid for c in record.camps] == [[1.0, 0.0], [0.0, 1.0]]
+
+    def test_centroid_and_flex_cards_default_absent_on_untouched_split(self):
+        record = record_from_split(self._split(), generated_from="t", params={})
+        assert record.flex_cards == []
+        assert all(c.centroid is None for c in record.camps)
+
+    def test_centroid_floats_survive_the_json_round_trip(self, tmp_path):
+        camp = Camp(
+            name="A", member_keys=[("t1", 0)], signature_cards=[("X", 1.0)],
+            n=40, tier="evolving", centroid=[0.7071067811865476, 0.7071067811865476],
+        )
+        split = DiscoveredSplit(
+            parent="Doomsday", camps=[camp, camp], n_noise=0, stability=0.95,
+            silhouette=None, passed=True, reasons=[], flex_cards=["B", "A"],
+        )
+        record = record_from_split(split, generated_from="t", params={})
+        path = tmp_path / "discovered.json"
+        save_discovered(DiscoveredRegistry(version="1", splits=[record]), path)
+
+        loaded = load_discovered(path).splits[0]
+        assert loaded.flex_cards == ["B", "A"]   # vocabulary ORDER is load-bearing, not a set
+        assert loaded.camps[0].centroid == pytest.approx([0.7071067811865476] * 2)
+
+    def test_old_shape_json_without_the_new_keys_still_loads(self, tmp_path):
+        """A staged record written before this feature (no centroid/flex_cards keys at all)
+        loads unchanged — the honest-degrade precondition assign_incremental keys off."""
+        path = tmp_path / "discovered.json"
+        path.write_text(json.dumps({
+            "version": "1",
+            "splits": [{
+                "parent": "Doomsday",
+                "generated_from": "discover run @ 2026-01-01 (pre-feature)",
+                "params": {},
+                "camps": [
+                    {"name": "A", "signature_cards": ["X"], "n": 40, "tier": "evolving",
+                     "member_keys": [["t1", 0]]},
+                    {"name": "B", "signature_cards": ["Y"], "n": 35, "tier": "evolving",
+                     "member_keys": [["t1", 1]]},
+                ],
+                "stability": 0.95,
+                "status": "candidate",
+            }],
+        }, indent=2))
+
+        loaded = load_discovered(path).splits[0]
+        assert loaded.flex_cards == []
+        assert all(c.centroid is None for c in loaded.camps)
 
 
 # ---------------------------------------------------------------------------
@@ -465,3 +532,304 @@ class TestApplySplit:
 
         disc = load_discovered(disc_path)
         assert disc.splits[0].status == "promoted"
+
+
+# ---------------------------------------------------------------------------
+# assign_incremental
+# ---------------------------------------------------------------------------
+
+def _con_with_clustered_doomsday_pool():
+    """In-memory DB: a clean two-camp 'Doomsday' pool (35 + 35), the shape discovery clusters.
+
+    Camp A runs Card A1/A2, camp B the mirror; ±1 copy of deterministic wobble keeps rows
+    non-identical without touching separation (mirrors tests/analytics/test_discovery.py).
+    """
+    from legacy_engine.ingestion import store
+
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    con.execute(
+        "INSERT INTO tournaments VALUES ('t1', 'T', '2026-01-01', NULL, 'Legacy', 'src', 'online')"
+    )
+    deck_rows = []
+    card_rows = []
+    for idx in range(70):
+        pair = ("Card A1", "Card A2") if idx < 35 else ("Card B1", "Card B2")
+        wobble = idx % 2
+        deck_rows.append(("t1", idx, "p", "W", "Doomsday", None))
+        card_rows += [
+            ("t1", idx, "main", "Core Land", 4),
+            ("t1", idx, "main", pair[0], 4 - wobble),
+            ("t1", idx, "main", pair[1], 3 + wobble),
+        ]
+    con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", deck_rows)
+    con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)", card_rows)
+    return con
+
+
+def _insert_deck(con, deck_idx: int, counts: dict[str, int], archetype: str = "Doomsday") -> None:
+    con.execute(
+        "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+        ["t1", deck_idx, "p", "W", archetype, None],
+    )
+    for name, count in counts.items():
+        con.execute(
+            "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+            ["t1", deck_idx, "main", name, count],
+        )
+
+
+def _variants(con) -> dict[int, str | None]:
+    return dict(
+        con.execute("SELECT deck_idx, variant FROM decks WHERE tournament_id = 't1'").fetchall()
+    )
+
+
+class TestAssignIncremental:
+    """Real centroids throughout: the split is produced by an actual `discover_subarchetypes`
+    run over the 70-deck pool, then post-staging decks are inserted — the exact sequence that
+    leaves fresh decks camp-unlabeled when a discovery re-run fails its stability gate."""
+
+    # Deck indices reserved for post-staging decks (outside the clustered pool's 0..69).
+    CLOSE_TO_A = 100
+    NO_OVERLAP = 101
+
+    def _stage(self, con, tmp_path, record=None) -> tuple[str, DiscoveredSplitRecord]:
+        from legacy_engine.analytics.discovery import discover_subarchetypes
+
+        if record is None:
+            split = discover_subarchetypes(con, "Doomsday", seed=0, n_boot=10)
+            assert split.passed, split.reasons
+            record = record_from_split(split, generated_from="gen-1", params={})
+        disc_path = str(tmp_path / "discovered.json")
+        save_discovered(DiscoveredRegistry(version="1", splits=[record]), disc_path)
+        return disc_path, record
+
+    def _camp_of(self, record: DiscoveredSplitRecord, deck_idx: int) -> str:
+        return next(
+            c.name for c in record.camps if ("t1", deck_idx) in (c.member_keys or [])
+        )
+
+    def _fixture(self, tmp_path):
+        """Cluster + stage over 70 decks, then add the post-staging decks and apply membership."""
+        con = _con_with_clustered_doomsday_pool()
+        disc_path, record = self._stage(con, tmp_path)
+        _insert_deck(con, self.CLOSE_TO_A, {"Core Land": 4, "Card A1": 4, "Card A2": 3})
+        _insert_deck(con, self.NO_OVERLAP, {"Core Land": 4, "Weird Tech": 4})
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+        return con, disc_path, record
+
+    def test_assigns_post_staging_deck_to_its_nearest_camp(self, tmp_path):
+        con, disc_path, record = self._fixture(tmp_path)
+        camp_a = self._camp_of(record, 0)
+
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.degraded is False
+        assert result.n_assigned == 1
+        assert result.per_camp == {camp_a: 1}
+        assert _variants(con)[self.CLOSE_TO_A] == camp_a
+        con.close()
+
+    def test_assignment_row_carries_incremental_provenance(self, tmp_path):
+        con, disc_path, record = self._fixture(tmp_path)
+        camp_a = self._camp_of(record, 0)
+
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        rows = con.execute(
+            "SELECT tournament_id, deck_idx, parent, camp, assigned_by, similarity, "
+            "generated_from FROM variant_incremental_assignments"
+        ).fetchall()
+        assert len(rows) == 1
+        tid, idx, parent, camp, assigned_by, similarity, generated_from = rows[0]
+        assert (tid, idx, parent, camp) == ("t1", self.CLOSE_TO_A, "Doomsday", camp_a)
+        assert assigned_by == "incremental"
+        assert generated_from == "gen-1"
+        assert similarity > 0.9   # a near-exact camp-A list
+        con.close()
+
+    def test_deck_sharing_no_flex_card_stays_unlabeled(self, tmp_path):
+        con, disc_path, _record = self._fixture(tmp_path)
+
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.n_declined == 1
+        assert _variants(con)[self.NO_OVERLAP] is None
+        assigned_idxs = [
+            r[0] for r in con.execute(
+                "SELECT deck_idx FROM variant_incremental_assignments"
+            ).fetchall()
+        ]
+        assert self.NO_OVERLAP not in assigned_idxs
+        con.close()
+
+    def test_cluster_members_are_not_re_examined(self, tmp_path):
+        """apply_split runs first, so every clustered member already carries its membership
+        label — incremental assignment must only ever consider the leftovers."""
+        con, disc_path, _record = self._fixture(tmp_path)
+
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.n_assigned + result.n_declined == 2   # the two post-staging decks only
+        assert con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments"
+        ).fetchone()[0] == 1
+        con.close()
+
+    def test_min_similarity_floor_is_honoured(self, tmp_path):
+        con, disc_path, _record = self._fixture(tmp_path)
+
+        result = assign_incremental(
+            con, "Doomsday", discovered_path=disc_path, min_similarity=0.999999,
+        )
+
+        assert result.n_assigned == 0
+        assert result.n_declined == 2
+        assert _variants(con)[self.CLOSE_TO_A] is None
+        con.close()
+
+    def test_other_archetype_decks_are_never_touched(self, tmp_path):
+        con = _con_with_clustered_doomsday_pool()
+        disc_path, _record = self._stage(con, tmp_path)
+        _insert_deck(con, self.CLOSE_TO_A, {"Core Land": 4, "Card A1": 4, "Card A2": 3})
+        _insert_deck(con, 200, {"Core Land": 4, "Card A1": 4, "Card A2": 3}, archetype="Lands")
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert _variants(con)[200] is None
+        con.close()
+
+    def test_record_without_the_frozen_representation_degrades_honestly(self, tmp_path):
+        """The ~30 real staged splits predating this path: named reason, zero decks touched."""
+        con = _con_with_clustered_doomsday_pool()
+        _, record = self._stage(con, tmp_path)
+        old_shape = record.model_copy(update={
+            "flex_cards": [],
+            "camps": [c.model_copy(update={"centroid": None}) for c in record.camps],
+        })
+        disc_path, _ = self._stage(con, tmp_path, record=old_shape)
+        _insert_deck(con, self.CLOSE_TO_A, {"Core Land": 4, "Card A1": 4, "Card A2": 3})
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.degraded is True
+        assert result.note is not None
+        assert "no frozen flex vocabulary" in result.note
+        assert "discover run" in result.note          # names the fix, not just the failure
+        assert result.n_assigned == 0
+        assert _variants(con)[self.CLOSE_TO_A] is None
+        assert con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments"
+        ).fetchone()[0] == 0
+        con.close()
+
+    def test_rerun_against_the_same_generation_is_idempotent(self, tmp_path):
+        con, disc_path, record = self._fixture(tmp_path)
+        first = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+        second = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert second.n_cleared == first.n_assigned
+        assert second.n_assigned == first.n_assigned
+        assert second.per_camp == first.per_camp
+        assert _variants(con)[self.CLOSE_TO_A] == self._camp_of(record, 0)
+        assert con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments"
+        ).fetchone()[0] == 1
+        con.close()
+
+    def test_new_generation_claiming_the_deck_supersedes_the_incremental_label(self, tmp_path):
+        """The supersession contract: once a PASSing run clusters the deck for real, the
+        incremental row is cleared and the membership label — not the stale one — stands."""
+        con, disc_path, record = self._fixture(tmp_path)
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+        camp_b = self._camp_of(record, 69)
+
+        # Generation 2 clusters the previously-incremental deck into the OTHER camp.
+        gen2_camps = [
+            c.model_copy(update={"member_keys": [*(c.member_keys or []), ("t1", self.CLOSE_TO_A)]})
+            if c.name == camp_b else c
+            for c in record.camps
+        ]
+        gen2 = record.model_copy(update={"camps": gen2_camps, "generated_from": "gen-2"})
+        disc_path, _ = self._stage(con, tmp_path, record=gen2)
+
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.n_cleared == 1
+        assert _variants(con)[self.CLOSE_TO_A] == camp_b    # real membership, not the old label
+        assert con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments"
+        ).fetchone()[0] == 0
+        con.close()
+
+    def test_new_generation_not_claiming_the_deck_reassigns_it_fresh(self, tmp_path):
+        """The other supersession branch: still uncovered by membership, so the stale row is
+        cleared and rewritten against the new generation — never left orphaned."""
+        con, disc_path, record = self._fixture(tmp_path)
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        gen2 = record.model_copy(update={"generated_from": "gen-2"})
+        disc_path, _ = self._stage(con, tmp_path, record=gen2)
+
+        apply_split(con, "Doomsday", discovered_path=disc_path)
+        result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert result.n_cleared == 1
+        assert result.n_assigned == 1
+        rows = con.execute(
+            "SELECT deck_idx, generated_from FROM variant_incremental_assignments"
+        ).fetchall()
+        assert rows == [(self.CLOSE_TO_A, "gen-2")]
+        con.close()
+
+    def test_no_staged_split_fails_fast(self, tmp_path):
+        con = _con_with_clustered_doomsday_pool()
+        with pytest.raises(ValueError, match="no staged candidate split for parent 'Doomsday'"):
+            assign_incremental(con, "Doomsday", discovered_path=str(tmp_path / "nope.json"))
+        con.close()
+
+    def test_refuses_to_clear_rows_it_did_not_write(self, tmp_path):
+        """assigned_by is a closed vocabulary — a row outside it is state this path doesn't own
+        and must never silently delete."""
+        con, disc_path, _record = self._fixture(tmp_path)
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+        con.execute(
+            "UPDATE variant_incremental_assignments SET assigned_by = 'hand-curated'"
+        )
+
+        with pytest.raises(ValueError, match="hand-curated"):
+            assign_incremental(con, "Doomsday", discovered_path=disc_path)
+        assert con.execute(
+            "SELECT count(*) FROM variant_incremental_assignments"
+        ).fetchone()[0] == 1
+        con.close()
+
+    def test_supersession_sweep_is_scoped_to_its_own_parent(self, tmp_path):
+        """The clear step keys on `parent` — re-running one archetype must never drop another
+        archetype's incremental rows or reset its labels."""
+        con, disc_path, record = self._fixture(tmp_path)
+        assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        # A second parent with its own incremental row, staged into the same registry.
+        _insert_deck(con, 300, {"Core Land": 4, "Card A1": 4, "Card A2": 3}, archetype="Lands")
+        lands = record.model_copy(update={"parent": "Lands", "camps": [
+            c.model_copy(update={"member_keys": []}) for c in record.camps
+        ]})
+        disc_path = str(tmp_path / "both.json")
+        save_discovered(DiscoveredRegistry(version="1", splits=[record, lands]), disc_path)
+        lands_result = assign_incremental(con, "Lands", discovered_path=disc_path)
+        assert lands_result.n_assigned == 1
+
+        doomsday_result = assign_incremental(con, "Doomsday", discovered_path=disc_path)
+
+        assert doomsday_result.n_cleared == 1   # its own row only
+        parents = con.execute(
+            "SELECT parent, deck_idx FROM variant_incremental_assignments ORDER BY parent"
+        ).fetchall()
+        assert parents == [("Doomsday", self.CLOSE_TO_A), ("Lands", 300)]
+        assert _variants(con)[300] is not None
+        con.close()
