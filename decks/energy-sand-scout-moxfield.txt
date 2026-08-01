@@ -1,0 +1,31 @@
+4 Ajani, Nacatl Pariah
+4 Amped Raptor
+4 Guide of Souls
+4 Ocelot Pride
+4 Swords to Plowshares
+4 Voice of Victory
+3 Sand Scout
+3 Static Prison
+3 Thalia, Guardian of Thraben
+2 Goblin Bombardment
+2 Hexing Squelcher
+4 Arid Mesa
+4 Wasteland
+2 Karakas
+2 Lazotep Quarry
+2 Marsh Flats
+2 Plains
+2 Plateau
+2 Sunbaked Canyon
+1 Elegant Parlor
+1 Mountain
+1 Windswept Heath
+
+Sideboard
+4 Deafening Silence
+2 Containment Priest
+2 Null Rod
+2 Price of Progress
+2 Pyroblast
+2 Surgical Extraction
+1 Abrade
