@@ -418,14 +418,20 @@ def build_field_read_report(
         f"matchup_plans_count={len(sideboard_pkg.matchup_plans)}"
     )
     if sideboard_pkg.matchup_plans:
+        from legacy_engine.advisory.sideboard import format_plan_declines
         for opp, plan in sorted(sideboard_pkg.matchup_plans.items()):
             if plan.degraded:
-                audit.append(f"  matchup_plan[{opp}]: degraded — {plan.note}")
+                audit.append(
+                    f"  matchup_plan[{opp}]: degraded ({plan.plan_status}) — {plan.note}"
+                )
             else:
                 audit.append(
-                    f"  matchup_plan[{opp}]: tier={plan.tier}, n_basis={plan.n_basis}, "
-                    f"out={plan.side_out}, in={plan.side_in}"
+                    f"  matchup_plan[{opp}]: status={plan.plan_status}, tier={plan.tier}, "
+                    f"n_basis={plan.n_basis}, out={plan.side_out}, in={plan.side_in}"
                 )
+            declined = format_plan_declines(plan)
+            if declined:
+                audit.append(f"  matchup_plan[{opp}]: declined — {declined}")
 
     return FieldReadReport(
         deck_archetype=resolved_archetype,
@@ -544,14 +550,16 @@ def _render_whattoplay(report: FieldReadReport) -> str:
 
 def _render_sideboard_plans(sb) -> list[str]:
     """Render per-matchup OUT/IN plans as text lines (only when value_informed)."""
-    from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER
+    from legacy_engine.advisory.sideboard import _VALUE_DISCLAIMER, format_plan_declines
 
     if not sb.value_informed or not sb.matchup_plans:
         return []
     lines: list[str] = ["  Per-matchup plans (presence-correlational):"]
     for opp, plan in sorted(sb.matchup_plans.items()):
         if plan.degraded:
-            lines.append(f"    vs {opp}: thin data — no per-matchup plan (rely on 15 composition)")
+            # plan.note carries the named degrade reason; hardcoding "thin data" here
+            # mislabels the structural no-legal-flex case.
+            lines.append(f"    vs {opp}: {plan.note}")
         else:
             out_str = ", ".join(
                 f"{c}x {card}" for card, c in sorted(plan.side_out.items())
@@ -563,6 +571,9 @@ def _render_sideboard_plans(sb) -> list[str]:
                 f"    vs {opp} [{plan.tier}, n≥{plan.n_basis}]: "
                 f"OUT {out_str} | IN {in_str}"
             )
+        declined = format_plan_declines(plan)
+        if declined:
+            lines.append(f"      [declined] {declined}")
     lines.append(f"  [disclaimer] {_VALUE_DISCLAIMER}")
     return lines
 
