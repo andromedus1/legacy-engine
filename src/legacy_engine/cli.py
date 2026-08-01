@@ -7222,6 +7222,265 @@ def eras_confirm(event_date: str, card: str, reason: str, events_path: str | Non
     click.echo("// re-run `eras run` (and any windowed report) to pick up the healed regime")
 
 
+# ── superarchetype: strategy clusters over archetypes (the third taxonomy level) ──
+#
+# Deliberate deviation from advisory-window-resolution-block: this group takes plain
+# --since/--until and never calls resolve_advisory_window, because that block's thin-regime degrade
+# counts `rounds`. The taxonomy must not be a function of match outcomes at ANY point, including its
+# window choice — that is the property the whole feature exists to guarantee.
+@main.group()
+def superarchetype() -> None:
+    """Derive, inspect, and explain the superarchetype (strategy-cluster) taxonomy."""
+
+
+_superarchetype_db_opt = click.option(
+    "--db",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to the DuckDB database file (defaults to project default).",
+)
+
+
+def _echo_cluster(cluster, *, indent: str = "  ") -> None:
+    support = "curated" if cluster.curated else (
+        f"AU={cluster.au:.3f} BP@1.0={cluster.bp_at_unit_scale:.2f}"
+        if cluster.au is not None and cluster.bp_at_unit_scale is not None
+        else "no branch support (singleton)"
+    )
+    click.echo(f"{indent}{cluster.id}  {cluster.label}  [{support}]")
+    for member in cluster.members:
+        note = f"  — {member.note}" if member.note else ""
+        click.echo(
+            f"{indent}  {member.archetype}  ({member.provenance}, n={member.n_decks}){note}"
+        )
+
+
+@superarchetype.command("run")
+@_superarchetype_db_opt
+@click.option("--since", default=None, help="Window start (YYYY-MM-DD, inclusive).")
+@click.option("--until", default=None, help="Window end (YYYY-MM-DD, inclusive).")
+@click.option("--au-min", type=float, default=None,
+              help="Branch AU p-value floor (calibration choice; default 0.95, compared strictly).")
+@click.option("--min-bp", type=float, default=None,
+              help="Raw bootstrap-probability floor at scale 1.0 (calibration choice; default 0.30).")
+@click.option("--n-boot", type=int, default=200, show_default=True,
+              help="Bootstrap resamples per scale.")
+@click.option("--seed", type=int, default=0, show_default=True, help="RNG seed (runs are exact).")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Compute and report without writing the registry or the DuckDB cache.")
+@_verbose
+def superarchetype_run(
+    db: str | None, since: str | None, until: str | None, au_min: float | None,
+    min_bp: float | None, n_boot: int, seed: int, dry_run: bool, verbose: bool,
+) -> None:
+    """Run the offline clustering pass: cores -> staple strip -> Jaccard -> average linkage ->
+    AU cut -> assignment -> curated merge -> persisted registry + churn report.
+
+    Sibling of `label` / `discover run` / `eras run`. Reads `deck_cards` only — never `rounds`.
+
+    Example: legacy-engine superarchetype run --since 2026-05-11
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.superarchetype.registry import run_superarchetypes
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        result = run_superarchetypes(
+            con, since=since, until=until, seed=seed, n_boot=n_boot,
+            au_min=au_min, min_bp=min_bp, write=not dry_run,
+        )
+    finally:
+        con.close()
+
+    registry = result.registry
+    click.echo(
+        f"// superarchetype run: window {since or '—'} .. {until or '—'}  "
+        f"(seed={seed}, n_boot={n_boot})"
+    )
+    click.echo(
+        f"// {result.n_archetypes} archetype label(s); {result.n_definers} definer(s) "
+        f"covering {result.definer_field_share:.1%} of the field"
+    )
+    click.echo(
+        f"// format staples hard-removed ({len(registry.staples)}): "
+        f"{', '.join(registry.staples) or '(none)'}"
+    )
+
+    if not registry.clusters:
+        click.echo("// DEGRADED: no taxonomy derived")
+        for reason in registry.reasons:
+            click.echo(f"//   {reason}")
+        return
+
+    multi = sum(1 for c in registry.clusters if len(c.members) > 1)
+    click.echo(
+        f"// {len(registry.clusters)} cluster(s), {multi} with more than one member; "
+        f"{result.assigned_field_share:.1%} of the field placed"
+    )
+    for cluster in registry.clusters:
+        _echo_cluster(cluster)
+
+    click.echo(f"// stability: {registry.stability:.3f}   cophenetic: {registry.cophenetic:.3f}")
+    click.echo(f"// churn: {result.churn.note}")
+    for archetype, old_id, new_id in result.churn.moves:
+        click.echo(f"//   moved {archetype}: {old_id} -> {new_id}")
+    for note in result.remap:
+        click.echo(f"//   identity {note}")
+
+    if registry.unassigned:
+        click.echo(f"// unassigned ({len(registry.unassigned)}):")
+        for archetype, reason in registry.unassigned[:20]:
+            click.echo(f"//   {archetype}: {reason}")
+        if len(registry.unassigned) > 20:
+            click.echo(f"//   … {len(registry.unassigned) - 20} more")
+
+    if registry.degraded:
+        click.echo("// DEGRADED taxonomy — see reasons below")
+    for reason in registry.reasons:
+        click.echo(f"// {reason}")
+    click.echo("// written" if result.written else "// dry run — nothing written")
+
+
+@superarchetype.command("list")
+@_superarchetype_db_opt
+@click.option("--cluster", "cluster_id", default=None, help="Show only this cluster id.")
+@_verbose
+def superarchetype_list(db: str | None, cluster_id: str | None, verbose: bool) -> None:
+    """List every persisted cluster and its members with derived/assigned/curated provenance.
+
+    Example: legacy-engine superarchetype list
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.superarchetype.registry import (
+        read_superarchetype_members,
+    )
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        registry = read_superarchetype_members(con)
+    finally:
+        con.close()
+
+    if registry is None or not registry.clusters:
+        click.echo("(no superarchetype registry — run `superarchetype run` first)")
+        return
+
+    click.echo(
+        f"// derived over {registry.window_since or '—'} .. {registry.window_until or '—'} "
+        f"at {registry.derived_at}"
+    )
+    click.echo(
+        f"// {len(registry.clusters)} cluster(s); stability {registry.stability:.3f}; "
+        f"{len(registry.unassigned)} unassigned archetype(s)"
+    )
+    if registry.degraded:
+        click.echo("// DEGRADED taxonomy — see `superarchetype run` output for the named reasons")
+
+    shown = [c for c in registry.clusters if cluster_id is None or c.id == cluster_id]
+    if not shown:
+        raise click.ClickException(
+            f"unknown cluster {cluster_id!r} — run `superarchetype list` to see the ids"
+        )
+    for cluster in shown:
+        _echo_cluster(cluster, indent="")
+
+
+@superarchetype.command("explain")
+@click.argument("archetype")
+@_superarchetype_db_opt
+@_verbose
+def superarchetype_explain(archetype: str, db: str | None, verbose: bool) -> None:
+    """Walk one archetype's cluster assignment: provenance, branch support, and the shared vs
+    disjoint stripped-core cards against each cluster-mate.
+
+    Example: legacy-engine superarchetype explain "Aluren"
+    """
+    _setup_logging(verbose)
+    from legacy_engine.analytics.superarchetype.cluster import (
+        build_compositions,
+        load_archetype_decks,
+    )
+    from legacy_engine.analytics.superarchetype.registry import (
+        read_superarchetype_members,
+    )
+    from legacy_engine.ingestion import store
+
+    con = store.connect(db) if db else store.connect()
+    try:
+        registry = read_superarchetype_members(con)
+        if registry is None:
+            raise click.ClickException(
+                "no superarchetype registry — run `superarchetype run` first"
+            )
+        decks = load_archetype_decks(
+            con, since=registry.window_since, until=registry.window_until
+        )
+    finally:
+        con.close()
+
+    compositions, _staples = build_compositions(decks)
+    cluster = registry.cluster_of(archetype)
+
+    click.echo(f"=== {archetype} — superarchetype assignment ===")
+    click.echo(
+        f"// registry window: {registry.window_since or '—'} .. {registry.window_until or '—'}"
+    )
+
+    if cluster is None:
+        reason = next((r for a, r in registry.unassigned if a == archetype), None)
+        if reason is None:
+            raise click.ClickException(
+                f"unknown archetype {archetype!r} — not in the registry and not on its "
+                "unassigned list; check `superarchetype list`"
+            )
+        click.echo(f"// UNASSIGNED: {reason}")
+        return
+
+    member = next(m for m in cluster.members if m.archetype == archetype)
+    click.echo(f"// cluster: {cluster.id}  {cluster.label}")
+    click.echo(f"// provenance: {member.provenance}" + (f"  ({member.note})" if member.note else ""))
+    if cluster.curated:
+        click.echo("// curated cluster — the derived assignment is recorded on each member above")
+    elif cluster.au is not None:
+        click.echo(
+            f"// branch support: AU={cluster.au:.3f} at height {cluster.height:.3f}, "
+            f"raw BP@scale1.0={cluster.bp_at_unit_scale:.2f}"
+        )
+        click.echo(
+            "// AU is computed per branch with NO multiplicity correction across branches — "
+            "the supported-branch count is optimistic in the multiple-comparisons direction"
+        )
+    else:
+        click.echo("// branch support: none — this archetype is its own cluster (au-unsupported)")
+
+    own = compositions.get(archetype)
+    if own is None:
+        click.echo("// no in-window decks for this archetype — composition detail unavailable")
+        return
+
+    click.echo(f"// stripped core ({len(own.stripped_core)} card(s)) vs each cluster-mate:")
+    for other in cluster.members:
+        if other.archetype == archetype:
+            continue
+        peer = compositions.get(other.archetype)
+        if peer is None:
+            click.echo(f"  {other.archetype}: no in-window decks — not comparable")
+            continue
+        shared = sorted(own.stripped_core & peer.stripped_core)
+        only_self = sorted(own.stripped_core - peer.stripped_core)
+        only_peer = sorted(peer.stripped_core - own.stripped_core)
+        union = len(own.stripped_core | peer.stripped_core)
+        similarity = (len(shared) / union) if union else 0.0
+        click.echo(f"  {other.archetype}: Jaccard {similarity:.3f}")
+        click.echo(f"    shared ({len(shared)}): {', '.join(shared) or '(none)'}")
+        click.echo(f"    {archetype} only ({len(only_self)}): {', '.join(only_self) or '(none)'}")
+        click.echo(
+            f"    {other.archetype} only ({len(only_peer)}): {', '.join(only_peer) or '(none)'}"
+        )
+
+
 # ── lint: curated-data integrity checks (CI-gated) ──
 @main.group()
 def lint() -> None:
