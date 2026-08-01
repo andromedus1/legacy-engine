@@ -1,7 +1,7 @@
 ---
 id: epic-sb-advisor-correctness-matchup-plan-flex
 kind: feature
-stage: drafting
+stage: review
 tags: [advisory]
 parent: epic-sb-advisor-correctness
 depends_on: []
@@ -424,3 +424,105 @@ land exemption incidentally.
 6. **Scope creep into "which cards SHOULD be cut".** This feature only decides eligibility. It must
    not touch lift computation, `lock_threshold`, or the coverage model — that is
    `epic-sb-config-evaluation-matchup-slot-test`'s and `per-deck-castability`'s territory.
+
+
+## Implementation notes
+
+Stage: `drafting` → `implementing` (design commit) → `review` (this commit). Implemented to the
+design above with no architectural deviation; three points where the design was tightened during
+implementation are recorded below.
+
+### What shipped
+
+| Unit | Landing site |
+|---|---|
+| 1 — plan-status vocabulary + diagnostic fields | `src/legacy_engine/advisory/sideboard.py` (constants + `MatchupPlan.__post_init__`) |
+| 2 — `_resolve_land_names` | `src/legacy_engine/advisory/sideboard.py` |
+| 3 — `_in_axis_verdict` (+ `_format_suppressed`, `format_plan_declines`) | `src/legacy_engine/advisory/sideboard.py` |
+| 4 — `_plan_matchups` eligibility rework | `src/legacy_engine/advisory/sideboard.py` |
+| 5 — call-site wiring | `src/legacy_engine/advisory/sideboard.py` (`recommend_sideboard` Step 6b) |
+| 6 — render honesty | `src/legacy_engine/cli.py` (2 sites), `src/legacy_engine/advisory/report.py` (2 sites) |
+
+`docs/ARCHITECTURE.md`'s `sideboard.py` row was rolled forward to describe the land exemption, the
+axis gate, the declined-candidate records, and the `no-legal-flex` degrade.
+
+### Deviations from the design
+
+1. **`format_plan_declines` was added as a public helper** (not in the unit list). Four render
+   sites needed the same "what did this plan decline" string; three inlined copies would have
+   drifted. `_format_suppressed` stayed private as the note-building primitive.
+2. **A fourth render site was fixed** — `report.py`'s field-read AUDIT trail (`:420`), not just the
+   three plan renders. It now carries `plan_status` and the declined list, which is where the
+   audit reader will look when a plan comes back empty.
+3. **The planned (≥1 swap) note also carries `declined off-axis IN`.** The design only put the
+   declined summary on the zero-swap and degraded notes. A plan that swapped 2 cards while
+   declining a higher-lift off-axis candidate is exactly the case where the reader needs to see
+   the overruled signal, so it is surfaced there too.
+
+### Honest-degrade path — how it is surfaced and tested
+
+Surfaced three ways, all carrying the named reason rather than re-deriving prose from `degraded`:
+
+- `MatchupPlan.plan_status == "no-legal-flex"` + `degraded=True` + `side_out`/`side_in` empty +
+  `post_board == deck_maindeck` + `n_basis=0` / `tier="speculative"` (magnitude suppressed).
+- `note` reads `vs <opp>: NO LEGAL FLEX — <N> card(s) locked core (≥65% archetype adoption);
+  <M> land slot(s) exempt from cuts. No OUT/IN proposed; the 15's composition carries this
+  matchup. Declined despite negative lift: <card> (lift -0.200, land), …`
+- `out_suppressed` carries the full `(card, lift, reason)` list, rendered by every plan surface as
+  a `declined:` / `[declined]` line.
+
+Tested by `TestMatchupPlanFlex::test_no_legal_flex_degrades_honestly` (asserts the status, the
+suppressed magnitude, the named reason, the declined records, and that the word "thin" does NOT
+appear — the mislabel the two hardcoded render sites would have produced) and
+`test_no_legal_flex_when_every_slot_is_ineligible` (proves the degrade is structural, fired on
+slot eligibility before lift is read).
+
+### Land-creature / MDFC finding
+
+The corpus decided the test — see `## Corpus grounding`. Summary: `cards.is_land` is TRUE for 34
+modal-DFC *spell* face-aliases that appear in corpus maindecks (Sink into Stupor 3,377 decks,
+Shatterskull Smashing 3,228, Boggart Trawler 2,654, Fell the Profane 2,346, Agadeem's Awakening
+2,140), so the column would have made all of them un-sideboardable. The `type_line` rule exempts
+none of them and still catches Dryad Arbor (`'Land Creature — Forest Dryad'`, the only
+land-creature in any corpus maindeck at 4,155 decks), transform lands whose front face is a land
+(Westvale Abbey), and plain lands (Scalding Tarn). Transform cards whose land is the BACK face
+(Ojer Pakpatiq, `'Legendary Creature — God'`) are correctly left eligible. No special-casing
+beyond the type-line rule was needed. `test_resolve_land_names_uses_type_line_not_is_land_column`
+pins this with the six verified rows and a constraint comment naming `store.py:213`.
+
+### Goldens
+
+No golden re-pins. The three `freshness-stripped CLI-body` goldens
+(`test_conditioned_card_winrate.py`, `test_matchup_split_variant.py`) cover `report cards` /
+`report subgroup` / `report matchups` and do not touch the matchup-plan render blocks. The two
+hardcoded `"thin data — no per-matchup plan"` strings that changed had no test coverage asserting
+them (verified by grep before editing).
+
+### Verification
+
+- `.venv/bin/python -m pytest -q` → **3218 passed, 1 skipped**. 26 new tests
+  (`TestMatchupPlanFlex` 24, `TestMatchupPlanFlexIntegration` 2); zero existing tests modified.
+- `.venv/bin/ruff check src/` → 527 findings, all pre-existing house style. Per-file delta against
+  the base commit on the three touched files: `BLE001` +1 (the degrade-on-failure `except
+  Exception` in `_resolve_land_names`, matching 27 existing) and `UP037` +6 (quoted annotations,
+  matching 131 existing). No new class of finding. CI's ruff step is non-blocking (`|| true`).
+
+### Test-integrity note
+
+The first pass of the integration tests was a green lie: they looped over
+`pkg.matchup_plans.items()` on a fixture that produces **zero** plans for an all-land maindeck (an
+all-land deck has no nonland colors, so `compute_deck_colors` returns empty, no hoser is castable,
+and `final_cards` is empty — `_plan_matchups` is never reached). They were replaced with two tests
+that assert something real: a monkeypatch spy proving `recommend_sideboard` actually resolves and
+passes `land_names` / `opponent_axes` / `card_axes` (the wiring the pure unit tests cannot reach),
+and an end-to-end land sweep. Both now assert `pkg.matchup_plans` is non-empty first, so they fail
+loudly rather than silently pass if the fixture ever stops producing plans.
+
+### Known limitation (deliberate, out of scope here)
+
+The `no-legal-flex` degrade cannot be exercised end-to-end through `recommend_sideboard` on the
+existing hermetic fixture: an all-land maindeck can never reach the planner (no nonland colors →
+no castable hosers → empty 15), and the fixture's `Control` archetype has too small a consensus
+core to lock a mixed deck flat. The path is fully covered at the `_plan_matchups` level with
+hand-built inputs. A corpus fixture with a consensus-tight archetype would close the gap; that
+belongs with `epic-sb-advisor-correctness-backtest-ci-gate`'s hermetic backtest fixture, not here.
