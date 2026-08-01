@@ -169,6 +169,96 @@ class TestEraHorizonsResolutionOrder:
         con.close()
 
 
+class TestEraHorizonsCampParentMap:
+    """``camp_parent`` (feature-multi-split-matrix Unit 3): explicit camp -> parent resolution for
+    the multi-split matrix, where a prefix rule cannot disambiguate many parents at once."""
+
+    def _painter_pair_con(self):
+        """``Painter`` has an era row; ``Blue Painter`` does not — the prefix trap."""
+        con = store.connect(":memory:")
+        boundary = EraBoundary(date="2026-04-20", signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False)
+        eras = {"Painter": EntityEras(entity="Painter", stable_since="2026-04-20", boundaries=(boundary,), inherited_from_parent=False)}
+        attributions = {("Painter", "2026-04-20"): Attribution(kind="ban", card="Grindstone", detail="ban: Grindstone")}
+        _write(con, eras, attributions)
+        # The ban-only branch queries `decks`; give it a corpus so the fallback is a real lookup.
+        _load_decks(con, archetype="Blue Painter", n=5, dt="2026-06-01", name_prefix="bp")
+        return con
+
+    def test_camp_with_no_row_inherits_its_mapped_parent(self):
+        con = self._painter_pair_con()
+        camp_parent = {"Painter [Welder]": "Painter", "Blue Painter [Welder]": "Blue Painter"}
+        horizons, _audit = era_horizons(
+            con, ["Painter [Welder]", "Blue Painter [Welder]"], camp_parent=camp_parent,
+        )
+        assert horizons["Painter [Welder]"].source == "era-parent"
+        assert horizons["Painter [Welder]"].since == "2026-04-20"
+        # "Blue Painter [Welder]" must NOT inherit "Painter"'s row via a prefix match.
+        assert horizons["Blue Painter [Welder]"].source == "ban-only"
+        assert horizons["Blue Painter [Welder]"].since is None
+        con.close()
+
+    def test_prefix_parsing_would_have_gotten_it_wrong(self):
+        """The same call WITHOUT the map, using the single-split prefix rule, mis-resolves
+        ``Blue Painter``'s camp — this is exactly why the explicit map exists."""
+        con = self._painter_pair_con()
+        horizons, _audit = era_horizons(
+            con, ["Blue Painter [Welder]"], split_variant="Painter",
+        )
+        # Prefix rule can't see "Blue Painter" as the parent, so it falls to ban-only on the
+        # WRONG base label — the map above resolves the parent by construction instead.
+        assert horizons["Blue Painter [Welder]"].source == "ban-only"
+        con.close()
+
+    def test_camp_own_row_still_wins_over_the_mapped_parent(self):
+        con = store.connect(":memory:")
+        eras = {
+            "Painter": EntityEras(entity="Painter", stable_since="2026-04-20", boundaries=(), inherited_from_parent=False),
+            "Painter [Welder]": EntityEras(entity="Painter [Welder]", stable_since="2026-05-01", boundaries=(), inherited_from_parent=False),
+        }
+        _write(con, eras, parent={"Painter": "Painter", "Painter [Welder]": "Painter"})
+
+        horizons, _audit = era_horizons(
+            con, ["Painter [Welder]"], camp_parent={"Painter [Welder]": "Painter"},
+        )
+        assert horizons["Painter [Welder]"] == EraHorizon(
+            since="2026-05-01", source="era", trigger=None, alarm=None,
+        )
+        con.close()
+
+    def test_unmapped_label_falls_through_to_the_prefix_rule(self):
+        """A map that covers only SOME labels leaves the rest on the untouched prefix path."""
+        con = self._painter_pair_con()
+        horizons, _audit = era_horizons(
+            con, ["Painter [Welder]", "Painter [Grindstone]"],
+            split_variant="Painter", camp_parent={"Painter [Welder]": "Painter"},
+        )
+        assert horizons["Painter [Welder]"].source == "era-parent"
+        assert horizons["Painter [Grindstone]"].source == "era-parent"
+        con.close()
+
+    def test_ban_only_fallback_uses_the_mapped_parent(self):
+        """The ban-only branch resolves its base label through the map too — a camp of an
+        era-less parent must inherit that PARENT's ban date, not its own synthetic label."""
+        con = store.connect(":memory:")
+        eras = {"Other": EntityEras(entity="Other", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        _write(con, eras)
+        for i in range(5):
+            decks = [_deck(f"r{i}", ["Entomb", "Reanimate"])]
+            tid = store.load_tournament(
+                con, parse_cache_item(_tournament(f"t{i}", "2025-06-01", decks), "MTGO"),
+            )
+            con.execute("UPDATE decks SET archetype = 'Reanimator' WHERE tournament_id = ?", [tid])
+
+        horizons, _audit = era_horizons(
+            con, ["Reanimator [Turbo]"], camp_parent={"Reanimator [Turbo]": "Reanimator"},
+        )
+        assert horizons["Reanimator [Turbo]"] == EraHorizon(
+            since="2025-11-10", source="ban-only",
+            trigger="ban: valid_since 2025-11-10", alarm=None,
+        )
+        con.close()
+
+
 # ---------------------------------------------------------------------------
 # resolve_field_era
 # ---------------------------------------------------------------------------
