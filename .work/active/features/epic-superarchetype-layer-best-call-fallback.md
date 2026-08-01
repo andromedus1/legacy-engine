@@ -117,3 +117,9 @@ opponent-cluster cell (existing design) → **family-imputed cell** (licensed; c
 marginal-imputed (last resort, quarantined — compose with feature-ranking-honesty-guards).
 Copy discipline: the page promises "fewer blank cells and honest leans", not grounded coverage;
 the I² one-sidedness caveat must appear wherever a pooled or imputed number does.
+
+## Inherited addendum #2 (2026-08-01): era/freshness display (epic addendum #2 — binding)
+Imputed/pooled cells inherit the page's not-current muting rules via their pool's
+current-regime share; the provenance chip names the window mix; subjects whose family
+membership churned on the latest `superarchetype run` carry a labeled churn flag. Seam with
+feature-ranking-honesty-guards: its regime-currency warning treats pool composition identically.

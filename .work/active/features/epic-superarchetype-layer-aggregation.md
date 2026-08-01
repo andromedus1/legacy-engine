@@ -420,3 +420,16 @@ def impute_cell(subject: str, opponent: str, license: ImputationLicense,
 - [ ] p never appears without the license attached; no NaN/inf escapes.
 - [ ] Non-vacuity: mutate _LICENSE_MIN_COLS / the veto predicate BY SYMBOL NAME and confirm the matching
       tests go red.
+
+### Unit 7 amendment (2026-08-01, era discipline — epic addendum #2)
+- `MemberTally` gains `definer: bool` (or the constructor rejects non-contributors): pool
+  contributions are DEFINERS + CURATED members only; assignees receive imputation but never
+  contribute. Acceptance: an assignee tally is refused/excluded with a named reason.
+- `ImputedCell`/`PooledCell` gain freshness passthrough: `window_note: str` and
+  `current_regime_share: float | None` — the kernel does not COMPUTE windows (it stays DB-free;
+  -chain supplies both from the adaptive build) but must never drop them. Acceptance: provenance
+  round-trips; a pool with current_regime_share below the page's muting floor still returns, with
+  the share attached for the surface to mute.
+- The license harness (LOO) runs on era-windowed profiles supplied by the caller; the harness API
+  takes profiles, not dates. The 2026-01-01 probe numbers (MAE 0.075 vs 0.107) are recorded as
+  directional expectations, not fixtures.
