@@ -15,6 +15,7 @@ import pytest
 from legacy_engine.analytics.superarchetype.aggregate import (
     MemberTally,
     _logit_with_correction,
+    concentration,
     dersimonian_laird,
     effective_n,
 )
@@ -199,3 +200,56 @@ class TestEffectiveN:
         re = dersimonian_laird(headline_pair)
         with pytest.raises(ValueError, match="no member tallies"):
             effective_n([], re)
+
+
+class TestConcentration:
+    def test_headline_fixture_fails_the_gate(self, headline_pair):
+        # Brief §6.3: HHI = 0.573, m_eff = 1.75 (< 2.0), top share 0.69 (>= 0.60 cap).
+        result = concentration(headline_pair)
+        assert result.hhi == pytest.approx(0.573, abs=1e-3)
+        assert result.m_eff == pytest.approx(1.75, abs=5e-3)
+        assert result.top_member == "Show and Tell"
+        assert result.top_share == pytest.approx(29 / 42)
+        assert result.passed is False
+
+    def test_sixty_twenty_twenty_passes_m_eff_and_fails_only_the_cap(self, make_tally):
+        # The K>=3 binding case (adversarial-read finding 3): m_eff = 2.27 clears the gate, so
+        # only the (uncalibrated, project-owned) 0.60 top-share cap refuses it.
+        members = [
+            make_tally("Big", wins=15, n=30),
+            make_tally("Small1", wins=5, n=10),
+            make_tally("Small2", wins=5, n=10),
+        ]
+        result = concentration(members)
+        assert result.m_eff == pytest.approx(2.27, abs=5e-3)
+        assert result.m_eff >= 2.0
+        assert result.top_share == pytest.approx(0.60)
+        assert result.passed is False
+        assert result.label is not None and "dominated by Big" in result.label
+
+    def test_failing_cell_is_labelled_not_dropped(self, headline_pair):
+        result = concentration(headline_pair)
+        assert result.label == "dominated by Show and Tell (69% of pooled n)"
+        assert "calibration" in result.calibration_note
+
+    def test_even_split_passes_with_no_label(self, make_tally):
+        members = [make_tally("A", wins=5, n=20), make_tally("B", wins=9, n=20)]
+        result = concentration(members)
+        assert result.passed is True
+        assert result.label is None
+        assert result.m_eff == pytest.approx(2.0)
+
+    def test_single_member_concentrates_fully(self, make_tally):
+        result = concentration([make_tally("Solo", wins=4, n=10)])
+        assert result.hhi == pytest.approx(1.0)
+        assert result.m_eff == pytest.approx(1.0)
+        assert result.passed is False
+        assert result.label == "dominated by Solo (100% of pooled n)"
+
+    def test_empty_input_fails_fast(self):
+        with pytest.raises(ValueError, match="no member tallies"):
+            concentration([])
+
+    def test_duplicate_member_names_fail_fast(self, make_tally):
+        with pytest.raises(ValueError, match="duplicate member archetype"):
+            concentration([make_tally("A", wins=1, n=5), make_tally("A", wins=2, n=5)])
