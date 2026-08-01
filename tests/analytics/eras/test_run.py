@@ -37,6 +37,36 @@ from legacy_engine.analytics.eras.store import read_entity_eras
 # TestAlarmCalibration — pure fixture-based, no DB
 # ---------------------------------------------------------------------------
 
+_CLIFF_START_WEEKLY = [2, 5, 12, 34, 23, 42, 37, 41, 52, 20, 28, 36, 50, 58, 59, 59, 20, 1]
+
+
+def _cliff_series_with_card_rates(entity: str, rates: dict) -> "EntitySeries":
+    """Same weekly deck-count shape as `tron_cliff_series` (the calibrated cliff — BOCPD peak
+    lands on the last complete bucket, 2026-06-22) with one or more cards' own tracked inclusion
+    rate parametrized — lets the same shape prove both `registered_pending` (rate plausible) and
+    `unattributed` (rate below `BAN_AFFECT_THRESHOLD`, e.g. Drift's real 15% Undercity Informer
+    inclusion) without depending on the shared `tron_cliff_series` fixture's own fixed 100% rate.
+    """
+    from legacy_engine.analytics.eras.series import Bucket, EntitySeries
+
+    start = date(2026, 3, 2)
+    n = len(_CLIFF_START_WEEKLY)
+    starts = [(start + timedelta(weeks=i)).isoformat() for i in range(n)]
+    buckets = tuple(
+        Bucket(
+            start=starts[i], complete=(i < n - 1), decks=decks, field_decks=420,
+            wins=0, losses=0,
+            card_incl={card: round(rate * decks) for card, rate in rates.items()},
+        )
+        for i, decks in enumerate(_CLIFF_START_WEEKLY)
+    )
+    return EntitySeries(
+        entity=entity, parent=entity, bucket_weeks=1, flex_cards=tuple(rates), buckets=buckets,
+    )
+
+
+_CLIFF_PEAK_DATE = "2026-06-22"  # empirically the cliff's own BOCPD argmax bucket start
+
 
 class TestAlarmCalibration:
     """Calibration ground truth (epic risk note): fires on the Tron cliff, silent on the stable
@@ -111,6 +141,61 @@ class TestAlarmCalibration:
         series = {"Short": s}
         eras = {"Short": EntityEras(entity="Short", stable_since=None, boundaries=(), inherited_from_parent=False)}
         assert compute_drift_alarms(series, eras, {}) == {}
+
+    def test_registered_ban_near_peak_softens_wording(self):
+        # Card tracked at 100% (well above BAN_AFFECT_THRESHOLD) -> plausible ban.
+        s = _cliff_series_with_card_rates("Tron", {"Candelabra of Tawnos": 1.0})
+        series = {"Tron": s}
+        eras = {"Tron": EntityEras(entity="Tron", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        ban_events = ((date(2026, 6, 15), "Candelabra of Tawnos", "test ban"),)
+        alarms = compute_drift_alarms(series, eras, {}, ban_events=ban_events)
+        assert "Tron" in alarms
+        alarm = alarms["Tron"]
+        assert alarm.kind == "registered_pending"
+        assert alarm.card == "Candelabra of Tawnos"
+        assert "possible unregistered" not in alarm.note
+        assert "registered ban" in alarm.note
+
+    def test_registered_ban_below_threshold_stays_unattributed(self):
+        # Card tracked at 15% (below BAN_AFFECT_THRESHOLD) -> the nearby ban does NOT explain
+        # this entity's own disturbance; wording must stay the classic unattributed note.
+        s = _cliff_series_with_card_rates("Drift", {"Undercity Informer": 0.15})
+        series = {"Drift": s}
+        eras = {"Drift": EntityEras(entity="Drift", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        ban_events = ((date(2026, 6, 15), "Undercity Informer", "test ban"),)
+        alarms = compute_drift_alarms(series, eras, {}, ban_events=ban_events)
+        assert "Drift" in alarms
+        alarm = alarms["Drift"]
+        assert alarm.kind == "unattributed"
+        assert alarm.card is None
+        assert "possible unregistered B&R change" in alarm.note
+
+    def test_no_ban_events_argument_is_byte_identical_to_today(self, tron_cliff_series):
+        # Today's exact call shape (no ban_events kwarg at all) -> unchanged output.
+        series = {"Tron": tron_cliff_series}
+        eras = {"Tron": EntityEras(entity="Tron", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        alarms = compute_drift_alarms(series, eras, {})
+        assert alarms["Tron"].kind == "unattributed"
+        assert alarms["Tron"].note == (
+            f"unattributed disturbance (p_change={alarms['Tron'].p_change:.3f}) — "
+            "possible unregistered B&R change"
+        )
+
+    def test_two_same_date_bans_names_the_plausible_one(self):
+        s = _cliff_series_with_card_rates(
+            "Tron", {"Plausible Card": 1.0, "Implausible Card": 0.10},
+        )
+        series = {"Tron": s}
+        eras = {"Tron": EntityEras(entity="Tron", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        ban_events = (
+            (date(2026, 6, 15), "Plausible Card", "test ban"),
+            (date(2026, 6, 15), "Implausible Card", "test ban"),
+        )
+        alarms = compute_drift_alarms(series, eras, {}, ban_events=ban_events)
+        alarm = alarms["Tron"]
+        assert alarm.kind == "registered_pending"
+        assert alarm.card == "Plausible Card"
+        assert "Implausible Card" in alarm.note
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +318,26 @@ class TestRunErasEndToEnd:
         result, _rows = run_result_and_rows
         assert "Drift" in result.alarms
         assert result.alarms["Drift"].p_change >= 0.5
+
+    def test_tron_alarm_names_registered_ban_not_unregistered(self, run_result_and_rows):
+        # Finding A repro: Tron's own boundary IS attributed "ban" (Undercity Informer), but at
+        # n=3 the fleet-wide BH-FDR has no power to accept it -> the alarm still fires. Wording
+        # must consult the ledger and say so, never claim the ban is unregistered.
+        result, _rows = run_result_and_rows
+        assert "Tron" in result.alarms
+        alarm = result.alarms["Tron"]
+        assert alarm.kind == "registered_pending"
+        assert alarm.card == "Undercity Informer"
+        assert "possible unregistered" not in alarm.note
+
+    def test_drift_alarm_stays_unattributed_alongside_tron(self, run_result_and_rows):
+        # Same nearby registered ban must NOT soften Drift's wording — its own 15% inclusion is
+        # genuinely below the affectedness threshold, proving the plausibility gate (not mere
+        # presence of a nearby ban) drives the corrected wording.
+        result, _rows = run_result_and_rows
+        alarm = result.alarms["Drift"]
+        assert alarm.kind == "unattributed"
+        assert "possible unregistered B&R change" in alarm.note
 
     def test_store_round_trip_matches_the_run_result(self, run_result_and_rows):
         result, rows = run_result_and_rows
