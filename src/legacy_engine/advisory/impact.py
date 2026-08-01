@@ -307,7 +307,8 @@ def symmetry_factor(hoser: "HoserCard", my_vulnerability_tags: "frozenset[str]")
 
     ``hoser.attacks`` and the vulnerability-tag vocabulary (``whattoplay.VulnerabilityTag``)
     are the SAME tag space (graveyard-recursion, graveyard-fuel, plays-<color>, combo,
-    low-curve, greedy-manabase, creature-based, low-interaction, storm-reliant, ramp) — a
+    low-curve, nonbasic-manabase, artifact-mana-reliant, creature-based, low-interaction,
+    storm-reliant, ramp) — a
     symmetric hoser "shares the hosed axis" with my deck exactly when
     ``hoser.attacks & my_vulnerability_tags`` is non-empty (e.g. a symmetric
     graveyard-recursion hoser boarded in by a deck that ALSO carries the graveyard-recursion

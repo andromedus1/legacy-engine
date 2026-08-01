@@ -403,7 +403,7 @@ class TestImpactOrchestration:
         hoser = make_hoser(
             name="Null Rod",
             colors=frozenset({"G"}),
-            attacks=frozenset({"ramp", "greedy-manabase"}),
+            attacks=frozenset({"ramp", "artifact-mana-reliant"}),
             symmetry="symmetric",
         )
         linchpin = make_linchpin(
