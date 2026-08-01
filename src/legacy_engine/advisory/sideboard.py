@@ -198,8 +198,7 @@ from legacy_engine.advisory.positioning import _DEFAULT_RISK_QUANTILE, _DIRICHLE
 # Imported here as a module-level constant to avoid importing card_tags (circular risk).
 _PITCH_SPELL_RE = re.compile(
     r"rather than pay this spell's mana cost"
-    r"|without paying its mana cost"
-    r"|without paying \(its|their\) mana cost"
+    r"|without paying (?:its|their) mana costs?"
     r"|you may exile .+ rather than pay"
     r"|you may return .+ to its owner's hand rather than pay",
     re.IGNORECASE,
@@ -908,6 +907,32 @@ _VALID_SYMMETRY = frozenset({"asymmetric", "symmetric"})
 # catalog entry), so no shipped entry uses this token yet — the loader must still accept it.
 _VALID_CAST_REQUIRES = frozenset({"opp_controls_plains"})
 
+# HoserCard.attacks: the closed vulnerability-tag vocabulary a curated entry may claim.
+# MUST stay in sync with the tags emitted by whattoplay._vulnerability_from_composition and
+# whattoplay._color_contingent_tags — a curated tag outside this set can never match a derived
+# vulnerability tag, so the entry would silently cover nothing. "_hate" is the counter-hoser
+# pseudo-attack (see _HATE_ELEMENT_PREFIX), not a derived vulnerability tag.
+_VALID_ATTACK_TAGS: frozenset[str] = frozenset({
+    "_hate",
+    "artifact-mana-reliant",
+    "colorless-reliant",
+    "combo",
+    "creature-based",
+    "graveyard-fuel",
+    "graveyard-recursion",
+    "low-curve",
+    "low-interaction",
+    "nonbasic-manabase",
+    "noncreature-reliant",
+    "ramp",
+    "storm-reliant",
+    "plays-black",
+    "plays-blue",
+    "plays-green",
+    "plays-red",
+    "plays-white",
+})
+
 
 def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
     """Load and validate a hoser catalog from a JSON data file.
@@ -916,7 +941,7 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
 
     Each hoser entry must have:
       ``name``          (str)
-      ``attacks``       (list of tag strings; non-empty)
+      ``attacks``       (list of tag strings; non-empty, each in ``_VALID_ATTACK_TAGS``)
       ``colors``        (list of WUBRG single-char strings; empty = colorless)
       ``max_copies``    (int ≥ 1)
       ``swing``         (float in (0,1) OR the aliases "dedicated" / "soft")
@@ -961,6 +986,12 @@ def load_hoser_catalog(path: "Path | str") -> "dict[str, HoserCard]":
                 f"load_hoser_catalog: {name!r} 'attacks' must be a non-empty list"
             )
         attacks = frozenset(str(t) for t in attacks_raw)
+        unknown_attacks = sorted(attacks - _VALID_ATTACK_TAGS)
+        if unknown_attacks:
+            raise ValueError(
+                f"load_hoser_catalog: {name!r} 'attacks' has unknown tag(s) "
+                f"{unknown_attacks}; allowed: {sorted(_VALID_ATTACK_TAGS)}"
+            )
 
         colors_raw = entry.get("colors")
         if not isinstance(colors_raw, list):
@@ -1258,6 +1289,13 @@ _FALLBACK_ATTACKS: frozenset[str] = frozenset({"combo"})
 _RE_BLAST_RED = re.compile(r"target red (?:spell|permanent)|if it'?s red", re.IGNORECASE)
 _RE_BLAST_BLUE = re.compile(r"target blue (?:spell|permanent)|if it'?s blue", re.IGNORECASE)
 
+# Land destruction (epic-card-semantics-ir-fix-ld-mislabel): "destroy target land" / "destroy
+# target nonbasic land" — Wasteland ("{T}, Sacrifice this land: Destroy target nonbasic
+# land.") and Ghost Quarter ("{T}, Sacrifice this land: Destroy target land. ...").  Must be
+# checked BEFORE rule 4's bare "destroy target" substring check, which would otherwise
+# mislabel a promoted (non-catalog) land-destruction card as creature-based.
+_RE_LAND_DESTRUCTION = re.compile(r"destroy target (?:nonbasic )?land\b", re.IGNORECASE)
+
 # Broad free/soft anti-noncreature interaction (feature-sfv-attachments): the exact
 # "counter target noncreature spell" template shared by Force of Negation / Spell Pierce /
 # Mental Misstep-style noncreature-restricted counters — distinct from the generic
@@ -1274,7 +1312,12 @@ _RE_COUNTER_NONCREATURE = re.compile(r"counter target noncreature spell", re.IGN
 # without restricting to noncreature spells, and vice versa (Force of Negation/Spell Pierce
 # hit noncreature spells of ANY color, including colorless, but do not specifically call out
 # "colorless spell" the way Consign/Ceremonious Rejection do).
-_RE_COUNTER_COLORLESS = re.compile(r"counter target.*colorless spell", re.IGNORECASE | re.DOTALL)
+# `[^.]*` (not DOTALL `.*`) bounds the match to a single sentence — a future card reading
+# "Counter target spell. ... colorless spell ..." in a LATER, unrelated sentence must not
+# match; `[^.]*` still crosses the newline inside Consign to Memory's one sentence ("Counter
+# target triggered ability or\ncolorless spell.") since a negated character class matches
+# newlines regardless of DOTALL.
+_RE_COUNTER_COLORLESS = re.compile(r"counter target[^.]*colorless spell", re.IGNORECASE)
 
 
 def _derive_attacks_for_promoted(
@@ -1298,12 +1341,19 @@ def _derive_attacks_for_promoted(
        → {plays-red} / {plays-blue}   (Hydroblast/Pyroblast/Blue|Red Elemental Blast template)
     3. Graveyard exile: "exile" AND "graveyard" present
        → {graveyard-recursion}
+    3b. Land destruction: "destroy target land" / "destroy target nonbasic land" (Wasteland,
+        Ghost Quarter) → {nonbasic-manabase}   (checked, and skipped for rule 4, the same way
+        rule 2's ``is_color_blast`` short-circuits rule 4 — otherwise the bare "destroy
+        target" substring in rule 4 would mislabel a land-destruction spell creature-based)
     4. Removal: "destroy target" / "exile target creature" / "exile target attacking"
        → {creature-based}
     5. staple_role == "free_interaction" (card_tags lookup)
        → {combo, storm-reliant}   (Force of Negation, Daze, etc.)
     6. Artifact/enchantment removal: "destroy target artifact" / "destroy target enchantment"
-       → {greedy-manabase}        (answers Blood Moon, Back to Basics, Chalice)
+       → {artifact-mana-reliant}  (reaches artifact mana sources — Lotus Petal, Chrome
+       Mox, Lion's Eye Diamond. It cannot reach lands, so it does NOT credit nonbasic-manabase. Such a card's
+       value in answering an opposing Blood Moon / Back to Basics is PROTECTION of its own
+       controller's manabase, a relation this attack vocabulary does not express.)
     7. Fallback: {combo}  (conservative — labeled in warning by caller).
 
     Returns a frozenset of tag strings.  Never returns the empty frozenset so
@@ -1344,8 +1394,15 @@ def _derive_attacks_for_promoted(
     if "graveyard" in text_lower and "exile" in text_lower:
         tags.add("graveyard-recursion")
 
-    # 4. Creature removal (skip when already attributed as a color blast — see #2)
-    if not is_color_blast and (
+    # 3b. Land destruction — checked before rule 4's bare "destroy target" substring check,
+    # which would otherwise mislabel Wasteland/Ghost Quarter-style effects creature-based.
+    is_land_destruction = bool(_RE_LAND_DESTRUCTION.search(text_lower))
+    if is_land_destruction:
+        tags.add("nonbasic-manabase")
+
+    # 4. Creature removal (skip when already attributed as a color blast — see #2 — or as
+    # land destruction — see #3b)
+    if not is_color_blast and not is_land_destruction and (
         "destroy target" in text_lower
         or "exile target creature" in text_lower
         or "exile target attacking" in text_lower
@@ -1356,14 +1413,14 @@ def _derive_attacks_for_promoted(
     if staple_role(card_name) == "free_interaction":
         tags.update({"combo", "storm-reliant"})
 
-    # 6. Artifact/enchantment removal → answers lock pieces / mana hosers
+    # 6. Artifact/enchantment removal → reaches artifact mana sources only, never lands
     if (
         "destroy target artifact" in text_lower
         or "destroy target enchantment" in text_lower
         or ("exile target" in text_lower and "artifact" in text_lower)
         or ("exile target" in text_lower and "enchantment" in text_lower)
     ):
-        tags.add("greedy-manabase")
+        tags.add("artifact-mana-reliant")
 
     return frozenset(tags) if tags else _FALLBACK_ATTACKS
 
@@ -1498,7 +1555,7 @@ def _maindeck_answer_coverage(
 
     Attribution, in priority order:
       1. Catalog lookup — when the maindeck card is itself a curated ``HOSER_CATALOG``
-         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"greedy-manabase"}``),
+         entry (e.g. Wasteland, whose curated ``attacks`` is ``{"nonbasic-manabase"}``),
          its hand-curated ``attacks`` are authoritative. This is the common case for the
          motivating bug (maindeck utility lands/interaction that double as catalog hosers).
       2. Oracle-text derivation — for maindeck cards NOT in the catalog, reuse
@@ -1553,6 +1610,77 @@ def _maindeck_answer_coverage(
 # Unit 2: CoverageModel + _build_coverage_model
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# 4-of legality guard (epic-sb-advisor-correctness-fourof-guard).
+# ---------------------------------------------------------------------------
+
+# Format copy limit. Basic lands are exempt (CR 100.2a / the "any number of basic lands"
+# carve-out); every other card is capped at 4 across maindeck + sideboard COMBINED.
+_FORMAT_MAX_COPIES = 4
+
+
+def _is_basic_land(card: "Card | None") -> bool:
+    """True for basic lands, which the 4-of rule exempts.
+
+    Detected from ``type_line`` containing "Basic" (the supertype), so snow-covered basics
+    and Wastes are covered without a hardcoded name list. Unknown cards (``None``) are NOT
+    treated as basics — an unresolvable card must not silently bypass the legality cap.
+    """
+    if card is None:
+        return False
+    return "basic" in (card.type_line or "").lower()
+
+
+def _maindeck_copy_caps(
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+) -> "dict[str, int]":
+    """Remaining format-legal copies per maindeck card name.
+
+    ``{name: 4 - maindeck_copies}`` for every non-basic card the maindeck already runs,
+    floored at 0. A name absent from the result is unconstrained (the maindeck runs none).
+    Basics are omitted entirely — they are exempt from the 4-of rule.
+
+    Pure function (objective-search-split): the caller resolves Card objects once and
+    passes a lookup, so no DB access happens inside the loop.
+    """
+    caps: dict[str, int] = {}
+    for name, copies in main_cards.items():
+        if copies <= 0:
+            continue
+        if _is_basic_land(get_card(name)):
+            continue
+        caps[name] = max(0, _FORMAT_MAX_COPIES - copies)
+    return caps
+
+
+def _fourof_legality_warnings(
+    sideboard_cards: "dict[str, int]",
+    main_cards: "dict[str, int]",
+    get_card: "Callable[[str], Card | None]",
+) -> "list[str]":
+    """Post-check the assembled package: combined main+SB copies must not exceed 4.
+
+    Returns one honest-degrade warning per offending card (empty list = legal). This is a
+    backstop, not the primary mechanism — the candidate cap in ``_build_coverage_model``
+    should prevent an illegal package from ever being assembled. It fires only if some path
+    bypasses that cap, which is exactly when a silent illegal board would otherwise ship.
+    """
+    out: list[str] = []
+    for name, sb_copies in sorted(sideboard_cards.items()):
+        main_copies = main_cards.get(name, 0)
+        total = main_copies + sb_copies
+        if total <= _FORMAT_MAX_COPIES:
+            continue
+        if _is_basic_land(get_card(name)):
+            continue
+        out.append(
+            f"// ILLEGAL: {name} {main_copies} main + {sb_copies} SB = {total} copies "
+            f"(max {_FORMAT_MAX_COPIES})"
+        )
+    return out
+
+
 @dataclass
 class CoverageModel:
     """Abstraction shared by both solvers.
@@ -1584,6 +1712,7 @@ def _build_coverage_model(
     opponent_linchpins: "dict[str, list[Linchpin]] | None" = None,
     opponent_cards: "dict[str, dict[str, int]] | None" = None,
     maindeck_coverage: "dict[str, float] | None" = None,
+    maindeck_copy_caps: "dict[str, int] | None" = None,
 ) -> CoverageModel:
     """Build the coverage model: elements with weights + color-prefiltered candidates.
 
@@ -1670,7 +1799,7 @@ def _build_coverage_model(
     When ``maindeck_coverage`` is not None (see ``_maindeck_answer_coverage``), each
     (archetype, tag) element's weight is additionally multiplied by
     ``(1 - _MAINDECK_DISCOUNT * maindeck_coverage.get(tag, 0.0))`` — an axis the maindeck
-    already answers (e.g. 4 maindeck Wasteland covering "greedy-manabase") should not also
+    already answers (e.g. 4 maindeck Wasteland covering "nonbasic-manabase") should not also
     claim a full-weight dedicated SB slot for the same axis. ``_hate:`` pseudo-elements are
     EXEMPT (mirrors the ``"|" not in key`` skip in the ``matchup_pressure`` pass above) —
     they represent field-wide interaction pressure against the DECK's own vulnerabilities,
@@ -1833,7 +1962,7 @@ def _build_coverage_model(
     # Unit C2) ---
     # When maindeck_coverage is not None, discount each (archetype, tag) element's weight
     # by how much the MAINDECK already answers that tag — stops the solver from double-
-    # counting an axis (e.g. 4 maindeck Wasteland already covering "greedy-manabase" ->
+    # counting an axis (e.g. 4 maindeck Wasteland already covering "nonbasic-manabase" ->
     # the SB shouldn't also spend a full-weight slot on Ghost Quarter for the same axis).
     # `_hate:` pseudo-elements are exempt (same "|" not in key skip as Step 3b) — they
     # model field-wide interactive pressure against the deck's OWN vulnerabilities, not an
@@ -1860,6 +1989,30 @@ def _build_coverage_model(
     # --- Step 4: Color-prefiltered candidate hosers ---
     candidate_covers: dict[str, frozenset[str]] = {}
     candidate_meta: dict[str, HoserCard] = {}
+
+    # 4-of legality cap (epic-sb-advisor-correctness-fourof-guard): a candidate's usable
+    # copies are bounded by what the MAINDECK leaves legal, not by the catalog/modal count
+    # alone. Applied here at candidate_meta assembly — the single point every consumer
+    # (_greedy_solve, _ilp_solve, _rank_considering_pool) reads max_copies from — so the
+    # solver and the considering pool are capped by one rule instead of two.
+    # Element weights are deliberately NOT touched: how valuable answering a tag is does not
+    # depend on how many copies THIS deck may still add.
+    # Gated-additive: maindeck_copy_caps None/{} -> no-op -> byte-identical.
+    _capped_out: list[str] = []
+    _capped_down: list[str] = []
+
+    def _apply_copy_cap(name: str, hoser: HoserCard) -> "HoserCard | None":
+        """Cap a candidate at its remaining format-legal copies; None = drop entirely."""
+        if not maindeck_copy_caps:
+            return hoser
+        cap = maindeck_copy_caps.get(name)
+        if cap is None or cap >= hoser.max_copies:
+            return hoser
+        if cap <= 0:
+            _capped_out.append(name)
+            return None
+        _capped_down.append(f"{name} ({hoser.max_copies}->{cap})")
+        return _dc_replace(hoser, max_copies=cap)
 
     for card_name, hoser in catalog.items():
         # Empirical pool filter (gated-additive): when provided, drop cards not in the pool.
@@ -1917,8 +2070,11 @@ def _build_coverage_model(
                     covered.add(hate_key)
 
         if covered:
+            _capped = _apply_copy_cap(card_name, hoser)
+            if _capped is None:
+                continue
             candidate_covers[card_name] = frozenset(covered)
-            candidate_meta[card_name] = hoser
+            candidate_meta[card_name] = _capped
 
     # --- Step 4b: Promoted empirical candidates (gated-additive) ---
     # Cards from the empirical pool that were NOT in the catalog.  They bypass the
@@ -1957,8 +2113,11 @@ def _build_coverage_model(
                         covered_promoted.add(hate_key)
 
             if covered_promoted:
+                _capped_p = _apply_copy_cap(card_name, hoser)
+                if _capped_p is None:
+                    continue
                 candidate_covers[card_name] = frozenset(covered_promoted)
-                candidate_meta[card_name] = hoser
+                candidate_meta[card_name] = _capped_p
                 log.debug(
                     "_build_coverage_model: admitted promoted %r covering %d elements",
                     card_name, len(covered_promoted),
@@ -1968,6 +2127,19 @@ def _build_coverage_model(
                     "_build_coverage_model: promoted %r covers no live elements — skipped",
                     card_name,
                 )
+
+    # Audit lines for the 4-of cap — emitted once, after BOTH the catalog and promoted
+    # candidate loops, so a card capped on either path is reported the same way.
+    if _capped_out:
+        warnings.append(
+            "// 4-of guard: dropped "
+            + ", ".join(sorted(set(_capped_out)))
+            + " (maindeck already runs 4)"
+        )
+    if _capped_down:
+        warnings.append(
+            "// 4-of guard: capped " + ", ".join(sorted(set(_capped_down))) + " by maindeck copies"
+        )
 
     # --- Step 4c: cap UNCOVERED `_hate:` weight (feature-sfv-weights) ---
     # The epic's locked decision is to make protective/counter-hoser cards actually COVER the
@@ -4031,12 +4203,18 @@ def recommend_sideboard(
     # Computed ONCE here from the already-resolved deck_card_objects (objective-search-split
     # — no extra DB round-trip inside the pure _maindeck_answer_coverage loop) and threaded
     # into _build_coverage_model so it can discount element weights for axes the maindeck
-    # itself already answers (e.g. 4 maindeck Wasteland -> "greedy-manabase"). Empty when the
+    # itself already answers (e.g. 4 maindeck Wasteland -> "nonbasic-manabase"). Empty when the
     # deck answers no tracked vulnerability tags -> _build_coverage_model no-ops (byte-identical).
     _card_by_name: "dict[str, Card]" = {card.name: card for card in deck_card_objects}
     maindeck_coverage = _maindeck_answer_coverage(
         deck_maindeck, _card_by_name.get, catalog=catalog
     )
+
+    # --- Step 3h: 4-of legality caps (epic-sb-advisor-correctness-fourof-guard) ---
+    # Resolved from the same already-fetched deck_card_objects. Threaded into
+    # _build_coverage_model so a card the maindeck already runs 4 of can never be offered
+    # as a 5th copy by the solver OR the considering pool.
+    maindeck_copy_caps = _maindeck_copy_caps(deck_maindeck, _card_by_name.get)
 
     # --- Step 4: Build coverage model ---
     model = _build_coverage_model(
@@ -4053,6 +4231,7 @@ def recommend_sideboard(
         opponent_linchpins=opponent_linchpins,
         opponent_cards=opponent_cards,
         maindeck_coverage=maindeck_coverage,
+        maindeck_copy_caps=maindeck_copy_caps,
     )
     warnings.extend(model.warnings)
 
@@ -4256,6 +4435,14 @@ def recommend_sideboard(
         for card_name, hoser in model.candidate_meta.items()
         if card_name in final_cards
     }
+
+    # --- Step 6f: 4-of legality post-check (epic-sb-advisor-correctness-fourof-guard) ---
+    # Backstop over the ALREADY-SOLVED final_cards. The candidate cap should make this
+    # unreachable; if it ever fires, the board is format-illegal and the user is told so
+    # explicitly rather than shipping a silently illegal list.
+    warnings.extend(
+        _fourof_legality_warnings(final_cards, deck_maindeck, _card_by_name.get)
+    )
 
     return SideboardPackage(
         cards=final_cards,
