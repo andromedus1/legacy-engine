@@ -21,6 +21,10 @@ DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
 # `discover list`/`discover promote`; never hand-curated, unlike VARIANTS_REGISTRY_PATH).
 DISCOVERED_VARIANTS_PATH = DATA_DIR / "variants" / "discovered.json"
 
+# Derived superarchetype taxonomy (derived side — JSON SSOT written by `superarchetype run`;
+# the `superarchetype_members`/`superarchetype_meta` DuckDB tables are its rebuildable cache).
+DERIVED_SUPERARCHETYPES_PATH = DATA_DIR / "superarchetypes" / "derived.json"
+
 # Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
 PACKAGE_DATA_DIR = Path(__file__).parent / "data"
 VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
@@ -29,6 +33,8 @@ HOSERS_DIR = PACKAGE_DATA_DIR / "hosers"
 HOSERS_REGISTRY_PATH = HOSERS_DIR / "legacy.json"      # shipped hoser catalog (curated SSOT)
 LINCHPINS_DIR = PACKAGE_DATA_DIR / "linchpins"
 LINCHPINS_REGISTRY_PATH = LINCHPINS_DIR / "legacy.json"  # shipped linchpin overrides (curated SSOT)
+SUPERARCHETYPES_DIR = PACKAGE_DATA_DIR / "superarchetypes"
+SUPERARCHETYPES_REGISTRY_PATH = SUPERARCHETYPES_DIR / "legacy.json"  # curated cluster overrides
 PLAYERS_DIR = PACKAGE_DATA_DIR / "players"
 ALIASES_PATH = PLAYERS_DIR / "aliases.json"             # shipped player-alias map (curated SSOT)
 BAN_EVENTS_DIR = PACKAGE_DATA_DIR / "banlist"

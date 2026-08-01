@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "notes": [
+    "Curated superarchetype overrides. Curated entries WIN BY KEY over the derived clustering:",
+    "a cluster listed here owns its id and label outright, and every archetype it names is pulled",
+    "out of whatever derived cluster held it, stamped provenance=curated, and annotated with the",
+    "derived assignment it replaced.",
+    "",
+    "Empty by default. The derived pass is deliberately conservative (a branch must clear a",
+    "multiscale-bootstrap AU p-value AND a raw bootstrap-probability floor), so it declines to",
+    "assert families it cannot support rather than asserting them wrongly. Add an entry here when",
+    "dogfooding shows a real strategy family the AU cut refuses -- that is what this layer is for.",
+    "",
+    "Ids are stable across refreshes and are what downstream surfaces key on: never renumber one.",
+    "An archetype may appear in at most one cluster; the loader fails fast on a duplicate."
+  ],
+  "clusters": []
+}
