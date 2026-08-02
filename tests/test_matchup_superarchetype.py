@@ -104,8 +104,9 @@ def _raw(name: str, date: str, spec: list[tuple[str, str, str, int]]) -> dict:
     }
 
 
-def _hero_con():
-    con = store.connect(":memory:")
+def _hero_con(path: str = ":memory:"):
+    """The hero corpus, optionally file-backed (the script e2e needs a --db path)."""
+    con = store.connect(path)
     for name, date, spec in (
         ("hero-old", _PRE_REGIME_DATE, _ROUNDS_OLD),
         ("hero-current", _CURRENT_DATE, _ROUNDS_CURRENT),
