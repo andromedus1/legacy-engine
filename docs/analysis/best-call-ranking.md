@@ -9,8 +9,8 @@ summary: |
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
   tracked HTML template: scripts/refresh_best_call_ranking.py +
   scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-  strata, and the cross-camp P(best) column; the page itself carries the authoritative
-  definitional prose.
+  strata, the cross-camp P(best) column, and the exploratory three-level family view;
+  the page itself carries the authoritative definitional prose.
 decisions:
   - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
@@ -20,6 +20,7 @@ decisions:
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
   - "Superarchetype family fallback is LEDGER-ONLY: page-unmeasured cells may carry an additive sa lean (imputed from licensed family siblings / pooled vs the opponent's family / family range with the named refusal and NO point estimate), resolved by the engine's display ladder at its stricter gates (pooled n_eff>=30, imputed pool n>=25 + license + per-cell veto). Leans never enter agency, adj, floor, coverage, strata, or the MC — every row metric is bit-identical with the layer on or off. Registry read from the same --db (superarchetype run's derived cache); --no-superarchetypes regenerates the baseline; the I2 one-sidedness caveat rides the definitional card, the per-row lean key, and every lean tooltip."
+  - "The serving registry also produces an additive families payload for an expandable family → archetype → camp navigator, an S×S family heatmap, and a camps×parent-opponents map. Family agency/adj/floor/coverage are exploratory summaries only: archetype Best Call remains decision-authoritative until a future-only predictive/decision benchmark passes. With no registry the page explicitly degrades the family view and leaves the authoritative archetype/camp surfaces intact."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
   - "Refresh THIS page last in the data cycle: its matrices read eras + variants, so it inherits whatever labeling state exists when it runs."
 ---
@@ -82,6 +83,44 @@ Candidacy is gated at the display-suppression coverage threshold — a candidate
 below 5% measured coverage shows n/a with its coverage instead of an
 imputation-noise score.
 
+**Three-level strategy-family view (exploratory).** The same serving registry
+also produces an additive top-level `families` payload beside `arch` and `camps`.
+Each family record carries its stable id, display/full labels, curated flag,
+current-field member archetypes with provenance, presentation-only family
+metrics, a deterministic two-sentence description naming its derived/curated origin, leading
+current-field members, and field footprint, and typed family-opponent cells. The template renders this as an
+expandable **family → archetype → camp** hierarchy: family rows open onto their
+current-field archetypes, and each archetype opens visually onto its staged camp
+rows. Long derived labels composed with ` + ` are shortened for display after
+the first two components (`... + N more`), while `full_label` retains the exact
+registry label for hover/title disclosure.
+
+The family metrics (agency, adjusted WR, floor, coverage, field share) are an
+**exploratory navigation summary, not a recommendation surface**. A family cell
+is a current-field-share-weighted summary of accepted member-archetype pooled
+cells; refused and below-display-gate pools never become numbers. The family
+floor excludes the intra-family cell. These values do not feed archetype Best
+Call, camp P(best), or either view's grounding strata. The archetype table remains
+the decision-authoritative Best Call surface until the family layer passes a
+future-only predictive/decision benchmark.
+
+Two maps expose the evidence without inventing a camp-by-camp cube:
+
+- The **S×S strategy-family heatmap** has subject families on rows and opponent
+  families on columns. Numeric cells use only accepted typed pooled outputs;
+  hatched `refuse` cells retain the typed refusal or insufficient-`n_eff` reason
+  in the tooltip, and outlined diagonal cells are labeled intra-family.
+- The **camps×parent opponents map** is rectangular: staged camps are subjects
+  and the existing parent-archetype opponents are columns. Measured cells show
+  the shrunk rate; thin/unavailable cells stay explicit (`n=<count>` or an
+  unavailable marker). It performs no speculative camp x camp pooling.
+
+If the serving registry is absent, empty, or disabled with
+`--no-superarchetypes`, `families` is an empty list. The page then says that the
+strategy-family view is unavailable, hides both family maps, and leaves the
+authoritative archetype and camp views unaffected; this is an explicit honest
+degrade, not an unlabeled missing section.
+
 **Superarchetype family fallback (ledger-only).** `main()` reads the serving
 taxonomy from the SAME `--db` (`read_superarchetype_members` — the derived cache
 `superarchetype run` rebuilds; absent tables = layer off, byte-identical) and
@@ -125,6 +164,14 @@ frontmatter decisions above — the page prose is authoritative.
   Candelabra-era data).
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).
+- **Family rows are exploratory navigation** — their agency/adj/floor/coverage
+  summarize typed pooled family evidence and must not be read as a ranked Best
+  Call recommendation. Follow the nested row to the archetype's `Best Call`
+  metrics for the authoritative decision surface; family authority requires the
+  future-only benchmark first.
+- **Heatmap refusals are data** — a hatched family cell is a typed refusal (or
+  insufficient effective evidence), not a blank to interpolate. Outlined cells
+  are intra-family; the camps map remains camps×parent opponents by design.
 - **Family leans are leans** — an `imputed`/`pooled` value in the ledger is
   superarchetype-sourced, never a measured cell, and passing the heterogeneity
   gate never promotes it: I² is one-sided evidence (a low value is not a

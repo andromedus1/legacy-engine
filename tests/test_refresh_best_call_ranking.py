@@ -507,6 +507,33 @@ class TestSuperarchetypeIsolation:
 
 
 class TestSuperarchetypeLeans:
+    def test_family_payload_is_nested_typed_and_exploratory(self, hero_blobs):
+        off, on = hero_blobs
+        assert off["families"] == []
+        assert [family["id"] for family in on["families"]] == ["sa-fair", "sa-enemy"]
+        fair = on["families"][0]
+        assert fair["full_label"] == "Fair"
+        assert fair["description"].startswith(
+            "A composition-derived family anchored in the current field by Hero, SibA, and SibB."
+        )
+        assert "represent 50.0% of published decks" in fair["description"]
+        assert [member["archetype"] for member in fair["members"]] == [
+            "Hero", "SibA", "SibB",
+        ]
+        assert all({"opponent_id", "p", "n_eff", "refused_reason"} <= cell.keys()
+                   for cell in fair["cells"])
+        assert fair["agency"] == min(fair["adj"], fair["floor"])
+        assert fair["floor_opp"] != fair["label"]  # intra-family cells never set the floor
+
+    def test_family_refusals_never_gain_a_point_estimate(self, hero_blobs):
+        _off, on = hero_blobs
+        refused = [
+            cell for family in on["families"] for cell in family["cells"]
+            if cell["refused_reason"] is not None
+        ]
+        assert refused
+        assert all(cell["p"] is None for cell in refused)
+
     def test_imputed_lean_with_the_locked_chip_fields(self, hero_blobs):
         _off, on = hero_blobs
         sa = _cell(on, "Hero", "OppX")["sa"]
@@ -643,6 +670,10 @@ class TestMainEndToEnd:
         assert html.count("certificate of exchangeability") >= 2
         assert '"one_sided_note": "I^2 is one-sided evidence:' in html
         assert 'id="sa-fallback"' in html
+        assert 'id="taxonomy-root"' in html
+        assert 'id="family-heatmap"' in html
+        assert 'id="camp-heatmap"' in html
+        assert '"families": [' in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
         """--no-superarchetypes on a registry-bearing DB must be byte-identical to the page

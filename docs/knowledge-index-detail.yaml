@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T15:12:30Z'
+generated_at: '2026-08-02T16:10:27Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -122,9 +122,10 @@ documents:
 
       scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
 
-      strata, and the cross-camp P(best) column; the page itself carries the authoritative
+      strata, the cross-camp P(best) column, and the exploratory three-level family
+      view;
 
-      definitional prose.
+      the page itself carries the authoritative definitional prose.
 
       '
     decisions:
@@ -163,6 +164,12 @@ documents:
       on or off. Registry read from the same --db (superarchetype run''s derived cache);
       --no-superarchetypes regenerates the baseline; the I2 one-sidedness caveat rides
       the definitional card, the per-row lean key, and every lean tooltip.'
+    - 'The serving registry also produces an additive families payload for an expandable
+      family → archetype → camp navigator, an S×S family heatmap, and a camps×parent-opponents
+      map. Family agency/adj/floor/coverage are exploratory summaries only: archetype
+      Best Call remains decision-authoritative until a future-only predictive/decision
+      benchmark passes. With no registry the page explicitly degrades the family view
+      and leaves the authoritative archetype/camp surfaces intact.'
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).
