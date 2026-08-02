@@ -78,6 +78,11 @@ future-only decision benchmark. No registry was written during this preview.
 ## Mockups
 
 - Screens: `.mockups/screens/epic-superarchetype-layer-three-level-page/index.html`
+- Strategic-plan redesign: `strategy-option-1.html` through `strategy-option-4.html`
+- Accessibility mirror: `strategy-option-1-sr.html`
+- Strategic-plan selection: hybrid of Options 1 + 2 — sortable/filterable peer table with a
+  semantic row-expansion control revealing the reusable plan portrait and exact opponent-plan
+  ledger; approved by the maintainer on 2026-08-02.
 - Selected direction: Option 2's expandable hierarchy combined with Option 1's explicit
   strategy-family heatmap; refined at `option-hybrid.html` (2026-08-02).
 - Selected: `option-hybrid.html` — approved by the maintainer on 2026-08-02.
