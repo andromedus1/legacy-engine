@@ -56,10 +56,11 @@ Tell), which is why this arc outranks the presentation-layer honesty work in the
 - **Intra-cluster matches**: they **count** toward the superarchetype cell but carry an
   **intra-cluster flag** so surfaces can say "this edge is inside your own family" (the
   Aluren 73.9% vs Show and Tell case). Divergence-as-diagnostic, not silent exclusion.
-- **Consumption on the best-call page**: **per-cell fallback, labeled** — use the archetype
-  cell when it clears its tier gate, fall back to the superarchetype cell when it doesn't,
-  with a provenance chip alongside the existing BA/FC/era chips. Every row gets coverage and
-  every number stays auditable.
+- **Consumption on the best-call page (rolled forward 2026-08-02 after decision-utility
+  research and the maintainer's HTML approval)**: family evidence is an explicitly exploratory,
+  labeled navigation/explanation layer. Archetype Best Call remains decision-authoritative;
+  family leans do not enter its agency/adj/floor/coverage/strata until the future-only benchmark
+  passes. The engine's typed pooling/prior seams remain available without silently changing the page.
 - **Foundation**: VISION rolled forward to a three-level taxonomy (superarchetype → parent
   archetype → camp) at scope time. SPEC/ARCHITECTURE roll forward during epic-design once
   the brief pins the method.
@@ -75,7 +76,7 @@ implement **that** method; they do not re-open these:
 |---|---|
 | Representation + distance | Per-archetype maindeck **core set** (>=50% inclusion) **minus format staples** (core to >=30% of definers — hard removal, TF-IDF is not enough); **Jaccard** on the stripped cores (§3.1-3.2) |
 | Algorithm + cut | **Average-linkage agglomerative** — NOT HDBSCAN, and the decisive reason is the noise class alone: an archetype called noise gets **no superarchetype at all**, a coverage failure aimed precisely at the thin rows this epic exists to serve (the "no density contrast at N~30" argument is the brief's own judgment, flagged there as unsourced — do not lean on it). Cut at the deepest height where every retained branch clears **multiscale-bootstrap AU p > 0.95** over resampled CARD features, cross-checked with co-membership stability > 0.9 (§3.3-3.4) |
-| Too small to cluster | **Definers** >=30 decks AND >=8 core cards (~30 archetypes, 83.7% of field) may define; everything else with >=5 core cards is **assigned** by nearest centroid (~182 archetypes, 98.3% of field, zero unassignable) (§3.5) |
+| Too small to cluster | **Definers** >=30 decks AND >=8 core cards (~30 archetypes, 83.7% of field) may define; everything else with >=5 core cards is **assigned** by mean Jaccard dissimilarity to the cluster's definers (~182 archetypes, 98.3% of field, zero unassignable) (§3.5) |
 | Aggregation | **Random-effects (DerSimonian-Laird) inverse-variance pooling** on continuity-corrected logits, feeding an **`n_eff`** derived from the random-effects variance into the existing `tier_for_sample()` / display gate — heterogeneity can never buy tier (§4) |
 | Uneven coverage | **`m_eff` = 1/HHI >= 2.0** AND max member share <= 0.60; failing cells still served, labeled `dominated by <member>` (§5) |
 | Validity of pooling | **I² gate** (<=0.40 pool freely / 0.40-0.75 label `heterogeneous pool` / >0.75 refuse the pooled number and show the member split), plus a direction/spread guard and a minimum-computability rule. All three fire on the epic's own motivating pair (§6) |
@@ -111,8 +112,9 @@ Child feature designs treat these as fixed inputs — do not re-ask. -->
    matrix already carries** (camp label or parent label). This is what lets the layer compose with
    `MultiSplitMatrix` instead of forking it — subject-side inclusion, force-inclusion, era windows,
    and cross-era priors stay exactly where they are.
-3. **Offline `superarchetype run` writes the registry; matrix builders READ it and never cluster
-   inline.** The brief pulls two ways here (§10 "never in a query hot path" vs §9 "no reason to
+3. **Offline `superarchetype run` previews a candidate; explicit `--promote` writes the serving
+   registry; matrix builders READ it and never cluster inline.** The brief pulls two ways here
+   (§10 "never in a query hot path" vs §9 "no reason to
    cache a stale taxonomy"). Resolution: the registry records the window it was derived over, and a
    mismatch with the window a consumer is sourcing over is a loud `//` audit line — no hot-path
    clustering, no silent staleness. `superarchetype run` joins the refresh cycle before the
@@ -126,11 +128,10 @@ Child feature designs treat these as fixed inputs — do not re-ask. -->
    registry (unmatched clusters get a new id; the remap is reported in the run audit). Curated
    entries own both id and display name outright. Membership moves, identity does not — otherwise
    every consuming surface churns window-over-window.
-6. **Superarchetype-sourced cells feed the best-call page's `adj` and `coverage` but never its
-   `floor`**, and a row covered only by fallback lands in its own labeled stratum rather than being
-   promoted to `grounded`. The floor is the page's harshest claim ("this deck has a proven hole")
-   and a pooled family cell is not proof of a specific hole; the brief is explicit that passing the
-   heterogeneity gate never promotes a pooled estimate to measured status.
+6. **Decision authority is withheld at the page boundary pending the future-only benchmark.**
+   Superarchetype-sourced cells remain labeled exploratory leans and do not feed archetype/camp
+   `agency`, `adj`, `floor`, `coverage`, strata, or P(best). The separate family navigator and maps
+   summarize typed pooled evidence with their own support-weighted coverage and muting rules.
 7. **The no-registry path is byte-identical** (gated-additive-augmentation): absent or empty
    registry ⇒ no rung, no ladder, no field changes, existing goldens and the multi-split parity
    tests green untouched.
@@ -171,6 +172,10 @@ the clustering pass's own output and splitting it would leave `-clustering` with
   the best-call page, member-split rendering for refused pools, stratum rules, the I² one-sidedness
   caveat in the definitional card, runbook roll-forward — depends on:
   `[epic-superarchetype-layer-chain, feature-multi-split-matrix]`
+- `epic-superarchetype-layer-three-level-page` — approved exploratory family → archetype → camp
+  hierarchy, S×S family heatmap, camps × parent-opponents map, deterministic family descriptions,
+  and the explicit archetype-authority boundary — depends on:
+  `[epic-superarchetype-layer-chain, epic-superarchetype-layer-best-call-fallback]`
 
 ### Decomposition risks
 

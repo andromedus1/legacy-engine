@@ -60,8 +60,9 @@ def test_superarchetype_comparison_is_strictly_non_writing(runner):
     result = runner.invoke(main, [
         "superarchetype", "run", "--compare-since", "2026-06-29",
     ])
-    assert result.exit_code != 0
-    assert "requires the default era-aware policy and --dry-run" in result.output
+    assert result.exit_code == 0, result.output
+    assert "// comparison: era-aware vs uniform since 2026-06-29" in result.output
+    assert "// preview — nothing written" in result.output
 
 
 # ---------------------------------------------------------------------------

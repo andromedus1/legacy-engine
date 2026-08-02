@@ -103,15 +103,22 @@ def _run(runner, db_path, *extra):
 
 
 class TestSuperarchetypeRun:
-    def test_derives_and_persists_a_taxonomy(self, tmp_path, runner, isolated_registry):
+    def test_explicit_promotion_persists_a_taxonomy(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
-        result = _run(runner, db_path)
+        result = _run(runner, db_path, "--promote")
         assert result.exit_code == 0, result.output
         assert "// superarchetype run:" in result.output
         assert "8 definer(s)" in result.output
         assert "format staples hard-removed (5)" in result.output
-        assert "// written" in result.output
+        assert "// promoted: serving registry + DuckDB cache replaced" in result.output
         assert isolated_registry.exists()
+
+    def test_default_run_is_preview_only(self, tmp_path, runner, isolated_registry):
+        db_path = _build_superarchetype_db(tmp_path)
+        result = _run(runner, db_path)
+        assert result.exit_code == 0, result.output
+        assert "// preview — nothing written" in result.output
+        assert not isolated_registry.exists()
 
     def test_planted_families_land_together(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
@@ -143,8 +150,22 @@ class TestSuperarchetypeRun:
         db_path = _build_superarchetype_db(tmp_path)
         result = _run(runner, db_path, "--dry-run")
         assert result.exit_code == 0, result.output
-        assert "// dry run — nothing written" in result.output
+        assert "// preview — nothing written" in result.output
         assert not isolated_registry.exists()
+
+    def test_dry_run_and_promote_are_mutually_exclusive(
+        self, tmp_path, runner, isolated_registry
+    ):
+        db_path = _build_superarchetype_db(tmp_path)
+        result = _run(runner, db_path, "--dry-run", "--promote")
+        assert result.exit_code != 0
+        assert "--dry-run and --promote are mutually exclusive" in result.output
+
+    def test_comparison_cannot_be_promoted(self, tmp_path, runner, isolated_registry):
+        db_path = _build_superarchetype_db(tmp_path)
+        result = _run(runner, db_path, "--compare-since", "2026-05-11", "--promote")
+        assert result.exit_code != 0
+        assert "requires the default era-aware policy in preview mode" in result.output
 
     def test_is_deterministic_across_invocations(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
@@ -156,8 +177,8 @@ class TestSuperarchetypeRun:
         self, tmp_path, runner, isolated_registry
     ):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
-        result = _run(runner, db_path)
+        _run(runner, db_path, "--promote")
+        result = _run(runner, db_path, "--promote")
         assert result.exit_code == 0, result.output
         assert "co-membership agreement 1.000" in result.output
 
@@ -189,13 +210,14 @@ class TestSuperarchetypeList:
         db_path = _build_superarchetype_db(tmp_path)
         result = runner.invoke(main, ["superarchetype", "list", "--db", db_path])
         assert result.exit_code == 0, result.output
-        assert "(no superarchetype registry — run `superarchetype run` first)" in result.output
+        assert "review a candidate" in result.output
+        assert "superarchetype run --promote" in result.output
 
     def test_lists_clusters_with_provenance_after_a_run(
         self, tmp_path, runner, isolated_registry
     ):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(main, ["superarchetype", "list", "--db", db_path])
         assert result.exit_code == 0, result.output
         assert "// derived over" in result.output
@@ -204,7 +226,7 @@ class TestSuperarchetypeList:
 
     def test_filters_to_one_cluster(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(
             main, ["superarchetype", "list", "--db", db_path, "--cluster", "sa-001"]
         )
@@ -213,7 +235,7 @@ class TestSuperarchetypeList:
 
     def test_unknown_cluster_fails_loudly(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(
             main, ["superarchetype", "list", "--db", db_path, "--cluster", "sa-999"]
         )
@@ -224,7 +246,7 @@ class TestSuperarchetypeList:
 class TestSuperarchetypeExplain:
     def test_walks_an_assignment(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(main, ["superarchetype", "explain", "Aluren", "--db", db_path])
         assert result.exit_code == 0, result.output
         assert "=== Aluren — superarchetype assignment ===" in result.output
@@ -237,7 +259,7 @@ class TestSuperarchetypeExplain:
         self, tmp_path, runner, isolated_registry
     ):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(
             main, ["superarchetype", "explain", "Two Card Brew", "--db", db_path]
         )
@@ -246,7 +268,7 @@ class TestSuperarchetypeExplain:
 
     def test_unknown_archetype_fails_loudly(self, tmp_path, runner, isolated_registry):
         db_path = _build_superarchetype_db(tmp_path)
-        _run(runner, db_path)
+        _run(runner, db_path, "--promote")
         result = runner.invoke(main, ["superarchetype", "explain", "Nope", "--db", db_path])
         assert result.exit_code != 0
         assert "unknown archetype" in result.output
