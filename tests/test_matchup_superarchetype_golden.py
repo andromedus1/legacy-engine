@@ -108,13 +108,13 @@ class TestDefaultBuildGolden:
             "wins": 7,
             "n": 16,
             "p_raw": 0.4375,
-            "p_shrunk": got["p_shrunk"],
-            "ci_low": got["ci_low"],
-            "ci_high": got["ci_high"],
+            "p_shrunk": 0.5657388986053412,
+            "ci_low": 0.22160595580094844,
+            "ci_high": 0.6738576259048334,
             "tier": "speculative",
             "is_mirror": False,
             "display": False,
-            "prior_mean": got["prior_mean"],
+            "prior_mean": 0.7025270571177049,
             "prior_source": "pre-disturbance value (window < 2026-03-01); hierarchy: "
             "parent cell (leave-camp-out)",
         }

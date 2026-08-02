@@ -2757,7 +2757,10 @@ class TestPlanMatchupsRealSwap:
         )
         con = store.connect(":memory:")
         try:
-            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4)
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4,
+                land_names=frozenset(),
+            )
         finally:
             con.close()
 
@@ -2801,7 +2804,10 @@ class TestPlanMatchupsRealSwap:
         )
         con = store.connect(":memory:")
         try:
-            plans = _plan_matchups(con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4)
+            plans = _plan_matchups(
+                con, maindeck, sideboard_15, {opp: ov}, archetype=None, max_swaps=4,
+                land_names=frozenset(),
+            )
         finally:
             con.close()
 
@@ -8933,6 +8939,39 @@ class TestMatchupPlanFlex:
             assert _resolve_land_names(con, ["Scalding Tarn"]) == frozenset()
         finally:
             con.close()
+
+    def test_plan_degrades_when_land_lookup_fails(self):
+        """Unknown land types must stop planning, never silently make lands cuttable."""
+        import duckdb
+        from legacy_engine.advisory.sideboard import _OppValues, _plan_matchups
+
+        opp = "Combo"
+        maindeck = {"Scalding Tarn": 4, "Brainstorm": 4}
+        ov = _OppValues(
+            opponent=opp,
+            maindeck={
+                "Scalding Tarn": self._cv("Scalding Tarn", "main", opp, -0.30),
+                "Brainstorm": self._cv("Brainstorm", "main", opp, -0.10),
+            },
+            side={"Surgical Extraction": self._cv(
+                "Surgical Extraction", "side", opp, +0.25
+            )},
+            cleared_gate=True,
+        )
+        con = duckdb.connect(":memory:")
+        try:
+            plan = _plan_matchups(
+                con, maindeck, {"Surgical Extraction": 4}, {opp: ov}, archetype=None
+            )[opp]
+        finally:
+            con.close()
+
+        assert plan.plan_status == "land-resolution-failed"
+        assert plan.degraded is True
+        assert plan.side_out == {}
+        assert plan.side_in == {}
+        assert plan.post_board == maindeck
+        assert "LAND SAFETY UNKNOWN" in plan.note
 
     # -- OUT-side land exemption ---------------------------------------------
 

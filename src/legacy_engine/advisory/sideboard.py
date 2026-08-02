@@ -222,6 +222,7 @@ _PLAN_STATUS_NO_FLEX = "no-legal-flex"
 _PLAN_STATUS_NO_DEAD_CARDS = "no-dead-cards"
 _PLAN_STATUS_NO_IN = "no-in-candidates"
 _PLAN_STATUS_NO_LEGAL_SWAP = "no-legal-swap"
+_PLAN_STATUS_LAND_LOOKUP_FAILED = "land-resolution-failed"
 
 _VALID_PLAN_STATUSES: frozenset[str] = frozenset({
     _PLAN_STATUS_PLANNED,
@@ -230,6 +231,7 @@ _VALID_PLAN_STATUSES: frozenset[str] = frozenset({
     _PLAN_STATUS_NO_DEAD_CARDS,
     _PLAN_STATUS_NO_IN,
     _PLAN_STATUS_NO_LEGAL_SWAP,
+    _PLAN_STATUS_LAND_LOOKUP_FAILED,
 })
 
 # Statuses that set degraded=True: no plan was produced for a reason that is not "the data
@@ -237,6 +239,7 @@ _VALID_PLAN_STATUSES: frozenset[str] = frozenset({
 _DEGRADED_PLAN_STATUSES: frozenset[str] = frozenset({
     _PLAN_STATUS_THIN_DATA,
     _PLAN_STATUS_NO_FLEX,
+    _PLAN_STATUS_LAND_LOOKUP_FAILED,
 })
 
 # Max declined candidates named inline in a plan note; the full list stays on the dataclass.
@@ -2641,12 +2644,20 @@ def _resolve_land_names(
     The type-line test still catches Dryad Arbor (``'Land Creature — Forest Dryad'``) and
     transform lands like Westvale Abbey (``'Land'``), whose front face IS a land drop.
 
-    Returns ``frozenset()`` on any lookup failure — an unresolvable card list degrades to the
-    pre-exemption behavior rather than crashing the planner.
+    Returns ``frozenset()`` on any lookup failure for compatibility callers. Safety-critical
+    planning uses ``_resolve_land_names_checked`` so that failure produces no swaps.
     """
+    land_names, _error = _resolve_land_names_checked(con, names)
+    return land_names
+
+
+def _resolve_land_names_checked(
+    con: duckdb.DuckDBPyConnection, names: "Iterable[str]"
+) -> tuple[frozenset[str], str | None]:
+    """Return resolved land names plus a named lookup failure for safety-critical callers."""
     unique = sorted({n for n in names if n})
     if not unique:
-        return frozenset()
+        return frozenset(), None
     try:
         placeholders = ", ".join("?" for _ in unique)
         rows = con.execute(
@@ -2658,8 +2669,8 @@ def _resolve_land_names(
         ).fetchall()
     except Exception as exc:
         log.debug("_resolve_land_names: type_line lookup failed: %s", exc)
-        return frozenset()
-    return frozenset(row[0] for row in rows)
+        return frozenset(), f"cards.type_line lookup failed: {exc}"
+    return frozenset(row[0] for row in rows), None
 
 
 def _in_axis_verdict(
@@ -2733,6 +2744,7 @@ def _plan_matchups(
     catalog: Optional[dict[str, HoserCard]] = None,
     adaptive_windows: "dict[str, tuple[str | None, str | None]] | None" = None,
     land_names: "frozenset[str] | None" = None,
+    land_names_error: str | None = None,
     opponent_axes: "dict[str, frozenset[str]] | None" = None,
     card_axes: "dict[str, frozenset[str]] | None" = None,
 ) -> dict[str, MatchupPlan]:
@@ -2796,7 +2808,27 @@ def _plan_matchups(
         return frozenset(hoser.attacks) if hoser is not None else frozenset()
 
     if land_names is None:
-        land_names = _resolve_land_names(con, deck_maindeck)
+        land_names, land_names_error = _resolve_land_names_checked(con, deck_maindeck)
+
+    if land_names_error is not None:
+        note = (
+            "LAND SAFETY UNKNOWN — no swaps produced because maindeck land types could not "
+            f"be resolved ({land_names_error})"
+        )
+        return {
+            opponent: MatchupPlan(
+                opponent=opponent,
+                side_out={},
+                side_in={},
+                post_board=dict(deck_maindeck),
+                n_basis=0,
+                tier="speculative",
+                degraded=True,
+                note=note,
+                plan_status=_PLAN_STATUS_LAND_LOOKUP_FAILED,
+            )
+            for opponent in opp_values
+        }
 
     plans: dict[str, MatchupPlan] = {}
 
@@ -4632,7 +4664,9 @@ def recommend_sideboard(
             # Eligibility inputs, resolved once here (objective-search-split): the land set
             # costs one type_line query; the opponent axis sets and the card→attacks map are
             # already in hand from Step 3 and the catalog/promotion pass.
-            _plan_land_names = _resolve_land_names(con, deck_maindeck)
+            _plan_land_names, _plan_land_error = _resolve_land_names_checked(
+                con, deck_maindeck
+            )
             _plan_card_axes: dict[str, frozenset[str]] = {
                 name: frozenset(hoser.attacks) for name, hoser in catalog.items()
             }
@@ -4649,6 +4683,7 @@ def recommend_sideboard(
                 catalog=catalog,
                 adaptive_windows=computed_adaptive_windows,
                 land_names=_plan_land_names,
+                land_names_error=_plan_land_error,
                 opponent_axes=archetype_tags,
                 card_axes=_plan_card_axes,
             )
