@@ -9,17 +9,19 @@ summary: |
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
   tracked HTML template: scripts/refresh_best_call_ranking.py +
   scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-  strata, the cross-camp P(best) column, and the exploratory three-level family view;
+  strata, the cross-camp P(best) column, and the five-plan strategic taxonomy;
   the page itself carries the authoritative definitional prose.
 decisions:
-  - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
+  - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
-  - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the raw observed rate, not the shrunk estimate, after passing the measured-cell gate (n>=8)."
+  - "Every measured cell (n>=8 by default) can set the floor using its shrunk estimate; this exposes apparent holes sooner. Because better-covered decks have more chances to reveal a low matchup, ungrounded agency remains an explicit upper bound and must be read with measured coverage. Blowouts classify on the raw observed rate after the same measured-cell gate."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
-  - "Superarchetypes remain an additive, explicitly non-authoritative page layer: page-unmeasured ledgers may carry stricter-gated family leans that never enter archetype/camp decision metrics, while the serving registry produces an exploratory family → archetype → camp navigator, S×S family heatmap, and camps×parent-opponents map. Archetype Best Call remains authoritative until a future-only benchmark passes; no registry/--no-superarchetypes explicitly degrades the family surface and preserves the baseline."
+  - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
+  - "Strategic-plan same-plan play is structural 50% context: it contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
+  - "Superarchetypes remain only as stricter-gated fallback evidence in otherwise unmeasured archetype/camp ledger cells. They never enter strategic-plan, archetype, or camp metrics; --no-superarchetypes removes those ledger leans without changing the ranking surfaces."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
   - "Refresh THIS page last in the data cycle: its matrices read eras + variants, so it inherits whatever labeling state exists when it runs."
 ---
@@ -28,8 +30,9 @@ decisions:
 
 The page: [decks/best-deck-best-call-ranking.html](../../decks/best-deck-best-call-ranking.html)
 (gitignored, self-contained offline HTML). Tables are click-sortable per column
-(default: agency % descending); sorting stays within honesty strata. Rows expand
-to the full per-opponent matchup ledger.
+(default: agency % descending); sorting stays within honesty strata. Coverage
+filters and column sorting apply to the strategic-plan, archetype, and camp peer
+tables. Rows expand to accessible per-opponent matchup ledgers.
 
 ## Refresh (one command, after a data cycle)
 
@@ -84,47 +87,32 @@ Candidacy is gated at the display-suppression coverage threshold — a candidate
 below 5% measured coverage shows n/a with its coverage instead of an
 imputation-noise score.
 
-**Three-level strategy-family view (exploratory).** The same serving registry
-also produces an additive top-level `families` payload beside `arch` and `camps`.
-Each family record carries its stable id, display/full labels, curated flag,
-current-field member archetypes with provenance, presentation-only family
-metrics, a deterministic two-sentence description naming its derived/curated origin, leading
-positive-share current-field members, and field footprint, and typed family-opponent cells. The template renders this as an
-**family-expandable, visually nested family → archetype → camp** hierarchy: family rows open onto
-their current-field archetypes with each archetype's staged camp rows nested beneath it. Long derived labels composed with ` + ` are shortened for display after
-the first two components (`... + N more`), while `full_label` retains the exact
-registry label for hover/title disclosure.
+**Strategic-plan view.** The page adds a `plans` peer table above the archetype
+table. Its registry defines five curated plans (`Disrupt + Pressure`, `Go Off`,
+`Go Over`, `Go Wide`, and `Lock + Outlast`) independently of composition-derived
+superarchetypes. Every current-field archetype must have exactly one primary
+assignment; optional secondary assignments describe hybrids in the expanded
+portrait but do not duplicate their matches or field share across rows.
 
-The family metrics (agency, adjusted WR, floor, coverage, field share) are an
-**exploratory navigation summary, not a recommendation surface**. A family cell
-is a current-field-share-weighted summary of accepted member-archetype pooled
-cells; refused and below-display-gate pools never become numbers. Each numeric cell carries its
-accepted subject field-share support; coverage and adjusted WR are weighted by that support, top
-opponents need at least the page coverage threshold in subject support to ground a row, and partial
-refusals remain inspectable in the tooltip. Ungrounded family metrics are visibly labeled as leans
-(and agency as an upper bound), matching the page's muting discipline. The family
-floor excludes the intra-family cell. These values do not feed archetype Best
-Call, camp P(best), or either view's grounding strata. The archetype table remains
-the decision-authoritative Best Call surface until the family layer passes a
-future-only predictive/decision benchmark.
+Plan cells are rebuilt from decisive match records mapped through those primary
+assignments. They are therefore match-level aggregates, not averages of rendered
+archetype percentages. External plan matchups use the same `n>=8` measured gate
+as the page. Same-plan matches are shown as structural 50% context: 50% contributes
+to adjusted field WR at that plan's field share, but the diagonal is never marked
+measured, never sets the floor, and never enters external coverage. The floor is
+the worst measured external plan. Coverage is measured external opponent share
+divided by all external opponent share; grounding requires every top external
+opponent (up to `--top-k`) measured plus `--cover-min` external coverage. Thus an
+incomplete plan agency remains an explicit upper bound.
 
-Two maps expose the evidence without inventing a camp-by-camp cube:
-
-- The **S×S strategy-family heatmap** has subject families on rows and opponent
-  families on columns. Numeric cells use only accepted typed pooled outputs;
-  hatched `refuse` cells retain the typed refusal or insufficient-`n_eff` reason
-  in a keyboard-focusable tooltip/accessible label, along with effective n, subject support,
-  current-regime evidence share, and source windows; outlined diagonal cells are labeled intra-family.
-- The **camps×parent opponents map** is rectangular: staged camps are subjects
-  and the existing parent-archetype opponents are columns. Measured cells show
-  the shrunk rate; thin/unavailable cells stay explicit (`n=<count>` or an
-  unavailable marker). It performs no speculative camp x camp pooling.
-
-If the serving registry is absent, empty, or disabled with
-`--no-superarchetypes`, `families` is an empty list. The page then says that the
-strategy-family view is unavailable, hides both family maps, and leaves the
-authoritative archetype and camp views unaffected; this is an explicit honest
-degrade, not an unlabeled missing section.
+The peer table is sortable within grounded/ungrounded honesty strata and has a
+minimum-floor-coverage filter. Each plan name is a real keyboard-focusable
+disclosure button with `aria-expanded`/`aria-controls`; opening it yields a
+responsive portrait (description, field footprint, decisive-match count, agency,
+member archetypes, and secondary-plan chips) beside the exact plan-versus-plan
+ledger. The ledger distinguishes measured shrunk/raw records, below-gate or empty
+external cells, and the structural same-plan diagonal in text rather than color
+alone.
 
 **Superarchetype family fallback (ledger-only).** `main()` reads the serving
 taxonomy from the SAME `--db` (`read_superarchetype_members` — the derived cache
@@ -164,24 +152,21 @@ frontmatter decisions above — the page prose is authoritative.
   raw observed WR: **Edge** at 55–60% inclusive and **Dominant** above 60%.
   They are descriptive ledger bands only; they do not affect any metric,
   grounding decision, or ranking.
-- **Floors are evidence-gated** — a cell sets the floor only at n>=20, or
-  thinner when its 95% CI upper bound is still below 50% (an 0-8 qualifies —
-  Eldrazi vs Red Stompy, CI 0–26%; a 2-6 is ambiguity and cannot). Still check
-  the expanded ledger (CIs shown per cell) before acting on a single-cell verdict.
+- **Floors use every measured cell** — once a matchup reaches the page's
+  `n>=8` measured gate, its shrunk estimate can set the floor. This exposes
+  holes earlier, while the explicit upper-bound marker and measured-coverage
+  column keep incomplete rows from masquerading as fully mapped claims. Still
+  check the expanded ledger (raw record and CI shown) before acting on one cell.
 - **Fallback windows are ban-scoped** — a deck whose engine was banned (Nadu
   Cephalid, Candelabra Forge) keeps none of its banned-era matches in any cell
   that touches it; coverage drops honestly instead (Forge 95%→17% grounding was
   Candelabra-era data).
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).
-- **Family rows are exploratory navigation** — their agency/adj/floor/coverage
-  summarize typed pooled family evidence and must not be read as a ranked Best
-  Call recommendation. Follow the nested row to the archetype's `Best Call`
-  metrics for the authoritative decision surface; family authority requires the
-  future-only benchmark first.
-- **Heatmap refusals are data** — a hatched family cell is a typed refusal (or
-  insufficient effective evidence), not a blank to interpolate. Outlined cells
-  are intra-family; the camps map remains camps×parent opponents by design.
+- **Plan rows are mutually exclusive primary-plan aggregates** — secondary chips
+  explain hybrid decks but never count their matches or field share again.
+  Same-plan 50% is structural context, not evidence: judge a plan's floor and
+  grounding only from its external cells and external-coverage percentage.
 - **Family leans are leans** — an `imputed`/`pooled` value in the ledger is
   superarchetype-sourced, never a measured cell, and passing the heterogeneity
   gate never promotes it: I² is one-sided evidence (a low value is not a
