@@ -14,7 +14,7 @@ summary: |
 decisions:
   - "Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
-  - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the shrunk estimate, not raw."
+  - "A thin cell must prove its hole: the floor is set only by cells with n>=20 or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered decks mechanically show lower floors. Blowouts classify on the raw observed rate, not the shrunk estimate, after passing the measured-cell gate (n>=8)."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
@@ -155,10 +155,11 @@ frontmatter decisions above — the page prose is authoritative.
 - **Strata are honesty walls**: grounded+current, grounded-but-not-current
   (<5 decks in the last 4 corpus weeks), ungrounded (thin floor = upper bound).
   Column sorting reorders *within* a stratum only.
-- **Blowouts** count measured current-field matchups at shrunk WR <40% (full) /
-  40–45% (half) — classified on the shrunk estimate so thin-cell noise doesn't
-  count; "% meta that blows you out" weights them by field share and is a lower
-  bound (unmeasured opponents can't be counted).
+- **Blowouts** count measured current-field matchups at raw observed WR <40%
+  (full) / 40–45% (half). The `n>=8` measured-cell gate excludes thin cells;
+  among those measured cells, classification uses the raw rate rather than the
+  shrunk estimate. "% meta that blows you out" weights them by field share and
+  is a lower bound (unmeasured opponents can't be counted).
 - **Floors are evidence-gated** — a cell sets the floor only at n>=20, or
   thinner when its 95% CI upper bound is still below 50% (an 0-8 qualifies —
   Eldrazi vs Red Stompy, CI 0–26%; a 2-6 is ambiguity and cannot). Still check
