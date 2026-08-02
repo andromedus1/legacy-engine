@@ -56,6 +56,14 @@ def test_advise_subcommands_require_deck(runner):
         assert result.exit_code != 0, f"advise {sub} should fail without --deck"
 
 
+def test_superarchetype_comparison_is_strictly_non_writing(runner):
+    result = runner.invoke(main, [
+        "superarchetype", "run", "--compare-since", "2026-06-29",
+    ])
+    assert result.exit_code != 0
+    assert "requires the default era-aware policy and --dry-run" in result.output
+
+
 # ---------------------------------------------------------------------------
 # report cards — Unit 5 of epic-deck-generation-per-card-value
 # ---------------------------------------------------------------------------

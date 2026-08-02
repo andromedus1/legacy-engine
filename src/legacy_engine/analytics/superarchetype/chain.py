@@ -160,15 +160,30 @@ def registry_audit_lines(
         1 for c in registry.clusters for m in c.members
         if m.provenance in _CONTRIBUTOR_PROVENANCE
     )
+    window_label = (
+        "PER-ENTITY ERAS"
+        if registry.window_policy == "per-entity-era"
+        else (registry.window_since or "FULL CORPUS")
+    )
     lines = [
         (
             f"// superarchetype: {len(registry.clusters)} clusters "
             f"({n_contributors} contributors), "
-            f"window {registry.window_since or 'FULL CORPUS'}..{registry.window_until or 'open'}, "
+            f"window {window_label}..{registry.window_until or 'open'}, "
             f"derived {registry.derived_at[:10]}"
         )
     ]
-    if registry.window_since is None:
+    lines.extend(registry.audit_lines)
+    if registry.window_policy == "per-entity-era":
+        sources: dict[str, int] = {}
+        for _label, _since, source in registry.entity_horizons:
+            sources[source] = sources.get(source, 0) + 1
+        lines.append(
+            "// superarchetype: per-entity core horizons ("
+            + ", ".join(f"{source}={count}" for source, count in sorted(sources.items()))
+            + ")"
+        )
+    elif registry.window_since is None:
         lines.append(
             "// superarchetype: ⚠ FULL-CORPUS registry — exploratory taxonomy serving a windowed "
             "matrix (era-mix risk); re-run `superarchetype run --since <regime start>`"

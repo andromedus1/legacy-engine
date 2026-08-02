@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-01
+updated: 2026-08-02
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -42,9 +42,9 @@ The page reads eras + variants, so run it **last**, after the standard cycle:
 .venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
   while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
 .venv/bin/legacy-engine eras run             # re-detect era boundaries + drift alarms
-# re-derive the superarchetype taxonomy over the current regime (the page's family
-# fallback reads its DuckDB derived cache; a stale window warns in the audit header):
-.venv/bin/legacy-engine superarchetype run --since <current regime start>
+# re-derive cores over each archetype's own stable era (the page's family fallback
+# reads the DuckDB derived cache; horizon provenance is echoed in the audit header):
+.venv/bin/legacy-engine superarchetype run
 .venv/bin/python scripts/refresh_best_call_ranking.py
 ```
 
@@ -131,7 +131,7 @@ frontmatter decisions above — the page prose is authoritative.
   certificate of exchangeability). A `family range` line is a refusal rendered
   honestly — read the member split, not a blended number. Check the audit header
   for the registry window (a stale-taxonomy warning there means re-run
-  `superarchetype run --since <regime start>`).
+  `superarchetype run`; use `--since <date>` only for a labeled uniform-window diagnostic).
 - **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
   archetypes compete in ONE argmax, so the values are comparable across parents
   and can never sum past 1. n/a means the row failed the 5% measured-coverage

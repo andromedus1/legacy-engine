@@ -12,6 +12,7 @@ from legacy_engine.analytics.superarchetype.cluster import (
     ClusterSolution,
     DerivedCluster,
     cluster_archetypes,
+    load_archetype_decks,
 )
 from legacy_engine.analytics.superarchetype.registry import (
     CuratedCluster,
@@ -323,6 +324,9 @@ class TestPersistence:
             staples=("Brainstorm", "Ponder"),
             unassigned=(("Z", "thin"),),
             reasons=("one", "two"),
+            window_policy="per-entity-era",
+            entity_horizons=(("A", "2026-02-01", "era"), ("B", None, "era")),
+            audit_lines=("// eras: test audit",),
         )
         path = tmp_path / "nested" / "derived.json"
         write_derived_registry(registry, path)
@@ -337,6 +341,9 @@ class TestPersistence:
             staples=("Brainstorm",),
             unassigned=(("Z", "thin"),),
             reasons=("one",),
+            window_policy="per-entity-era",
+            entity_horizons=(("A", "2026-02-01", "era"),),
+            audit_lines=("// eras: test audit",),
         )
         con = duckdb.connect(str(tmp_path / "t.duckdb"))
         try:
@@ -367,6 +374,42 @@ class TestPersistence:
         registry = make_registry([registry_cluster("sa-001", ["A", "B"])])
         assert registry.cluster_of("A").id == "sa-001"
         assert registry.cluster_of("Nope") is None
+
+
+class TestEraAwareDeckLoading:
+    def test_each_archetype_uses_its_own_horizon(self):
+        con = duckdb.connect(":memory:")
+        con.execute("CREATE TABLE tournaments(id INTEGER, date VARCHAR)")
+        con.execute("CREATE TABLE decks(tournament_id INTEGER, deck_idx INTEGER, archetype VARCHAR)")
+        con.execute(
+            "CREATE TABLE deck_cards(tournament_id INTEGER, deck_idx INTEGER, "
+            "name VARCHAR, board VARCHAR, count INTEGER)"
+        )
+        con.executemany("INSERT INTO tournaments VALUES (?, ?)", [
+            (1, "2026-01-01"), (2, "2026-03-01"),
+        ])
+        con.executemany("INSERT INTO decks VALUES (?, ?, ?)", [
+            (1, 0, "Rebuilt"), (2, 0, "Rebuilt"),
+            (1, 1, "Stable"), (2, 1, "Stable"),
+        ])
+        con.executemany("INSERT INTO deck_cards VALUES (?, ?, ?, 'main', 4)", [
+            (1, 0, "Old Engine"), (2, 0, "New Engine"),
+            (1, 1, "Old Stable"), (2, 1, "New Stable"),
+        ])
+        try:
+            decks = load_archetype_decks(
+                con, since_by_archetype={"Rebuilt": "2026-02-01", "Stable": None}
+            )
+        finally:
+            con.close()
+
+        by_arch = {}
+        for deck in decks:
+            by_arch.setdefault(deck.archetype, []).append(deck.cards)
+        assert by_arch["Rebuilt"] == [frozenset({"New Engine"})]
+        assert by_arch["Stable"] == [
+            frozenset({"Old Stable"}), frozenset({"New Stable"})
+        ]
 
 
 class TestProvenanceVocabulary:
