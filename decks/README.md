@@ -2,6 +2,12 @@
 
 Working decklists and field files for deck-prep (`scripts/deck-prep.sh`).
 
+## Generated review artifact
+
+- `best-deck-best-call-ranking.html` — local, git-ignored Best Deck / Best Call review page.
+  Refresh it with `.venv/bin/python scripts/refresh_best_call_ranking.py`; it is generated from
+  the local analytics data and should be reviewed, not hand-edited.
+
 ## Decklists (plain text: `N Cardname` per line, maindeck only)
 - `dimir-tempo.txt` — the primary build: grindy/disruptive (2 Hymn to Tourach + 2 Baleful Strix
   over the consensus velocity package). Off-meta in those slots, but pointed at a big-mana meta.

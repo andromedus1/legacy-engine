@@ -4,6 +4,16 @@ The stable-era release: every statistic windows to each archetype's (and camp's)
 stable era — the largest stretch of still-solid data — with the triggering disturbance named.
 
 ### Features
+- **Superarchetype layer + serving lifecycle** — strategy clusters now complete the taxonomy as
+  superarchetype → parent archetype → camp. `superarchetype run` previews a derived candidate;
+  `run --promote`, after operator review, explicitly replaces the serving JSON registry and its
+  DuckDB cache. `list` and `explain` inspect the serving memberships and provenance.
+- **Best Deck / Best Call review page** — `.venv/bin/python
+  scripts/refresh_best_call_ranking.py` generates the git-ignored
+  `decks/best-deck-best-call-ranking.html`: a family → archetype → camp hierarchy, family heatmap,
+  and deterministic group descriptions. Family evidence is exploratory only; ranking authority
+  remains archetype-level. Raw-win-rate matchup bands are Blowout <40%, Half 40–45%, Edge 55–60%
+  inclusive, and Dominant >60%.
 - **Per-entity stable-era detection** — new `analytics/eras/` package: density-adaptive entity
   series, signal ensemble (presence cliffs/ramps, composition change-points via ruptures,
   share shifts, win-rate corroboration), selection-corrected permutation p-values, fleet-wide
