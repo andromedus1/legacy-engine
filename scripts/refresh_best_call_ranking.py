@@ -71,12 +71,14 @@ from legacy_engine.advisory.positioning import (
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.matchup import (
+    DISPLAY_GATE_N,
     MatchupMatrix,
     build_adaptive_matrix,
     build_matrix,
     build_multi_split_adaptive,
     build_multi_split_matrix,
 )
+from legacy_engine.analytics.superarchetype.aggregate import I2_ONE_SIDED_NOTE
 from legacy_engine.analytics.superarchetype.registry import read_superarchetype_members
 from legacy_engine.archetype.discovered import staged_split_parents
 from legacy_engine.config import DUCKDB_PATH
@@ -172,6 +174,8 @@ def _sa_payload(subj, opp, msa, label_of):
     )
 
     if entry.kind == "imputed":
+        if imputed is None:
+            raise AssertionError(f"imputed ladder entry has no ImputedCell: {(subj, opp)!r}")
         lic = imputed.license
         return {
             "kind": "imputed",
@@ -181,12 +185,21 @@ def _sa_payload(subj, opp, msa, label_of):
             "cluster_id": lic.cluster_id,
             "cur": r4(imputed.current_regime_share), "window_note": imputed.window_note,
             "license": lic.reason, "tau": r4(lic.tau_profile),
+            # Imputation is licensed by a profile-level divergence test rather than a
+            # per-cell Heterogeneity value, but the feature contract requires the same
+            # one-sided evidence warning on every family-sourced point estimate. Import the
+            # estimator's SSOT constant; never duplicate or parse display prose here.
+            "one_sided_note": I2_ONE_SIDED_NOTE,
             "split": _split_json(entry.sibling_split),
             "reasons": list(entry.reasons),
         }
 
     if entry.kind == "pooled":
+        if pooled is None:
+            raise AssertionError(f"pooled ladder entry has no PooledCell: {(subj, opp)!r}")
         conc, het = pooled.concentration, pooled.heterogeneity
+        # Serialize the TYPED verdict fields directly. ``PooledCell.provenance`` is display
+        # prose, not a semantic contract, and can contradict refused/not-computable verdicts.
         return {
             "kind": "pooled",
             "p": r4(pooled.pooled_p), "ci_low": r4(pooled.ci_low), "ci_high": r4(pooled.ci_high),
@@ -194,28 +207,41 @@ def _sa_payload(subj, opp, msa, label_of):
             "family": label_of.get(entry.cluster_id, entry.cluster_id),
             "cluster_id": entry.cluster_id,
             "m_eff": round(conc.m_eff, 2) if conc is not None else None,
+            "concentration_passed": conc.passed if conc is not None else None,
+            "concentration_label": conc.label if conc is not None else None,
             "i2": r4(het.i2) if het is not None else None,
             "i2_band": het.band if het is not None else None,
+            "heterogeneity_note": het.note if het is not None else None,
+            "heterogeneity_reason": het.reason if het is not None else None,
+            "one_sided_note": het.one_sided_note if het is not None else None,
             "intra_share": r4(pooled.intra_cluster_share),
             "cur": r4(pooled.current_regime_share), "window_note": pooled.window_note,
-            "notes": list(pooled.provenance[1:]),
             "split": _split_json(pooled.member_split),
             "reasons": list(entry.reasons),
         }
 
     # kind == "none": a family-range display when any split exists; nothing to add otherwise.
+    # The named refusal comes from the TYPED fields (ImputedCell.reason /
+    # PooledCell.refused_reason), never parsed out of display strings.
     if entry.sibling_split:
-        # sibling_split rides an ATTEMPTED imputation (resolve_ladder attaches it only then),
-        # so the family and freshness come from the imputation side.
-        fam_id = imputed.license.cluster_id if imputed is not None else entry.cluster_id
-        reason = next((r for r in entry.reasons if r.startswith("imputation")), None)
-        cur = r4(imputed.current_regime_share) if imputed is not None else None
-        wnote = imputed.window_note if imputed is not None else ""
+        # sibling_split rides an ATTEMPTED imputation (resolve_ladder attaches it only
+        # then), so the family, refusal, and freshness come from the imputation side.
+        if imputed is None:
+            raise AssertionError(f"sibling split has no ImputedCell: {(subj, opp)!r}")
+        fam_id = imputed.license.cluster_id
+        reason = f"imputation refused: {imputed.reason}"
+        cur = r4(imputed.current_regime_share)
+        wnote = imputed.window_note
         split, source = entry.sibling_split, "siblings"
     elif pooled is not None and pooled.member_split:
         fam_id = entry.cluster_id
-        reason = next(
-            (r for r in entry.reasons if r.startswith(("pooled", "no pooled"))), None)
+        if pooled.refused_reason is not None:
+            reason = f"pooled cell refused: {pooled.refused_reason}"
+        else:
+            reason = (
+                f"pooled cell below the engine display gate "
+                f"(n_eff {pooled.n_eff:.0f} < {DISPLAY_GATE_N})"
+            )
         cur = r4(pooled.current_regime_share)
         wnote = pooled.window_note
         split, source = pooled.member_split, "members"
@@ -226,8 +252,12 @@ def _sa_payload(subj, opp, msa, label_of):
         "family": label_of.get(fam_id, fam_id) if fam_id else None,
         "cluster_id": fam_id,
         "source": source,
-        "reason": reason or "; ".join(entry.reasons),
+        "reason": reason,
         "cur": cur, "window_note": wnote,
+        "one_sided_note": (
+            pooled.heterogeneity.one_sided_note
+            if pooled is not None and pooled.heterogeneity is not None else None
+        ),
         "split": _split_json(split),
         "reasons": list(entry.reasons),
     }
@@ -343,6 +373,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print(f"building multi-split matrices for {len(parents)} staged parents...", flush=True)
     msa = build_multi_split_adaptive(
         con, parents=parents, min_row_share=min_row_share, superarchetypes=superarchetypes,
+        apply_superarchetype_priors=False,
     )
     camp_parent = msa.multi.camp_parent
     camp_labels = [s for s in msa.multi.subjects if s in camp_parent]

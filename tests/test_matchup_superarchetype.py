@@ -181,6 +181,24 @@ class TestOffPathIdentity:
             *base.audit_preamble, "// superarchetype: registry empty — layer off",
         )
 
+    def test_overlay_only_mode_keeps_base_cells_while_engaging_display_maps(self):
+        """A ledger-only consumer gets the typed ladder without letting family priors mutate
+        any MatchupCell. This is one registry-fed pass, not a baseline rebuild plus overlay."""
+        con = _hero_con()
+        base = build_multi_split_adaptive(con, parents=())
+        overlay = build_multi_split_adaptive(
+            con, parents=(), superarchetypes=_hero_registry(),
+            apply_superarchetype_priors=False,
+        )
+        con.close()
+
+        assert set(overlay.multi.cells) == set(base.multi.cells)
+        for key, cell in base.multi.cells.items():
+            assert _fields(overlay.multi.cells[key]) == _fields(cell), key
+        assert overlay.cluster_cells and overlay.imputed_cells and overlay.ladder
+        assert {entry.kind for entry in overlay.ladder.values()} >= {"imputed", "pooled", "none"}
+        assert any(line.startswith("// superarchetype:") for line in overlay.audit_preamble)
+
 
 # ---------------------------------------------------------------------------
 # The prior rungs — engaged cells change, everything else is untouched
