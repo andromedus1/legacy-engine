@@ -97,38 +97,35 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
 .bo-key .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
   vertical-align: -1px; margin: 0 4px 0 10px; }
 .scroll { overflow-x: auto; }
-.tablewrap { overflow-x: auto; }
+.tablewrap { overflow: visible; }
+.table-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  color: var(--ink-2); font-size: 12px; }
+.table-controls input { width: 72px; padding: 4px 6px; color: var(--ink);
+  background: var(--surface-1); border: 1px solid var(--ring); border-radius: 6px;
+  font-variant-numeric: tabular-nums; }
+.table-count { color: var(--muted); }
+.table-scroll { max-height: 72vh; overflow: auto; }
+.table-scroll thead th { position: sticky; top: 0; z-index: 2;
+  background: var(--surface-1); box-shadow: 0 1px 0 var(--axis); }
 svg text { font-family: inherit; }
 .footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
 .hint { font-size: 13px; color: var(--ink-2); margin: -8px 0 14px; }
 .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
   border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
   font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
-.explore-note { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--surface-1)); }
-.taxonomy { padding: 0; overflow-x: auto; }
-.tax-head, .tax-row { display:grid; grid-template-columns:minmax(300px,1fr) repeat(5,110px);
-  gap:0; align-items:center; padding:7px 12px; border-bottom:1px solid var(--grid); }
-.tax-head { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
-.tax-family > summary { list-style:none; cursor:pointer; background:color-mix(in srgb,var(--s1) 7%,var(--surface-1)); }
-.tax-family > summary::-webkit-details-marker { display:none; }
-.tax-family > summary .tax-name::before { content:"▸ "; color:var(--s1); }
-.tax-family[open] > summary .tax-name::before { content:"▾ "; }
-.tax-name { font-weight:650; min-width:0; white-space:normal; }
-.tax-description { grid-column:1/-1; padding:8px 46px 10px; color:var(--ink-2);
-  font-size:12px; border-bottom:1px solid var(--grid); background:var(--surface-1); }
-.tax-arch { padding-left:34px; background:var(--surface-1); }
-.tax-camp { padding-left:66px; color:var(--ink-2); background:color-mix(in srgb,var(--surface-1) 92%,var(--page)); }
-.tax-num { font-variant-numeric:tabular-nums; }
-.map-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(320px,1fr); gap:12px; }
-.heat-wrap { overflow:auto; max-height:620px; }
-table.heatmap { width:max-content; min-width:100%; font-size:11px; }
-.heatmap th:first-child, .heatmap td:first-child { position:sticky; left:0; z-index:2; background:var(--surface-1); }
-.heatmap th { max-width:82px; overflow:hidden; text-overflow:ellipsis; }
-.heatmap td.hm { min-width:54px; text-align:center; border:1px solid var(--page); padding:6px 4px; }
-.heatmap td.hm-refused { background:repeating-linear-gradient(135deg,var(--grid),var(--grid) 4px,var(--surface-1) 4px,var(--surface-1) 8px); color:var(--muted); }
-.heatmap td.hm-intra { outline:2px solid var(--s1); outline-offset:-2px; }
-.heatmap td.hm:focus { outline:3px solid var(--amber); outline-offset:-3px; }
-@media (max-width:900px) { .map-grid{grid-template-columns:1fr}.tax-head,.tax-row{grid-template-columns:minmax(230px,1fr) repeat(5,92px)} }
+.plan-toggle { appearance:none; border:0; background:none; color:inherit; font:inherit;
+  font-weight:650; padding:0; cursor:pointer; text-align:left; }
+.plan-toggle::before { content:"▸ "; color:var(--s1); }
+.plan-toggle[aria-expanded="true"]::before { content:"▾ "; }
+.plan-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:3px; border-radius:2px; }
+.plan-portrait { display:grid; grid-template-columns:minmax(220px,.8fr) minmax(320px,1.2fr); gap:18px; }
+.plan-portrait h3 { margin:0 0 5px; font-size:16px; }
+.plan-portrait p { margin:0 0 10px; color:var(--ink-2); }
+.plan-stat { display:inline-block; margin:0 12px 6px 0; }
+.plan-members { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.plan-member { border:1px solid var(--ring); border-radius:7px; padding:3px 6px; }
+.plan-ledger td:first-child { font-weight:600; }
+@media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -142,10 +139,10 @@ window, and blowout highlights.</div>
 <div class="card def">
   <details class="method">
   <summary>What is Agency&nbsp;%? — the metric and each column</summary>
-  <div style="margin-top:8px"><b>Agency % = min( adjusted field win rate , worst grounded matchup ) × 100</b> —
+  <div style="margin-top:8px"><b>Agency % = min( adjusted field win rate , worst measured matchup ) × 100</b> —
   how much of the match result your own play keeps in the worst case.
   The <b>adjusted field WR</b> is your shrunk win rate weighted by the current field's
-  archetype shares (are you competitive <i>in general</i>?). The <b>worst grounded matchup</b>
+  archetype shares (are you competitive <i>in general</i>?). The <b>worst measured matchup</b>
   is your floor against any opponent you can actually be paired into (are you competitive
   <i>against anyone</i>?). A high-agency deck never hands the result to the pairing screen:
   it concedes no free wins to the room. Theory under test: <b>maximum agency = most fun</b>.</div>
@@ -177,11 +174,11 @@ window, and blowout highlights.</div>
         each chip's tooltip; a pool with &lt; 50% current-regime evidence carries an amber
         <span class="chip">◦mostly pre-regime</span> marker; the registry's own provenance
         (and its stale-taxonomy warning, when it fires) is in the audit header above.</li>
-    <li><b>A thin cell must prove its hole</b> — the row's floor can only be set by a cell with
-        n ≥ 20, or by a thinner measured cell whose 95% CI upper bound is still below 50%
-        (an 0-8 qualifies; a 2-6 is ambiguity, not evidence). This keeps the min() from being
-        won by noise: without the gate, the deck with the <i>most</i> measured cells tends to
-        show the <i>lowest</i> floor purely mechanically.</li>
+    <li><b>Every measured matchup can set the floor</b> — once a cell clears the page's
+        n ≥ 8 measured-evidence gate, its shrunk estimate participates in the minimum. This
+        makes visible holes matter sooner. Because a deck with more measured opponents has
+        more chances to expose a low matchup, incomplete rows remain explicit upper bounds and
+        coverage must be read alongside agency.</li>
     <li><b>Coverage counts against the floor</b> — unmeasured field share is shown per row;
         a floor claim over 70% of the field is a 70% claim.</li>
     <li><b>Blowouts</b> — count of measured current-field matchups where you're getting run over:
@@ -293,32 +290,30 @@ window, and blowout highlights.</div>
 <div class="footnote" style="margin: -4px 2px 0">One dot per archetype with a computable
 adjusted WR and floor. <b>Blue = grounded floor</b>: the deck's top-8 field opponents are each
 measured (n ≥ 8) and ≥ 80% of field share-mass is covered, so the floor is a measured claim.
-<b>Gray = thin floor (a lean)</b>: that grounding failed — unknown matchups sit near the deck's
+<b>Gray = incomplete floor (upper bound)</b>: that grounding failed — unknown matchups sit near the deck's
 own shrunk average, and agency = min over cells can only <i>fall</i> as more get measured — so
 the dot's floor is an upper bound, not a claim. <b>Filled dot = current; hollow dot = not
 current</b> (fewer than 5 decks in the last 4 corpus weeks). Labels mark the top 5
 grounded-and-current decks by agency; hover any dot for its numbers.</div>
 
-<h2>Strategy families → archetypes → camps <span class="chip">exploratory</span></h2>
-<div class="card explore-note"><b>Navigation, not a recommendation.</b> Strategy families are
-outcome-blind composition groups. They help explain the room and pool sparse matchup evidence,
-but the archetype table below remains the decision-authoritative Best Call surface until the
-future-only predictive/decision benchmark passes. A low I² is never proof that members are
-exchangeable.</div>
-<div id="taxonomy-root"></div>
-
-<div class="map-grid" id="family-maps">
-  <section><h2>Strategy-family agency map</h2><div class="card heat-wrap" id="family-heatmap"></div>
-  <div class="footnote">Rows are subject families; columns are opponent families. Hatched cells
-  are typed refusals or insufficient effective evidence, never missing-data blanks. Outlined cells
-  are intra-family.</div></section>
-  <section><h2>Camps × parent opponents</h2><div class="card heat-wrap" id="camp-heatmap"></div>
-  <div class="footnote">The evidence-preserving rectangular map: camp subjects against parent-level
-  opponents. Thin cells remain labeled by n; no speculative camp×camp pooling.</div></section>
-</div>
+<h2>Strategic plans</h2>
+<div class="card tablewrap">
+<div class="table-controls"><label for="coverage-plan">Minimum floor coverage</label>
+<input id="coverage-plan" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
+<span class="table-count" id="count-plan"></span></div>
+<div class="table-scroll"><table id="t-plan"></table></div>
+<div class="footnote">Five curated, mutually exclusive primary plans summarize what decks are
+trying to do; secondary labels explain hybrids without counting them twice. Expand a plan for its
+portrait, member archetypes, and exact plan-versus-plan ledger. Results are rebuilt from decisive
+matches. Same-plan play is structural 50% context and never sets the floor or inflates external
+coverage.</div></div>
 
 <h2>Archetypes</h2>
-<div class="card tablewrap"><table id="t-arch"></table>
+<div class="card tablewrap">
+<div class="table-controls"><label for="coverage-arch">Minimum floor coverage</label>
+<input id="coverage-arch" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
+<span class="table-count" id="count-arch"></span></div>
+<div class="table-scroll"><table id="t-arch"></table></div>
 <div class="footnote">Click a row to expand its full matchup ledger — one line per
 current-field opponent: the chip after the name is that opponent's % of meta; the first
 number is the shrunk estimate, <i>raw</i> is wins/n; the window chip is
@@ -331,11 +326,16 @@ live pick); <b>window</b> = the row's era window (<span class="chip">since date<
 stable_since from era detection; <span class="chip">full history</span> = no accepted era
 boundary); <b>% of meta</b> = share of all decks in the field window (audit header);
 <b>grounded</b> row = the top-8 field opponents are each measured (n ≥ 8) and ≥ 80% of field
-share-mass is covered — its floor is a measured claim; <b>≤</b> before an agency value =
-ungrounded (thin-floor) row, the value is an upper bound.</div></div>
+share-mass is covered — its floor is broadly measured; <b>≤</b> plus the
+<span class="chip">upper bound</span> marker means grounding failed and the agency value can
+fall as more matchups become measured.</div></div>
 
 <h2>Subarchetypes (camps)</h2>
-<div class="card tablewrap"><table id="t-camp"></table>
+<div class="card tablewrap">
+<div class="table-controls"><label for="coverage-camp">Minimum floor coverage</label>
+<input id="coverage-camp" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
+<span class="table-count" id="count-camp"></span></div>
+<div class="table-scroll"><table id="t-camp"></table></div>
 <div class="footnote">Same columns, ledger, and markers as the archetype table above, plus
 <b>P(best)</b>: the probability this deck is the best call for the current field — one
 shared Monte-Carlo where every camp and every unsplit archetype is scored against the
@@ -413,98 +413,6 @@ function blowouts(r) {
 // refusal, freshness marker, and I² caveat; display/provenance prose is never parsed as truth.
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
-function heatStyle(p) {
-  if (p == null) return "";
-  const d = Math.min(1, Math.abs(p - .5) / .16);
-  const rgb = p >= .5 ? [42,120,214] : [208,59,59];
-  return `background:color-mix(in srgb,rgb(${rgb.join(",")}) ${Math.round(10+42*d)}%,var(--surface-1))`;
-}
-function metricCell(v, suffix="") { return `<span class="tax-num">${v == null ? "—" : fmtP(v)+suffix}</span>`; }
-function familyMetric(v, grounded, agency=false) {
-  if (v == null) return `<span class="tax-num">—</span>`;
-  return `<span class="tax-num">${grounded ? "" : agency ? "≤ " : ""}${fmtP(v)}` +
-    `${grounded ? "" : ` <span class="chip">lean</span>`}</span>`;
-}
-function renderTaxonomy() {
-  const root = document.getElementById("taxonomy-root");
-  const families = D.families || [];
-  if (!families.length) {
-    root.innerHTML = `<div class="card"><b>Strategy-family view unavailable.</b> No serving` +
-      ` superarchetype registry was present in this database; the authoritative archetype and` +
-      ` camp views below are unaffected.</div>`;
-    document.getElementById("family-maps").style.display = "none";
-    return;
-  }
-  const archByName = new Map(D.arch.map(r => [r.subject, r]));
-  const campsByParent = new Map();
-  D.camps.forEach(r => { if (!campsByParent.has(r.parent)) campsByParent.set(r.parent, []); campsByParent.get(r.parent).push(r); });
-  let html = `<div class="card taxonomy"><div class="tax-head"><span>Name</span><span>Agency</span>`+
-    `<span>Adj WR</span><span>Floor</span><span>Coverage</span><span>Meta</span></div>`;
-  for (const family of families) {
-    const memberRows = family.members.map(m => archByName.get(m.archetype)).filter(Boolean)
-      .sort((a,b) => b.field_share-a.field_share);
-    html += `<details class="tax-family"><summary class="tax-row"><span class="tax-name" title="${escA(family.full_label || family.label)}">${escT(family.label)}`+
-      ` <span class="chip">${memberRows.length} archetypes</span>${family.curated ? ` <span class="chip">curated</span>` : ""}</span>`+
-      `${familyMetric(family.agency,family.grounded,true)}${familyMetric(family.adj,family.grounded)}`+
-      `${familyMetric(family.floor,family.grounded)}`+
-      `<span>${Math.round(100*family.coverage)}%</span><span>${(100*family.field_share).toFixed(1)}%</span></summary>`;
-    html += `<div class="tax-description">${escT(family.description)}</div>`;
-    for (const arch of memberRows) {
-      const camps = (campsByParent.get(arch.subject) || []).sort((a,b) => b.field_share-a.field_share);
-      html += `<div class="tax-row tax-arch"><span class="tax-name">↳ ${escT(arch.subject)} <span class="chip">Best Call</span></span>`+
-        `${metricCell(arch.agency)}${metricCell(arch.adj)}${metricCell(arch.floor)}`+
-        `<span>${Math.round(100*arch.coverage)}%</span><span>${(100*arch.field_share).toFixed(1)}%</span></div>`;
-      for (const camp of camps) html += `<div class="tax-row tax-camp"><span>↳ ${escT(camp.camp)} <span class="chip">camp</span></span>`+
-        `${metricCell(camp.agency)}${metricCell(camp.adj)}${metricCell(camp.floor)}`+
-        `<span>${Math.round(100*camp.coverage)}%</span><span>${(100*camp.field_share).toFixed(1)}%</span></div>`;
-    }
-    html += `</details>`;
-  }
-  root.innerHTML = html + `</div>`;
-}
-function renderFamilyHeatmap() {
-  const families = D.families || [];
-  if (!families.length) return;
-  let html = `<table class="heatmap"><thead><tr><th>subject ↓ / opponent →</th>`+
-    families.map(f => `<th title="${escA(f.full_label || f.label)}">${escT(f.label)}</th>`).join("") + `</tr></thead><tbody>`;
-  for (const family of families) {
-    const cells = new Map(family.cells.map(c => [c.opponent_id, c]));
-    html += `<tr><th title="${escA(family.full_label || family.label)}">${escT(family.label)}</th>`;
-    for (const opponent of families) {
-      const c = cells.get(opponent.id);
-      const refused = !c || c.p == null;
-      const title = refused ? (c?.refused_reason || "no pooled evidence") :
-        `${family.full_label || family.label} vs ${opponent.full_label || opponent.label}: ${fmtP(c.p)}%, n_eff ${Math.round(c.n_eff)}, accepted ${c.accepted_members}/${c.subject_members} subject members (${fmtP(c.support)}% field-share support); current-regime evidence ${c.current_regime_share == null ? "unknown" : fmtP(c.current_regime_share)+"%"}; windows: ${(c.window_notes || []).join(" | ") || "unknown"}` +
-        (c.support_reason ? `; partial refusals: ${c.support_reason}` : "");
-      html += `<td class="hm ${refused ? "hm-refused" : ""} ${c?.intra_family ? "hm-intra" : ""}"`+
-        ` style="${refused ? "" : heatStyle(c.p)}" title="${escA(title)}" tabindex="0" aria-label="${escA(title)}">${refused ? "refuse" : fmtP(c.p)}</td>`;
-    }
-    html += `</tr>`;
-  }
-  document.getElementById("family-heatmap").innerHTML = html + `</tbody></table>`;
-}
-function renderCampHeatmap() {
-  const rows = D.camps || [];
-  if (!rows.length) { document.getElementById("camp-heatmap").textContent = "No staged camps."; return; }
-  const opponents = rows[0].cells.map(c => c.opp);
-  let html = `<table class="heatmap"><thead><tr><th>camp ↓ / parent →</th>`+
-    opponents.map(o => `<th title="${escA(o)}">${escT(o)}</th>`).join("") + `</tr></thead><tbody>`;
-  for (const row of rows) {
-    const cells = new Map(row.cells.map(c => [c.opp,c]));
-    html += `<tr><th>${escT(row.parent)} [${escT(row.camp)}]</th>`;
-    for (const opponent of opponents) {
-      const c = cells.get(opponent), thin = !c || !c.measured || c.p == null;
-      const title = !c ? "cell unavailable" : `${row.subject} vs ${opponent}: ${fmtP(c.p)}%, n=${c.n}, ${c.window}`;
-      html += `<td class="hm ${thin ? "hm-refused" : ""}" style="${thin ? "" : heatStyle(c.p)}" title="${escA(title)}" tabindex="0" aria-label="${escA(title)}">`+
-        `${!c ? "—" : thin ? `n=${c.n}` : fmtP(c.p)}</td>`;
-    }
-    html += `</tr>`;
-  }
-  document.getElementById("camp-heatmap").innerHTML = html + `</tbody></table>`;
-}
-renderTaxonomy();
-renderFamilyHeatmap();
-renderCampHeatmap();
 const saSplitText = split => split.map(m =>
   `${m.a}${m.intra ? " (intra-family)" : ""} ${m.w}-${m.n - m.w} (${fmtP(m.p)}%, ${m.tier})`
 ).join("; ");
@@ -565,7 +473,8 @@ function pbestHtml(r) {
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
   const cls = (r.grounded ? "" : "thin") + stale;
-  const name = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
+  const baseName = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
+  const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
   const w = Math.max(2, Math.round((r.agency || 0) * 220));
   const agencyTxt = (r.grounded ? "" : "≤ ") + fmtP(r.agency);
   const floorTxt = r.floor == null ? "—" :
@@ -592,12 +501,12 @@ function rowHtml(r, i, camp) {
 const COLS = [
   {label:"#", sort:false},
   {label:"deck", get:r => (r.parent ? r.parent+" ["+r.camp+"]" : r.subject).toLowerCase(), dir:1},
-  {label:"agency %", get:r => r.agency, dir:-1},
+  {label:"agency % (≤ = upper bound)", get:r => r.agency, dir:-1},
   {label:"adj field WR %", get:r => r.adj, dir:-1},
-  {label:"worst grounded matchup %", get:r => r.floor, dir:-1},
+  {label:"worst measured matchup %", get:r => r.floor, dir:-1},
   {label:"blowouts", get:r => r._b.score, dir:1},
   {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
-  {label:"floor coverage", get:r => r.coverage, dir:-1},
+  {label:"measured coverage", get:r => r.coverage, dir:-1},
   {label:"% of meta", get:r => r.field_share, dir:-1},
   {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
   {label:"window", get:r => r.since || "", dir:1},
@@ -610,8 +519,13 @@ const colsFor = camp => camp ? CAMP_COLS : COLS;
 // Default sort: agency %, descending. Click a header to sort by that column;
 // click again to flip direction. Sorting happens WITHIN each honesty stratum —
 // grounded-current rows never intermix with not-current or thin-floor rows.
-const sortState = {"t-arch": {col: 2, dir: -1}, "t-camp": {col: 2, dir: -1}};
+const tableState = {
+  "t-plan": {col: 2, dir: -1, minCoverage: 0, input: "coverage-plan", count: "count-plan", expanded: new Set()},
+  "t-arch": {col: 2, dir: -1, minCoverage: 0, input: "coverage-arch", count: "count-arch"},
+  "t-camp": {col: 2, dir: -1, minCoverage: 0, input: "coverage-camp", count: "count-camp"},
+};
 [...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
+(D.plans || []).forEach(r => { r._b = blowouts({subject:r.id, cells:r.cells.map(c => ({...c, opp:c.opponent_id}))}); });
 // The family-fallback method card only when the blob actually carries leans (layer on).
 if ([...D.arch, ...D.camps].some(r => r.cells.some(c => c.sa)))
   document.getElementById("sa-fallback").style.display = "";
@@ -629,33 +543,110 @@ function cmpBy(col, dir, cols) {
 }
 
 function headHtml(id, cols) {
-  const st = sortState[id];
-  return "<tr>" + cols.map((c, k) => {
+  const st = tableState[id];
+  return "<thead><tr>" + cols.map((c, k) => {
     if (c.sort === false) return `<th>${c.label}</th>`;
     const arrow = k === st.col ? (st.dir === 1 ? " ▲" : " ▼") : "";
     return `<th class="sortable" data-col="${k}">${c.label}${arrow}</th>`;
-  }).join("") + "</tr>";
+  }).join("") + "</tr></thead>";
+}
+
+const PLAN_COLS = [
+  {label:"#", sort:false},
+  {label:"strategic plan", get:r => r.label.toLowerCase(), dir:1},
+  {label:"agency % (≤ = upper bound)", get:r => r.agency, dir:-1},
+  {label:"adj field WR %", get:r => r.adj, dir:-1},
+  {label:"worst measured plan %", get:r => r.floor, dir:-1},
+  {label:"blowouts", get:r => r._b.score, dir:1},
+  {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
+  {label:"measured coverage", get:r => r.coverage, dir:-1},
+  {label:"% of meta", get:r => r.field_share, dir:-1},
+  {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
+  {label:"window", get:r => r.since || "", dir:1},
+];
+function planRowHtml(plan, rank) {
+  const cls = plan.grounded ? "" : "thin";
+  const agency = `${plan.grounded ? "" : "≤ "}${fmtP(plan.agency)}`;
+  const floor = plan.floor == null ? "—" : `${fmtP(plan.floor)} <span class="chip">vs ${escT(plan.floor_opp)}</span>`;
+  const b = plan._b;
+  const detailId = `plan-detail-${plan.id}`;
+  return `<tr class="${cls}"><td>${rank}</td><td class="name"><button type="button" class="plan-toggle"`+
+    ` data-plan="${escA(plan.id)}" aria-expanded="${tableState["t-plan"].expanded.has(plan.id)}" aria-controls="${detailId}">`+
+    `${escT(plan.label)}</button>${plan.grounded ? "" : ` <span class="chip">upper bound</span>`}</td>`+
+    `<td class="barcell"><span class="bar" style="width:${Math.max(2,Math.round((plan.agency||0)*220))}px"></span>${agency}</td>`+
+    `<td>${fmtP(plan.adj)}</td><td>${floor}</td>`+
+    `<td>${b.score % 1 ? b.score.toFixed(1) : b.score} <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span></td>`+
+    `<td>${(100*b.metaShare).toFixed(1)}%</td><td>${(100*plan.coverage).toFixed(0)}%</td>`+
+    `<td>${(100*plan.field_share).toFixed(1)}%</td><td>${plan.recent_4wk}</td><td><span class="chip">since ${escT(plan.since || "full history")}</span></td></tr>`+
+    (tableState["t-plan"].expanded.has(plan.id) ? planDetailHtml(plan, detailId) : "");
+}
+function planDetailHtml(plan, detailId) {
+  const members = plan.members.map(m => `<span class="plan-member">${escT(m.archetype)}`+
+    `${m.secondary.map(id => `<span class="chip">${escT((D.plans.find(p=>p.id===id)||{label:id}).label)}</span>`).join("")}</span>`).join("");
+  const ledger = plan.cells.map(c => {
+    let result;
+    if (c.structural_same_plan) result = `<b>50.0%</b> <span class="chip">structural same-plan</span>`;
+    else if (!c.measured) result = `<span class="unm">unmeasured — ${escT(c.reason)}; ${c.wins}-${c.losses}</span>`;
+    else result = `<b>${fmtP(c.p)}%</b> · raw ${fmtP(c.raw)}% · ${c.wins}-${c.losses}`;
+    return `<tr><td>${escT(c.opponent)}</td><td>${(100*c.share).toFixed(1)}%</td><td>${result}</td><td>${c.n}</td></tr>`;
+  }).join("");
+  return `<tr class="detail" id="${detailId}"><td colspan="${PLAN_COLS.length}"><div class="plan-portrait">`+
+    `<section><h3>${escT(plan.label)}</h3><p>${escT(plan.description)}</p>`+
+    `<span class="plan-stat"><b>${(100*plan.field_share).toFixed(1)}%</b> of field</span>`+
+    `<span class="plan-stat"><b>${plan.decisive_matches}</b> decisive matches</span>`+
+    `<span class="plan-stat"><b>${fmtP(plan.agency)}%</b> ${plan.grounded ? "grounded agency" : "agency upper bound"}</span>`+
+    `<div class="plan-members">${members}</div></section>`+
+    `<section><table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Field</th><th>Result</th><th>n</th></tr></thead><tbody>${ledger}</tbody></table></section>`+
+    `</div></td></tr>`;
+}
+function togglePlanDetail(button) {
+  const st = tableState["t-plan"], id = button.dataset.plan;
+  if (st.expanded.has(id)) st.expanded.delete(id); else st.expanded.add(id);
+  renderPlanTable();
+  document.querySelector(`.plan-toggle[data-plan="${CSS.escape(id)}"]`)?.focus();
+}
+function renderPlanTable() {
+  const rows = D.plans || [], st = tableState["t-plan"], el = document.getElementById("t-plan");
+  const visible = rows.filter(r => r.coverage >= st.minCoverage);
+  const visibleIds = new Set(visible.map(r => r.id));
+  st.expanded = new Set([...st.expanded].filter(id => visibleIds.has(id)));
+  document.getElementById(st.count).textContent = `${visible.length} of ${rows.length} rows`;
+  let rank = 1, html = headHtml("t-plan", PLAN_COLS) + "<tbody>";
+  const strata = [["", visible.filter(r=>r.grounded)], ["ungrounded (INCOMPLETE EXTERNAL FLOOR — agency is an UPPER BOUND)", visible.filter(r=>!r.grounded)]];
+  for (const [label, set] of strata) {
+    if (!set.length) continue;
+    if (label) html += `<tr><td colspan="${PLAN_COLS.length}" style="color:var(--muted);font-size:11.5px;text-transform:uppercase;padding-top:14px">${label}</td></tr>`;
+    [...set].sort(cmpBy(st.col, st.dir, PLAN_COLS)).forEach(plan => { html += planRowHtml(plan, rank++); });
+  }
+  el.innerHTML = html + "</tbody>";
+  el.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
+    const col=Number(th.dataset.col); if(st.col===col) st.dir=-st.dir; else {st.col=col;st.dir=PLAN_COLS[col].dir;} renderPlanTable();
+  }));
+  el.querySelectorAll(".plan-toggle").forEach(button => button.addEventListener("click", () => togglePlanDetail(button)));
 }
 
 function renderTable(id, rows, camp) {
   const el = document.getElementById(id);
-  const st = sortState[id];
+  const st = tableState[id];
   const cols = colsFor(camp);
+  const visibleRows = rows.filter(r => r.coverage >= st.minCoverage);
+  document.getElementById(st.count).textContent =
+    `${visibleRows.length} of ${rows.length} rows`;
   const strata = [
-    ["", rows.filter(r => r.grounded && r.recent_4wk >= 5)],
+    ["", visibleRows.filter(r => r.grounded && r.recent_4wk >= 5)],
     ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
-      rows.filter(r => r.grounded && r.recent_4wk < 5)],
-    ["ungrounded (thin floor — the ≤ value is an UPPER BOUND: agency = min over cells, so it can only fall as more matchups get measured; shrinkage parks unknown cells near the deck's own hot marginal)",
-      rows.filter(r => !r.grounded)],
+      visibleRows.filter(r => r.grounded && r.recent_4wk < 5)],
+    ["ungrounded (INCOMPLETE FLOOR — every ≤ agency value is an UPPER BOUND and can fall as more matchups become measured)",
+      visibleRows.filter(r => !r.grounded)],
   ];
-  let html = headHtml(id, cols), i = 0;
+  let html = headHtml(id, cols) + "<tbody>", i = 0;
   for (const [label, set] of strata) {
     if (!set.length) continue;
     if (label) html += `<tr><td colspan="${cols.length}" style="color:var(--muted);font-size:11.5px;
       text-transform:uppercase;letter-spacing:.04em;padding-top:14px">${label}</td></tr>`;
     [...set].sort(cmpBy(st.col, st.dir, cols)).forEach(r => { html += rowHtml(r, i, camp); i += 1; });
   }
-  el.innerHTML = html;
+  el.innerHTML = html + "</tbody>";
   el.querySelectorAll("th.sortable").forEach(th => {
     th.addEventListener("click", () => {
       const col = Number(th.dataset.col);
@@ -704,6 +695,24 @@ function renderTable(id, rows, camp) {
     });
   });
 }
+
+function bindCoverageFilter(id, rows, camp) {
+  const st = tableState[id];
+  document.getElementById(st.input).addEventListener("input", event => {
+    const value = Number(event.target.value);
+    st.minCoverage = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) / 100 : 0;
+    renderTable(id, rows, camp);
+  });
+}
+bindCoverageFilter("t-arch", D.arch, false);
+bindCoverageFilter("t-camp", D.camps, true);
+document.getElementById("coverage-plan").addEventListener("input", event => {
+  const value = Number(event.target.value);
+  tableState["t-plan"].minCoverage = Number.isFinite(value)
+    ? Math.min(100, Math.max(0, value)) / 100 : 0;
+  renderPlanTable();
+});
+renderPlanTable();
 renderTable("t-arch", D.arch, false);
 renderTable("t-camp", D.camps, true);
 

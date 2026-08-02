@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T16:51:25Z'
+generated_at: '2026-08-02T20:31:09Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -123,24 +123,24 @@ documents:
 
       scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
 
-      strata, the cross-camp P(best) column, and the exploratory three-level family
-      view;
+      strata, the cross-camp P(best) column, and the five-plan strategic taxonomy;
 
       the page itself carries the authoritative definitional prose.
 
       '
     decisions:
-    - 'Agency % = min(adjusted field WR, worst grounded matchup) x 100 — the page''s
+    - 'Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page''s
       single ranking number; theory under test: maximum agency = most fun.'
     - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred;
       the fallback pools matches since the last ban that affected either deck (BA
       label, archetype_valid_since) — full-corpus FC only when neither deck was ever
       ban-affected. The Nadu rule: a banned engine''s matches never inflate a row
       (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28).'
-    - 'A thin cell must prove its hole: the floor is set only by cells with n>=20
-      or a 95% CI upper bound below 50% — otherwise min() is won by noise and better-covered
-      decks mechanically show lower floors. Blowouts classify on the raw observed
-      rate, not the shrunk estimate, after passing the measured-cell gate (n>=8).'
+    - Every measured cell (n>=8 by default) can set the floor using its shrunk estimate;
+      this exposes apparent holes sooner. Because better-covered decks have more chances
+      to reveal a low matchup, ungrounded agency remains an explicit upper bound and
+      must be read with measured coverage. Blowouts classify on the raw observed rate
+      after the same measured-cell gate.
     - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass
       covered; ungrounded rows are labeled leans (agency shown as an upper bound),
       and sorting never intermixes strata.
@@ -156,13 +156,19 @@ documents:
       same coverage threshold that suppresses display (<5% measured coverage -> n/a
       + reason) because zero-coverage candidates otherwise absorb the whole argmax
       as imputation noise; S* labels full-field values below 85% coverage.
-    - 'Superarchetypes remain an additive, explicitly non-authoritative page layer:
-      page-unmeasured ledgers may carry stricter-gated family leans that never enter
-      archetype/camp decision metrics, while the serving registry produces an exploratory
-      family → archetype → camp navigator, S×S family heatmap, and camps×parent-opponents
-      map. Archetype Best Call remains authoritative until a future-only benchmark
-      passes; no registry/--no-superarchetypes explicitly degrades the family surface
-      and preserves the baseline.'
+    - 'Strategic plans are a curated, independent five-plan taxonomy: every current-field
+      archetype has exactly one primary plan for mutually exclusive match-level aggregation
+      and may carry secondary labels for hybrid explanation only. Plan cells pool
+      decisive matches directly rather than averaging archetype rates.'
+    - 'Strategic-plan same-plan play is structural 50% context: it contributes to
+      adjusted field WR but is never measured, never sets the floor, and is excluded
+      from the external-coverage denominator. External plan cells use the page''s
+      n>=8 measured gate; grounding requires the top external plans measured and >=80%
+      external field-share coverage.'
+    - Superarchetypes remain only as stricter-gated fallback evidence in otherwise
+      unmeasured archetype/camp ledger cells. They never enter strategic-plan, archetype,
+      or camp metrics; --no-superarchetypes removes those ledger leans without changing
+      the ranking surfaces.
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).

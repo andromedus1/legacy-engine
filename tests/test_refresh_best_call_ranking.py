@@ -507,53 +507,18 @@ class TestSuperarchetypeIsolation:
 
 
 class TestSuperarchetypeLeans:
-    def test_family_payload_is_nested_typed_and_exploratory(self, hero_blobs):
+    def test_strategic_plan_payload_is_independent_of_composition_overlay(self, hero_blobs):
         off, on = hero_blobs
-        assert off["families"] == []
-        assert [family["id"] for family in on["families"]] == ["sa-fair", "sa-enemy"]
-        fair = on["families"][0]
-        assert fair["full_label"] == "Fair"
-        assert fair["description"].startswith(
-            "A composition-derived family anchored in the current field by Hero, SibA, and SibB."
-        )
-        assert "represent 50.0% of published decks" in fair["description"]
-        assert [member["archetype"] for member in fair["members"]] == [
-            "Hero", "SibA", "SibB",
+        assert on["plans"] == off["plans"]
+        assert [plan["id"] for plan in on["plans"]] == [
+            "disrupt-pressure", "go-off", "go-over", "go-wide", "lock-outlast",
         ]
-        assert all({"opponent_id", "p", "n_eff", "refused_reason", "support",
-                    "support_reason", "window_notes", "current_regime_share"} <= cell.keys()
-                   for cell in fair["cells"])
-        assert fair["agency"] == min(fair["adj"], fair["floor"])
-        assert fair["floor_opp"] != fair["label"]  # intra-family cells never set the floor
-        external = [cell for cell in fair["cells"] if not cell["intra_family"]]
-        expected_coverage = (
-            sum(cell["share"] * cell["support"] for cell in external if cell["p"] is not None)
-            / sum(cell["share"] for cell in external)
-        )
-        assert fair["coverage"] == pytest.approx(expected_coverage, abs=1e-4)
-
-    def test_family_payload_excludes_zero_share_historical_members(self):
-        rows = [
-            {"subject": "Hero", "field_share": .3, "recent_4wk": 4},
-            {"subject": "SibA", "field_share": 0.0, "recent_4wk": 0},
-            {"subject": "SibB", "field_share": .2, "recent_4wk": 3},
-            {"subject": "OppX", "field_share": .5, "recent_4wk": 5},
-        ]
-        families = rbcr.build_family_payload(
-            _hero_registry(), {}, rows, top_k=8, cover_min=.8,
-        )
-        fair = next(family for family in families if family["id"] == "sa-fair")
-        assert [member["archetype"] for member in fair["members"]] == ["Hero", "SibB"]
-        assert "SibA" not in fair["description"]
-
-    def test_family_refusals_never_gain_a_point_estimate(self, hero_blobs):
-        _off, on = hero_blobs
-        refused = [
-            cell for family in on["families"] for cell in family["cells"]
-            if cell["refused_reason"] is not None
-        ]
-        assert refused
-        assert all(cell["p"] is None for cell in refused)
+        hero_plan = on["plans"][0]
+        assert hero_plan["members"][0]["archetype"] == "Hero"
+        assert hero_plan["members"][0]["secondary"] == ["go-off"]
+        assert len(hero_plan["cells"]) == 5
+        same = next(cell for cell in hero_plan["cells"] if cell["structural_same_plan"])
+        assert same["p"] == .5 and not same["measured"]
 
     def test_imputed_lean_with_the_locked_chip_fields(self, hero_blobs):
         _off, on = hero_blobs
@@ -708,12 +673,17 @@ class TestMainEndToEnd:
         assert html.count("certificate of exchangeability") >= 2
         assert '"one_sided_note": "I^2 is one-sided evidence:' in html
         assert 'id="sa-fallback"' in html
-        assert 'id="taxonomy-root"' in html
-        assert 'id="family-heatmap"' in html
-        assert 'id="camp-heatmap"' in html
-        assert 'tabindex="0" aria-label=' in html
-        assert 'familyMetric(family.agency,family.grounded,true)' in html
-        assert '"families": [' in html
+        assert 'id="coverage-plan"' in html
+        assert 'id="t-plan"' in html
+        assert 'class="plan-toggle"' in html
+        assert 'aria-expanded=' in html and 'aria-controls=' in html
+        assert 'function planDetailHtml' in html
+        assert '"plans": [' in html
+        assert 'id="taxonomy-root"' not in html
+        assert 'id="family-heatmap"' not in html
+        assert 'id="camp-heatmap"' not in html
+        assert 'renderFamilyHeatmap' not in html
+        assert 'renderCampHeatmap' not in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
         """--no-superarchetypes on a registry-bearing DB must be byte-identical to the page
