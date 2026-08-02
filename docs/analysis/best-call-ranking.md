@@ -19,6 +19,7 @@ decisions:
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
+  - "Superarchetype family fallback is LEDGER-ONLY: page-unmeasured cells may carry an additive sa lean (imputed from licensed family siblings / pooled vs the opponent's family / family range with the named refusal and NO point estimate), resolved by the engine's display ladder at its stricter gates (pooled n_eff>=30, imputed pool n>=25 + license + per-cell veto). Leans never enter agency, adj, floor, coverage, strata, or the MC — every row metric is bit-identical with the layer on or off. Registry read from the same --db (superarchetype run's derived cache); --no-superarchetypes regenerates the baseline; the I2 one-sidedness caveat rides the definitional card, the per-row lean key, and every lean tooltip."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
   - "Refresh THIS page last in the data cycle: its matrices read eras + variants, so it inherits whatever labeling state exists when it runs."
 ---
@@ -41,6 +42,9 @@ The page reads eras + variants, so run it **last**, after the standard cycle:
 .venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
   while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
 .venv/bin/legacy-engine eras run             # re-detect era boundaries + drift alarms
+# re-derive the superarchetype taxonomy over the current regime (the page's family
+# fallback reads its DuckDB derived cache; a stale window warns in the audit header):
+.venv/bin/legacy-engine superarchetype run --since <current regime start>
 .venv/bin/python scripts/refresh_best_call_ranking.py
 ```
 
@@ -51,7 +55,8 @@ A gate-A FAIL keeps the old frozen split; treat that parent's camp rows as stale
 
 Knobs (defaults are the page's published method): `--field-since` (defaults to the
 latest confirmed ban event date), `--ground-n 8`, `--top-k 8`, `--cover-min 0.8`,
-`--min-row-share 0.001`, `--db`, `--out`.
+`--min-row-share 0.001`, `--no-superarchetypes` (baseline/audit regeneration without
+the family-fallback overlay), `--db`, `--out`.
 
 ## What the script does
 
@@ -76,6 +81,23 @@ fallback), so values are comparable across camps of different parents.
 Candidacy is gated at the display-suppression coverage threshold — a candidate
 below 5% measured coverage shows n/a with its coverage instead of an
 imputation-noise score.
+
+**Superarchetype family fallback (ledger-only).** `main()` reads the serving
+taxonomy from the SAME `--db` (`read_superarchetype_members` — the derived cache
+`superarchetype run` rebuilds; absent tables = layer off, byte-identical) and
+passes it into the one-pass build. Page-unmeasured cells then carry an additive
+`sa` payload resolved by the engine's display ladder — `imputed` (licensed family
+siblings' record vs that exact opponent, tau-widened CI), `pooled` (the deck vs
+every member of the opponent's family, `intra-family` share flagged), or `range`
+(refused/unlicensed/vetoed: the member split with the named refusal — `dominated
+by <member>`, heterogeneous pool, local veto, comparability desert — and no point
+estimate). The expanded ledger renders them as dashed-border leans with
+provenance chips; pools with <50% current-regime evidence carry an amber
+`◦mostly pre-regime` marker. **Isolation contract:** leans never enter agency,
+adj, floor, coverage, strata, or the P(best) MC — enforced by
+`TestSuperarchetypeIsolation` (blob equality modulo additive `sa` keys + audit
+lines). Split parents' archetype rows carry no fallback (the multi-split subject
+set is camps + unsplit archetypes); their camp rows do.
 
 The full refresh runs in ~40s on the current corpus (~11s archetype matrices +
 ~13s one-pass camp matrices + ~2s shared-field ranking); the script echoes each
@@ -103,6 +125,13 @@ frontmatter decisions above — the page prose is authoritative.
   Candelabra-era data).
 - Camp rows carry staged-candidate provenance (speculative overlay, never
   promoted taxonomy).
+- **Family leans are leans** — an `imputed`/`pooled` value in the ledger is
+  superarchetype-sourced, never a measured cell, and passing the heterogeneity
+  gate never promotes it: I² is one-sided evidence (a low value is not a
+  certificate of exchangeability). A `family range` line is a refusal rendered
+  honestly — read the member split, not a blended number. Check the audit header
+  for the registry window (a stale-taxonomy warning there means re-run
+  `superarchetype run --since <regime start>`).
 - **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
   archetypes compete in ONE argmax, so the values are comparable across parents
   and can never sum past 1. n/a means the row failed the 5% measured-coverage
