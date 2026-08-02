@@ -8,7 +8,7 @@ depends_on: [epic-superarchetype-layer-aggregation, feature-multi-split-matrix]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # Superarchetype rung — cluster-pooled cells in the matrix and in the shrinkage chain
@@ -398,7 +398,8 @@ captured on the untouched builder BEFORE any mutation, commit bfc7f4f) + cell-fo
 tests for `superarchetypes=None` and empty-registry builds + the untouched pre-existing parity
 and CLI-golden suites. Full suite after all units: 3507 passed, 1 skipped (pre-existing skip).
 
-**Real-corpus spot check (read-only, serving config: staged parents, min_row_share=0.001)**:
+**Real-corpus spot check (read-only; measured 2026-08-01 before PR #75; serving registry window
+2026-05-11; staged parents; min_row_share=0.001)**:
 144 rung-labeled cells and the changed-cell set equals the rung-labeled set exactly; 557 granted
 imputations (all from sa-003, the only family clearing the license — 5 evaluable columns, 1
 divergent (0.20 <= 0.25), tau_profile 0.269 widening every imputed CI by ±0.13); ladder kinds

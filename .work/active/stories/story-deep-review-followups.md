@@ -1,14 +1,14 @@
 ---
 id: story-deep-review-followups
 kind: story
-stage: implementing
+stage: review
 tags: [analytics, cleanup]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # Deep-review follow-ups (2026-08-01, 7-feature post-merge review)
@@ -53,41 +53,40 @@ Regression coverage pins both directions against the typed `Heterogeneity.band` 
 `Concentration.passed` fields. Verification: `99 passed` in
 `tests/analytics/superarchetype/test_aggregate.py`.
 
-## Session handoff — 2026-08-01 FINAL WRAP
+### Unit 2 — fail-safe land resolution
 
-Resume on branch `fix/deep-review-followups`. The completed work is split into committed units:
+Added a checked land-type lookup while preserving `_resolve_land_names` as the compatibility
+wrapper. Both the direct planner path and `recommend_sideboard` now carry lookup failure into
+`_plan_matchups`, which returns a named `land-resolution-failed` degraded plan with no swaps for
+every opponent. The missing-table regression proves a land can never become eligible merely
+because the `cards` lookup failed. Two pre-existing pure planner fixtures now inject their known
+empty land set explicitly instead of accidentally depending on a missing table.
 
-- `1a26452` closes the already-merged best-call fallback substrate item (PR #76).
-- `a2b86a1` implements this story's Unit 1 provenance-honesty fix and tests it.
+### Unit 3 — review-test integrity and snapshot hygiene
 
-The next unit is finding 3, the matchup-plan land-resolution failure. Start at
-`src/legacy_engine/advisory/sideboard.py` in `_resolve_land_names` and `_plan_matchups`; the main
-caller resolves land names once near the matchup-plan build. Today a cards-table/query failure
-returns an empty set and silently makes lands eligible cuts. Preserve the compatibility wrapper if
-useful, but carry an explicit resolution failure into `_plan_matchups`. The safe behavior is a
-named degraded plan with no swaps—not an unsafe plan built from an empty exemption set. Inspect the
-closed `plan_status` vocabulary before adding or reusing a status. Existing focused coverage starts
-near `tests/test_sideboard.py`'s `test_resolve_land_names_degrades_on_missing_table` and land-never-
-sided-out tests.
+- Replaced the golden representative cell's self-compared floats with independent exact expected
+  values while retaining the full-output hash.
+- Replaced the fixed-`logit_mean` partial-derivative `n_eff` test with a joint-estimator sequence
+  over observed member tallies whose fitted heterogeneity rises as effective sample falls.
+- Added a real builder test that enables `FAMILY_FIRST_KINDS` for a stored young release era and
+  proves the family-current imputation branch sets the prior and source label.
+- Timestamped and config-stamped the chain feature's original real-corpus spot check so its 557
+  imputation count is explicitly historical rather than a timeless assertion.
 
-After that, finish findings 4 and 5 in small committed units: replace the golden float self-
-comparison with an independent expected/canonical check; broaden `n_eff` monotonicity beyond one
-fixed `logit_mean`; execute the family-first override branch; and establish timestamped real-corpus
-snapshot wording. The dilution/provenance gap from finding 4 is already covered by Unit 1.
+### Integrated verification and bounded review
 
-For finding 2, do not naively rebuild the registry from the thin 2026-06-29 window. Record the
-serving decision and advance `epic-superarchetype-layer-era-core-pools`, consistent with the merged
-methodology research in PR #77. The failed preview means the three-level page remains blocked: first
-implement and run the offline representation benchmark, select a validated method, generate a new
-preview, and obtain user approval. `story-readme-repo-currency` remains last.
+- Focused sideboard verification: 7 passed.
+- Superarchetype golden/aggregation/chain verification: 122 passed.
+- Full suite: 3,522 passed, 1 warning (UMAP's existing seeded `n_jobs` warning).
+- `git diff --check`: clean.
 
-Operational constraints for resume:
+Bounded inline review found no remaining correctness blocker in this story's changed surfaces.
+The serving-registry decision remains intentionally outside this cleanup story and continues in
+`epic-superarchetype-layer-era-core-pools`; the three-level page remains gated on that output.
 
-- All GitHub operations must authenticate as `andromedus1`; verify with an explicit per-command
-  token before any PR or merge. The canonical remote is
-  `https://github.com/andromedus1/legacy-engine.git`.
-- Keep commit-per-unit. Merge substrate-carrying branches; never rebase them.
-- Render superarchetype verdicts from typed fields, never provenance prose.
-- Run the full suite before moving this story to review. If GitHub reports no checks, re-push so CI
-  actually fires. Use 12-significant-figure float canonicalization for any new goldens.
-- `.claude/scratch/` is unrelated untracked user material and must remain untouched and uncommitted.
+## Next capability step
+
+Do not naively rebuild the registry from the thin 2026-06-29 global window. Advance
+`epic-superarchetype-layer-era-core-pools` through design and its offline representation benchmark,
+then select a validated serving method, generate a new preview, and obtain user approval before the
+three-level page uses superarchetype output as a headline ranking.
