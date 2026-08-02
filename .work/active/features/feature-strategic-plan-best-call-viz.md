@@ -1,7 +1,7 @@
 ---
 id: feature-strategic-plan-best-call-viz
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, viz, ui]
 parent: null
 depends_on: [epic-superarchetype-layer-three-level-page]
@@ -12,6 +12,17 @@ updated: 2026-08-02
 ---
 
 # Strategic-plan table in Best Deck / Best Call
+
+## Review feedback — 2026-08-02
+
+The first review rejected composition-derived family leans inside archetype matchup dropdowns.
+Replace them with a leading **Against strategic plans** section for every archetype, derived from
+that archetype's underlying decisive matches against each primary plan (estimate/raw/n,
+window/provenance, measured/thin state, and same-plan semantics as appropriate), followed by the
+existing exact archetype ledger. Remove the family-lean payload attachment and dead CSS/JavaScript
+when no page consumer remains. This is an in-scope presentation/data-contract correction, so the
+feature returns to `implementing`; completed child checkpoints remain done and the feature will
+return to review after integrated verification.
 
 ## Brief
 
