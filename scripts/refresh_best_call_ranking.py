@@ -34,6 +34,14 @@ Method (the page's definitional card is the authoritative prose):
     scored against the same sampled field. The MC ranks on the PAGE-USED cells (the
     ledger's own era-preferred, ban-scoped-fallback selection), so the column shares the
     page's Nadu-rule windows and its coverage-suppression honesty gates.
+  - Superarchetype fallback (LEDGER-ONLY): a page-unmeasured cell may carry an additive
+    ``sa`` payload resolved by the engine's display ladder (measured -> imputed -> pooled
+    -> family range), rendered as a labeled lean in the expanded ledger. Leans NEVER enter
+    adj/floor/agency/coverage/strata or the MC — every row metric computes from
+    bit-identical inputs with the layer on or off (the isolation decision in
+    .work/active/features/epic-superarchetype-layer-best-call-fallback.md). The registry
+    is read from the SAME --db (``superarchetype run``'s derived cache); absent tables =
+    layer off; ``--no-superarchetypes`` regenerates the baseline.
 
 Run after every data refresh cycle (refresh all -> label -> discover apply x N ->
 eras run) — the matchup matrices read eras + variants, so refresh THIS page LAST:
@@ -63,12 +71,15 @@ from legacy_engine.advisory.positioning import (
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.matchup import (
+    DISPLAY_GATE_N,
     MatchupMatrix,
     build_adaptive_matrix,
     build_matrix,
     build_multi_split_adaptive,
     build_multi_split_matrix,
 )
+from legacy_engine.analytics.superarchetype.aggregate import I2_ONE_SIDED_NOTE
+from legacy_engine.analytics.superarchetype.registry import read_superarchetype_members
 from legacy_engine.archetype.discovered import staged_split_parents
 from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.ingestion.banlist import BAN_EVENTS
@@ -134,6 +145,124 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
     return cells
 
 
+def _split_json(split):
+    """Per-member records behind a pooled/imputed/range lean (divergence-as-diagnostic)."""
+    return [
+        {"a": s.archetype, "w": s.wins, "n": s.n, "p": r4(s.p_hat),
+         "tier": str(s.tier), "intra": s.intra_cluster}
+        for s in split
+    ]
+
+
+def _sa_payload(subj, opp, msa, label_of):
+    """One page-unmeasured cell's superarchetype fallback, or ``None`` (render as today).
+
+    Ledger-only content: the caller attaches it as an ADDITIVE ``sa`` key and never touches
+    the pre-existing cell fields, so adj/floor/agency/coverage/grounded/P(best) compute from
+    bit-identical inputs whether the layer is on or off (the design's isolation decision).
+    Kinds mirror the engine ladder: ``imputed`` (licensed family evidence, tau-widened CI),
+    ``pooled`` (subject vs the opponent's whole family, engine display gate ``n_eff >= 30``),
+    ``range`` (refused/unlicensed/vetoed: the member split ONLY — no point estimate).
+    """
+    entry = msa.ladder.get((subj, opp))
+    if entry is None:
+        return None
+    imputed = msa.imputed_cells.get((subj, opp))
+    pooled = (
+        msa.cluster_cells.get((subj, entry.cluster_id))
+        if entry.cluster_id is not None else None
+    )
+
+    if entry.kind == "imputed":
+        if imputed is None:
+            raise AssertionError(f"imputed ladder entry has no ImputedCell: {(subj, opp)!r}")
+        lic = imputed.license
+        return {
+            "kind": "imputed",
+            "p": r4(imputed.p), "ci_low": r4(imputed.ci_low), "ci_high": r4(imputed.ci_high),
+            "pool_n": imputed.pool_n, "k": len(imputed.siblings),
+            "family": label_of.get(lic.cluster_id, lic.cluster_id),
+            "cluster_id": lic.cluster_id,
+            "cur": r4(imputed.current_regime_share), "window_note": imputed.window_note,
+            "license": lic.reason, "tau": r4(lic.tau_profile),
+            # Imputation is licensed by a profile-level divergence test rather than a
+            # per-cell Heterogeneity value, but the feature contract requires the same
+            # one-sided evidence warning on every family-sourced point estimate. Import the
+            # estimator's SSOT constant; never duplicate or parse display prose here.
+            "one_sided_note": I2_ONE_SIDED_NOTE,
+            "split": _split_json(entry.sibling_split),
+            "reasons": list(entry.reasons),
+        }
+
+    if entry.kind == "pooled":
+        if pooled is None:
+            raise AssertionError(f"pooled ladder entry has no PooledCell: {(subj, opp)!r}")
+        conc, het = pooled.concentration, pooled.heterogeneity
+        # Serialize the TYPED verdict fields directly. ``PooledCell.provenance`` is display
+        # prose, not a semantic contract, and can contradict refused/not-computable verdicts.
+        return {
+            "kind": "pooled",
+            "p": r4(pooled.pooled_p), "ci_low": r4(pooled.ci_low), "ci_high": r4(pooled.ci_high),
+            "n_eff": round(pooled.n_eff, 1), "tier": str(pooled.tier),
+            "family": label_of.get(entry.cluster_id, entry.cluster_id),
+            "cluster_id": entry.cluster_id,
+            "m_eff": round(conc.m_eff, 2) if conc is not None else None,
+            "concentration_passed": conc.passed if conc is not None else None,
+            "concentration_label": conc.label if conc is not None else None,
+            "i2": r4(het.i2) if het is not None else None,
+            "i2_band": het.band if het is not None else None,
+            "heterogeneity_note": het.note if het is not None else None,
+            "heterogeneity_reason": het.reason if het is not None else None,
+            "one_sided_note": het.one_sided_note if het is not None else None,
+            "intra_share": r4(pooled.intra_cluster_share),
+            "cur": r4(pooled.current_regime_share), "window_note": pooled.window_note,
+            "split": _split_json(pooled.member_split),
+            "reasons": list(entry.reasons),
+        }
+
+    # kind == "none": a family-range display when any split exists; nothing to add otherwise.
+    # The named refusal comes from the TYPED fields (ImputedCell.reason /
+    # PooledCell.refused_reason), never parsed out of display strings.
+    if entry.sibling_split:
+        # sibling_split rides an ATTEMPTED imputation (resolve_ladder attaches it only
+        # then), so the family, refusal, and freshness come from the imputation side.
+        if imputed is None:
+            raise AssertionError(f"sibling split has no ImputedCell: {(subj, opp)!r}")
+        fam_id = imputed.license.cluster_id
+        reason = f"imputation refused: {imputed.reason}"
+        cur = r4(imputed.current_regime_share)
+        wnote = imputed.window_note
+        split, source = entry.sibling_split, "siblings"
+    elif pooled is not None and pooled.member_split:
+        fam_id = entry.cluster_id
+        if pooled.refused_reason is not None:
+            reason = f"pooled cell refused: {pooled.refused_reason}"
+        else:
+            reason = (
+                f"pooled cell below the engine display gate "
+                f"(n_eff {pooled.n_eff:.0f} < {DISPLAY_GATE_N})"
+            )
+        cur = r4(pooled.current_regime_share)
+        wnote = pooled.window_note
+        split, source = pooled.member_split, "members"
+    else:
+        return None
+    return {
+        "kind": "range",
+        "family": label_of.get(fam_id, fam_id) if fam_id else None,
+        "cluster_id": fam_id,
+        "source": source,
+        "reason": reason,
+        "cur": cur, "window_note": wnote,
+        "one_sided_note": (
+            pooled.heterogeneity.one_sided_note
+            if pooled is not None and pooled.heterogeneity is not None else None
+        ),
+        "split": _split_json(split),
+        "reasons": list(entry.reasons),
+    }
+
+
 # A thin measured cell can set the row's floor only when even its optimistic bound is
 # unfavorable — ambiguity is not a hole. Deep cells (n >= FLOOR_DEEP_N) qualify on their
 # point estimate; thinner ones must have a 95% CI upper bound below 50%.
@@ -172,7 +301,7 @@ def row_stats(cells, top_k, cover_min):
 
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
-                 regime_card, parents):
+                 regime_card, parents, superarchetypes=None):
     corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
     corpus_decks, corpus_events = con.execute(
@@ -242,7 +371,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     # methodology change.
     t_camp = time.perf_counter()
     print(f"building multi-split matrices for {len(parents)} staged parents...", flush=True)
-    msa = build_multi_split_adaptive(con, parents=parents, min_row_share=min_row_share)
+    msa = build_multi_split_adaptive(
+        con, parents=parents, min_row_share=min_row_share, superarchetypes=superarchetypes,
+        apply_superarchetype_priors=False,
+    )
     camp_parent = msa.multi.camp_parent
     camp_labels = [s for s in msa.multi.subjects if s in camp_parent]
     # Fallback windows (the Nadu rule): each pair pools since max(parent_ban, opp_ban) —
@@ -330,6 +462,33 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
           f"({len(camps_out)} camp rows)", flush=True)
 
+    # ── Superarchetype fallback overlay (LEDGER-ONLY) ──
+    # Additive `sa` keys on page-unmeasured cells; measured cells and every row-level field
+    # are untouched, so adj/floor/agency/coverage/grounded/P(best) are bit-identical with the
+    # layer on or off. Rung 1 (a measured cell) is the page's existing selection above.
+    sa_audit: list[str] = []
+    if superarchetypes is not None:
+        label_of = {c.id: c.label for c in superarchetypes.clusters}
+        sa_counts = {"imputed": 0, "pooled": 0, "range": 0}
+        for row in (*arch_out, *camps_out):
+            for c in row["cells"]:
+                if c["measured"]:
+                    continue
+                payload = _sa_payload(row["subject"], c["opp"], msa, label_of)
+                if payload is not None:
+                    c["sa"] = payload
+                    sa_counts[payload["kind"]] += 1
+        sa_audit = [
+            line for line in msa.audit_preamble if line.startswith("// superarchetype")
+        ]
+        sa_audit.append(
+            f"// superarchetype fallback: {sa_counts['imputed']} imputed + "
+            f"{sa_counts['pooled']} pooled + {sa_counts['range']} family-range leans in the "
+            "expanded ledgers — leans never enter agency, adj, floor, coverage, or strata"
+        )
+        print(f"  superarchetype fallback: {sa_counts['imputed']} imputed, "
+              f"{sa_counts['pooled']} pooled, {sa_counts['range']} range", flush=True)
+
     return {
         "meta": {
             "field_since": field_since, "field_decks": field_decks,
@@ -357,6 +516,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"{len(potential)} candidates (camps + unsplit archetypes with >= "
                 f"{_PBEST_SUPPRESS_COVERAGE:.0%} measured coverage) on the page-used "
                 f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
+                *sa_audit,
             ],
         },
         "arch": arch_out,
@@ -375,16 +535,21 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--cover-min", type=float, default=0.8)
     ap.add_argument("--min-row-share", type=float, default=0.001)
+    ap.add_argument("--no-superarchetypes", action="store_true",
+                    help="skip the family-fallback ledger overlay (baseline/audit regeneration)")
     args = ap.parse_args()
 
     regime_card = latest_ban[1] if args.field_since == latest_ban[0].isoformat() else None
     parents = staged_split_parents()
     con = duckdb.connect(args.db, read_only=True)
     try:
+        # The registry rides the SAME DB (`superarchetype run`'s derived cache); absent
+        # tables -> None -> the builder's byte-identical off path (gated-additive).
+        superarchetypes = None if args.no_superarchetypes else read_superarchetype_members(con)
         blob = compute_blob(
             con, field_since=args.field_since, ground_n=args.ground_n, top_k=args.top_k,
             cover_min=args.cover_min, min_row_share=args.min_row_share,
-            regime_card=regime_card, parents=parents,
+            regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
         )
     finally:
         con.close()
