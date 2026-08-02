@@ -160,6 +160,10 @@ frontmatter decisions above — the page prose is authoritative.
   among those measured cells, classification uses the raw rate rather than the
   shrunk estimate. "% meta that blows you out" weights them by field share and
   is a lower bound (unmeasured opponents can't be counted).
+- **Positive ledger highlights** apply only to measured (`n>=8`) cells and use
+  raw observed WR: **Edge** at 55–60% inclusive and **Dominant** above 60%.
+  They are descriptive ledger bands only; they do not affect any metric,
+  grounding decision, or ranking.
 - **Floors are evidence-gated** — a cell sets the floor only at n>=20, or
   thinner when its 95% CI upper bound is still below 50% (an 0-8 qualifies —
   Eldrazi vs Red Stompy, CI 0–26%; a 2-6 is ambiguity and cannot). Still check

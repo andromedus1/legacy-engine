@@ -631,6 +631,15 @@ class TestMainEndToEnd:
         assert "if (c.p != null && c.p < 0.40)" not in template
         assert "else if (c.p != null && c.p < 0.45)" not in template
 
+    def test_positive_matchup_highlights_use_symmetric_raw_wr_bands(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "else if (c.raw > 0.60)" in template
+        assert 'class=\\"edge-dominant\\"' in template
+        assert "else if (c.raw >= 0.55)" in template
+        assert 'class=\\"edge\\"' in template
+        assert "dominant (&gt;60%)" in template
+        assert "edge (55–60%)" in template
+
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"
         con = store.connect(str(db_path))
