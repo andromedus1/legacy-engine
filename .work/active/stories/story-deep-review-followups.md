@@ -40,3 +40,15 @@ exactly). File:line refs verified at review time.
 5. **Note hygiene:** chain's "557 imputations, all sa-003" rotted within hours (573 across
    sa-003 + sac-001 after PR #75) — timestamp real-corpus snapshots in implementation notes as a
    convention.
+
+## Implementation progress
+
+### Unit 1 — aggregate provenance honesty
+
+Fixed the typed-verdict/provenance mismatch before any further renderer work. A heterogeneity-
+refused cell now says `refused with concentration label:` when concentration also fails; it never
+claims that label was served. A served `not-computable` heterogeneity cell now carries
+`served with heterogeneity label: <typed reason>` instead of omitting the verdict from provenance.
+Regression coverage pins both directions against the typed `Heterogeneity.band` and
+`Concentration.passed` fields. Verification: `99 passed` in
+`tests/analytics/superarchetype/test_aggregate.py`.
