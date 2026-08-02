@@ -1,14 +1,14 @@
 ---
 id: epic-superarchetype-layer
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics, archetype]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-02
 ---
 
 # Superarchetype layer — pool strategy clusters so every row gets signal
@@ -393,3 +393,11 @@ existing own-pre-disturbance anchor; where attribution is drift-only, the anchor
 -chain's design must decide the ladder order per attribution kind via a LOO harness over historical
 disturbances, not by assertion. This makes era-aware imputation the young-regime serving strategy
 the roadmap item asked for.
+
+## Child features reviewed and complete (2026-08-02)
+
+All direct feature children are `done`: clustering, random-effects aggregation, matchup-chain
+integration, ledger-safe Best Call fallback, and the approved three-level HTML page. The era-aware
+core-pools story is also `done`. Integrated verification on the final page snapshot: 25 focused
+generator tests and 3,527 full-suite tests passed; the corpus-backed production HTML was regenerated
+with the serving registry and reviewed through the feature's standard fresh-context lane.
