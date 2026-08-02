@@ -98,6 +98,30 @@ svg text { font-family: inherit; }
 .tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
   border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
   font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
+.explore-note { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--surface-1)); }
+.taxonomy { padding: 0; overflow: hidden; }
+.tax-head, .tax-row { display:grid; grid-template-columns:minmax(300px,1fr) repeat(5,110px);
+  gap:0; align-items:center; padding:7px 12px; border-bottom:1px solid var(--grid); }
+.tax-head { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
+.tax-family > summary { list-style:none; cursor:pointer; background:color-mix(in srgb,var(--s1) 7%,var(--surface-1)); }
+.tax-family > summary::-webkit-details-marker { display:none; }
+.tax-family > summary .tax-name::before { content:"▸ "; color:var(--s1); }
+.tax-family[open] > summary .tax-name::before { content:"▾ "; }
+.tax-name { font-weight:650; min-width:0; white-space:normal; }
+.tax-description { grid-column:1/-1; padding:8px 46px 10px; color:var(--ink-2);
+  font-size:12px; border-bottom:1px solid var(--grid); background:var(--surface-1); }
+.tax-arch { padding-left:34px; background:var(--surface-1); }
+.tax-camp { padding-left:66px; color:var(--ink-2); background:color-mix(in srgb,var(--surface-1) 92%,var(--page)); }
+.tax-num { font-variant-numeric:tabular-nums; }
+.map-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(320px,1fr); gap:12px; }
+.heat-wrap { overflow:auto; max-height:620px; }
+table.heatmap { width:max-content; min-width:100%; font-size:11px; }
+.heatmap th:first-child, .heatmap td:first-child { position:sticky; left:0; z-index:2; background:var(--surface-1); }
+.heatmap th { max-width:82px; overflow:hidden; text-overflow:ellipsis; }
+.heatmap td.hm { min-width:54px; text-align:center; border:1px solid var(--page); padding:6px 4px; }
+.heatmap td.hm-refused { background:repeating-linear-gradient(135deg,var(--grid),var(--grid) 4px,var(--surface-1) 4px,var(--surface-1) 8px); color:var(--muted); }
+.heatmap td.hm-intra { outline:2px solid var(--s1); outline-offset:-2px; }
+@media (max-width:900px) { .map-grid{grid-template-columns:1fr}.tax-head,.tax-row{grid-template-columns:minmax(230px,1fr) repeat(5,92px)} }
 </style>
 </head>
 <body>
@@ -264,6 +288,24 @@ the dot's floor is an upper bound, not a claim. <b>Filled dot = current; hollow 
 current</b> (fewer than 5 decks in the last 4 corpus weeks). Labels mark the top 5
 grounded-and-current decks by agency; hover any dot for its numbers.</div>
 
+<h2>Strategy families → archetypes → camps <span class="chip">exploratory</span></h2>
+<div class="card explore-note"><b>Navigation, not a recommendation.</b> Strategy families are
+outcome-blind composition groups. They help explain the room and pool sparse matchup evidence,
+but the archetype table below remains the decision-authoritative Best Call surface until the
+future-only predictive/decision benchmark passes. A low I² is never proof that members are
+exchangeable.</div>
+<div id="taxonomy-root"></div>
+
+<div class="map-grid" id="family-maps">
+  <section><h2>Strategy-family agency map</h2><div class="card heat-wrap" id="family-heatmap"></div>
+  <div class="footnote">Rows are subject families; columns are opponent families. Hatched cells
+  are typed refusals or insufficient effective evidence, never missing-data blanks. Outlined cells
+  are intra-family.</div></section>
+  <section><h2>Camps × parent opponents</h2><div class="card heat-wrap" id="camp-heatmap"></div>
+  <div class="footnote">The evidence-preserving rectangular map: camp subjects against parent-level
+  opponents. Thin cells remain labeled by n; no speculative camp×camp pooling.</div></section>
+</div>
+
 <h2>Archetypes</h2>
 <div class="card tablewrap"><table id="t-arch"></table>
 <div class="footnote">Click a row to expand its full matchup ledger — one line per
@@ -359,6 +401,92 @@ function blowouts(r) {
 // the exact same inputs with the layer on or off. Typed verdict fields supply every gate label,
 // refusal, freshness marker, and I² caveat; display/provenance prose is never parsed as truth.
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
+function heatStyle(p) {
+  if (p == null) return "";
+  const d = Math.min(1, Math.abs(p - .5) / .16);
+  const rgb = p >= .5 ? [42,120,214] : [208,59,59];
+  return `background:color-mix(in srgb,rgb(${rgb.join(",")}) ${Math.round(10+42*d)}%,var(--surface-1))`;
+}
+function metricCell(v, suffix="") { return `<span class="tax-num">${v == null ? "—" : fmtP(v)+suffix}</span>`; }
+function renderTaxonomy() {
+  const root = document.getElementById("taxonomy-root");
+  const families = D.families || [];
+  if (!families.length) {
+    root.innerHTML = `<div class="card"><b>Strategy-family view unavailable.</b> No serving` +
+      ` superarchetype registry was present in this database; the authoritative archetype and` +
+      ` camp views below are unaffected.</div>`;
+    document.getElementById("family-maps").style.display = "none";
+    return;
+  }
+  const archByName = new Map(D.arch.map(r => [r.subject, r]));
+  const campsByParent = new Map();
+  D.camps.forEach(r => { if (!campsByParent.has(r.parent)) campsByParent.set(r.parent, []); campsByParent.get(r.parent).push(r); });
+  let html = `<div class="card taxonomy"><div class="tax-head"><span>Name</span><span>Agency</span>`+
+    `<span>Adj WR</span><span>Floor</span><span>Coverage</span><span>Meta</span></div>`;
+  for (const family of families) {
+    const memberRows = family.members.map(m => archByName.get(m.archetype)).filter(Boolean)
+      .sort((a,b) => b.field_share-a.field_share);
+    html += `<details class="tax-family"><summary class="tax-row"><span class="tax-name" title="${escA(family.full_label || family.label)}">${escT(family.label)}`+
+      ` <span class="chip">${memberRows.length} archetypes</span>${family.curated ? ` <span class="chip">curated</span>` : ""}</span>`+
+      `${metricCell(family.agency)}${metricCell(family.adj)}${metricCell(family.floor)}`+
+      `<span>${Math.round(100*family.coverage)}%</span><span>${(100*family.field_share).toFixed(1)}%</span></summary>`;
+    html += `<div class="tax-description">${escT(family.description)}</div>`;
+    for (const arch of memberRows) {
+      const camps = (campsByParent.get(arch.subject) || []).sort((a,b) => b.field_share-a.field_share);
+      html += `<div class="tax-row tax-arch"><span class="tax-name">↳ ${escT(arch.subject)} <span class="chip">Best Call</span></span>`+
+        `${metricCell(arch.agency)}${metricCell(arch.adj)}${metricCell(arch.floor)}`+
+        `<span>${Math.round(100*arch.coverage)}%</span><span>${(100*arch.field_share).toFixed(1)}%</span></div>`;
+      for (const camp of camps) html += `<div class="tax-row tax-camp"><span>↳ ${escT(camp.camp)} <span class="chip">camp</span></span>`+
+        `${metricCell(camp.agency)}${metricCell(camp.adj)}${metricCell(camp.floor)}`+
+        `<span>${Math.round(100*camp.coverage)}%</span><span>${(100*camp.field_share).toFixed(1)}%</span></div>`;
+    }
+    html += `</details>`;
+  }
+  root.innerHTML = html + `</div>`;
+}
+function renderFamilyHeatmap() {
+  const families = D.families || [];
+  if (!families.length) return;
+  let html = `<table class="heatmap"><thead><tr><th>subject ↓ / opponent →</th>`+
+    families.map(f => `<th title="${escA(f.label)}">${escT(f.label)}</th>`).join("") + `</tr></thead><tbody>`;
+  for (const family of families) {
+    const cells = new Map(family.cells.map(c => [c.opponent_id, c]));
+    html += `<tr><th>${escT(family.label)}</th>`;
+    for (const opponent of families) {
+      const c = cells.get(opponent.id);
+      const refused = !c || c.p == null;
+      const title = refused ? (c?.refused_reason || "no pooled evidence") :
+        `${family.label} vs ${opponent.label}: ${fmtP(c.p)}%, n_eff ${Math.round(c.n_eff)}, accepted ${c.accepted_members}/${c.subject_members} subject members`;
+      html += `<td class="hm ${refused ? "hm-refused" : ""} ${c?.intra_family ? "hm-intra" : ""}"`+
+        ` style="${refused ? "" : heatStyle(c.p)}" title="${escA(title)}">${refused ? "refuse" : fmtP(c.p)}</td>`;
+    }
+    html += `</tr>`;
+  }
+  document.getElementById("family-heatmap").innerHTML = html + `</tbody></table>`;
+}
+function renderCampHeatmap() {
+  const rows = D.camps || [];
+  if (!rows.length) { document.getElementById("camp-heatmap").textContent = "No staged camps."; return; }
+  const opponents = rows[0].cells.map(c => c.opp);
+  let html = `<table class="heatmap"><thead><tr><th>camp ↓ / parent →</th>`+
+    opponents.map(o => `<th title="${escA(o)}">${escT(o)}</th>`).join("") + `</tr></thead><tbody>`;
+  for (const row of rows) {
+    const cells = new Map(row.cells.map(c => [c.opp,c]));
+    html += `<tr><th>${escT(row.parent)} [${escT(row.camp)}]</th>`;
+    for (const opponent of opponents) {
+      const c = cells.get(opponent), thin = !c || !c.measured || c.p == null;
+      const title = !c ? "cell unavailable" : `${row.subject} vs ${opponent}: ${fmtP(c.p)}%, n=${c.n}, ${c.window}`;
+      html += `<td class="hm ${thin ? "hm-refused" : ""}" style="${thin ? "" : heatStyle(c.p)}" title="${escA(title)}">`+
+        `${!c ? "—" : thin ? `n=${c.n}` : fmtP(c.p)}</td>`;
+    }
+    html += `</tr>`;
+  }
+  document.getElementById("camp-heatmap").innerHTML = html + `</tbody></table>`;
+}
+renderTaxonomy();
+renderFamilyHeatmap();
+renderCampHeatmap();
 const saSplitText = split => split.map(m =>
   `${m.a}${m.intra ? " (intra-family)" : ""} ${m.w}-${m.n - m.w} (${fmtP(m.p)}%, ${m.tier})`
 ).join("; ");

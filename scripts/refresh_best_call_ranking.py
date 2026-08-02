@@ -300,6 +300,145 @@ def row_stats(cells, top_k, cover_min):
     }
 
 
+def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cover_min):
+    """Build the exploratory family hierarchy + S×S agency-map payload.
+
+    The opponent-axis values are the engine's typed ``PooledCell`` outputs.  The subject axis is
+    summarized across current-field member archetypes using their field shares; a refused or
+    below-display-gate pool never becomes a number.  This payload is presentation-only and is not
+    consumed by archetype Best Call, camp P(best), or their grounding strata.
+    """
+    if registry is None or not registry.clusters:
+        return []
+
+    def display_label(label):
+        parts = label.split(" + ")
+        if len(label) <= 56 or len(parts) <= 2:
+            return label
+        return f"{parts[0]} + {parts[1]} + {len(parts) - 2} more"
+
+    by_subject = {row["subject"]: row for row in archetype_rows}
+    clusters = []
+    for cluster in registry.clusters:
+        members = [by_subject[name] for name in cluster.archetypes if name in by_subject]
+        share = sum(row["field_share"] for row in members)
+        if not members or share <= 0:
+            continue
+        clusters.append((cluster, members, share))
+
+    family_shares = {cluster.id: share for cluster, _members, share in clusters}
+    total_family_share = sum(family_shares.values())
+    out = []
+    for cluster, members, share in clusters:
+        leading = sorted(members, key=lambda row: (-row["field_share"], row["subject"]))[:3]
+        leading_names = [row["subject"] for row in leading]
+        if len(leading_names) == 1:
+            anchors = leading_names[0]
+        elif len(leading_names) == 2:
+            anchors = " and ".join(leading_names)
+        else:
+            anchors = ", ".join(leading_names[:-1]) + f", and {leading_names[-1]}"
+        origin = "curated strategy" if cluster.curated else "composition-derived"
+        description = (
+            f"A {origin} family anchored in the current field by {anchors}. "
+            f"Its member archetypes represent {share:.1%} of published decks in this field window."
+        )
+        cells = []
+        for opponent, _opponent_members, opponent_share in clusters:
+            accepted = []
+            refused = []
+            for member in members:
+                pooled = cluster_cells.get((member["subject"], opponent.id))
+                if pooled is None:
+                    refused.append(f"{member['subject']}: no pooled evidence")
+                elif pooled.pooled_p is None:
+                    refused.append(f"{member['subject']}: {pooled.refused_reason}")
+                elif pooled.n_eff < DISPLAY_GATE_N:
+                    refused.append(
+                        f"{member['subject']}: n_eff {pooled.n_eff:.0f} < {DISPLAY_GATE_N}"
+                    )
+                else:
+                    accepted.append((member["field_share"], pooled))
+
+            accepted_weight = sum(weight for weight, _pooled in accepted)
+            p = (
+                sum(weight * pooled.pooled_p for weight, pooled in accepted)
+                / accepted_weight
+                if accepted_weight else None
+            )
+            n_eff = sum(pooled.n_eff for _weight, pooled in accepted)
+            current_weight = sum(
+                weight * pooled.current_regime_share
+                for weight, pooled in accepted
+                if pooled.current_regime_share is not None
+            )
+            current_den = sum(
+                weight for weight, pooled in accepted
+                if pooled.current_regime_share is not None
+            )
+            cells.append({
+                "opponent_id": opponent.id,
+                "opponent": display_label(opponent.label),
+                "share": r4(opponent_share / total_family_share) if total_family_share else 0.0,
+                "p": r4(p),
+                "n_eff": r4(n_eff),
+                "accepted_members": len(accepted),
+                "subject_members": len(members),
+                "intra_family": cluster.id == opponent.id,
+                "current_regime_share": r4(current_weight / current_den) if current_den else None,
+                "refused_reason": "; ".join(refused) if not accepted else None,
+            })
+
+        # A family explains its internal diversity in the map, but its decision floor is against
+        # OTHER strategies (the epic's agency definition). The intra-family cell never ranks it.
+        external = [cell for cell in cells if not cell["intra_family"]]
+        measurable = [cell for cell in external if cell["p"] is not None]
+        den = sum(cell["share"] for cell in external)
+        coverage = sum(cell["share"] for cell in measurable) / den if den else 0.0
+        adj = (
+            sum(cell["share"] * cell["p"] for cell in measurable)
+            / sum(cell["share"] for cell in measurable)
+            if measurable else None
+        )
+        floor_cell = min(measurable, key=lambda cell: cell["p"]) if measurable else None
+        floor = floor_cell["p"] if floor_cell else None
+        top = sorted(external, key=lambda cell: cell["share"], reverse=True)[:top_k]
+        grounded = bool(top) and all(cell["p"] is not None for cell in top) and coverage >= cover_min
+        vals = [value for value in (adj, floor) if value is not None]
+        out.append({
+            "id": cluster.id,
+            "label": display_label(cluster.label),
+            "full_label": cluster.label,
+            "curated": cluster.curated,
+            "description": description,
+            "field_share": r4(share),
+            "recent_4wk": sum(row["recent_4wk"] for row in members),
+            "adj": r4(adj),
+            "floor": r4(floor),
+            "floor_opp": floor_cell["opponent"] if floor_cell else None,
+            "agency": r4(min(vals)) if vals else None,
+            "coverage": r4(coverage),
+            "grounded": grounded,
+            "members": [
+                {
+                    "archetype": member["subject"],
+                    "field_share": member["field_share"],
+                    "provenance": next(
+                        registry_member.provenance
+                        for registry_member in cluster.members
+                        if registry_member.archetype == member["subject"]
+                    ),
+                }
+                for member in members
+            ],
+            "cells": cells,
+        })
+
+    # Registry order is stable identity order; presentation order is current field share.
+    out.sort(key=lambda family: (-family["field_share"], family["label"]))
+    return out
+
+
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                  regime_card, parents, superarchetypes=None):
     corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
@@ -489,6 +628,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         print(f"  superarchetype fallback: {sa_counts['imputed']} imputed, "
               f"{sa_counts['pooled']} pooled, {sa_counts['range']} range", flush=True)
 
+    families = build_family_payload(
+        superarchetypes, msa.cluster_cells, arch_out, top_k=top_k, cover_min=cover_min,
+    )
+
     return {
         "meta": {
             "field_since": field_since, "field_decks": field_decks,
@@ -521,6 +664,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         },
         "arch": arch_out,
         "camps": camps_out,
+        "families": families,
     }
 
 

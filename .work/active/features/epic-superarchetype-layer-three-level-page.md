@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-three-level-page
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, viz]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-chain, epic-superarchetype-layer-best-call-fallback]
@@ -167,3 +167,29 @@ inspect the final document in a browser.
   scrollable table with compact labels and cell tooltips; hierarchy remains the primary surface.
 - **Registry absent or stale**: refresh must still complete. **Fallback**: explicit unavailable
   section and existing two-level report remain fully functional.
+
+## Implementation summary
+
+Implemented the approved nested hierarchy plus explicit heatmap in the tracked refresh generator
+and template. The additive `families` payload reads the serving registry and typed adaptive
+`cluster_cells`; it carries concise/full labels, deterministic two-sentence group descriptions,
+member provenance, exploratory family metrics, and refusal-safe S×S cells. Intra-family cells remain
+visible in the map but cannot set family agency/floor. The template renders expandable
+family → archetype → camp rows, the family heatmap, and the rectangular camps × parent-opponents
+map while retaining the existing authoritative archetype and camp tables.
+
+The no-registry/`--no-superarchetypes` path emits `families: []`, displays an explicit unavailable
+state, and leaves the existing surfaces intact. The production artifact was regenerated at
+`decks/best-deck-best-call-ranking.html` (gitignored by design) from the real corpus: 1,876 field
+decks through 2026-07-30, 94 archetype rows, 115 camp rows, and 21 serving-registry families.
+
+## Verification
+
+- Approved mockup: `.mockups/screens/epic-superarchetype-layer-three-level-page/option-hybrid.html`
+- Focused generator suite: `24 passed`
+- Full project suite: `3526 passed, 1 existing UMAP warning` via
+  `.venv/bin/python -m pytest -q`
+- Generated page JavaScript: parsed successfully with Node (`new Function` syntax validation)
+- Knowledge index: `0 errors, 6 pre-existing warnings`
+- Browser: regenerated production HTML opened successfully; automated macOS screenshot capture was
+  unavailable because the execution environment exposes no capturable display.
