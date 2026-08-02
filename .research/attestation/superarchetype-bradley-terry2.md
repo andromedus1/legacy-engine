@@ -3,6 +3,7 @@ source_handle: superarchetype-bradley-terry2
 fetched: 2026-07-31
 source_url: https://cran.r-project.org/web/packages/BradleyTerry2/vignettes/BradleyTerry.html
 provenance: source-direct
+substrate_confidence: source-direct
 ---
 
 ## Summary
