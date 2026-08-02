@@ -1,11 +1,11 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-08-01T17:05:20Z'
+generated_at: '2026-08-02T03:43:34Z'
 generated_from: frontmatter
-total_docs: 31
+total_docs: 32
 by_kind:
   planning: 7
-  research: 24
+  research: 25
 recent:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
