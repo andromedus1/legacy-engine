@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-01T17:05:20Z'
+generated_at: '2026-08-02T03:43:34Z'
 generated_from: frontmatter
-total_docs: 31
+total_docs: 32
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -320,3 +320,13 @@ documents:
   consumer_hint: The quality report + metadata for the ingestion-archetype-contracts
     deep-research campaign. Read to know how trustworthy the brief set is, the contradictions
     flagged, and what to verify before building.
+- path: docs/reviews/2026-08-01-shipped-features-deep-review.md
+  title: Fresh-context deep review — features shipped 2026-07-31/08-01
+  type: review
+  kind: research
+  updated: '2026-08-01'
+  consumer_hint: Read when auditing what actually shipped to main across 2026-07-31/08-01
+    — a fresh-context, adversarial post-merge deep review of the seven shipped features
+    (superarchetype aggregation/chain/clustering, camp-incremental assignment, matchup-plan
+    flex, era-alarm hygiene, multi-split matrix), with confirmed defects at file:line,
+    vacuous-test findings, and implementation-note claims checked against code.
