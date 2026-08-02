@@ -7281,10 +7281,13 @@ def _echo_cluster(cluster, *, indent: str = "  ") -> None:
 @click.option("--seed", type=int, default=0, show_default=True, help="RNG seed (runs are exact).")
 @click.option("--dry-run", is_flag=True, default=False,
               help="Compute and report without writing the registry or the DuckDB cache.")
+@click.option("--compare-since", default=None,
+              help="With --dry-run, compare era-aware cores to this uniform start date.")
 @_verbose
 def superarchetype_run(
     db: str | None, since: str | None, until: str | None, au_min: float | None,
-    min_bp: float | None, n_boot: int, seed: int, dry_run: bool, verbose: bool,
+    min_bp: float | None, n_boot: int, seed: int, dry_run: bool,
+    compare_since: str | None, verbose: bool,
 ) -> None:
     """Run the offline clustering pass: cores -> staple strip -> Jaccard -> average linkage ->
     AU cut -> assignment -> curated merge -> persisted registry + churn report.
@@ -7295,22 +7298,47 @@ def superarchetype_run(
     """
     _setup_logging(verbose)
     from legacy_engine.analytics.superarchetype.registry import run_superarchetypes
+    from legacy_engine.analytics.superarchetype.registry import membership_churn
     from legacy_engine.ingestion import store
 
+    if compare_since is not None and (since is not None or not dry_run):
+        raise click.ClickException(
+            "--compare-since requires the default era-aware policy and --dry-run"
+        )
+
     con = store.connect(db) if db else store.connect()
+    comparison = None
     try:
         result = run_superarchetypes(
             con, since=since, until=until, seed=seed, n_boot=n_boot,
             au_min=au_min, min_bp=min_bp, write=not dry_run,
         )
+        if compare_since is not None:
+            comparison = run_superarchetypes(
+                con, since=compare_since, until=until, seed=seed, n_boot=n_boot,
+                au_min=au_min, min_bp=min_bp, write=False,
+            )
     finally:
         con.close()
 
     registry = result.registry
+    window_label = since or "per-entity eras"
     click.echo(
-        f"// superarchetype run: window {since or '—'} .. {until or '—'}  "
-        f"(seed={seed}, n_boot={n_boot})"
+        f"// superarchetype run: window {window_label} .. {until or '—'}  "
+        f"(policy={registry.window_policy}, seed={seed}, n_boot={n_boot})"
     )
+    for line in registry.audit_lines:
+        click.echo(line)
+    if registry.window_policy == "per-entity-era":
+        source_counts: dict[str, int] = {}
+        for _label, _horizon, source in registry.entity_horizons:
+            source_counts[source] = source_counts.get(source, 0) + 1
+        click.echo(
+            "// core horizons: "
+            + ", ".join(
+                f"{source}={count}" for source, count in sorted(source_counts.items())
+            )
+        )
     click.echo(
         f"// {result.n_archetypes} archetype label(s); {result.n_definers} definer(s) "
         f"covering {result.definer_field_share:.1%} of the field"
@@ -7352,6 +7380,20 @@ def superarchetype_run(
         click.echo("// DEGRADED taxonomy — see reasons below")
     for reason in registry.reasons:
         click.echo(f"// {reason}")
+    if comparison is not None:
+        compared = membership_churn(result.registry, comparison.registry)
+        click.echo(f"// comparison: era-aware vs uniform since {compare_since}")
+        click.echo(
+            f"//   definers {result.n_definers} ({result.definer_field_share:.1%}) vs "
+            f"{comparison.n_definers} ({comparison.definer_field_share:.1%}); "
+            f"placed {result.assigned_field_share:.1%} vs {comparison.assigned_field_share:.1%}"
+        )
+        click.echo(
+            f"//   clusters {len(result.registry.clusters)} vs "
+            f"{len(comparison.registry.clusters)}; {compared.note}"
+        )
+        for archetype, old_id, new_id in compared.moves:
+            click.echo(f"//   comparison move {archetype}: {old_id} -> {new_id}")
     click.echo("// written" if result.written else "// dry run — nothing written")
 
 

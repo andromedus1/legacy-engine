@@ -1,18 +1,18 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-08-02T03:43:34Z'
+generated_at: '2026-08-02T15:12:30Z'
 generated_from: frontmatter
 total_docs: 32
 by_kind:
   planning: 7
   research: 25
 recent:
-- path: docs/ARCHITECTURE.md
-  title: 'Architecture: legacy-engine'
-  kind: planning
-  updated: '2026-08-01'
 - path: docs/analysis/best-call-ranking.md
   title: Best Deck / Best Call agency ranking — refresh runbook
+  kind: planning
+  updated: '2026-08-02'
+- path: docs/ARCHITECTURE.md
+  title: 'Architecture: legacy-engine'
   kind: planning
   updated: '2026-08-01'
 - path: docs/SPEC.md

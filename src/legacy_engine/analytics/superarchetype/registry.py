@@ -113,6 +113,9 @@ class SuperarchetypeRegistry:
     reasons: tuple[str, ...]
     seed: int
     n_boot: int
+    window_policy: str = "global"
+    entity_horizons: tuple[tuple[str, str | None, str], ...] = ()
+    audit_lines: tuple[str, ...] = ()
 
     def cluster_of(self, archetype: str) -> RegistryCluster | None:
         """The cluster an archetype belongs to, or ``None`` when it is unassigned."""
@@ -257,6 +260,9 @@ def merge_curated(
     window_since: str | None,
     window_until: str | None,
     derived_at: str,
+    window_policy: str = "global",
+    entity_horizons: tuple[tuple[str, str | None, str], ...] = (),
+    audit_lines: tuple[str, ...] = (),
 ) -> SuperarchetypeRegistry:
     """Merge curated clusters over the derived solution — curated wins by key.
 
@@ -334,6 +340,9 @@ def merge_curated(
         reasons=tuple(reasons),
         seed=solution.seed,
         n_boot=solution.n_boot,
+        window_policy=window_policy,
+        entity_horizons=entity_horizons,
+        audit_lines=audit_lines,
     )
 
 
@@ -427,6 +436,9 @@ def match_identities(
             reasons=new.reasons,
             seed=new.seed,
             n_boot=new.n_boot,
+            window_policy=new.window_policy,
+            entity_horizons=new.entity_horizons,
+            audit_lines=new.audit_lines,
         ),
         tuple(notes),
     )
@@ -499,6 +511,9 @@ def _registry_to_dict(registry: SuperarchetypeRegistry) -> dict:
         "degraded": registry.degraded,
         "seed": registry.seed,
         "n_boot": registry.n_boot,
+        "window_policy": registry.window_policy,
+        "entity_horizons": [list(row) for row in registry.entity_horizons],
+        "audit_lines": list(registry.audit_lines),
         "staples": list(registry.staples),
         "unassigned": [[a, r] for a, r in registry.unassigned],
         "reasons": list(registry.reasons),
@@ -558,6 +573,12 @@ def _registry_from_dict(raw: Mapping) -> SuperarchetypeRegistry:
         reasons=tuple(raw.get("reasons", ())),
         seed=int(raw.get("seed", 0)),
         n_boot=int(raw.get("n_boot", 0)),
+        window_policy=raw.get("window_policy", "global"),
+        entity_horizons=tuple(
+            (str(a), since, str(source))
+            for a, since, source in raw.get("entity_horizons", ())
+        ),
+        audit_lines=tuple(raw.get("audit_lines", ())),
     )
 
 
@@ -608,7 +629,10 @@ CREATE TABLE IF NOT EXISTS superarchetype_meta (
     cophenetic DOUBLE NOT NULL,
     degraded BOOLEAN NOT NULL,
     seed INTEGER NOT NULL,
-    n_boot INTEGER NOT NULL
+    n_boot INTEGER NOT NULL,
+    window_policy VARCHAR NOT NULL,
+    entity_horizons_json VARCHAR NOT NULL,
+    audit_lines_json VARCHAR NOT NULL
 )
 """
 
@@ -652,8 +676,9 @@ def rebuild_superarchetype_members(
         """
         INSERT INTO superarchetype_meta (
             derived_at, window_since, window_until, staples_json, unassigned_json, reasons_json,
-            stability, cophenetic, degraded, seed, n_boot
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            stability, cophenetic, degraded, seed, n_boot, window_policy,
+            entity_horizons_json, audit_lines_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             registry.derived_at, registry.window_since, registry.window_until,
@@ -661,7 +686,9 @@ def rebuild_superarchetype_members(
             json.dumps([[a, r] for a, r in registry.unassigned]),
             json.dumps(list(registry.reasons)),
             registry.stability, registry.cophenetic, registry.degraded,
-            registry.seed, registry.n_boot,
+            registry.seed, registry.n_boot, registry.window_policy,
+            json.dumps([list(row) for row in registry.entity_horizons]),
+            json.dumps(list(registry.audit_lines)),
         ],
     )
 
@@ -673,10 +700,24 @@ def read_superarchetype_members(
     renders "no registry" rather than crashing). Only the missing-table case degrades; any other DB
     error stays loud."""
     try:
+        meta_columns = {
+            str(row[1]) for row in con.execute(
+                "PRAGMA table_info('superarchetype_meta')"
+            ).fetchall()
+        }
+        if not meta_columns:
+            return None
+        metadata_tail = (
+            "window_policy, entity_horizons_json, audit_lines_json"
+            if "window_policy" in meta_columns
+            else "'global' AS window_policy, '[]' AS entity_horizons_json, "
+                 "'[]' AS audit_lines_json"
+        )
         meta = con.execute(
-            """
+            f"""
             SELECT derived_at, window_since, window_until, staples_json, unassigned_json,
-                   reasons_json, stability, cophenetic, degraded, seed, n_boot
+                   reasons_json, stability, cophenetic, degraded, seed, n_boot,
+                   {metadata_tail}
             FROM superarchetype_meta
             """
         ).fetchall()
@@ -695,7 +736,8 @@ def read_superarchetype_members(
 
     (
         derived_at, window_since, window_until, staples_json, unassigned_json, reasons_json,
-        stability, cophenetic, degraded, seed, n_boot,
+        stability, cophenetic, degraded, seed, n_boot, window_policy,
+        entity_horizons_json, audit_lines_json,
     ) = meta[0]
 
     staged: dict[str, dict] = {}
@@ -732,6 +774,12 @@ def read_superarchetype_members(
         reasons=tuple(json.loads(reasons_json)),
         seed=int(seed),
         n_boot=int(n_boot),
+        window_policy=window_policy,
+        entity_horizons=tuple(
+            (str(a), since, str(source))
+            for a, since, source in json.loads(entity_horizons_json)
+        ),
+        audit_lines=tuple(json.loads(audit_lines_json)),
     )
 
 
@@ -766,7 +814,28 @@ def run_superarchetypes(
     resolved_path = Path(derived_path) if derived_path is not None else DERIVED_SUPERARCHETYPES_PATH
     resolved_curated = CURATED_SUPERARCHETYPES if curated is None else curated
 
-    decks = load_archetype_decks(con, since=since, until=until)
+    window_policy = "global" if since is not None else "per-entity-era"
+    entity_horizons: tuple[tuple[str, str | None, str], ...] = ()
+    audit_lines: tuple[str, ...] = ()
+    if window_policy == "per-entity-era":
+        from legacy_engine.analytics.eras.consume import era_horizons
+
+        labels = [
+            str(row[0]) for row in con.execute(
+                "SELECT DISTINCT archetype FROM decks "
+                "WHERE archetype IS NOT NULL AND archetype <> '' ORDER BY archetype"
+            ).fetchall()
+        ]
+        horizons, audit_lines = era_horizons(con, labels)
+        entity_horizons = tuple(
+            (label, horizons[label].since, horizons[label].source) for label in labels
+        )
+        decks = load_archetype_decks(
+            con, until=until,
+            since_by_archetype={label: horizon.since for label, horizon in horizons.items()},
+        )
+    else:
+        decks = load_archetype_decks(con, since=since, until=until)
     deck_counts: dict[str, int] = {}
     for deck in decks:
         deck_counts[deck.archetype] = deck_counts.get(deck.archetype, 0) + 1
@@ -783,6 +852,9 @@ def run_superarchetypes(
         solution, resolved_curated,
         deck_counts=deck_counts, window_since=since, window_until=until,
         derived_at=datetime.now(UTC).isoformat(),
+        window_policy=window_policy,
+        entity_horizons=entity_horizons,
+        audit_lines=audit_lines,
     )
     registry, remap = match_identities(merged, previous)
     churn = membership_churn(registry, previous)
