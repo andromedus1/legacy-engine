@@ -9,7 +9,8 @@ summary: |
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
   tracked HTML template: scripts/refresh_best_call_ranking.py +
   scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-  strata, the cross-camp P(best) column, and the five-plan strategic taxonomy;
+  strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
+  including exact archetype-versus-plan evidence in every archetype dropdown;
   the page itself carries the authoritative definitional prose.
 decisions:
   - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
@@ -21,9 +22,9 @@ decisions:
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
   - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
   - "Strategic-plan same-plan play is structural 50% context: it contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
-  - "Superarchetypes remain only as stricter-gated fallback evidence in otherwise unmeasured archetype/camp ledger cells. They never enter strategic-plan, archetype, or camp metrics; --no-superarchetypes removes those ledger leans without changing the ranking surfaces."
+  - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, n, the page's uniform field window/provenance, and measured/thin state; mirrors add structural 50% context to the archetype's own primary-plan cell. The exact archetype ledger remains below."
+  - "Composition-derived superarchetypes remain an internal matrix/statistical-borrowing layer only. They emit no page-visible dropdown payload, family lean, family range, or presentation audit line."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
-  - "Refresh THIS page last in the data cycle: its matrices read eras + variants, so it inherits whatever labeling state exists when it runs."
 ---
 
 # Best Deck / Best Call agency ranking — refresh runbook
@@ -60,8 +61,7 @@ A gate-A FAIL keeps the old frozen split; treat that parent's camp rows as stale
 
 Knobs (defaults are the page's published method): `--field-since` (defaults to the
 latest confirmed ban event date), `--ground-n 8`, `--top-k 8`, `--cover-min 0.8`,
-`--min-row-share 0.001`, `--no-superarchetypes` (baseline/audit regeneration without
-the family-fallback overlay), `--db`, `--out`.
+`--min-row-share 0.001`, `--db`, `--out`.
 
 ## What the script does
 
@@ -114,22 +114,23 @@ ledger. The ledger distinguishes measured shrunk/raw records, below-gate or empt
 external cells, and the structural same-plan diagonal in text rather than color
 alone.
 
-**Superarchetype family fallback (ledger-only).** `main()` reads the serving
-taxonomy from the SAME `--db` (`read_superarchetype_members` — the derived cache
-`superarchetype run` rebuilds; absent tables = layer off, byte-identical) and
-passes it into the one-pass build. Page-unmeasured cells then carry an additive
-`sa` payload resolved by the engine's display ladder — `imputed` (licensed family
-siblings' record vs that exact opponent, tau-widened CI), `pooled` (the deck vs
-every member of the opponent's family, `intra-family` share flagged), or `range`
-(refused/unlicensed/vetoed: the member split with the named refusal — `dominated
-by <member>`, heterogeneous pool, local veto, comparability desert — and no point
-estimate). The expanded ledger renders them as dashed-border leans with
-provenance chips; pools with <50% current-regime evidence carry an amber
-`◦mostly pre-regime` marker. **Isolation contract:** leans never enter agency,
-adj, floor, coverage, strata, or the P(best) MC — enforced by
-`TestSuperarchetypeIsolation` (blob equality modulo additive `sa` keys + audit
-lines). Split parents' archetype rows carry no fallback (the multi-split subject
-set is camps + unsplit archetypes); their camp rows do.
+**Archetype dropdowns lead with direct plan evidence.** Opening any archetype row
+first shows **Against strategic plans**, exactly five cells in registry order.
+Each cell is aggregated directly from that archetype's decisive `MatchResults`
+against opponents assigned to the corresponding primary plan; it is not derived
+from rendered archetype percentages or from composition-family evidence. Each
+cell carries shrunk/raw rates, W-L, `n`, the uniform field window and provenance,
+and its measured/thin state under the same `n>=8` page gate. In the archetype's
+own primary-plan cell, exact archetype mirrors contribute structural 50% context
+and are counted separately from decisive non-mirror W-L. The exact
+archetype-versus-archetype ledger follows this five-cell block.
+
+**Superarchetypes are internal only.** Composition-derived superarchetypes may
+still support matrix construction and statistical borrowing, but the ranking
+page exposes no family fallback payload: no archetype or camp dropdown gains an
+imputed/pooled lean, family range, provenance chip, or superarchetype presentation
+audit line. The page-visible dropdown evidence is the direct strategic-plan block
+followed by the exact archetype ledger.
 
 The full refresh runs in ~40s on the current corpus (~11s archetype matrices +
 ~13s one-pass camp matrices + ~2s shared-field ranking); the script echoes each
@@ -167,14 +168,10 @@ frontmatter decisions above — the page prose is authoritative.
   explain hybrid decks but never count their matches or field share again.
   Same-plan 50% is structural context, not evidence: judge a plan's floor and
   grounding only from its external cells and external-coverage percentage.
-- **Family leans are leans** — an `imputed`/`pooled` value in the ledger is
-  superarchetype-sourced, never a measured cell, and passing the heterogeneity
-  gate never promotes it: I² is one-sided evidence (a low value is not a
-  certificate of exchangeability). A `family range` line is a refusal rendered
-  honestly — read the member split, not a blended number. Check the audit header
-  for the registry window (a stale-taxonomy warning there means preview a candidate with
-  `superarchetype run`, review it, then explicitly use `--promote` if approved; use
-  `--since <date>` only for a labeled uniform-window diagnostic).
+- **Archetype plan cells are direct evidence** — read their shrunk/raw rates, W-L, `n`,
+  measured/thin state, and uniform field provenance before the exact opponent
+  ledger below. Mirrors in the row's own primary-plan cell are structural 50%
+  context, not additional observed wins or losses.
 - **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
   archetypes compete in ONE argmax, so the values are comparable across parents
   and can never sum past 1. n/a means the row failed the 5% measured-coverage

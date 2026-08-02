@@ -72,6 +72,19 @@ class StrategicPlanResult:
     provenance: str | None
 
 
+@dataclass(frozen=True)
+class ArchetypeStrategicPlanCell:
+    archetype: str
+    opponent_id: str
+    wins: int
+    losses: int
+    mirror_n: int
+    n: int
+    raw: float | None
+    shrunk: float | None
+    measured: bool
+
+
 def _plan_token(value: object, *, field: str) -> str:
     token = str(value)
     if token not in PLAN_IDS:
@@ -225,3 +238,52 @@ def aggregate_strategic_plan_results(
         until,
         provenance if provenance is not None else match_results.provenance,
     )
+
+
+def aggregate_archetype_vs_plan_results(
+    match_results: MatchResults,
+    registry: StrategicPlanRegistry,
+    *,
+    current_archetypes: Collection[str],
+    ground_n: int,
+) -> Mapping[tuple[str, str], ArchetypeStrategicPlanCell]:
+    """Aggregate each current archetype directly against the five opponent plans.
+
+    Archetype mirrors are real same-plan context. They contribute one physical match
+    at structural 50% (half a win) without pretending to be an observed directional win.
+    """
+    if ground_n < 1:
+        raise ValueError("ground_n must be >= 1")
+    validate_current_plan_coverage(registry, current_archetypes)
+    primary = {item.archetype: item.primary for item in registry.assignments}
+    tallies: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
+    for (subject, opponent), tally in match_results.matchups.items():
+        if subject not in current_archetypes:
+            continue
+        opponent_plan = primary.get(opponent)
+        if opponent_plan is not None:
+            tallies[(subject, opponent_plan)][0] += tally.wins
+            tallies[(subject, opponent_plan)][1] += tally.losses
+
+    out: dict[tuple[str, str], ArchetypeStrategicPlanCell] = {}
+    for archetype in current_archetypes:
+        assignment = primary[archetype]
+        for plan in registry.plans:
+            wins, losses = tallies[(archetype, plan.id)]
+            mirrors = match_results.mirror_n.get(archetype, 0) if plan.id == assignment else 0
+            n = wins + losses + mirrors
+            effective_wins = wins + 0.5 * mirrors
+            out[(archetype, plan.id)] = ArchetypeStrategicPlanCell(
+                archetype=archetype,
+                opponent_id=plan.id,
+                wins=wins,
+                losses=losses,
+                mirror_n=mirrors,
+                n=n,
+                raw=effective_wins / n if n else None,
+                shrunk=beta_binomial_shrink_to(
+                    effective_wins, n, prior_mean=0.5, strength=SHRINK_STRENGTH
+                ) if n else None,
+                measured=n >= ground_n,
+            )
+    return MappingProxyType(out)

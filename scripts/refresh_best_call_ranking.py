@@ -81,6 +81,7 @@ from legacy_engine.analytics.matchup import (
 from legacy_engine.analytics.match_results import compute_match_results
 from legacy_engine.analytics.strategy_plan import (
     StrategicPlanResult,
+    aggregate_archetype_vs_plan_results,
     aggregate_strategic_plan_results,
     load_strategic_plan_registry,
 )
@@ -713,33 +714,6 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
           f"({len(camps_out)} camp rows)", flush=True)
 
-    # ── Superarchetype fallback overlay (LEDGER-ONLY) ──
-    # Additive `sa` keys on page-unmeasured cells; measured cells and every row-level field
-    # are untouched, so adj/floor/agency/coverage/grounded/P(best) are bit-identical with the
-    # layer on or off. Rung 1 (a measured cell) is the page's existing selection above.
-    sa_audit: list[str] = []
-    if superarchetypes is not None:
-        label_of = {c.id: c.label for c in superarchetypes.clusters}
-        sa_counts = {"imputed": 0, "pooled": 0, "range": 0}
-        for row in (*arch_out, *camps_out):
-            for c in row["cells"]:
-                if c["measured"]:
-                    continue
-                payload = _sa_payload(row["subject"], c["opp"], msa, label_of)
-                if payload is not None:
-                    c["sa"] = payload
-                    sa_counts[payload["kind"]] += 1
-        sa_audit = [
-            line for line in msa.audit_preamble if line.startswith("// superarchetype")
-        ]
-        sa_audit.append(
-            f"// superarchetype fallback: {sa_counts['imputed']} imputed + "
-            f"{sa_counts['pooled']} pooled + {sa_counts['range']} family-range leans in the "
-            "expanded ledgers — leans never enter agency, adj, floor, coverage, or strata"
-        )
-        print(f"  superarchetype fallback: {sa_counts['imputed']} imputed, "
-              f"{sa_counts['pooled']} pooled, {sa_counts['range']} range", flush=True)
-
     # Strategic intent is a separate curated semantic layer. Recompute it from
     # decisive match tallies rather than averaging any rendered row statistic.
     plan_registry = load_strategic_plan_registry()
@@ -751,6 +725,38 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         ground_n=ground_n,
         since=field_since,
     )
+    archetype_plan_cells = aggregate_archetype_vs_plan_results(
+        plan_matches,
+        plan_registry,
+        current_archetypes=[row["subject"] for row in arch_out],
+        ground_n=ground_n,
+    )
+    assignment_by_archetype = {
+        assignment.archetype: assignment for assignment in plan_registry.assignments
+    }
+    for row in arch_out:
+        assignment = assignment_by_archetype[row["subject"]]
+        row["strategic_plan"] = {
+            "primary": assignment.primary,
+            "secondary": list(assignment.secondary),
+        }
+        row["plan_cells"] = []
+        for plan in plan_registry.plans:
+            cell = archetype_plan_cells[(row["subject"], plan.id)]
+            row["plan_cells"].append({
+                "opponent_id": plan.id,
+                "opponent": plan.label,
+                "wins": cell.wins,
+                "losses": cell.losses,
+                "mirror_n": cell.mirror_n,
+                "n": cell.n,
+                "raw": r4(cell.raw),
+                "p": r4(cell.shrunk),
+                "measured": cell.measured,
+                "same_primary_plan": plan.id == assignment.primary,
+                "since": field_since,
+                "provenance": plan_matches.provenance,
+            })
     plans = build_strategic_plan_payload(
         plan_result, arch_out, top_k=top_k, cover_min=cover_min,
     )
@@ -787,7 +793,9 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"{plan_result.decisive_matches} decisive matches "
                 f"({plan_result.same_plan_matches} same-plan), "
                 f"{plan_result.omitted_matches} omitted; window since {field_since}",
-                *sa_audit,
+                f"// archetype vs strategic plans: {len(arch_out)} archetypes × "
+                f"{len(plan_registry.plans)} primary opponent plans from underlying decisive "
+                "matches; archetype mirrors contribute structural 50% context",
             ],
         },
         "arch": arch_out,

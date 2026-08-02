@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T20:31:09Z'
+generated_at: '2026-08-02T20:52:23Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -123,7 +123,9 @@ documents:
 
       scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
 
-      strata, the cross-camp P(best) column, and the five-plan strategic taxonomy;
+      strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
+
+      including exact archetype-versus-plan evidence in every archetype dropdown;
 
       the page itself carries the authoritative definitional prose.
 
@@ -165,15 +167,17 @@ documents:
       from the external-coverage denominator. External plan cells use the page''s
       n>=8 measured gate; grounding requires the top external plans measured and >=80%
       external field-share coverage.'
-    - Superarchetypes remain only as stricter-gated fallback evidence in otherwise
-      unmeasured archetype/camp ledger cells. They never enter strategic-plan, archetype,
-      or camp metrics; --no-superarchetypes removes those ledger leans without changing
-      the ranking surfaces.
+    - Every archetype dropdown begins with five Against strategic plans cells built
+      directly from that archetype's decisive MatchResults, grouped by opponent primary
+      plan. Cells carry shrunk/raw rates, W-L, n, the page's uniform field window/provenance,
+      and measured/thin state; mirrors add structural 50% context to the archetype's
+      own primary-plan cell. The exact archetype ledger remains below.
+    - Composition-derived superarchetypes remain an internal matrix/statistical-borrowing
+      layer only. They emit no page-visible dropdown payload, family lean, family
+      range, or presentation audit line.
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).
-    - 'Refresh THIS page last in the data cycle: its matrices read eras + variants,
-      so it inherits whatever labeling state exists when it runs.'
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo
