@@ -3,6 +3,7 @@ source_handle: superarchetype-pvp-counter-clustering
 fetched: 2026-07-31
 source_url: https://arxiv.org/html/2408.17180v1
 provenance: source-direct
+substrate_confidence: source-direct
 ---
 
 ## Summary
