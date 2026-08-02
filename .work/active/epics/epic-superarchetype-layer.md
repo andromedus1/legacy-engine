@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer
 kind: epic
-stage: review
+stage: done
 tags: [analytics, archetype]
 parent: null
 depends_on: []
@@ -404,5 +404,24 @@ the roadmap item asked for.
 All direct feature children are `done`: clustering, random-effects aggregation, matchup-chain
 integration, ledger-safe Best Call fallback, and the approved three-level HTML page. The era-aware
 core-pools story is also `done`. Integrated verification on the final page snapshot: 25 focused
-generator tests and 3,527 full-suite tests passed; the corpus-backed production HTML was regenerated
+generator tests and 3,530 full-suite tests passed; the corpus-backed production HTML was regenerated
 with the serving registry and reviewed through the feature's standard fresh-context lane.
+
+## Review (2026-08-02)
+
+**Verdict: approve with comments.** The standard independent epic pass found three blockers, all
+resolved before closure:
+
+- `superarchetype run` is now preview-only by default; only an explicit, operator-reviewed
+  `--promote` replaces the serving registry and DuckDB cache. Comparison mode is strictly
+  non-writing, and the refresh runbook documents the review boundary.
+- This epic and its foundation documents now agree with the approved authority boundary: family
+  evidence is exploratory navigation and explanation on Best Call; archetype metrics remain the
+  recommendation surface until the future-only benchmark passes.
+- VISION, SPEC, and ARCHITECTURE now describe the shipped state and the actual mean-Jaccard
+  assignee rule. The missing three-level-page child was added to the decomposition.
+
+Verification after fixes: 249 focused superarchetype/page tests passed; the complete suite passed
+with **3,530 tests** and one pre-existing UMAP warning; the knowledge index regenerated with zero
+errors (six pre-existing warnings); `git diff --check` passed. Per the standard workflow, this was
+one fresh-context review pass followed by adjudication and verification, not a second review pass.
