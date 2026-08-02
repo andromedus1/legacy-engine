@@ -320,7 +320,10 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
     by_subject = {row["subject"]: row for row in archetype_rows}
     clusters = []
     for cluster in registry.clusters:
-        members = [by_subject[name] for name in cluster.archetypes if name in by_subject]
+        members = [
+            by_subject[name] for name in cluster.archetypes
+            if name in by_subject and by_subject[name]["field_share"] > 0
+        ]
         share = sum(row["field_share"] for row in members)
         if not members or share <= 0:
             continue
@@ -361,6 +364,7 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
                     accepted.append((member["field_share"], pooled))
 
             accepted_weight = sum(weight for weight, _pooled in accepted)
+            support = accepted_weight / share if share else 0.0
             p = (
                 sum(weight * pooled.pooled_p for weight, pooled in accepted)
                 / accepted_weight
@@ -376,6 +380,7 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
                 weight for weight, pooled in accepted
                 if pooled.current_regime_share is not None
             )
+            window_notes = sorted({pooled.window_note or "unknown" for _weight, pooled in accepted})
             cells.append({
                 "opponent_id": opponent.id,
                 "opponent": display_label(opponent.label),
@@ -384,9 +389,12 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
                 "n_eff": r4(n_eff),
                 "accepted_members": len(accepted),
                 "subject_members": len(members),
+                "support": r4(support),
                 "intra_family": cluster.id == opponent.id,
                 "current_regime_share": r4(current_weight / current_den) if current_den else None,
+                "window_notes": window_notes,
                 "refused_reason": "; ".join(refused) if not accepted else None,
+                "support_reason": "; ".join(refused) if refused else None,
             })
 
         # A family explains its internal diversity in the map, but its decision floor is against
@@ -394,16 +402,18 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
         external = [cell for cell in cells if not cell["intra_family"]]
         measurable = [cell for cell in external if cell["p"] is not None]
         den = sum(cell["share"] for cell in external)
-        coverage = sum(cell["share"] for cell in measurable) / den if den else 0.0
+        coverage = sum(cell["share"] * cell["support"] for cell in measurable) / den if den else 0.0
         adj = (
-            sum(cell["share"] * cell["p"] for cell in measurable)
-            / sum(cell["share"] for cell in measurable)
+            sum(cell["share"] * cell["support"] * cell["p"] for cell in measurable)
+            / sum(cell["share"] * cell["support"] for cell in measurable)
             if measurable else None
         )
         floor_cell = min(measurable, key=lambda cell: cell["p"]) if measurable else None
         floor = floor_cell["p"] if floor_cell else None
         top = sorted(external, key=lambda cell: cell["share"], reverse=True)[:top_k]
-        grounded = bool(top) and all(cell["p"] is not None for cell in top) and coverage >= cover_min
+        grounded = bool(top) and all(
+            cell["p"] is not None and cell["support"] >= cover_min for cell in top
+        ) and coverage >= cover_min
         vals = [value for value in (adj, floor) if value is not None]
         out.append({
             "id": cluster.id,

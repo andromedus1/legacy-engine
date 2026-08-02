@@ -99,7 +99,7 @@ svg text { font-family: inherit; }
   border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
   font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
 .explore-note { border-left: 4px solid var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--surface-1)); }
-.taxonomy { padding: 0; overflow: hidden; }
+.taxonomy { padding: 0; overflow-x: auto; }
 .tax-head, .tax-row { display:grid; grid-template-columns:minmax(300px,1fr) repeat(5,110px);
   gap:0; align-items:center; padding:7px 12px; border-bottom:1px solid var(--grid); }
 .tax-head { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
@@ -121,6 +121,7 @@ table.heatmap { width:max-content; min-width:100%; font-size:11px; }
 .heatmap td.hm { min-width:54px; text-align:center; border:1px solid var(--page); padding:6px 4px; }
 .heatmap td.hm-refused { background:repeating-linear-gradient(135deg,var(--grid),var(--grid) 4px,var(--surface-1) 4px,var(--surface-1) 8px); color:var(--muted); }
 .heatmap td.hm-intra { outline:2px solid var(--s1); outline-offset:-2px; }
+.heatmap td.hm:focus { outline:3px solid var(--amber); outline-offset:-3px; }
 @media (max-width:900px) { .map-grid{grid-template-columns:1fr}.tax-head,.tax-row{grid-template-columns:minmax(230px,1fr) repeat(5,92px)} }
 </style>
 </head>
@@ -409,6 +410,11 @@ function heatStyle(p) {
   return `background:color-mix(in srgb,rgb(${rgb.join(",")}) ${Math.round(10+42*d)}%,var(--surface-1))`;
 }
 function metricCell(v, suffix="") { return `<span class="tax-num">${v == null ? "—" : fmtP(v)+suffix}</span>`; }
+function familyMetric(v, grounded, agency=false) {
+  if (v == null) return `<span class="tax-num">—</span>`;
+  return `<span class="tax-num">${grounded ? "" : agency ? "≤ " : ""}${fmtP(v)}` +
+    `${grounded ? "" : ` <span class="chip">lean</span>`}</span>`;
+}
 function renderTaxonomy() {
   const root = document.getElementById("taxonomy-root");
   const families = D.families || [];
@@ -429,7 +435,8 @@ function renderTaxonomy() {
       .sort((a,b) => b.field_share-a.field_share);
     html += `<details class="tax-family"><summary class="tax-row"><span class="tax-name" title="${escA(family.full_label || family.label)}">${escT(family.label)}`+
       ` <span class="chip">${memberRows.length} archetypes</span>${family.curated ? ` <span class="chip">curated</span>` : ""}</span>`+
-      `${metricCell(family.agency)}${metricCell(family.adj)}${metricCell(family.floor)}`+
+      `${familyMetric(family.agency,family.grounded,true)}${familyMetric(family.adj,family.grounded)}`+
+      `${familyMetric(family.floor,family.grounded)}`+
       `<span>${Math.round(100*family.coverage)}%</span><span>${(100*family.field_share).toFixed(1)}%</span></summary>`;
     html += `<div class="tax-description">${escT(family.description)}</div>`;
     for (const arch of memberRows) {
@@ -449,17 +456,18 @@ function renderFamilyHeatmap() {
   const families = D.families || [];
   if (!families.length) return;
   let html = `<table class="heatmap"><thead><tr><th>subject ↓ / opponent →</th>`+
-    families.map(f => `<th title="${escA(f.label)}">${escT(f.label)}</th>`).join("") + `</tr></thead><tbody>`;
+    families.map(f => `<th title="${escA(f.full_label || f.label)}">${escT(f.label)}</th>`).join("") + `</tr></thead><tbody>`;
   for (const family of families) {
     const cells = new Map(family.cells.map(c => [c.opponent_id, c]));
-    html += `<tr><th>${escT(family.label)}</th>`;
+    html += `<tr><th title="${escA(family.full_label || family.label)}">${escT(family.label)}</th>`;
     for (const opponent of families) {
       const c = cells.get(opponent.id);
       const refused = !c || c.p == null;
       const title = refused ? (c?.refused_reason || "no pooled evidence") :
-        `${family.label} vs ${opponent.label}: ${fmtP(c.p)}%, n_eff ${Math.round(c.n_eff)}, accepted ${c.accepted_members}/${c.subject_members} subject members`;
+        `${family.full_label || family.label} vs ${opponent.full_label || opponent.label}: ${fmtP(c.p)}%, n_eff ${Math.round(c.n_eff)}, accepted ${c.accepted_members}/${c.subject_members} subject members (${fmtP(c.support)}% field-share support); current-regime evidence ${c.current_regime_share == null ? "unknown" : fmtP(c.current_regime_share)+"%"}; windows: ${(c.window_notes || []).join(" | ") || "unknown"}` +
+        (c.support_reason ? `; partial refusals: ${c.support_reason}` : "");
       html += `<td class="hm ${refused ? "hm-refused" : ""} ${c?.intra_family ? "hm-intra" : ""}"`+
-        ` style="${refused ? "" : heatStyle(c.p)}" title="${escA(title)}">${refused ? "refuse" : fmtP(c.p)}</td>`;
+        ` style="${refused ? "" : heatStyle(c.p)}" title="${escA(title)}" tabindex="0" aria-label="${escA(title)}">${refused ? "refuse" : fmtP(c.p)}</td>`;
     }
     html += `</tr>`;
   }
@@ -477,7 +485,7 @@ function renderCampHeatmap() {
     for (const opponent of opponents) {
       const c = cells.get(opponent), thin = !c || !c.measured || c.p == null;
       const title = !c ? "cell unavailable" : `${row.subject} vs ${opponent}: ${fmtP(c.p)}%, n=${c.n}, ${c.window}`;
-      html += `<td class="hm ${thin ? "hm-refused" : ""}" style="${thin ? "" : heatStyle(c.p)}" title="${escA(title)}">`+
+      html += `<td class="hm ${thin ? "hm-refused" : ""}" style="${thin ? "" : heatStyle(c.p)}" title="${escA(title)}" tabindex="0" aria-label="${escA(title)}">`+
         `${!c ? "—" : thin ? `n=${c.n}` : fmtP(c.p)}</td>`;
     }
     html += `</tr>`;
