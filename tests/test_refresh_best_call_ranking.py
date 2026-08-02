@@ -601,6 +601,15 @@ class TestMainEndToEnd:
         assert '"kind": "pooled"' in html
         assert '"kind": "range"' in html
         assert "// superarchetype fallback:" in html
+        # The template's rendering half: the lean renderer, the definitional-card ladder
+        # prose with the locked copy discipline, and the I² one-sidedness caveat.
+        assert "saCellHtml" in html
+        assert "fewer blank cells and honest leans, never grounded coverage" in html
+        # The caveat appears in the definitional card and the per-row lean key; SA_CAVEAT is
+        # the runtime constant that rides every lean chip's tooltip.
+        assert html.count("certificate of exchangeability") >= 2
+        assert "SA_CAVEAT" in html
+        assert 'id="sa-fallback"' in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
         """--no-superarchetypes on a registry-bearing DB must be byte-identical to the page
