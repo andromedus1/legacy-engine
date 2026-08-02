@@ -478,6 +478,33 @@ class TestSuperarchetypeIsolation:
         )
         assert "leans never enter agency, adj, floor, coverage, or strata" in census
 
+    def test_camp_rows_hold_the_anti_leak_contract_non_vacuously(self):
+        """The original hero assertion had no camps. Split Hero into two real camp rows so
+        this pins the registry-fed one-pass matrix at the exact surface that consumes it."""
+        con = _hero_con()
+        con.execute(
+            "update decks set variant=case "
+            "when player='h1' then 'Alpha' when player='h2' then 'Beta' else variant end "
+            "where archetype='Hero'"
+        )
+        kwargs = dict(
+            field_since=_HERO_FIELD_SINCE, ground_n=8, top_k=8, cover_min=0.8,
+            min_row_share=0.001, regime_card=None, parents=["Hero"],
+        )
+        off = rbcr.compute_blob(con, **kwargs)
+        on = rbcr.compute_blob(con, superarchetypes=_hero_registry(), **kwargs)
+        con.close()
+
+        assert len(on["camps"]) == len(off["camps"]) == 2
+        added = 0
+        for r_on, r_off in zip(on["camps"], off["camps"]):
+            assert {k: v for k, v in r_on.items() if k != "cells"} == \
+                   {k: v for k, v in r_off.items() if k != "cells"}
+            for c_on, c_off in zip(r_on["cells"], r_off["cells"]):
+                assert {k: v for k, v in c_on.items() if k != "sa"} == c_off
+                added += "sa" in c_on
+        assert added > 0  # the overlay engaged on camps; the equality is not an off-path proof
+
 
 class TestSuperarchetypeLeans:
     def test_imputed_lean_with_the_locked_chip_fields(self, hero_blobs):
@@ -490,6 +517,7 @@ class TestSuperarchetypeLeans:
         assert (sa["family"], sa["cluster_id"]) == ("Fair", "sa-fair")
         assert (sa["k"], sa["pool_n"]) == (2, 50)
         assert sa["license"].startswith("license granted:")
+        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
         assert sa["cur"] == 1.0
         assert [m["a"] for m in sa["split"]] == ["SibA", "SibB"]
 
@@ -500,6 +528,10 @@ class TestSuperarchetypeLeans:
         assert (sa["family"], sa["cluster_id"]) == ("Enemy", "sa-enemy")
         assert sa["p"] is not None and sa["n_eff"] >= 30
         assert sa["m_eff"] is not None and sa["i2_band"] in ("free", "labelled")
+        assert sa["concentration_passed"] is True
+        assert sa["concentration_label"] is None
+        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
+        assert "notes" not in sa  # aggregate display provenance is not a semantic input
         assert "imputation not attempted: subject has no cluster in the registry" in sa["reasons"]
 
     def test_refused_pool_renders_the_member_split_with_no_point_estimate(self, hero_blobs):
@@ -509,6 +541,7 @@ class TestSuperarchetypeLeans:
         assert "p" not in sa  # NO point estimate on a refused pool — split only
         assert sa["source"] == "members"
         assert sa["reason"].startswith("pooled cell refused: single-member cluster")
+        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
         assert any(
             r.startswith("imputation not attempted: SibA is inside Hero's own family")
             for r in sa["reasons"]
@@ -605,10 +638,10 @@ class TestMainEndToEnd:
         # prose with the locked copy discipline, and the I² one-sidedness caveat.
         assert "saCellHtml" in html
         assert "fewer blank cells and honest leans, never grounded coverage" in html
-        # The caveat appears in the definitional card and the per-row lean key; SA_CAVEAT is
-        # the runtime constant that rides every lean chip's tooltip.
+        # The caveat appears in the definitional card and the per-row lean key; the typed
+        # one_sided_note payload (not copied display prose) rides pooled/range tooltips.
         assert html.count("certificate of exchangeability") >= 2
-        assert "SA_CAVEAT" in html
+        assert '"one_sided_note": "I^2 is one-sided evidence:' in html
         assert 'id="sa-fallback"' in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
