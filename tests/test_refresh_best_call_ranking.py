@@ -46,6 +46,11 @@ from test_matchup_multi_split import (  # noqa: E402
     MID_DATE,
     _load_pre_ban_delver_decks,
 )
+from test_matchup_superarchetype import (  # noqa: E402
+    _hero_con,
+    _hero_registry,
+    _registry,
+)
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "refresh_best_call_ranking.py"
 _spec = importlib.util.spec_from_file_location("refresh_best_call_ranking", _SCRIPT_PATH)
@@ -400,6 +405,138 @@ class TestCrossCampRanking:
 
 
 # ---------------------------------------------------------------------------
+# Superarchetype fallback overlay (epic-superarchetype-layer-best-call-fallback)
+#
+# The isolation contract is structural: the overlay may only ADD an `sa` key to
+# page-unmeasured cells and `// superarchetype` audit lines to meta.audit; every other
+# byte of the blob — row metrics (adj/floor/agency/coverage/grounded/P(best)), measured
+# cells, meta — must be identical with the layer on or off. The hero corpus + registry
+# are the chain tests' fixtures (test_matchup_superarchetype), tuned so all three lean
+# kinds genuinely materialize at the script level:
+#   (Hero, OppX)  n=4  -> imputed (licensed sa-fair siblings, pool n=50)
+#   (Solo, OppX)  n=3  -> pooled (Solo has no family; sa-enemy display pool clears n_eff>=30)
+#   (Hero, SibA)  n=6  -> range  (intra-family: imputation not attempted, own-family pool
+#                                 refused "single-member cluster" -> member split only)
+# ---------------------------------------------------------------------------
+
+_HERO_FIELD_SINCE = "2020-01-01"  # covers both hero tournaments (field basis, not cell windows)
+
+
+def _hero_blob(con, superarchetypes=None):
+    return rbcr.compute_blob(
+        con, field_since=_HERO_FIELD_SINCE, ground_n=8, top_k=8, cover_min=0.8,
+        min_row_share=0.001, regime_card=None, parents=[], superarchetypes=superarchetypes,
+    )
+
+
+def _cell(blob, subj, opp):
+    row = next(r for r in blob["arch"] if r["subject"] == subj)
+    return next(c for c in row["cells"] if c["opp"] == opp)
+
+
+@pytest.fixture(scope="module")
+def hero_blobs():
+    con = _hero_con()
+    off = _hero_blob(con)
+    on = _hero_blob(con, superarchetypes=_hero_registry())
+    con.close()
+    return off, on
+
+
+class TestSuperarchetypeIsolation:
+    def test_rows_identical_except_additive_sa_keys_on_unmeasured_cells(self, hero_blobs):
+        """The anti-leak contract, key for key: no row metric, no measured cell, and no
+        pre-existing unmeasured-cell field may move when the layer turns on."""
+        off, on = hero_blobs
+        for table in ("arch", "camps"):
+            assert len(on[table]) == len(off[table])
+            for r_on, r_off in zip(on[table], off[table]):
+                assert {k: v for k, v in r_on.items() if k != "cells"} == \
+                       {k: v for k, v in r_off.items() if k != "cells"}, r_on["subject"]
+                assert len(r_on["cells"]) == len(r_off["cells"])
+                for c_on, c_off in zip(r_on["cells"], r_off["cells"]):
+                    if c_off["measured"]:
+                        assert c_on == c_off, (r_on["subject"], c_off["opp"])
+                    else:
+                        assert {k: v for k, v in c_on.items() if k != "sa"} == c_off, \
+                            (r_on["subject"], c_off["opp"])
+
+    def test_meta_identical_except_superarchetype_audit_lines(self, hero_blobs):
+        off, on = hero_blobs
+        base_audit = off["meta"]["audit"]
+        assert on["meta"]["audit"][:len(base_audit)] == base_audit
+        extra = on["meta"]["audit"][len(base_audit):]
+        assert extra, "the layer must announce itself in the audit header"
+        assert all(line.startswith("// superarchetype") for line in extra)
+        assert {**on["meta"], "audit": base_audit} == off["meta"]
+
+    def test_census_line_names_the_isolation_rule(self, hero_blobs):
+        _off, on = hero_blobs
+        census = next(
+            line for line in on["meta"]["audit"]
+            if line.startswith("// superarchetype fallback:")
+        )
+        assert "leans never enter agency, adj, floor, coverage, or strata" in census
+
+
+class TestSuperarchetypeLeans:
+    def test_imputed_lean_with_the_locked_chip_fields(self, hero_blobs):
+        _off, on = hero_blobs
+        sa = _cell(on, "Hero", "OppX")["sa"]
+        assert sa["kind"] == "imputed"
+        # SibA 14/25 + SibB 13/25, leave-Hero-out (pinned by the chain tests).
+        assert sa["p"] == pytest.approx(27 / 50, abs=1e-4)
+        assert sa["ci_low"] < sa["p"] < sa["ci_high"]  # tau-widened CI survives serialization
+        assert (sa["family"], sa["cluster_id"]) == ("Fair", "sa-fair")
+        assert (sa["k"], sa["pool_n"]) == (2, 50)
+        assert sa["license"].startswith("license granted:")
+        assert sa["cur"] == 1.0
+        assert [m["a"] for m in sa["split"]] == ["SibA", "SibB"]
+
+    def test_pooled_lean_carries_gates_and_i2_band(self, hero_blobs):
+        _off, on = hero_blobs
+        sa = _cell(on, "Solo", "OppX")["sa"]
+        assert sa["kind"] == "pooled"
+        assert (sa["family"], sa["cluster_id"]) == ("Enemy", "sa-enemy")
+        assert sa["p"] is not None and sa["n_eff"] >= 30
+        assert sa["m_eff"] is not None and sa["i2_band"] in ("free", "labelled")
+        assert "imputation not attempted: subject has no cluster in the registry" in sa["reasons"]
+
+    def test_refused_pool_renders_the_member_split_with_no_point_estimate(self, hero_blobs):
+        _off, on = hero_blobs
+        sa = _cell(on, "Hero", "SibA")["sa"]
+        assert sa["kind"] == "range"
+        assert "p" not in sa  # NO point estimate on a refused pool — split only
+        assert sa["source"] == "members"
+        assert sa["reason"].startswith("pooled cell refused: single-member cluster")
+        assert any(
+            r.startswith("imputation not attempted: SibA is inside Hero's own family")
+            for r in sa["reasons"]
+        )
+        assert sa["split"] and all({"a", "w", "n", "p", "tier", "intra"} <= m.keys()
+                                   for m in sa["split"])
+
+    def test_measured_cells_never_carry_sa(self, hero_blobs):
+        _off, on = hero_blobs
+        for table in ("arch", "camps"):
+            for row in on[table]:
+                for c in row["cells"]:
+                    if c["measured"]:
+                        assert "sa" not in c, (row["subject"], c["opp"])
+
+    def test_stale_registry_window_surfaces_in_the_page_audit(self):
+        """The stale-taxonomy warning (registry window predates the current regime start)
+        must reach meta.audit — it fires on the real corpus today, correctly."""
+        con = _hero_con()
+        stale = _registry(list(_hero_registry().clusters), window_since="2020-01-01")
+        blob = _hero_blob(con, superarchetypes=stale)
+        con.close()
+        assert any(
+            "predates the current regime start" in line for line in blob["meta"]["audit"]
+        )
+
+
+# ---------------------------------------------------------------------------
 # main() end-to-end against a tmp FILE DB (never the default DB)
 # ---------------------------------------------------------------------------
 
@@ -428,3 +565,53 @@ class TestMainEndToEnd:
         assert '"p_best"' in html
         assert "// multi-split: one pass over" in html
         assert "P(best)" in html  # the camp table column ships in the template
+
+    def _render(self, tmp_path, db_name, out_name, *, registry=None, extra_argv=(),
+                monkeypatch=None):
+        """Render the hero corpus through main() against a tmp FILE DB; the registry (when
+        given) is served the production way — rebuilt DuckDB tables read back by main()."""
+        from legacy_engine.analytics.superarchetype.registry import (
+            rebuild_superarchetype_members,
+        )
+
+        db_path = tmp_path / db_name
+        con = _hero_con(str(db_path))
+        try:
+            if registry is not None:
+                rebuild_superarchetype_members(con, registry)
+        finally:
+            con.close()
+        out_path = tmp_path / out_name
+        monkeypatch.setattr(rbcr, "staged_split_parents", list)
+        monkeypatch.setattr(sys, "argv", [
+            "refresh_best_call_ranking.py",
+            "--db", str(db_path), "--out", str(out_path),
+            "--field-since", _HERO_FIELD_SINCE,
+            *extra_argv,
+        ])
+        rbcr.main()
+        return out_path.read_text()
+
+    def test_main_serves_the_registry_from_the_db_seam(self, tmp_path, monkeypatch):
+        html = self._render(
+            tmp_path, "hero-sa.duckdb", "on.html",
+            registry=_hero_registry(), monkeypatch=monkeypatch,
+        )
+        assert '"kind": "imputed"' in html
+        assert '"kind": "pooled"' in html
+        assert '"kind": "range"' in html
+        assert "// superarchetype fallback:" in html
+
+    def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
+        """--no-superarchetypes on a registry-bearing DB must be byte-identical to the page
+        from a DB with no registry tables at all — the baseline stays reachable."""
+        absent = self._render(
+            tmp_path, "hero-bare.duckdb", "bare.html", monkeypatch=monkeypatch,
+        )
+        flagged = self._render(
+            tmp_path, "hero-flagged.duckdb", "flagged.html",
+            registry=_hero_registry(), extra_argv=("--no-superarchetypes",),
+            monkeypatch=monkeypatch,
+        )
+        assert flagged == absent
+        assert '"sa"' not in flagged
