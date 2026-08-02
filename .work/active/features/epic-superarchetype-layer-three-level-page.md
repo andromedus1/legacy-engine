@@ -1,7 +1,7 @@
 ---
 id: epic-superarchetype-layer-three-level-page
 kind: feature
-stage: review
+stage: done
 tags: [analytics, viz]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-chain, epic-superarchetype-layer-best-call-fallback]
@@ -186,10 +186,39 @@ decks through 2026-07-30, 94 archetype rows, 115 camp rows, and 21 serving-regis
 ## Verification
 
 - Approved mockup: `.mockups/screens/epic-superarchetype-layer-three-level-page/option-hybrid.html`
-- Focused generator suite: `24 passed`
-- Full project suite: `3526 passed, 1 existing UMAP warning` via
+- Focused generator suite: `25 passed`
+- Full project suite: `3527 passed, 1 existing UMAP warning` via
   `.venv/bin/python -m pytest -q`
 - Generated page JavaScript: parsed successfully with Node (`new Function` syntax validation)
 - Knowledge index: `0 errors, 6 pre-existing warnings`
 - Browser: regenerated production HTML opened successfully; automated macOS screenshot capture was
   unavailable because the execution environment exposes no capturable display.
+
+## Review (2026-08-02)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none unresolved. The standard fresh-context pass found three material issues, all
+fixed in `c244daa`: ungrounded family values now render as leans/upper bounds; numeric pooled cells
+carry window and current-regime provenance; and zero-share historical archetypes are excluded from
+current-field family membership and descriptions. The preceding planning-doc consistency audit also
+found partial subject support could overstate family coverage; coverage/adjusted WR now weight
+accepted subject field-share support, top-family grounding requires support, and partial refusals
+remain inspectable.
+
+**Important**: none unresolved. Taxonomy overflow is horizontal rather than clipped, and heatmap
+cells are keyboard-focusable with accessible labels carrying typed refusal/support details.
+
+**Nits**: Long family identities use concise labels in the matrix while full registry labels remain
+available in headers/tooltips.
+
+**Rejected**: The pre-existing page-ledger-vs-foundation fallback boundary, overall epic “in flight”
+status, and architecture “nearest centroid” wording are broader pre-existing epic/foundation work,
+not regressions introduced by this feature.
+
+**Notes**: Substrate feature review, effective weight `standard` (default), one same-harness
+fresh-context GPT-5.6 Sol pass. Applicable correctness, tests, design, UI/accessibility,
+source-transparency, security, compatibility, foundation, and end-to-end lenses were covered.
+Fix verification: focused `25 passed`; full suite `3527 passed` with the existing UMAP warning;
+production HTML regenerated and JavaScript syntax-validated. Standard closure policy applies:
+receiver-confirmed blockers were fixed and verified without a second independent pass.
