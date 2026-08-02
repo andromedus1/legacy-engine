@@ -87,12 +87,6 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
   border-left: 3px solid var(--edge); }
 .cells .edge-dominant { background: color-mix(in srgb, var(--edge-dominant) 15%, transparent);
   border-left: 3px solid var(--edge-dominant); }
-/* Superarchetype family leans in the expanded ledger — ledger-only labeled fallbacks for
-   unmeasured cells. Muted text kept on purpose (a lean is quieter than a measurement);
-   the dashed border distinguishes provenance from the solid blowout tints. */
-.cells .sa { padding-left: 6px; border-radius: 4px;
-  border-left: 3px dashed color-mix(in srgb, var(--s1) 55%, transparent); }
-.chip.sa-stale { color: var(--amber); }
 .bo-key { display: inline-block; margin: 0 0 6px; font-size: 11px; color: var(--muted); }
 .bo-key .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
   vertical-align: -1px; margin: 0 4px 0 10px; }
@@ -154,26 +148,6 @@ window, and blowout highlights.</div>
         <span class="chip">BA date</span>. A true full-corpus cell
         (<span class="chip">FC</span>) exists only when neither deck was ever ban-affected.
         The Nadu rule: a banned engine's matches never inflate a row — in either direction.</li>
-    <li id="sa-fallback" style="display:none"><b>Family fallback in the expanded ledger —
-        fewer blank cells and honest leans, never grounded coverage.</b> When a matchup is
-        unmeasured in both windows, the ledger may fill it from the deck's
-        <i>superarchetype</i> (strategy family), walking a fixed ladder: <b>imputed</b> — the
-        deck's family siblings' record against that exact opponent, shown only under an earned
-        family-coherence license, CI widened by the family's profile dispersion;
-        <b>pooled vs family</b> — the deck's own record against every member of the opponent's
-        family (an <span class="chip">intra-family</span> chip flags how much of that pool is
-        the deck's own family); else a <b>family range</b> — the member split with the named
-        refusal (<span class="chip">dominated by &lt;member&gt;</span>, heterogeneous pool,
-        local veto, comparability desert) and <i>no point estimate</i>. Borrowed evidence
-        clears a stricter gate than a deck's own cells (pooled n_eff ≥ 30; imputed pool n ≥ 25
-        + license + per-cell veto, vs n ≥ 8 for measured cells). Leans are ledger-only: they
-        never enter agency, adj field WR, floor, coverage, or the strata. The I² heterogeneity
-        gate is <b>one-sided evidence</b> — a high I² is a reliable stop, but a low I² is never
-        a certificate of exchangeability, so passing the gate never promotes a pooled estimate
-        to measured status. Window mix, current-regime share, license, and member records ride
-        each chip's tooltip; a pool with &lt; 50% current-regime evidence carries an amber
-        <span class="chip">◦mostly pre-regime</span> marker; the registry's own provenance
-        (and its stale-taxonomy warning, when it fires) is in the audit header above.</li>
     <li><b>Every measured matchup can set the floor</b> — once a cell clears the page's
         n ≥ 8 measured-evidence gate, its shrunk estimate participates in the minimum. This
         makes visible holes matter sooner. Because a deck with more measured opponents has
@@ -407,57 +381,8 @@ function blowouts(r) {
   return {score: full + 0.5 * half, full, half, denom,
           metaShare: metaFull + 0.5 * metaHalf};
 }
-// ---- Superarchetype family leans (ledger-only; cells carry an additive `sa` payload) ----
-// Rendered ONLY for unmeasured cells; measured cells and every row metric are computed from
-// the exact same inputs with the layer on or off. Typed verdict fields supply every gate label,
-// refusal, freshness marker, and I² caveat; display/provenance prose is never parsed as truth.
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
-const saSplitText = split => split.map(m =>
-  `${m.a}${m.intra ? " (intra-family)" : ""} ${m.w}-${m.n - m.w} (${fmtP(m.p)}%, ${m.tier})`
-).join("; ");
-const saStale = sa => sa.cur != null && sa.cur < 0.5
-  ? ` <span class="chip sa-stale">◦mostly pre-regime (${(100 * sa.cur).toFixed(0)}% current)</span>`
-  : "";
-const saTitle = (sa, extra) => escA([
-  ...extra, `members: ${saSplitText(sa.split)}`,
-  sa.window_note, sa.cur == null ? "" : `current-regime share ${(100 * sa.cur).toFixed(0)}%`,
-  ...(sa.reasons || []), sa.one_sided_note,
-].filter(Boolean).join(" · "));
-function saCellHtml(lbl, c) {
-  const sa = c.sa;
-  if (sa.kind === "imputed") {
-    const chip = `imputed from ${escA(sa.family)} (${sa.k} sibs, pool n=${sa.pool_n})`;
-    return `<div class="unm sa">${lbl} — family lean ${fmtP(sa.p)}% · 95% ${fmtP(sa.ci_low)}–${fmtP(sa.ci_high)} (τ-widened) · n=${c.n}` +
-      ` <span class="chip" title="${saTitle(sa, [sa.license])}">${chip}</span>${saStale(sa)}</div>`;
-  }
-  if (sa.kind === "pooled") {
-    const chip = `pooled vs ${escA(sa.family)} (n_eff ${sa.n_eff}, ${sa.tier})`;
-    const intra = sa.intra_share > 0
-      ? ` <span class="chip" title="share of this pool that is the deck's own family — most of this edge is against your own family">intra-family ${(100 * sa.intra_share).toFixed(0)}%</span>`
-      : "";
-    const typedNotes = [];
-    if (sa.i2_band === "labelled" && sa.heterogeneity_note)
-      typedNotes.push(sa.heterogeneity_note);
-    if (sa.i2_band === "not-computable" && sa.heterogeneity_reason)
-      typedNotes.push(sa.heterogeneity_reason);
-    if (sa.concentration_passed === false && sa.concentration_label)
-      typedNotes.push(sa.concentration_label);
-    const notes = typedNotes.map(t =>
-      ` <span class="chip" title="${escA(t)}">${escA(t.length > 44 ? t.slice(0, 43) + "…" : t)}</span>`).join("");
-    const gates = [`m_eff ${sa.m_eff}`, sa.i2 == null ? `I² ${sa.i2_band}` : `I²=${sa.i2.toFixed(2)} (${sa.i2_band})`];
-    return `<div class="unm sa">${lbl} — family lean ${fmtP(sa.p)}% · 95% ${fmtP(sa.ci_low)}–${fmtP(sa.ci_high)} · n_eff ${sa.n_eff}` +
-      ` <span class="chip" title="${saTitle(sa, gates)}">${chip}</span>${intra}${notes}${saStale(sa)}</div>`;
-  }
-  // kind === "range": refused/unlicensed/vetoed — the member split only, never a point estimate.
-  const ps = sa.split.map(m => m.p);
-  const lo = Math.min(...ps), hi = Math.max(...ps);
-  const pool = sa.split.reduce((t, m) => t + m.n, 0);
-  const src = sa.source === "siblings" ? `${escA(sa.family)} siblings` : `${escA(sa.family)} family members`;
-  const short = sa.reason.replace(/^(pooled cell refused: |imputation refused: |imputation not attempted: )/, "");
-  return `<div class="unm sa">${lbl} — unmeasured (n=${c.n}); family range ${fmtP(lo)}–${fmtP(hi)}% across ${sa.split.length} ${src} (pool n=${pool})` +
-    ` <span class="chip" title="${saTitle(sa, [sa.reason])}">${escA(short.length > 52 ? short.slice(0, 51) + "…" : short)}</span>${saStale(sa)}</div>`;
-}
 // Camp-only P(best) cell: ONE shared-field MC across all camps + unsplit archetypes
 // (meta.rank carries seed/draws/basis). p_best=null = below the candidacy coverage gate
 // (cov shown as the reason); the chip is the risk-adjusted lower-quantile field WR,
@@ -526,10 +451,6 @@ const tableState = {
 };
 [...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
 (D.plans || []).forEach(r => { r._b = blowouts({subject:r.id, cells:r.cells.map(c => ({...c, opp:c.opponent_id}))}); });
-// The family-fallback method card only when the blob actually carries leans (layer on).
-if ([...D.arch, ...D.camps].some(r => r.cells.some(c => c.sa)))
-  document.getElementById("sa-fallback").style.display = "";
-
 function cmpBy(col, dir, cols) {
   const get = cols[col].get;
   return (a, b) => {
@@ -624,6 +545,21 @@ function renderPlanTable() {
   }));
   el.querySelectorAll(".plan-toggle").forEach(button => button.addEventListener("click", () => togglePlanDetail(button)));
 }
+function archetypePlanHtml(r) {
+  if (!r.plan_cells) return "";
+  const rows = r.plan_cells.map(c => {
+    const same = c.same_primary_plan ? ` <span class="chip">primary plan</span>` : "";
+    const mirrors = c.mirror_n ? ` · ${c.mirror_n} archetype mirrors at structural 50%` : "";
+    const result = c.p == null ? `unmeasured — no decisive matches` :
+      `${c.measured ? `<b>${fmtP(c.p)}%</b>` : `<span class="unm">${fmtP(c.p)}% · thin</span>`}`+
+      ` · raw ${fmtP(c.raw)}% · ${c.wins}-${c.losses}${mirrors}`;
+    return `<tr><td>${escT(c.opponent)}${same}</td><td>${result}</td><td>${c.n}</td>`+
+      `<td><span class="chip">since ${escT(c.since)}</span>${c.provenance ? ` <span class="chip">${escT(c.provenance)}</span>` : ""}</td></tr>`;
+  }).join("");
+  return `<section><h3 style="margin:4px 0 7px">Against strategic plans</h3>`+
+    `<table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Result</th><th>n</th><th>Window</th></tr></thead><tbody>${rows}</tbody></table>`+
+    `<div class="footnote">Built directly from this archetype's decisive matches against every member of each primary plan; no rendered row averages or composition-family leans.</div></section>`;
+}
 
 function renderTable(id, rows, camp) {
   const el = document.getElementById(id);
@@ -663,8 +599,7 @@ function renderTable(id, rows, camp) {
       const r = src[Number(tr.dataset.i)];
       const cells = r.cells.map(c => {
         const lbl = `${c.opp} <span class="chip">${(100*c.share).toFixed(1)}%</span>`;
-        if (!c.measured) return c.sa ? saCellHtml(lbl, c)
-          : `<div class="unm">${lbl} — unmeasured (n=${c.n})</div>`;
+        if (!c.measured) return `<div class="unm">${lbl} — unmeasured (n=${c.n})</div>`;
         const raw = c.raw == null ? "" : ` raw ${fmtP(c.raw)}`;
         // Same thresholds as blowouts(): measured cells only, raw WR <40% full / 40–45% half.
         let cls = "", tag = "";
@@ -680,17 +615,10 @@ function renderTable(id, rows, camp) {
         `<span class="sw" style="background:var(--amber)"></span>half (40–45%)` +
         `<span class="sw" style="background:var(--edge)"></span>edge (55–60%)` +
         `<span class="sw" style="background:var(--edge-dominant)"></span>dominant (&gt;60%)</div>`;
-      // The lean key renders ONLY when this row actually carries family leans, so ledgers
-      // without them (and every layer-off page) are character-identical to before.
-      const saKey = r.cells.some(c => c.sa && !c.measured)
-        ? `<div class="bo-key">dashed border = family-sourced lean (imputed / pooled vs family` +
-          ` / family range — refused pools show the member split, no point estimate); leans` +
-          ` never enter agency, adj, floor, coverage, or strata. A low I² is never a` +
-          ` certificate of exchangeability — hover a lean's chip for its full provenance.</div>`
-        : "";
       const d = document.createElement("tr");
       d.className = "detail";
-      d.innerHTML = `<td colspan="${cols.length}">${key}${saKey}<div class="cells">${cells}</div></td>`;
+      d.innerHTML = `<td colspan="${cols.length}">${camp ? "" : archetypePlanHtml(r)}`+
+        `<section><h3 style="margin:14px 0 7px">Exact archetype matchups</h3>${key}<div class="cells">${cells}</div></section></td>`;
       tr.after(d);
     });
   });

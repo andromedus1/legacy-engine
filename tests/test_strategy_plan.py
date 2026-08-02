@@ -5,6 +5,7 @@ import pytest
 from legacy_engine.analytics.match_results import MatchCoverage, MatchResults, MatchupTally
 from legacy_engine.analytics.strategy_plan import (
     PLAN_IDS,
+    aggregate_archetype_vs_plan_results,
     aggregate_strategic_plan_results,
     load_strategic_plan_registry,
     validate_current_plan_coverage,
@@ -120,3 +121,18 @@ def test_absent_external_cells_are_null_and_ground_n_is_inclusive(registry_file,
     absent = result.cells[("go-over", "go-wide")]
     assert not thin.measured and thin.n == 8
     assert (absent.raw, absent.shrunk, absent.n, absent.measured) == (None, None, 0, False)
+
+
+def test_archetype_vs_plan_uses_direct_tallies_and_structural_mirrors(
+    registry_file, match_results,
+):
+    registry = load_strategic_plan_registry(registry_file())
+    cells = aggregate_archetype_vs_plan_results(
+        match_results(), registry, current_archetypes=["A1", "A2", "B"], ground_n=4,
+    )
+    external = cells[("A1", "go-off")]
+    assert (external.wins, external.losses, external.mirror_n, external.n) == (3, 1, 0, 4)
+    assert external.raw == .75 and external.measured
+    same = cells[("A1", "disrupt-pressure")]
+    assert (same.wins, same.losses, same.mirror_n, same.n) == (2, 1, 2, 5)
+    assert same.raw == pytest.approx(.6)
