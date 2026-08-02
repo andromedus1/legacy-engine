@@ -1,7 +1,7 @@
 ---
 id: feature-strategic-plan-best-call-viz
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, viz, ui]
 parent: null
 depends_on: [epic-superarchetype-layer-three-level-page]
@@ -23,6 +23,24 @@ existing exact archetype ledger. Remove the family-lean payload attachment and d
 when no page consumer remains. This is an in-scope presentation/data-contract correction, so the
 feature returns to `implementing`; completed child checkpoints remain done and the feature will
 return to review after integrated verification.
+
+### Review feedback resolution
+
+- Added a typed archetype-versus-plan aggregate derived directly from directed `MatchResults`
+  tallies, with archetype mirrors contributing structural 50% context only to the subject's own
+  primary-plan cell.
+- Every archetype row now carries five deterministic `plan_cells` with shrunk/raw rate, W-L,
+  mirror count, n, measured/thin state, primary-plan identity, and field-window provenance.
+- Archetype disclosures now lead with **Against strategic plans**, followed by the unchanged exact
+  archetype ledger.
+- Removed all `sa` payload attachment, family-fallback audit census, method prose, CSS, and
+  JavaScript rendering from the page. Composition-derived superarchetypes remain internal engine
+  evidence and do not appear in dropdowns.
+- Review-feedback implementation commit: `f09242c`.
+- Verification: focused strategy/report suite 34 passed; full suite 3,539 passed with one existing
+  UMAP warning; production report regenerated; embedded JavaScript parsed; required section/data
+  tokens present and family-lean tokens absent; knowledge-index lint 0 errors with 6 pre-existing
+  warnings; `git diff --check` clean.
 
 ## Brief
 
@@ -83,9 +101,9 @@ the existing table sorting/filtering/ledger machinery instead of adding a parall
   in the plan-name cell owns `aria-expanded`/`aria-controls`; expansion reveals one adjacent detail
   row containing the selected-plan portrait, exact opponent-plan ledger, member archetypes, and
   secondary labels.
-- The completed composition-family hierarchy remains available only through the archetype/camp
-  fallback evidence already used by the report. The visible strategy-family agency map and camps ×
-  parent-opponents figure, including their dedicated renderer functions and CSS, are deleted.
+- The composition-family hierarchy remains internal engine evidence only. No family fallback is
+  attached to report rows or rendered in dropdowns. The visible strategy-family agency map and
+  camps × parent-opponents figure, including their dedicated renderer functions and CSS, are deleted.
 - No separate archetype page is part of this arc. Typed registry and payload contracts live outside
   the template so a future `DeckDashboard` can consume them without scraping report HTML.
 
@@ -116,7 +134,7 @@ the UI only renders its typed output.
 - Review weight: standard (caller/default); feature intentionally stops at the independent review boundary.
 - Delivered the package-owned five-plan registry and typed match-level aggregator, with exact primary-plan attribution, secondary hybrid labels, structural same-plan 50%, complementarity assertions, omitted-match audit, and fail-fast current-field coverage.
 - Added the deterministic `plans` report payload and the approved sortable/filterable peer table with semantic disclosure, portrait, five-plan ledger, member archetypes, and secondary labels.
-- Removed the visible composition-family hierarchy, strategy-family agency map, camps × parent-opponents figure, and their renderer/CSS paths; retained composition-family evidence only in archetype/camp ledger fallbacks.
+- Removed the visible composition-family hierarchy, strategy-family agency map, camps × parent-opponents figure, renderer/CSS paths, and archetype/camp family-lean payloads.
 - Regenerated the production Best Deck / Best Call HTML and aligned the runbook plus three-layer knowledge index.
 - Child commits: `e2081ed` (data contract), `1b8b74f` (report surface).
 - Integrated verification: focused strategy/report suite 38 passed; full suite 3,543 passed with one existing UMAP warning; generated JavaScript parsed with Node and retained no placeholder; removed renderer identifiers absent; `git diff --check` clean; knowledge-index lint 0 errors with 6 pre-existing warnings.
@@ -267,8 +285,8 @@ requires every extant external plan cell measured and coverage >= `cover_min`; w
 possible external opponents, `top_k` is capped to their count. `agency=min(adj, floor)` only when a
 floor exists; otherwise it is null. All missing magnitudes remain null with named reasons in cells.
 
-Replace the old `families` presentation payload with additive `plans`; keep composition registry
-loading and `msa.cluster_cells` only where needed for ledger fallback. Add audit lines naming registry
+Replace the old `families` presentation payload with additive `plans`; composition-family evidence
+remains internal and is not serialized into report rows. Add audit lines naming registry
 version, assignment coverage, plan decisive/same-plan/omitted counts, and field window.
 
 **Acceptance Criteria**:
@@ -279,7 +297,7 @@ version, assignment coverage, plan decisive/same-plan/omitted counts, and field 
   coverage.
 - [ ] A low-n external plan cell yields an explicit unmeasured cell and makes the row an upper bound;
   it never sorts as a numeric zero.
-- [ ] Existing archetype/camp calculations and ledger-only composition-family fallbacks are unchanged.
+- [ ] Existing archetype/camp decision calculations are unchanged; composition-family leans are absent.
 
 ### Unit 4: Sortable strategic-plan table and accessible portrait
 
@@ -303,7 +321,7 @@ Sorting/filtering rerenders table rows but preserves expansion by plan id when t
 visible. The disclosure is a real `<button>`; row clicks do not own expansion. Sticky headers remain
 inside the existing scroll wrapper. Delete `renderFamilyHeatmap`, `renderCampHeatmap`,
 `family-heatmap`, `camp-heatmap`, `family-maps`, `map-grid`, heatmap-specific CSS, and the old visible
-taxonomy hierarchy. Do not delete composition-family ledger fallback rendering (`saCellHtml`).
+taxonomy hierarchy and delete composition-family ledger fallback rendering (`saCellHtml`).
 
 **Acceptance Criteria**:
 
@@ -314,7 +332,7 @@ taxonomy hierarchy. Do not delete composition-family ledger fallback rendering (
 - [ ] Expansion shows the reusable portrait plus exact five-plan ledger and hybrid labels without
   double-counting secondary plans.
 - [ ] The strategy-family agency map and camps × parent-opponents figure and their dead renderer/CSS
-  code are absent; composition-family evidence remains in archetype/camp ledgers.
+  code are absent; composition-family evidence does not appear in archetype/camp ledgers.
 - [ ] Light/dark tokens, responsive overflow, and the approved Option 1 + 2 visual language match the
   committed mockups.
 
