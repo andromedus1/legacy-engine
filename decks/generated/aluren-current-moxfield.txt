@@ -1,0 +1,36 @@
+4 Acererak the Archlich
+4 Aluren
+4 Ancient Tomb
+4 Atraxa, Grand Unifier
+4 Brainstorm
+4 Force of Will
+4 Lotus Petal
+4 Misty Rainforest
+4 Ponder
+4 Show and Tell
+4 Stock Up
+3 Tropical Island
+2 Hedge Maze
+2 Omniscience
+2 Veil of Summer
+1 Boseiju, Who Endures
+1 City of Traitors
+1 Flooded Strand
+1 Forest
+1 Island
+1 Polluted Delta
+1 Scalding Tarn
+
+Sideboard
+4 Carpet of Flowers
+1 Blue Elemental Blast
+1 Consign to Memory
+1 Defense Grid
+1 Engineered Explosives
+1 Force of Negation
+1 Force of Vigor
+1 Ghost Vacuum
+1 Heritage Reclamation
+1 Nature's Claim
+1 Pithing Needle
+1 Soul-Guide Lantern

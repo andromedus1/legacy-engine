@@ -1,0 +1,34 @@
+4 Animate Dead
+4 Dark Ritual
+4 Faithless Looting
+4 Griselbrand
+4 Lotus Petal
+4 Polluted Delta
+4 Reanimate
+4 Shallow Grave
+4 Thoughtseize
+4 Unmask
+3 Atraxa, Grand Unifier
+3 Swamp
+2 Archon of Cruelty
+2 Badlands
+2 Bloodstained Mire
+2 Cabal Therapy
+2 Collective Brutality
+1 Raph & Mikey, Troublemakers
+1 Raucous Theater
+1 Undercity Sewers
+1 Underground Sea
+
+Sideboard
+4 Defense Grid
+2 Abrade
+1 Ancient Tomb
+1 Collective Brutality
+1 Dauthi Voidwalker
+1 Duress
+1 Fatal Push
+1 Force of Despair
+1 Leyline of the Void
+1 Meltdown
+1 Mindbreak Trap
