@@ -1006,6 +1006,7 @@ def build_multi_split_adaptive(
     affect_threshold: float = 0.25,
     horizons: dict[str, str | None] | None = None,
     superarchetypes: "SuperarchetypeRegistry | None" = None,
+    apply_superarchetype_priors: bool = True,
 ) -> AdaptiveMultiSplitMatrix:
     """``build_adaptive_matrix`` for every split parent at once — one scan per distinct horizon.
 
@@ -1047,6 +1048,11 @@ def build_multi_split_adaptive(
     - the result carries the ``cluster_cells``/``imputed_cells``/``ladder`` overlay maps (see
       ``AdaptiveMultiSplitMatrix``) and the registry-provenance ``//`` lines in
       ``audit_preamble`` (window mismatch is loud, never silent).
+
+    ``apply_superarchetype_priors=False`` is the typed overlay-only consumer seam: the registry
+    still produces all three display maps and audit lines in the SAME pass, while ``multi.cells``
+    retains the baseline hierarchy exactly. It exists for surfaces such as the best-call page
+    whose explicit contract is ledger-only family leans with byte-identical headline inputs.
 
     Member tallies for every pool are drawn from THIS build's pairwise-windowed tally buckets
     (era addendum #2: a member contributes only from its current stable era), which is why the
@@ -1227,7 +1233,7 @@ def build_multi_split_adaptive(
             # fallthrough branch only — a camp cell with an LCO parent reference keeps the finer
             # existing anchor (the fixed chain order as anchor precedence; feature design
             # decision 2). Gate-failing rungs are skipped inside `rung_prior`.
-            if view is not None and prior_source == "marginal":
+            if apply_superarchetype_priors and view is not None and prior_source == "marginal":
                 rung = _chain.rung_prior(
                     subject, opponent, view,
                     pooled_by_since=pooled_by_since, valid_since=valid_since,
@@ -1242,7 +1248,7 @@ def build_multi_split_adaptive(
                 # (chain.FAMILY_FIRST_KINDS; EMPTY on today's corpus per the LOO harness, so the
                 # anchor wins everywhere until a re-measure says otherwise).
                 family_first = False
-                if view is not None:
+                if apply_superarchetype_priors and view is not None:
                     kind = _subject_boundary_kind(subject, s_ab)
                     if kind is not None and kind in _chain.FAMILY_FIRST_KINDS:
                         family_prior, _tallies, _skip = _impute_for(subject, opponent)

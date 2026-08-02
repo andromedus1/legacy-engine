@@ -104,8 +104,9 @@ def _raw(name: str, date: str, spec: list[tuple[str, str, str, int]]) -> dict:
     }
 
 
-def _hero_con():
-    con = store.connect(":memory:")
+def _hero_con(path: str = ":memory:"):
+    """The hero corpus, optionally file-backed (the script e2e needs a --db path)."""
+    con = store.connect(path)
     for name, date, spec in (
         ("hero-old", _PRE_REGIME_DATE, _ROUNDS_OLD),
         ("hero-current", _CURRENT_DATE, _ROUNDS_CURRENT),
@@ -179,6 +180,24 @@ class TestOffPathIdentity:
         assert empty.audit_preamble == (
             *base.audit_preamble, "// superarchetype: registry empty — layer off",
         )
+
+    def test_overlay_only_mode_keeps_base_cells_while_engaging_display_maps(self):
+        """A ledger-only consumer gets the typed ladder without letting family priors mutate
+        any MatchupCell. This is one registry-fed pass, not a baseline rebuild plus overlay."""
+        con = _hero_con()
+        base = build_multi_split_adaptive(con, parents=())
+        overlay = build_multi_split_adaptive(
+            con, parents=(), superarchetypes=_hero_registry(),
+            apply_superarchetype_priors=False,
+        )
+        con.close()
+
+        assert set(overlay.multi.cells) == set(base.multi.cells)
+        for key, cell in base.multi.cells.items():
+            assert _fields(overlay.multi.cells[key]) == _fields(cell), key
+        assert overlay.cluster_cells and overlay.imputed_cells and overlay.ladder
+        assert {entry.kind for entry in overlay.ladder.values()} >= {"imputed", "pooled", "none"}
+        assert any(line.startswith("// superarchetype:") for line in overlay.audit_preamble)
 
 
 # ---------------------------------------------------------------------------
