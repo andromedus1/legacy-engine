@@ -356,9 +356,8 @@ function blowouts(r) {
 }
 // ---- Superarchetype family leans (ledger-only; cells carry an additive `sa` payload) ----
 // Rendered ONLY for unmeasured cells; measured cells and every row metric are computed from
-// the exact same inputs with the layer on or off. The I² caveat travels with every lean.
-const SA_CAVEAT = "I² is one-sided evidence: a low value is never a certificate of " +
-  "exchangeability — a pooled or imputed number is a family-sourced lean, not a measured cell.";
+// the exact same inputs with the layer on or off. Typed verdict fields supply every gate label,
+// refusal, freshness marker, and I² caveat; display/provenance prose is never parsed as truth.
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const saSplitText = split => split.map(m =>
   `${m.a}${m.intra ? " (intra-family)" : ""} ${m.w}-${m.n - m.w} (${fmtP(m.p)}%, ${m.tier})`
@@ -369,7 +368,7 @@ const saStale = sa => sa.cur != null && sa.cur < 0.5
 const saTitle = (sa, extra) => escA([
   ...extra, `members: ${saSplitText(sa.split)}`,
   sa.window_note, sa.cur == null ? "" : `current-regime share ${(100 * sa.cur).toFixed(0)}%`,
-  ...(sa.reasons || []), SA_CAVEAT,
+  ...(sa.reasons || []), sa.one_sided_note,
 ].filter(Boolean).join(" · "));
 function saCellHtml(lbl, c) {
   const sa = c.sa;
@@ -383,7 +382,14 @@ function saCellHtml(lbl, c) {
     const intra = sa.intra_share > 0
       ? ` <span class="chip" title="share of this pool that is the deck's own family — most of this edge is against your own family">intra-family ${(100 * sa.intra_share).toFixed(0)}%</span>`
       : "";
-    const notes = (sa.notes || []).map(t =>
+    const typedNotes = [];
+    if (sa.i2_band === "labelled" && sa.heterogeneity_note)
+      typedNotes.push(sa.heterogeneity_note);
+    if (sa.i2_band === "not-computable" && sa.heterogeneity_reason)
+      typedNotes.push(sa.heterogeneity_reason);
+    if (sa.concentration_passed === false && sa.concentration_label)
+      typedNotes.push(sa.concentration_label);
+    const notes = typedNotes.map(t =>
       ` <span class="chip" title="${escA(t)}">${escA(t.length > 44 ? t.slice(0, 43) + "…" : t)}</span>`).join("");
     const gates = [`m_eff ${sa.m_eff}`, sa.i2 == null ? `I² ${sa.i2_band}` : `I²=${sa.i2.toFixed(2)} (${sa.i2_band})`];
     return `<div class="unm sa">${lbl} — family lean ${fmtP(sa.p)}% · 95% ${fmtP(sa.ci_low)}–${fmtP(sa.ci_high)} · n_eff ${sa.n_eff}` +
