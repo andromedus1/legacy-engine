@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T16:22:28Z'
+generated_at: '2026-08-02T16:31:43Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -87,16 +87,17 @@ documents:
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
-    - 'SUPERARCHETYPES (in flight — epic-superarchetype-layer): analytics/superarchetype/
+    - 'SUPERARCHETYPES (built; exploratory Best Call authority): analytics/superarchetype/
       adds the third taxonomy level above parent archetype. An offline `superarchetype
-      run` pass clusters archetypes on staple-stripped maindeck core sets (Jaccard
+      run` preview clusters archetypes on staple-stripped maindeck core sets (Jaccard
       + average-linkage agglomerative, AU multiscale-bootstrap cut over resampled
-      card features; definers >=30 decks/>=8 core cards, the tail assigned by nearest
-      centroid) and persists a derived registry merged under a package-shipped curated
-      override registry (hybrid-derived-curated-registry + curated-json-resource-loader).
-      Clustering reads deck_cards ONLY — never rounds — so the cut can never be tuned
-      against the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT
-      axis one more level (camp -> parent -> cluster, extending _pool_opponent_tallies)
+      card features; definers >=30 decks/>=8 core cards, the tail assigned by mean
+      Jaccard dissimilarity to cluster definers) and explicit `--promote` persists
+      a reviewed derived registry merged under a package-shipped curated override
+      registry (hybrid-derived-curated-registry + curated-json-resource-loader). Clustering
+      reads deck_cards ONLY — never rounds — so the cut can never be tuned against
+      the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT axis
+      one more level (camp -> parent -> cluster, extending _pool_opponent_tallies)
       and gains one shrinkage rung between the leave-camp-out parent cell and the
       subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird
       and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
@@ -237,11 +238,10 @@ documents:
       detection self-heals banlist announcement lag; every windowed figure names its
       window and triggering disturbance.'
     - 'Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes,
-      curated overrides) → parent archetype → camp. The superarchetype level exists
-      to fight thin data: when an archetype-level matchup cell can''t clear its tier
-      gate, the cell falls back to the superarchetype aggregate with a labeled provenance
-      chip, so every row gets signal against every major strategy. Intra-cluster matches
-      count but carry an intra-cluster flag.'
+      curated overrides) → parent archetype → camp. Superarchetypes expose pooled
+      strategy-family evidence with labeled provenance and intra-cluster flags; they
+      remain an exploratory navigation/explanation layer while archetype-level Best
+      Call stays decision-authoritative until the future-only benchmark passes.'
     - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
       per-deck findings, consensus decklists with primers — persists across sessions
       and is surfaced automatically; advice is grounded in a user profile (decks played,
@@ -407,9 +407,9 @@ documents:
       pooled proportion whose effective sample n_eff — not raw pooled n — feeds tier_for_sample
       and the display gate, gated on concentration (m_eff = 1/HHI >= 2.0, max member
       share <= 0.60) and heterogeneity (I-squared bands, with I-squared treated as
-      ONE-SIDED evidence). Cells fall back archetype -> superarchetype per cell, labeled
-      with a provenance chip; intra-cluster matches count but carry an intra-cluster
-      flag.'
+      ONE-SIDED evidence). Typed family cells carry labeled provenance and intra-cluster
+      flags; the Best Call page keeps them exploratory and ledger/navigation-only
+      until the future-only decision benchmark passes.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on

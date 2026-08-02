@@ -42,9 +42,11 @@ The page reads eras + variants, so run it **last**, after the standard cycle:
 .venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
   while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
 .venv/bin/legacy-engine eras run             # re-detect era boundaries + drift alarms
-# re-derive cores over each archetype's own stable era (the page's family fallback
-# reads the DuckDB derived cache; horizon provenance is echoed in the audit header):
-.venv/bin/legacy-engine superarchetype run
+# Preview a candidate over each archetype's own stable era. Review its membership,
+# churn, and quality output; this does not replace the serving family registry:
+.venv/bin/legacy-engine superarchetype run --compare-since 2026-06-29
+# Only after explicitly approving that candidate, promote it to the serving registry:
+# .venv/bin/legacy-engine superarchetype run --promote
 .venv/bin/python scripts/refresh_best_call_ranking.py
 ```
 
@@ -180,8 +182,9 @@ frontmatter decisions above — the page prose is authoritative.
   gate never promotes it: I² is one-sided evidence (a low value is not a
   certificate of exchangeability). A `family range` line is a refusal rendered
   honestly — read the member split, not a blended number. Check the audit header
-  for the registry window (a stale-taxonomy warning there means re-run
-  `superarchetype run`; use `--since <date>` only for a labeled uniform-window diagnostic).
+  for the registry window (a stale-taxonomy warning there means preview a candidate with
+  `superarchetype run`, review it, then explicitly use `--promote` if approved; use
+  `--since <date>` only for a labeled uniform-window diagnostic).
 - **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
   archetypes compete in ONE argmax, so the values are comparable across parents
   and can never sum past 1. n/a means the row failed the 5% measured-coverage

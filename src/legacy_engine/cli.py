@@ -7280,13 +7280,15 @@ def _echo_cluster(cluster, *, indent: str = "  ") -> None:
               help="Bootstrap resamples per scale.")
 @click.option("--seed", type=int, default=0, show_default=True, help="RNG seed (runs are exact).")
 @click.option("--dry-run", is_flag=True, default=False,
-              help="Compute and report without writing the registry or the DuckDB cache.")
+              help="Compatibility alias for the default preview-only behavior.")
+@click.option("--promote", is_flag=True, default=False,
+              help="Explicitly replace the serving JSON registry and DuckDB cache with this candidate.")
 @click.option("--compare-since", default=None,
-              help="With --dry-run, compare era-aware cores to this uniform start date.")
+              help="In preview mode, compare era-aware cores to this uniform start date.")
 @_verbose
 def superarchetype_run(
     db: str | None, since: str | None, until: str | None, au_min: float | None,
-    min_bp: float | None, n_boot: int, seed: int, dry_run: bool,
+    min_bp: float | None, n_boot: int, seed: int, dry_run: bool, promote: bool,
     compare_since: str | None, verbose: bool,
 ) -> None:
     """Run the offline clustering pass: cores -> staple strip -> Jaccard -> average linkage ->
@@ -7294,16 +7296,19 @@ def superarchetype_run(
 
     Sibling of `label` / `discover run` / `eras run`. Reads `deck_cards` only — never `rounds`.
 
-    Example: legacy-engine superarchetype run --since 2026-05-11
+    Preview: legacy-engine superarchetype run --compare-since 2026-05-11
+    Promote after review: legacy-engine superarchetype run --promote
     """
     _setup_logging(verbose)
     from legacy_engine.analytics.superarchetype.registry import run_superarchetypes
     from legacy_engine.analytics.superarchetype.registry import membership_churn
     from legacy_engine.ingestion import store
 
-    if compare_since is not None and (since is not None or not dry_run):
+    if dry_run and promote:
+        raise click.ClickException("--dry-run and --promote are mutually exclusive")
+    if compare_since is not None and (since is not None or promote):
         raise click.ClickException(
-            "--compare-since requires the default era-aware policy and --dry-run"
+            "--compare-since requires the default era-aware policy in preview mode"
         )
 
     con = store.connect(db) if db else store.connect()
@@ -7311,7 +7316,7 @@ def superarchetype_run(
     try:
         result = run_superarchetypes(
             con, since=since, until=until, seed=seed, n_boot=n_boot,
-            au_min=au_min, min_bp=min_bp, write=not dry_run,
+            au_min=au_min, min_bp=min_bp, write=promote,
         )
         if compare_since is not None:
             comparison = run_superarchetypes(
@@ -7394,7 +7399,10 @@ def superarchetype_run(
         )
         for archetype, old_id, new_id in compared.moves:
             click.echo(f"//   comparison move {archetype}: {old_id} -> {new_id}")
-    click.echo("// written" if result.written else "// dry run — nothing written")
+    click.echo(
+        "// promoted: serving registry + DuckDB cache replaced" if result.written else
+        "// preview — nothing written; review the candidate, then re-run with --promote"
+    )
 
 
 @superarchetype.command("list")
@@ -7419,7 +7427,10 @@ def superarchetype_list(db: str | None, cluster_id: str | None, verbose: bool) -
         con.close()
 
     if registry is None or not registry.clusters:
-        click.echo("(no superarchetype registry — run `superarchetype run` first)")
+        click.echo(
+            "(no superarchetype registry — review a candidate, then run "
+            "`superarchetype run --promote`)"
+        )
         return
 
     click.echo(
