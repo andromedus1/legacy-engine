@@ -623,6 +623,14 @@ class TestSuperarchetypeLeans:
 
 
 class TestMainEndToEnd:
+    def test_blowouts_are_classified_from_raw_measured_win_rate(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "if (!c.measured || c.raw == null" in template
+        assert "if (c.raw < 0.40)" in template
+        assert "else if (c.raw < 0.45)" in template
+        assert "if (c.p != null && c.p < 0.40)" not in template
+        assert "else if (c.p != null && c.p < 0.45)" not in template
+
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"
         con = store.connect(str(db_path))
