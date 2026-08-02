@@ -520,10 +520,31 @@ class TestSuperarchetypeLeans:
         assert [member["archetype"] for member in fair["members"]] == [
             "Hero", "SibA", "SibB",
         ]
-        assert all({"opponent_id", "p", "n_eff", "refused_reason"} <= cell.keys()
+        assert all({"opponent_id", "p", "n_eff", "refused_reason", "support",
+                    "support_reason", "window_notes", "current_regime_share"} <= cell.keys()
                    for cell in fair["cells"])
         assert fair["agency"] == min(fair["adj"], fair["floor"])
         assert fair["floor_opp"] != fair["label"]  # intra-family cells never set the floor
+        external = [cell for cell in fair["cells"] if not cell["intra_family"]]
+        expected_coverage = (
+            sum(cell["share"] * cell["support"] for cell in external if cell["p"] is not None)
+            / sum(cell["share"] for cell in external)
+        )
+        assert fair["coverage"] == pytest.approx(expected_coverage, abs=1e-4)
+
+    def test_family_payload_excludes_zero_share_historical_members(self):
+        rows = [
+            {"subject": "Hero", "field_share": .3, "recent_4wk": 4},
+            {"subject": "SibA", "field_share": 0.0, "recent_4wk": 0},
+            {"subject": "SibB", "field_share": .2, "recent_4wk": 3},
+            {"subject": "OppX", "field_share": .5, "recent_4wk": 5},
+        ]
+        families = rbcr.build_family_payload(
+            _hero_registry(), {}, rows, top_k=8, cover_min=.8,
+        )
+        fair = next(family for family in families if family["id"] == "sa-fair")
+        assert [member["archetype"] for member in fair["members"]] == ["Hero", "SibB"]
+        assert "SibA" not in fair["description"]
 
     def test_family_refusals_never_gain_a_point_estimate(self, hero_blobs):
         _off, on = hero_blobs
@@ -673,6 +694,8 @@ class TestMainEndToEnd:
         assert 'id="taxonomy-root"' in html
         assert 'id="family-heatmap"' in html
         assert 'id="camp-heatmap"' in html
+        assert 'tabindex="0" aria-label=' in html
+        assert 'familyMetric(family.agency,family.grounded,true)' in html
         assert '"families": [' in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):

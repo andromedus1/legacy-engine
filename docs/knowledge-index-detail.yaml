@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T16:10:27Z'
+generated_at: '2026-08-02T16:22:28Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -155,21 +155,13 @@ documents:
       same coverage threshold that suppresses display (<5% measured coverage -> n/a
       + reason) because zero-coverage candidates otherwise absorb the whole argmax
       as imputation noise; S* labels full-field values below 85% coverage.
-    - 'Superarchetype family fallback is LEDGER-ONLY: page-unmeasured cells may carry
-      an additive sa lean (imputed from licensed family siblings / pooled vs the opponent''s
-      family / family range with the named refusal and NO point estimate), resolved
-      by the engine''s display ladder at its stricter gates (pooled n_eff>=30, imputed
-      pool n>=25 + license + per-cell veto). Leans never enter agency, adj, floor,
-      coverage, strata, or the MC — every row metric is bit-identical with the layer
-      on or off. Registry read from the same --db (superarchetype run''s derived cache);
-      --no-superarchetypes regenerates the baseline; the I2 one-sidedness caveat rides
-      the definitional card, the per-row lean key, and every lean tooltip.'
-    - 'The serving registry also produces an additive families payload for an expandable
-      family → archetype → camp navigator, an S×S family heatmap, and a camps×parent-opponents
-      map. Family agency/adj/floor/coverage are exploratory summaries only: archetype
-      Best Call remains decision-authoritative until a future-only predictive/decision
-      benchmark passes. With no registry the page explicitly degrades the family view
-      and leaves the authoritative archetype/camp surfaces intact.'
+    - 'Superarchetypes remain an additive, explicitly non-authoritative page layer:
+      page-unmeasured ledgers may carry stricter-gated family leans that never enter
+      archetype/camp decision metrics, while the serving registry produces an exploratory
+      family → archetype → camp navigator, S×S family heatmap, and camps×parent-opponents
+      map. Archetype Best Call remains authoritative until a future-only benchmark
+      passes; no registry/--no-superarchetypes explicitly degrades the family surface
+      and preserves the baseline.'
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).
