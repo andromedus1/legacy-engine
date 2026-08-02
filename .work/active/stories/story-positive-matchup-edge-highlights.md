@@ -1,7 +1,7 @@
 ---
 id: story-positive-matchup-edge-highlights
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, ui]
 parent: null
 depends_on: [story-fix-blowouts-use-raw-win-rate]
@@ -43,3 +43,24 @@ so all four bands are immediately understandable.
 
 Keep classification inline beside the existing loss bands so one mutually exclusive raw-WR ladder
 owns all four row treatments; do not introduce a second metric or payload field.
+
+## Implementation notes
+
+- **Execution capability**: direct host implementation at medium effort; this was a tightly bounded
+  standalone story in one existing template with no ambiguous ownership or integration seam.
+- **Files changed**: `scripts/best_call_ranking_template.html`,
+  `tests/test_refresh_best_call_ranking.py`, and `docs/analysis/best-call-ranking.md`; generated
+  knowledge indexes were regenerated normally.
+- **Behavior**: measured rows now use one mutually exclusive raw-WR ladder: blowout `<40%`, half
+  `40–45%`, edge `55–60%`, dominant `>60%`. Positive bands add only row classes, chips, legend
+  entries, and explanatory copy; no payload or ranking calculation changed.
+- **Verification**: the new regression test failed before implementation and passed afterward;
+  27 focused page tests and the complete 3,532-test suite passed with one pre-existing UMAP warning.
+  The real-corpus HTML was regenerated and its single JavaScript block parsed successfully.
+
+## Review (2026-08-02)
+
+**Verdict: approve.** Bounded inline review confirmed exact boundary behavior (60% remains `Edge`,
+only values above 60% are `Dominant`), measured/raw-WR gating, mutually exclusive classes, textual
+accessibility, and isolation from all ranking metrics. The emitted HTML matches the template and
+documentation. No independent or cross-model reviewer was used for this standalone story.
