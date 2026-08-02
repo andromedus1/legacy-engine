@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-01T17:05:20Z'
+generated_at: '2026-08-02T03:43:34Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -154,6 +154,15 @@ documents:
       same coverage threshold that suppresses display (<5% measured coverage -> n/a
       + reason) because zero-coverage candidates otherwise absorb the whole argmax
       as imputation noise; S* labels full-field values below 85% coverage.
+    - 'Superarchetype family fallback is LEDGER-ONLY: page-unmeasured cells may carry
+      an additive sa lean (imputed from licensed family siblings / pooled vs the opponent''s
+      family / family range with the named refusal and NO point estimate), resolved
+      by the engine''s display ladder at its stricter gates (pooled n_eff>=30, imputed
+      pool n>=25 + license + per-cell veto). Leans never enter agency, adj, floor,
+      coverage, strata, or the MC — every row metric is bit-identical with the layer
+      on or off. Registry read from the same --db (superarchetype run''s derived cache);
+      --no-superarchetypes regenerates the baseline; the I2 one-sidedness caveat rides
+      the definitional card, the per-row lean key, and every lean tooltip.'
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).
@@ -1851,3 +1860,10 @@ documents:
     related:
     - slug: docs/briefs/ingestion-archetype-contracts/parent.md
       relationship: part-of
+  docs/reviews/2026-08-01-shipped-features-deep-review.md:
+    summary: 'Post-merge deep review of PRs #64-#75 era. Per-feature verdicts, confirmed
+      defects with file:line, tests whose assertions do not bite, implementation-note
+      claims that failed verification, and cross-cutting seam risks. Findings are
+      reported for the orchestrator to file as follow-up items; no reverts.
+
+      '
