@@ -518,6 +518,14 @@ class TestAggregateClusterCell:
         assert cell.heterogeneity.one_sided_note == I2_ONE_SIDED_NOTE
         assert cell.n_eff == pytest.approx(3.3, abs=0.1)
         assert cell.tier == "speculative"
+        assert any(
+            line.startswith("refused with concentration label:")
+            for line in cell.provenance
+        )
+        assert not any(
+            line.startswith("served with concentration label:")
+            for line in cell.provenance
+        )
 
     def test_dilution_fixtures_serve_with_labels_never_a_free_pool(self, make_tally):
         # Real-corpus dilution cells (feature file, 2026-07-31): thin members of different shape
@@ -541,6 +549,10 @@ class TestAggregateClusterCell:
             # Served (coverage is the point) but under the concentration label fallback.
             assert cell.pooled_p is not None
             assert any("dominated by Tron" in line for line in cell.provenance)
+            assert any(
+                line.startswith("served with heterogeneity label: heterogeneity not computable:")
+                for line in cell.provenance
+            )
 
     def test_tier_derives_from_n_eff_never_raw_pooled_n(self, make_tally):
         # Sum(n) = 32 would read "evolving"; the heterogeneous pool's n_eff ~ 12 reads
