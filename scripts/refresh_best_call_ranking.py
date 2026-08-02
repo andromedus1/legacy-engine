@@ -78,6 +78,12 @@ from legacy_engine.analytics.matchup import (
     build_multi_split_adaptive,
     build_multi_split_matrix,
 )
+from legacy_engine.analytics.match_results import compute_match_results
+from legacy_engine.analytics.strategy_plan import (
+    StrategicPlanResult,
+    aggregate_strategic_plan_results,
+    load_strategic_plan_registry,
+)
 from legacy_engine.analytics.superarchetype.aggregate import I2_ONE_SIDED_NOTE
 from legacy_engine.analytics.superarchetype.registry import read_superarchetype_members
 from legacy_engine.archetype.discovered import staged_split_parents
@@ -298,6 +304,102 @@ def row_stats(cells, top_k, cover_min):
         "grounded": topk_ok and coverage >= cover_min,
         "topk_ok": topk_ok,
     }
+
+
+def build_strategic_plan_payload(
+    result: StrategicPlanResult,
+    archetype_rows,
+    *,
+    top_k: int,
+    cover_min: float,
+):
+    """Adapt typed match-level plan results for the self-contained report."""
+    by_subject = {row["subject"]: row for row in archetype_rows}
+    plan_by_id = {plan.id: plan for plan in result.plans}
+    assignments = {item.archetype: item for item in result.assignments}
+    members_by_plan = {plan.id: [] for plan in result.plans}
+    for archetype, row in by_subject.items():
+        assignment = assignments[archetype]
+        members_by_plan[assignment.primary].append({
+            "archetype": archetype,
+            "primary": assignment.primary,
+            "secondary": list(assignment.secondary),
+            "field_share": row["field_share"],
+            "recent_4wk": row["recent_4wk"],
+        })
+    for members in members_by_plan.values():
+        members.sort(key=lambda item: (-item["field_share"], item["archetype"]))
+
+    shares = {
+        plan_id: sum(member["field_share"] for member in members)
+        for plan_id, members in members_by_plan.items()
+    }
+    out = []
+    for plan in result.plans:
+        external = []
+        cells = []
+        for opponent in result.plans:
+            cell = result.cells[(plan.id, opponent.id)]
+            share = shares[opponent.id]
+            payload = {
+                "opponent_id": opponent.id,
+                "opponent": opponent.label,
+                "share": r4(share),
+                "wins": cell.wins,
+                "losses": cell.losses,
+                "n": cell.n,
+                "raw": r4(cell.raw),
+                "p": r4(cell.shrunk),
+                "measured": cell.measured,
+                "structural_same_plan": cell.structural_same_plan,
+                "reason": (
+                    "structural same-plan expectation"
+                    if cell.structural_same_plan else
+                    ("no decisive matches" if cell.n == 0 else
+                     f"n={cell.n} below measured gate")
+                ),
+            }
+            if not cell.structural_same_plan:
+                external.append(payload)
+            cells.append(payload)
+
+        # Structural mirrors contribute exactly 50%; external cells contribute only
+        # once measured.  Unmeasured magnitudes remain visible in the ledger, not metrics.
+        weighted = [(shares[plan.id], 0.5)] + [
+            (cell["share"], cell["p"]) for cell in external if cell["measured"]
+        ]
+        weight = sum(item[0] for item in weighted)
+        adj = sum(w * p for w, p in weighted) / weight if weight else None
+        measured = [cell for cell in external if cell["measured"]]
+        floor_cell = min(measured, key=lambda cell: cell["p"]) if measured else None
+        external_share = sum(cell["share"] for cell in external)
+        coverage = sum(cell["share"] for cell in measured) / external_share if external_share else 0.0
+        top = sorted(external, key=lambda cell: (-cell["share"], cell["opponent_id"]))[
+            : min(top_k, len(external))
+        ]
+        grounded = bool(top) and all(cell["measured"] for cell in top) and coverage >= cover_min
+        floor = floor_cell["p"] if floor_cell else None
+        out.append({
+            "id": plan.id,
+            "label": plan.label,
+            "description": plan.description,
+            "field_share": r4(shares[plan.id]),
+            "recent_4wk": sum(member["recent_4wk"] for member in members_by_plan[plan.id]),
+            "adj": r4(adj),
+            "floor": r4(floor),
+            "floor_opp": floor_cell["opponent"] if floor_cell else None,
+            "agency": r4(min(adj, floor)) if adj is not None and floor is not None else None,
+            "coverage": r4(coverage),
+            "grounded": grounded,
+            "members": members_by_plan[plan.id],
+            "cells": cells,
+            "decisive_matches": result.decisive_matches,
+            "same_plan_matches": result.same_plan_matches,
+            "since": result.since,
+            "until": result.until,
+            "provenance": result.provenance,
+        })
+    return out
 
 
 def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cover_min):
@@ -638,8 +740,19 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         print(f"  superarchetype fallback: {sa_counts['imputed']} imputed, "
               f"{sa_counts['pooled']} pooled, {sa_counts['range']} range", flush=True)
 
-    families = build_family_payload(
-        superarchetypes, msa.cluster_cells, arch_out, top_k=top_k, cover_min=cover_min,
+    # Strategic intent is a separate curated semantic layer. Recompute it from
+    # decisive match tallies rather than averaging any rendered row statistic.
+    plan_registry = load_strategic_plan_registry()
+    plan_matches = compute_match_results(con, since=field_since)
+    plan_result = aggregate_strategic_plan_results(
+        plan_matches,
+        plan_registry,
+        current_archetypes=[row["subject"] for row in arch_out],
+        ground_n=ground_n,
+        since=field_since,
+    )
+    plans = build_strategic_plan_payload(
+        plan_result, arch_out, top_k=top_k, cover_min=cover_min,
     )
 
     return {
@@ -669,12 +782,17 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"{len(potential)} candidates (camps + unsplit archetypes with >= "
                 f"{_PBEST_SUPPRESS_COVERAGE:.0%} measured coverage) on the page-used "
                 f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
+                f"// strategic plans: registry v{plan_registry.schema_version}, "
+                f"{len(plan_registry.assignments)} assignments; "
+                f"{plan_result.decisive_matches} decisive matches "
+                f"({plan_result.same_plan_matches} same-plan), "
+                f"{plan_result.omitted_matches} omitted; window since {field_since}",
                 *sa_audit,
             ],
         },
         "arch": arch_out,
         "camps": camps_out,
-        "families": families,
+        "plans": plans,
     }
 
 
