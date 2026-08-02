@@ -1,7 +1,7 @@
 ---
 id: feature-strategic-plan-best-call-viz
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, viz, ui]
 parent: null
 depends_on: [epic-superarchetype-layer-three-level-page]
@@ -98,6 +98,18 @@ The trickiest unit is the match-derived aggregate. It must preserve decisive-mat
 symmetry, sample counts, window provenance, structural same-plan semantics, and honest external
 coverage without borrowing any rendered family/archetype statistic. It is designed and tested first;
 the UI only renders its typed output.
+
+## Implementation summary
+
+- Execution capability: high, selected for curated taxonomy, match aggregation, generated-data contract, and accessible UI semantics.
+- Review weight: standard (caller/default); feature intentionally stops at the independent review boundary.
+- Delivered the package-owned five-plan registry and typed match-level aggregator, with exact primary-plan attribution, secondary hybrid labels, structural same-plan 50%, complementarity assertions, omitted-match audit, and fail-fast current-field coverage.
+- Added the deterministic `plans` report payload and the approved sortable/filterable peer table with semantic disclosure, portrait, five-plan ledger, member archetypes, and secondary labels.
+- Removed the visible composition-family hierarchy, strategy-family agency map, camps × parent-opponents figure, and their renderer/CSS paths; retained composition-family evidence only in archetype/camp ledger fallbacks.
+- Regenerated the production Best Deck / Best Call HTML and aligned the runbook plus three-layer knowledge index.
+- Child commits: `e2081ed` (data contract), `1b8b74f` (report surface).
+- Integrated verification: focused strategy/report suite 38 passed; full suite 3,543 passed with one existing UMAP warning; generated JavaScript parsed with Node and retained no placeholder; removed renderer identifiers absent; `git diff --check` clean; knowledge-index lint 0 errors with 6 pre-existing warnings.
+- Adjacent issues parked: none.
 
 ## Implementation Units
 
