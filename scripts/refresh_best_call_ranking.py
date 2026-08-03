@@ -349,6 +349,8 @@ def build_strategic_plan_payload(
                 "wins": cell.wins,
                 "losses": cell.losses,
                 "n": cell.n,
+                "observed_n": cell.observed_n,
+                "mirror_n": cell.mirror_n,
                 "raw": r4(cell.raw),
                 "p": r4(cell.shrunk),
                 "measured": cell.measured,

@@ -99,7 +99,7 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
   font-variant-numeric: tabular-nums; }
 .table-count { color: var(--muted); }
 .table-scroll { max-height: 72vh; overflow: auto; }
-.table-scroll thead th { position: sticky; top: 0; z-index: 2;
+.table-scroll > table > thead > tr > th { position: sticky; top: 0; z-index: 2;
   background: var(--surface-1); box-shadow: 0 1px 0 var(--axis); }
 svg text { font-family: inherit; }
 .footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
@@ -506,10 +506,11 @@ function planDetailHtml(plan, detailId) {
     `${m.secondary.map(id => `<span class="chip">${escT((D.plans.find(p=>p.id===id)||{label:id}).label)}</span>`).join("")}</span>`).join("");
   const ledger = plan.cells.map(c => {
     let result;
-    if (c.structural_same_plan) result = `<b>50.0%</b> <span class="chip">structural same-plan</span>`;
+    if (c.structural_same_plan) result = `<b>50.0%</b> <span class="chip">structural same-plan</span>`+
+      ` · ${c.observed_n} cross-archetype matches · ${c.mirror_n} archetype mirrors`;
     else if (!c.measured) result = `<span class="unm">unmeasured — ${escT(c.reason)}; ${c.wins}-${c.losses}</span>`;
     else result = `<b>${fmtP(c.p)}%</b> · raw ${fmtP(c.raw)}% · ${c.wins}-${c.losses}`;
-    return `<tr><td>${escT(c.opponent)}</td><td>${(100*c.share).toFixed(1)}%</td><td>${result}</td><td>${c.n}</td></tr>`;
+    return `<tr><td>${escT(c.opponent)}</td><td>${(100*c.share).toFixed(1)}%</td><td>${result}</td><td>${c.structural_same_plan ? c.observed_n + c.mirror_n : c.n}</td></tr>`;
   }).join("");
   return `<tr class="detail" id="${detailId}"><td colspan="${PLAN_COLS.length}"><div class="plan-portrait">`+
     `<section><h3>${escT(plan.label)}</h3><p>${escT(plan.description)}</p>`+

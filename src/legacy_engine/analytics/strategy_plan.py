@@ -57,6 +57,8 @@ class StrategicPlanCell:
     shrunk: float | None
     measured: bool
     structural_same_plan: bool
+    observed_n: int
+    mirror_n: int
 
 
 @dataclass(frozen=True)
@@ -161,7 +163,8 @@ def aggregate_strategic_plan_results(
     validate_current_plan_coverage(registry, current_archetypes)
     primary = {item.archetype: item.primary for item in registry.assignments}
     totals: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
-    same_counts: dict[str, int] = defaultdict(int)
+    same_observed: dict[str, int] = defaultdict(int)
+    same_mirrors: dict[str, int] = defaultdict(int)
     omitted = 0
     included_external = 0
 
@@ -175,7 +178,7 @@ def aggregate_strategic_plan_results(
             omitted += tally.n
             continue
         if pa == pb:
-            same_counts[pa] += tally.n
+            same_observed[pa] += tally.n
             continue
         included_external += tally.n
         totals[(pa, pb)][0] += tally.wins
@@ -188,16 +191,16 @@ def aggregate_strategic_plan_results(
         if plan is None:
             omitted += n
         else:
-            same_counts[plan] += n
+            same_mirrors[plan] += n
 
     cells: dict[tuple[str, str], StrategicPlanCell] = {}
     for subject in registry.plans:
         for opponent in registry.plans:
             key = (subject.id, opponent.id)
             if subject.id == opponent.id:
-                n = same_counts[subject.id]
                 cells[key] = StrategicPlanCell(
-                    subject.id, opponent.id, n, n, n, 0.5, 0.5, False, True
+                    subject.id, opponent.id, 0, 0, 0, 0.5, 0.5, False, True,
+                    same_observed[subject.id], same_mirrors[subject.id],
                 )
                 continue
             wins, losses = totals[key]
@@ -214,6 +217,8 @@ def aggregate_strategic_plan_results(
                 ) if n else None,
                 n >= ground_n,
                 False,
+                n,
+                0,
             )
 
     for a in registry.plans:
@@ -226,7 +231,7 @@ def aggregate_strategic_plan_results(
             if ab.shrunk is not None and abs((ab.shrunk + ba.shrunk) - 1.0) > 1e-12:
                 raise AssertionError(f"non-complementary strategic-plan rates: {a.id}, {b.id}")
 
-    same_total = sum(same_counts.values())
+    same_total = sum(same_observed.values()) + sum(same_mirrors.values())
     return StrategicPlanResult(
         registry.plans,
         registry.assignments,
@@ -271,8 +276,7 @@ def aggregate_archetype_vs_plan_results(
         for plan in registry.plans:
             wins, losses = tallies[(archetype, plan.id)]
             mirrors = match_results.mirror_n.get(archetype, 0) if plan.id == assignment else 0
-            n = wins + losses + mirrors
-            effective_wins = wins + 0.5 * mirrors
+            n = wins + losses
             out[(archetype, plan.id)] = ArchetypeStrategicPlanCell(
                 archetype=archetype,
                 opponent_id=plan.id,
@@ -280,9 +284,9 @@ def aggregate_archetype_vs_plan_results(
                 losses=losses,
                 mirror_n=mirrors,
                 n=n,
-                raw=effective_wins / n if n else None,
+                raw=wins / n if n else None,
                 shrunk=beta_binomial_shrink_to(
-                    effective_wins, n, prior_mean=0.5, strength=SHRINK_STRENGTH
+                    wins, n, prior_mean=0.5, strength=SHRINK_STRENGTH
                 ) if n else None,
                 measured=n >= ground_n,
             )

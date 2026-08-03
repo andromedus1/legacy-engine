@@ -21,8 +21,8 @@ decisions:
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
   - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
-  - "Strategic-plan same-plan play is structural 50% context: it contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
-  - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, n, the page's uniform field window/provenance, and measured/thin state; mirrors add structural 50% context to the archetype's own primary-plan cell. The exact archetype ledger remains below."
+  - "Strategic-plan same-plan play is structural 50% context: the diagonal displays zero directional wins, losses, and n, while observed_n separately reports cross-archetype same-plan matches and mirror_n reports mirror context. It contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
+  - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive non-mirror MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's uniform field window/provenance, and measured/thin state. Exact-archetype mirrors are reported separately as mirror_n and shown only as structural 50% context; they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured gate. The exact archetype ledger remains below."
   - "Composition-derived superarchetypes remain an internal matrix/statistical-borrowing layer only. They emit no page-visible dropdown payload, family lean, family range, or presentation audit line."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
 ---
@@ -33,7 +33,9 @@ The page: [decks/best-deck-best-call-ranking.html](../../decks/best-deck-best-ca
 (gitignored, self-contained offline HTML). Tables are click-sortable per column
 (default: agency % descending); sorting stays within honesty strata. Coverage
 filters and column sorting apply to the strategic-plan, archetype, and camp peer
-tables. Rows expand to accessible per-opponent matchup ledgers.
+tables. Only direct headers of those outer peer tables are sticky; headers in
+nested plan ledgers scroll with their expanded row. Rows expand to accessible
+per-opponent matchup ledgers.
 
 ## Refresh (one command, after a data cycle)
 
@@ -97,9 +99,12 @@ portrait but do not duplicate their matches or field share across rows.
 Plan cells are rebuilt from decisive match records mapped through those primary
 assignments. They are therefore match-level aggregates, not averages of rendered
 archetype percentages. External plan matchups use the same `n>=8` measured gate
-as the page. Same-plan matches are shown as structural 50% context: 50% contributes
-to adjusted field WR at that plan's field share, but the diagonal is never marked
-measured, never sets the floor, and never enters external coverage. The floor is
+as the page. Same-plan matches are shown as structural 50% context. The diagonal
+therefore reports zero directional wins, losses, and `n`; `observed_n` separately
+reports decisive cross-archetype matches within that plan, and `mirror_n` reports
+exact-archetype mirror context. The displayed 50% contributes to adjusted field WR
+at that plan's field share, but the diagonal is never marked measured, never sets
+the floor, and never enters external coverage. The floor is
 the worst measured external plan. Coverage is measured external opponent share
 divided by all external opponent share; grounding requires every top external
 opponent (up to `--top-k`) measured plus `--cover-min` external coverage. Thus an
@@ -119,10 +124,11 @@ first shows **Against strategic plans**, exactly five cells in registry order.
 Each cell is aggregated directly from that archetype's decisive `MatchResults`
 against opponents assigned to the corresponding primary plan; it is not derived
 from rendered archetype percentages or from composition-family evidence. Each
-cell carries shrunk/raw rates, W-L, `n`, the uniform field window and provenance,
-and its measured/thin state under the same `n>=8` page gate. In the archetype's
-own primary-plan cell, exact archetype mirrors contribute structural 50% context
-and are counted separately from decisive non-mirror W-L. The exact
+cell carries shrunk/raw rates, W-L, observed `n`, the uniform field window and
+provenance, and its measured/thin state under the same `n>=8` page gate. In the
+archetype's own primary-plan cell, exact-archetype mirrors are retained separately
+as `mirror_n` and displayed only as structural 50% context. They do not contribute
+to observed `n`, the raw or shrunk estimate, or the `n>=8` measured gate. The exact
 archetype-versus-archetype ledger follows this five-cell block.
 
 **Superarchetypes are internal only.** Composition-derived superarchetypes may
@@ -168,10 +174,11 @@ frontmatter decisions above — the page prose is authoritative.
   explain hybrid decks but never count their matches or field share again.
   Same-plan 50% is structural context, not evidence: judge a plan's floor and
   grounding only from its external cells and external-coverage percentage.
-- **Archetype plan cells are direct evidence** — read their shrunk/raw rates, W-L, `n`,
-  measured/thin state, and uniform field provenance before the exact opponent
-  ledger below. Mirrors in the row's own primary-plan cell are structural 50%
-  context, not additional observed wins or losses.
+- **Archetype plan cells are direct evidence** — read their shrunk/raw rates, W-L,
+  observed `n`, measured/thin state, and uniform field provenance before the exact
+  opponent ledger below. `mirror_n` in the row's own primary-plan cell is separate
+  structural 50% context: mirrors contribute neither directional wins/losses nor
+  observed `n`, estimates, or measured-gate eligibility.
 - **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
   archetypes compete in ONE argmax, so the values are comparable across parents
   and can never sum past 1. n/a means the row failed the 5% measured-coverage
