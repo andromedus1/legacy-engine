@@ -1,7 +1,7 @@
 ---
 id: feature-strategic-plan-best-call-viz
 kind: feature
-stage: review
+stage: done
 tags: [analytics, viz, ui]
 parent: null
 depends_on: [epic-superarchetype-layer-three-level-page]
@@ -40,6 +40,25 @@ return to review after integrated verification.
 - Verification: focused strategy/report suite 34 passed; full suite 3,539 passed with one existing
   UMAP warning; production report regenerated; embedded JavaScript parsed; required section/data
   tokens present and family-lean tokens absent; knowledge-index lint 0 errors with 6 pre-existing
+  warnings; `git diff --check` clean.
+
+## Review record
+
+- Mode: substrate feature review.
+- Effective weight: standard (caller/default); exactly one independent balanced pass.
+- Verdict: approved after fixing all three receiver-confirmed blockers; no second independent pass
+  was run under the standard closure policy.
+- Finding 1 — fixed: archetype mirrors are now separate `mirror_n` structural context and cannot
+  enter observed n, raw/shrunk estimates, or the measured gate. Regression coverage proves 20
+  mirrors plus zero observed matches remains unmeasured.
+- Finding 2 — fixed: sticky positioning is scoped to direct outer peer-table headers; nested plan
+  ledger headers remain ordinary scrolling content, with a generated-HTML contract assertion.
+- Finding 3 — fixed: structural plan diagonals carry coherent zero directional W/L/n plus explicit
+  `observed_n` and `mirror_n`; serializers, display, tests, and runbook use those fields.
+- Fix commit: `a3c5c03`.
+- Closure verification: focused strategy/report suite 35 passed; full suite 3,540 passed with one
+  existing UMAP warning; production report regenerated; embedded JavaScript parsed; scoped sticky
+  selector present and broad selector absent; knowledge-index lint 0 errors with 6 pre-existing
   warnings; `git diff --check` clean.
 
 ## Brief
