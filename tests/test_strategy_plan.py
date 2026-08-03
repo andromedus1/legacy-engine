@@ -104,7 +104,8 @@ def test_match_level_aggregation_is_complementary_and_honest(registry_file, matc
     assert ab.shrunk + ba.shrunk == pytest.approx(1)
     same = result.cells[("disrupt-pressure", "disrupt-pressure")]
     assert same.structural_same_plan and same.raw == same.shrunk == 0.5
-    assert same.n == 5  # A1/A2 cross-archetype (3) plus A1 mirrors (2), counted once.
+    assert (same.wins, same.losses, same.n) == (0, 0, 0)
+    assert (same.observed_n, same.mirror_n) == (3, 2)
     assert result.same_plan_matches == 5
     assert result.omitted_matches == 3
     assert result.provenance == "paper"
@@ -134,5 +135,19 @@ def test_archetype_vs_plan_uses_direct_tallies_and_structural_mirrors(
     assert (external.wins, external.losses, external.mirror_n, external.n) == (3, 1, 0, 4)
     assert external.raw == .75 and external.measured
     same = cells[("A1", "disrupt-pressure")]
-    assert (same.wins, same.losses, same.mirror_n, same.n) == (2, 1, 2, 5)
-    assert same.raw == pytest.approx(.6)
+    assert (same.wins, same.losses, same.mirror_n, same.n) == (2, 1, 2, 3)
+    assert same.raw == pytest.approx(2 / 3)
+    assert not same.measured
+
+
+def test_archetype_mirrors_never_ground_an_observation_free_plan_cell(registry_file):
+    registry = load_strategic_plan_registry(registry_file())
+    results = MatchResults(
+        matchups={}, archetypes={}, coverage=MatchCoverage(), provenance=None,
+        mirror_n={"A1": 20},
+    )
+    cell = aggregate_archetype_vs_plan_results(
+        results, registry, current_archetypes=["A1"], ground_n=8,
+    )[("A1", "disrupt-pressure")]
+    assert (cell.n, cell.mirror_n) == (0, 20)
+    assert cell.raw is None and cell.shrunk is None and not cell.measured

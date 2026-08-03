@@ -479,6 +479,8 @@ class TestStrategicPlanPresentation:
         assert len(hero_plan["cells"]) == 5
         same = next(cell for cell in hero_plan["cells"] if cell["structural_same_plan"])
         assert same["p"] == .5 and not same["measured"]
+        assert (same["wins"], same["losses"], same["n"]) == (0, 0, 0)
+        assert same["observed_n"] >= 0 and same["mirror_n"] >= 0
 
     def test_archetype_rows_lead_with_exact_plan_cells_and_no_family_leans(self, hero_blobs):
         _off, on = hero_blobs
@@ -580,6 +582,8 @@ class TestMainEndToEnd:
         assert "saCellHtml" not in html
         assert '"sa":' not in html
         assert "// superarchetype fallback:" not in html
+        assert ".table-scroll > table > thead > tr > th { position: sticky" in html
+        assert ".plan-ledger thead" not in html
         assert 'id="coverage-plan"' in html
         assert 'id="t-plan"' in html
         assert 'class="plan-toggle"' in html

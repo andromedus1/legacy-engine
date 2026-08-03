@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T20:52:23Z'
+generated_at: '2026-08-03T00:11:36Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -162,16 +162,20 @@ documents:
       archetype has exactly one primary plan for mutually exclusive match-level aggregation
       and may carry secondary labels for hybrid explanation only. Plan cells pool
       decisive matches directly rather than averaging archetype rates.'
-    - 'Strategic-plan same-plan play is structural 50% context: it contributes to
-      adjusted field WR but is never measured, never sets the floor, and is excluded
-      from the external-coverage denominator. External plan cells use the page''s
-      n>=8 measured gate; grounding requires the top external plans measured and >=80%
-      external field-share coverage.'
+    - 'Strategic-plan same-plan play is structural 50% context: the diagonal displays
+      zero directional wins, losses, and n, while observed_n separately reports cross-archetype
+      same-plan matches and mirror_n reports mirror context. It contributes to adjusted
+      field WR but is never measured, never sets the floor, and is excluded from the
+      external-coverage denominator. External plan cells use the page''s n>=8 measured
+      gate; grounding requires the top external plans measured and >=80% external
+      field-share coverage.'
     - Every archetype dropdown begins with five Against strategic plans cells built
-      directly from that archetype's decisive MatchResults, grouped by opponent primary
-      plan. Cells carry shrunk/raw rates, W-L, n, the page's uniform field window/provenance,
-      and measured/thin state; mirrors add structural 50% context to the archetype's
-      own primary-plan cell. The exact archetype ledger remains below.
+      directly from that archetype's decisive non-mirror MatchResults, grouped by
+      opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's
+      uniform field window/provenance, and measured/thin state. Exact-archetype mirrors
+      are reported separately as mirror_n and shown only as structural 50% context;
+      they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured
+      gate. The exact archetype ledger remains below.
     - Composition-derived superarchetypes remain an internal matrix/statistical-borrowing
       layer only. They emit no page-visible dropdown payload, family lean, family
       range, or presentation audit line.
