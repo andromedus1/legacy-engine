@@ -725,7 +725,7 @@ class TestLoadFieldCounts:
     def test_comment_lines_skipped(self):
         """Non-directive comment lines are ignored."""
         con = _con()
-        field = _load_field(con, field_text="# my Boulder field\n0.6 Delver\n0.4 Lands")
+        field = _load_field(con, field_text="# my local field\n0.6 Delver\n0.4 Lands")
         assert set(field.shares.keys()) == {"Delver", "Lands"}
         assert field.counts is None
 

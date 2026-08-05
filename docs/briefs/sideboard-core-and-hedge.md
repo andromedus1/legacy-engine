@@ -140,7 +140,7 @@ real field differs.
 already sample field shares `w ~ Dirichlet(counts + γ)`. That Dirichlet posterior **is** a ready-made
 set of plausible fields — Stage 2 can score flex candidates against *sampled* fields rather than the
 point estimate, with no new machinery. A second, complementary widener: blend the local field toward
-the global/online field (the test-drive showed Boulder ≈ online but ≠ general paper — the blend
+the global/online field (the test-drive showed the local meta ≈ online but ≠ general paper — the blend
 direction matters).
 
 **Two objective dials (present both; let the operator/epic-design choose):**

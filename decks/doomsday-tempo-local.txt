@@ -1,4 +1,4 @@
-# DOOMSDAY TEMPO — Boulder list (consensus subarchetype + judgment board, 2026-07-04)
+# DOOMSDAY TEMPO — the local meta list (consensus subarchetype + judgment board, 2026-07-04)
 # Maindeck: consensus over the mechanically-split TEMPO camp of Doomsday (mains Murktide/Tamiyo,
 # no Personal Tutor/One Ring; n=47 of 134 regime decks, EVOLVING tier; paper subset n=8).
 # Board: JUDGMENT LAYER applied (same discipline as the Dimir board) over the engine reference:

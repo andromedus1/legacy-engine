@@ -1,11 +1,11 @@
-# DIMIR TEMPO — Boulder meta list (engine-generated, 2026-07-04)
+# DIMIR TEMPO — local meta list (engine-generated, 2026-07-04)
 # Consensus 60: current regime, all provenance (n=125 decks). Board: engine-optimized vs the
-# Boulder field (decks/boulder-field-since-518.txt), smart+hedge; natural budget 6/15 dedicated.
+# local field (decks/local-field-since-518.txt), smart+hedge; natural budget 6/15 dedicated.
 # Overridden out: 2 Defense Grid + 1 Damping Sphere (sweep-confirmed systematic false positives);
 # refills by considering residual: Toxic Deluge (.0039), Barrowgoyf (.0028), Brazen Borrower (.0028).
 # NOTE: 1-of-heavy hedge spread is a known scorer bias for pitch-class counters (see
 # docs/analysis/copy-count-distribution-study.md; feature-min-viable-copy-count tracks the fix).
-# Andrew's tuned personal board: decks/dimir-tempo-optimized.txt (judgment-annotated).
+# the maintainer's tuned personal board: decks/dimir-tempo-optimized.txt (judgment-annotated).
 1 Bloodstained Mire
 4 Brainstorm
 1 Brazen Borrower

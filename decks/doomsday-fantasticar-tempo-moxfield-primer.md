@@ -1,7 +1,7 @@
-# Doomsday Fantasticar Tempo (Moxfield primer, Andrew's list conventions)
+# Doomsday Fantasticar Tempo (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
-List = decks/doomsday-fantasticar-tempo.txt (Andrew's build, 2026-07-13).
+List = decks/doomsday-fantasticar-tempo.txt (the maintainer's build, 2026-07-13).
 Camp validation: the Fantasticar-Doomsday camp exists in the corpus — n=19 maindecks, all since
 2026-06-20, and the consensus core matches this list nearly card-for-card (4 Fantasticar mode,
 ~4 Daze, ~4 Bauble+Petal, 1 LED, no Wasteland, 15-16 lands). Early camp record 35-18 (66%),
@@ -17,7 +17,7 @@ Camp validation: the Fantasticar-Doomsday camp exists in the corpus — n=19 mai
   * early camp signal: 35-18 (66.0%) across the 8 decks w/ standings — SPECULATIVE tier, not a read
 * board = full dimir-shell switch (10 creatures + 5 spells) — NOT the camp's combo-protection board; the goyf half is camp-validated (goyf in 10/19 boards, avg 3.6), the murktide/brazen half is 0/19 = your untested harder-tempo-pivot
 * tech NOT in this 75 (vs stock doomsday tempo / camp boards): consign, fatal push, surgical, duress, unearth, wasteland — matchup notes flag each hole where it bites
-* matchup wrs = archetype-level doomsday (camps pooled, full corpus) vs boulder field — priors, not measurements of this build
+* matchup wrs = archetype-level doomsday (camps pooled, full corpus) vs local field — priors, not measurements of this build
 
 ---
 **plan:**
@@ -63,7 +63,7 @@ Camp validation: the Fantasticar-Doomsday camp exists in the corpus — n=19 mai
 
 ---
 ---
-**matchups & sideboard** // wr = archetype-level doomsday priors (camps pooled, full corpus) vs boulder field; imputed = no cell data // standard transform-out = 2 doomsday 1 LED 1 wraith 1 edge (keeps 2 doomsday + oracle to stay honest)
+**matchups & sideboard** // wr = archetype-level doomsday priors (camps pooled, full corpus) vs local field; imputed = no cell data // standard transform-out = 2 doomsday 1 LED 1 wraith 1 edge (keeps 2 doomsday + oracle to stay honest)
 
 **izzet delver — 11.2% of field, 42.7% wr (n=113, worst measured — burn taxes the half-life):**
 * their plan: DRC/cutter clock + bolt your face + daze/fow the oracle

@@ -48,12 +48,12 @@ def _standing(rank: int, player: str) -> dict:
 
 
 def _build_backtest_db(tmp_path) -> str:
-    """A tmp DuckDB with three 8-player tournaments seeding a known Boulder top-finisher sample.
+    """A tmp DuckDB with three 8-player tournaments seeding a known the local meta top-finisher sample.
 
     Top-finisher threshold at `_TOP_FINISHER_QUANTILE=0.25` over an 8-player field is
     `ceil(0.25 * 8) = 2` — ranks 1-2 qualify in each tournament.
 
-    Qualifying (top-finisher) Boulder decks in T1+T2: alice (T1 rank1), bob (T1 rank2),
+    Qualifying (top-finisher) the local meta decks in T1+T2: alice (T1 rank1), bob (T1 rank2),
     erin (T2 rank1), frank (T2 rank2) — 4 decks total.
 
     Known sideboard signal across those 4 decks:
@@ -64,14 +64,14 @@ def _build_backtest_db(tmp_path) -> str:
     Non-qualifying decks are seeded with a DISTINCT sideboard card ("Wear // Tear" /
     "Pyroblast") that must NOT leak into observed_frequency if the rank/tournament
     filtering is correct:
-      dave  (T1 rank4, Boulder) -> Wear // Tear
-      grace (T2 rank5, Boulder) -> Pyroblast
+      dave  (T1 rank4, the local meta) -> Wear // Tear
+      grace (T2 rank5, the local meta) -> Pyroblast
 
     T3 is an OFF-FIELD tournament for feature-sfv-backtest-scoped's field-scoping tests:
-    6/8 decks are Reanimator (a graveyard strategy), only 2/8 are Boulder. Its qualifying
-    Boulder top-finishers (holly rank1, ivan rank2) run a DISTINCT card ("Grafdigger's
+    6/8 decks are Reanimator (a graveyard strategy), only 2/8 are the local meta. Its qualifying
+    the local meta top-finishers (holly rank1, ivan rank2) run a DISTINCT card ("Grafdigger's
     Cage") that must NOT appear in observed_frequency under the default field-scoped
-    backtest against a {Boulder, Doomsday} field (T3's Boulder-or-Doomsday share is
+    backtest against a {the local meta, Doomsday} field (T3's the local meta-or-Doomsday share is
     2/8=0.25, below `_FIELD_OVERLAP_MIN=0.5`) — but MUST appear when field-scoping is
     disabled (`field_scope=False`), proving the toggle actually gates the filter.
     """
@@ -87,11 +87,11 @@ def _build_backtest_db(tmp_path) -> str:
                 "Formats": "Legacy",
             },
             "Decks": [
-                _deck("alice", "Boulder", ["Brainstorm"], ["Surgical Extraction", "Ravenous Trap"], "1st"),
-                _deck("bob", "Boulder", ["Brainstorm"],
+                _deck("alice", "the local meta", ["Brainstorm"], ["Surgical Extraction", "Ravenous Trap"], "1st"),
+                _deck("bob", "the local meta", ["Brainstorm"],
                       ["Surgical Extraction", "Ravenous Trap", "Rest in Peace"], "2nd"),
                 _deck("carol", "Doomsday", ["Dark Ritual"], ["Rest in Peace"], "3rd"),
-                _deck("dave", "Boulder", ["Brainstorm"], ["Wear // Tear"], "4th"),
+                _deck("dave", "the local meta", ["Brainstorm"], ["Wear // Tear"], "4th"),
                 _deck("p5", "Doomsday", ["Dark Ritual"], [], "5th"),
                 _deck("p6", "Doomsday", ["Dark Ritual"], [], "6th"),
                 _deck("p7", "Doomsday", ["Dark Ritual"], [], "7th"),
@@ -106,7 +106,7 @@ def _build_backtest_db(tmp_path) -> str:
         }
         tid1 = store.load_tournament(con, parse_cache_item(raw1, "MTGO"))
         _label_archetypes(con, tid1, {
-            "alice": "Boulder", "bob": "Boulder", "carol": "Doomsday", "dave": "Boulder",
+            "alice": "the local meta", "bob": "the local meta", "carol": "Doomsday", "dave": "the local meta",
             "p5": "Doomsday", "p6": "Doomsday", "p7": "Doomsday", "p8": "Doomsday",
         })
 
@@ -119,11 +119,11 @@ def _build_backtest_db(tmp_path) -> str:
                 "Formats": "Legacy",
             },
             "Decks": [
-                _deck("erin", "Boulder", ["Brainstorm"], ["Surgical Extraction"], "1st"),
-                _deck("frank", "Boulder", ["Brainstorm"], ["Surgical Extraction", "Ravenous Trap"], "2nd"),
+                _deck("erin", "the local meta", ["Brainstorm"], ["Surgical Extraction"], "1st"),
+                _deck("frank", "the local meta", ["Brainstorm"], ["Surgical Extraction", "Ravenous Trap"], "2nd"),
                 _deck("q3", "Doomsday", ["Dark Ritual"], [], "3rd"),
                 _deck("q4", "Doomsday", ["Dark Ritual"], [], "4th"),
-                _deck("grace", "Boulder", ["Brainstorm"], ["Pyroblast"], "5th"),
+                _deck("grace", "the local meta", ["Brainstorm"], ["Pyroblast"], "5th"),
                 _deck("q6", "Doomsday", ["Dark Ritual"], [], "6th"),
                 _deck("q7", "Doomsday", ["Dark Ritual"], [], "7th"),
                 _deck("q8", "Doomsday", ["Dark Ritual"], [], "8th"),
@@ -137,11 +137,11 @@ def _build_backtest_db(tmp_path) -> str:
         }
         tid2 = store.load_tournament(con, parse_cache_item(raw2, "MTGO"))
         _label_archetypes(con, tid2, {
-            "erin": "Boulder", "frank": "Boulder", "q3": "Doomsday", "q4": "Doomsday",
-            "grace": "Boulder", "q6": "Doomsday", "q7": "Doomsday", "q8": "Doomsday",
+            "erin": "the local meta", "frank": "the local meta", "q3": "Doomsday", "q4": "Doomsday",
+            "grace": "the local meta", "q6": "Doomsday", "q7": "Doomsday", "q8": "Doomsday",
         })
 
-        # --- Tournament 3 (8 players) — OFF-FIELD: 6/8 Reanimator, 2/8 Boulder ---
+        # --- Tournament 3 (8 players) — OFF-FIELD: 6/8 Reanimator, 2/8 the local meta ---
         raw3 = {
             "Tournament": {
                 "Name": "Backtest Corpus 3 (graveyard-heavy, off-field)",
@@ -150,8 +150,8 @@ def _build_backtest_db(tmp_path) -> str:
                 "Formats": "Legacy",
             },
             "Decks": [
-                _deck("holly", "Boulder", ["Brainstorm"], ["Grafdigger's Cage"], "1st"),
-                _deck("ivan", "Boulder", ["Brainstorm"], ["Grafdigger's Cage"], "2nd"),
+                _deck("holly", "the local meta", ["Brainstorm"], ["Grafdigger's Cage"], "1st"),
+                _deck("ivan", "the local meta", ["Brainstorm"], ["Grafdigger's Cage"], "2nd"),
                 _deck("r3", "Reanimator", ["Entomb"], [], "3rd"),
                 _deck("r4", "Reanimator", ["Entomb"], [], "4th"),
                 _deck("r5", "Reanimator", ["Entomb"], [], "5th"),
@@ -168,7 +168,7 @@ def _build_backtest_db(tmp_path) -> str:
         }
         tid3 = store.load_tournament(con, parse_cache_item(raw3, "MTGO"))
         _label_archetypes(con, tid3, {
-            "holly": "Boulder", "ivan": "Boulder", "r3": "Reanimator", "r4": "Reanimator",
+            "holly": "the local meta", "ivan": "the local meta", "r3": "Reanimator", "r4": "Reanimator",
             "r5": "Reanimator", "r6": "Reanimator", "r7": "Reanimator", "r8": "Reanimator",
         })
     finally:
@@ -188,7 +188,7 @@ def _label_archetypes(con: duckdb.DuckDBPyConnection, tournament_id: str, by_pla
 
 def _fake_field() -> FieldDistribution:
     return FieldDistribution(
-        shares={"Boulder": 0.6, "Doomsday": 0.4},
+        shares={"the local meta": 0.6, "Doomsday": 0.4},
         field_source="custom",
         counts=None,
         no_data=frozenset(),
@@ -217,7 +217,7 @@ def _fake_package(cards: dict[str, int]) -> SideboardPackage:
 
 class TestBacktestBoardClassification:
     def test_top_finisher_filter_and_classification(self, tmp_path, monkeypatch):
-        """Only rank<=threshold Boulder decks feed observed_frequency; classification
+        """Only rank<=threshold the local meta decks feed observed_frequency; classification
         correctly buckets overlap / scorer_only / winners_only."""
         db_path = _build_backtest_db(tmp_path)
         con = store.connect(db_path)
@@ -231,14 +231,14 @@ class TestBacktestBoardClassification:
         )
 
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
         assert isinstance(result, BoardBacktest)
-        assert result.archetype == "Boulder"
+        assert result.archetype == "the local meta"
 
-        # Exactly 4 qualifying top-finisher Boulder decks (alice, bob, erin, frank): the fixture's
+        # Exactly 4 qualifying top-finisher the local meta decks (alice, bob, erin, frank): the fixture's
         # threshold math is ceil(_TOP_FINISHER_QUANTILE * 8) = 2 qualifiers per 8-player tournament,
         # across T1+T2 = 4. Pin the constant so a retune doesn't silently invalidate this fixture.
         assert math.ceil(_TOP_FINISHER_QUANTILE * 8) == 2
@@ -273,7 +273,7 @@ class TestBacktestBoardClassification:
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
         )
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -289,7 +289,7 @@ class TestBacktestBoardClassification:
         store.init_schema(con)
 
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -331,7 +331,7 @@ class TestBacktestBoardClassification:
 
         monkeypatch.setattr(backtest_mod, "recommend_sideboard", _boom)
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -354,22 +354,22 @@ class TestApplyFieldScopePure:
 
     def test_majority_in_field_tournament_is_kept(self):
         deck_keys = [("t1", 0), ("t1", 1)]
-        archetype_counts = {"t1": {"Boulder": 6, "Doomsday": 2}}
+        archetype_counts = {"t1": {"the local meta": 6, "Doomsday": 2}}
         kept, considered, excluded = _apply_field_scope(
-            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+            deck_keys, archetype_counts, {"the local meta", "Doomsday"}
         )
         assert kept == deck_keys
         assert considered == 1
         assert excluded == 0
 
     def test_minority_in_field_tournament_is_excluded(self):
-        """6/8 Reanimator, 2/8 Boulder: a {Boulder, Doomsday} field has only 25% overlap,
+        """6/8 Reanimator, 2/8 the local meta: a {the local meta, Doomsday} field has only 25% overlap,
         below _FIELD_OVERLAP_MIN — the tournament's decks are dropped even though they
         pass the rank cut on their own."""
         deck_keys = [("t3", 0), ("t3", 1)]
-        archetype_counts = {"t3": {"Boulder": 2, "Reanimator": 6}}
+        archetype_counts = {"t3": {"the local meta": 2, "Reanimator": 6}}
         kept, considered, excluded = _apply_field_scope(
-            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+            deck_keys, archetype_counts, {"the local meta", "Doomsday"}
         )
         assert kept == []
         assert considered == 1
@@ -378,9 +378,9 @@ class TestApplyFieldScopePure:
     def test_boundary_at_exactly_min_overlap_is_kept(self):
         """Exactly _FIELD_OVERLAP_MIN (0.5) counts as in-field (>=, not >)."""
         deck_keys = [("t4", 0)]
-        archetype_counts = {"t4": {"Boulder": 4, "Reanimator": 4}}
+        archetype_counts = {"t4": {"the local meta": 4, "Reanimator": 4}}
         kept, considered, excluded = _apply_field_scope(
-            deck_keys, archetype_counts, {"Boulder"}, min_overlap=_FIELD_OVERLAP_MIN
+            deck_keys, archetype_counts, {"the local meta"}, min_overlap=_FIELD_OVERLAP_MIN
         )
         assert kept == deck_keys
         assert excluded == 0
@@ -390,7 +390,7 @@ class TestApplyFieldScopePure:
         tournament with zero labeled decks) has zero evidence and is excluded — never
         fabricated as in-field."""
         deck_keys = [("t5", 0)]
-        kept, considered, excluded = _apply_field_scope(deck_keys, {}, {"Boulder"})
+        kept, considered, excluded = _apply_field_scope(deck_keys, {}, {"the local meta"})
         assert kept == []
         assert considered == 1
         assert excluded == 1
@@ -398,19 +398,19 @@ class TestApplyFieldScopePure:
     def test_multi_tournament_mix_partitions_correctly(self):
         deck_keys = [("t1", 0), ("t2", 0), ("t3", 0), ("t3", 1)]
         archetype_counts = {
-            "t1": {"Boulder": 8},                       # 100% in-field -> kept
+            "t1": {"the local meta": 8},                       # 100% in-field -> kept
             "t2": {"Doomsday": 8},                       # 100% in-field -> kept
-            "t3": {"Boulder": 2, "Reanimator": 6},        # 25% in-field -> excluded
+            "t3": {"the local meta": 2, "Reanimator": 6},        # 25% in-field -> excluded
         }
         kept, considered, excluded = _apply_field_scope(
-            deck_keys, archetype_counts, {"Boulder", "Doomsday"}
+            deck_keys, archetype_counts, {"the local meta", "Doomsday"}
         )
         assert set(kept) == {("t1", 0), ("t2", 0)}
         assert considered == 3
         assert excluded == 1
 
     def test_empty_deck_keys_is_a_noop(self):
-        kept, considered, excluded = _apply_field_scope([], {}, {"Boulder"})
+        kept, considered, excluded = _apply_field_scope([], {}, {"the local meta"})
         assert kept == []
         assert considered == 0
         assert excluded == 0
@@ -423,7 +423,7 @@ class TestApplyFieldScopePure:
 
 class TestBacktestBoardFieldScope:
     def test_default_field_scope_excludes_off_field_tournament(self, tmp_path, monkeypatch):
-        """Default field_scope=True: T3 (6/8 Reanimator) is excluded from a {Boulder,
+        """Default field_scope=True: T3 (6/8 Reanimator) is excluded from a {the local meta,
         Doomsday} field backtest — its "Grafdigger's Cage" signal must not leak in, and
         the pre-existing T1+T2 sample (n=4) is unaffected."""
         db_path = _build_backtest_db(tmp_path)
@@ -432,7 +432,7 @@ class TestBacktestBoardFieldScope:
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
         )
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -440,7 +440,7 @@ class TestBacktestBoardFieldScope:
         assert result.n_winning_decks == 4  # T1+T2 only; T3 excluded
         assert "Grafdigger's Cage" not in result.observed_frequency
         assert result.observed_frequency["Surgical Extraction"] == pytest.approx(1.0)
-        assert result.n_tournaments_considered == 3  # T1, T2, T3 all had qualifying Boulder decks
+        assert result.n_tournaments_considered == 3  # T1, T2, T3 all had qualifying the local meta decks
         assert result.n_tournaments_excluded == 1  # only T3
 
     def test_no_field_scope_includes_off_field_tournament(self, tmp_path, monkeypatch):
@@ -452,7 +452,7 @@ class TestBacktestBoardFieldScope:
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
         )
         try:
-            result = backtest_board(con, "Boulder", _fake_field(), field_scope=False)
+            result = backtest_board(con, "the local meta", _fake_field(), field_scope=False)
         finally:
             con.close()
 
@@ -483,7 +483,7 @@ class TestBacktestBoardFieldScope:
             warnings=(),
         )
         try:
-            result = backtest_board(con, "Boulder", disjoint_field)
+            result = backtest_board(con, "the local meta", disjoint_field)
         finally:
             con.close()
 
@@ -504,7 +504,7 @@ class TestBacktestBoardFieldScope:
         )
         try:
             result = backtest_board(
-                con, "Boulder", _fake_field(), since="2026-01-08", until="2026-01-09"
+                con, "the local meta", _fake_field(), since="2026-01-08", until="2026-01-09"
             )
         finally:
             con.close()
@@ -528,7 +528,7 @@ class TestBacktestBoardFieldScope:
         )
         try:
             result = backtest_board(
-                con, "Boulder", _fake_field(), since="2026-01-15", until="2026-01-16"
+                con, "the local meta", _fake_field(), since="2026-01-15", until="2026-01-16"
             )
         finally:
             con.close()
@@ -555,10 +555,10 @@ class TestAdviseBacktestCLI:
         tier, and the explicit non-negotiable caveat line — always, regardless of verdict."""
         db_path = _build_backtest_db(tmp_path)
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
 
         fake_result = BoardBacktest(
-            archetype="Boulder",
+            archetype="the local meta",
             n_winning_decks=4,
             confidence="speculative",
             recommended=("Chalice of the Void", "Surgical Extraction", "Toxic Deluge"),
@@ -573,12 +573,12 @@ class TestAdviseBacktestCLI:
 
         result = runner.invoke(
             main,
-            ["advise", "backtest", "--archetype", "Boulder", "--field", str(field_file), "--db", db_path],
+            ["advise", "backtest", "--archetype", "the local meta", "--field", str(field_file), "--db", db_path],
         )
         assert result.exit_code == 0, result.output
 
         out = result.output
-        assert "// backtest: Boulder" in out
+        assert "// backtest: the local meta" in out
         assert "// confidence: speculative" in out
         assert "HONEST DEGRADE" in out
         assert "Overlap" in out
@@ -596,7 +596,7 @@ class TestAdviseBacktestCLI:
         still exit 0 — never a crash, never a fabricated verdict."""
         db_path = _build_backtest_db(tmp_path)
         field_file = tmp_path / "field.txt"
-        field_file.write_text("1.0 Boulder\n")
+        field_file.write_text("1.0 the local meta\n")
 
         empty_result = BoardBacktest(
             archetype="Nonexistent",
@@ -629,7 +629,7 @@ class TestAdviseBacktestCLI:
         correct considered/excluded counts."""
         db_path = _build_backtest_db(tmp_path)
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
 
         monkeypatch.setattr(
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
@@ -637,7 +637,7 @@ class TestAdviseBacktestCLI:
 
         result = runner.invoke(
             main,
-            ["advise", "backtest", "--archetype", "Boulder", "--field", str(field_file), "--db", db_path],
+            ["advise", "backtest", "--archetype", "the local meta", "--field", str(field_file), "--db", db_path],
         )
         assert result.exit_code == 0, result.output
         out = result.output
@@ -652,7 +652,7 @@ class TestAdviseBacktestCLI:
         """`--no-field-scope` reproduces the prior global (unscoped) sample end-to-end."""
         db_path = _build_backtest_db(tmp_path)
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
 
         monkeypatch.setattr(
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
@@ -661,7 +661,7 @@ class TestAdviseBacktestCLI:
         result = runner.invoke(
             main,
             [
-                "advise", "backtest", "--archetype", "Boulder", "--field", str(field_file),
+                "advise", "backtest", "--archetype", "the local meta", "--field", str(field_file),
                 "--db", db_path, "--no-field-scope",
             ],
         )
@@ -687,7 +687,7 @@ class TestAdviseBacktestCLI:
 
         result = runner.invoke(
             main,
-            ["advise", "backtest", "--archetype", "Boulder", "--field", str(field_file), "--db", db_path],
+            ["advise", "backtest", "--archetype", "the local meta", "--field", str(field_file), "--db", db_path],
         )
         assert result.exit_code == 0, result.output
         out = result.output
@@ -710,7 +710,7 @@ class TestCopyCountSurfaces:
     def test_observed_copy_distribution_histograms_the_top_finisher_sample(
         self, tmp_path, monkeypatch
     ):
-        """T1+T2's 4 qualifying Boulder decks each run their side cards at 1 copy —
+        """T1+T2's 4 qualifying the local meta decks each run their side cards at 1 copy —
         the histogram must count decks per copy-count, over qualifiers only."""
         db_path = _build_backtest_db(tmp_path)
         con = store.connect(db_path)
@@ -718,7 +718,7 @@ class TestCopyCountSurfaces:
             backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
         )
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -748,9 +748,9 @@ class TestCopyCountSurfaces:
                 },
                 "Decks": [
                     # Dupe rows: Toxic Deluge twice at Count 1 -> per-deck copies = 2.
-                    _deck("alice", "Boulder", ["Brainstorm"],
+                    _deck("alice", "the local meta", ["Brainstorm"],
                           ["Toxic Deluge", "Toxic Deluge"], "1st"),
-                    _deck("bob", "Boulder", ["Brainstorm"], ["Toxic Deluge"], "2nd"),
+                    _deck("bob", "the local meta", ["Brainstorm"], ["Toxic Deluge"], "2nd"),
                     _deck("carol", "Doomsday", ["Dark Ritual"], [], "3rd"),
                     _deck("dave", "Doomsday", ["Dark Ritual"], [], "4th"),
                     _deck("p5", "Doomsday", ["Dark Ritual"], [], "5th"),
@@ -767,14 +767,14 @@ class TestCopyCountSurfaces:
             }
             tid = store.load_tournament(con, parse_cache_item(raw, "MTGO"))
             _label_archetypes(con, tid, {
-                "alice": "Boulder", "bob": "Boulder", "carol": "Doomsday",
+                "alice": "the local meta", "bob": "the local meta", "carol": "Doomsday",
                 "dave": "Doomsday", "p5": "Doomsday", "p6": "Doomsday",
                 "p7": "Doomsday", "p8": "Doomsday",
             })
             monkeypatch.setattr(
                 backtest_mod, "recommend_sideboard", lambda *a, **k: _fake_package({})
             )
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -791,7 +791,7 @@ class TestCopyCountSurfaces:
             lambda *a, **k: _fake_package({"Surgical Extraction": 2, "Toxic Deluge": 1}),
         )
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -808,7 +808,7 @@ class TestCopyCountSurfaces:
 
         monkeypatch.setattr(backtest_mod, "recommend_sideboard", _boom)
         try:
-            result = backtest_board(con, "Boulder", _fake_field())
+            result = backtest_board(con, "the local meta", _fake_field())
         finally:
             con.close()
 
@@ -828,7 +828,7 @@ class TestCopyCountSurfaces:
 
         monkeypatch.setattr(backtest_mod, "recommend_sideboard", _capture)
         try:
-            backtest_board(con, "Boulder", _fake_field(), solver="greedy")
+            backtest_board(con, "the local meta", _fake_field(), solver="greedy")
         finally:
             con.close()
 

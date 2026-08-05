@@ -1,4 +1,4 @@
-# Esper Phelia, Yorion 80 (Moxfield primer, Andrew's list conventions)
+# Esper Phelia, Yorion 80 (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/esper-phelia-yorion-80.txt (Carroz 2nd, Legacy Challenge 32 2025-09-21, unmodified; 2026-07-20).

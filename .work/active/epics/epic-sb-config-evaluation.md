@@ -30,10 +30,10 @@ test (the measurement primitive) and a configuration comparator (the decision to
 compares two whole 75s — including **transform-alternates** (one deck that sideboards into a
 different deck) — against the field, with a **break-even** readout.
 
-**Motivating real-world use (Andrew, paper Boulder meta):** evaluating "Doomsday-tempo that
+**Motivating real-world use (the maintainer, paper local meta):** evaluating "Doomsday-tempo that
 transforms into Dimir Tempo" vs "Dimir Tempo + a silver-bullet SB (Massacre / Toxic Deluge /
 Hurkyl's Recall / Null Rod)." Session analysis (2026-06-29) found the transform option wins
-net field EV (~56% vs ~53% over the n≥30 Boulder field), but the decision hinges on the
+net field EV (~56% vs ~53% over the n≥30 local field), but the decision hinges on the
 both-modes-underwater matchups (Blue Artifacts, Eldrazi) where only the SB can help — exactly
 what these tools would quantify. The two reliable matchup inversions driving the result:
 Death & Taxes (Dimir 34.6% → Doomsday 71.8%) and Energy (37.9% → 59.6%).
@@ -64,7 +64,7 @@ The engine has **no game-level or sideboarding-action data** — only the regist
 aggregate match score (`"2-1"`), with no game order or board-state. So every sideboard-lift
 number is a **presence-correlational proxy over the decklist**, with selection confounds (the
 decks that choose to run a card may differ systematically) and thin per-matchup samples;
-Boulder-specific SB data is ~nil. The deliverable is **decision support with explicit
+local-field-specific SB data is ~nil. The deliverable is **decision support with explicit
 assumptions + break-even sensitivity, NOT "the data proves it."** Both features must wear this
 honestly (honest-degrade marker pattern: Wilson CIs, significance tests, loud thin-n /
 presence-correlational banners).

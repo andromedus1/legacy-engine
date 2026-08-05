@@ -1,4 +1,4 @@
-# Doomsday — Flow State + 4 Fantasticar (Moxfield primer, Andrew's list conventions)
+# Doomsday — Flow State + 4 Fantasticar (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/doomsday-flowstate-fantasticar.txt (Eureka22422 5-0, 2026-07-01, unmodified). 2026-07-23.

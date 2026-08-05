@@ -20,7 +20,7 @@ updated: 2026-06-15
 
 ## Brief
 Tournaments carry no geographic/location field (the `tournaments` table is id/name/date/uri/format/
-source/provenance — no location). Natively filtering by region (the headline Boulder use case) requires
+source/provenance — no location). Natively filtering by region (the headline the local meta use case) requires
 a LOCATION DATA SOURCE that does not exist yet: the fbettega cache doesn't structure location, and
 parsing it from event names/URIs is unreliable. This phase therefore needs RESEARCH (where does
 trustworthy location data come from?) before design, and it ROLLS FOUNDATION DOCS (new geo entity +

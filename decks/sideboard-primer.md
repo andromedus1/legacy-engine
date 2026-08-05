@@ -174,7 +174,7 @@ OUT:
 A creature deck that taxes your mana — answer the board, not their spells. Massacre is ideal: they're on Plains and you have a Swamp, so it's free, and -2/-2 sweeps Thalia / Mother of Runes / Stoneforge / most bears at once. Null Rod shuts off Aether Vial and the Stoneforge → Batterskull/Jitte plan (no equip, no Jitte). Toxic and Sheoldred clean up the rest. Cut Daze (Wasteland/Port punish you) and Bauble.
 
 ---
-Eldrazi / Post (heaviest in paper & Boulder) · C —
+Eldrazi / Post (heaviest in paper & the local meta) · C —
 
 Their plan: Ancient Tomb / Eldrazi Temple / Cloudpost ramp into oversized colorless creatures (Thought-Knot Seer, Reality Smasher) ahead of curve.
 
@@ -266,7 +266,7 @@ OUT:
 Force of Negation counters Aluren (an enchantment) before the engine starts. Once it resolves the matchup is hard (it free-casts a wall of creatures; Edict only nabs a chump). Strip it with maindeck Thoughtseize, keep Fatal Push for Cavern Harpy / Imperial Recruiter, and race. Daze is too slow — they hold up mana.
 
 ---
-Pox Loam (Smallpox, ~1% — Boulder local) · B —
+Pox Loam (Smallpox, ~1% — the local meta local) · B —
 
 Their plan: resource denial — Smallpox plus Life from the Loam recur Wasteland/Strip Mine to strip your lands every turn, grinding you out under discard behind a lone threat.
 

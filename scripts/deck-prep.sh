@@ -21,7 +21,7 @@
 #
 # Examples:
 #   scripts/deck-prep.sh decks/dimir-tempo.txt
-#   scripts/deck-prep.sh decks/dimir-tempo.txt decks/boulder-field.txt Entomb
+#   scripts/deck-prep.sh decks/dimir-tempo.txt decks/local-field.txt Entomb
 set -euo pipefail
 
 DECK="${1:?usage: deck-prep.sh <deck.txt> [field.txt] [regime]}"

@@ -38,7 +38,7 @@ decomposes the strategic track.
 ## Design decisions
 <!-- captured 2026-07-31 via epic-design --only-questions; the /brief and feature-design treat these as fixed inputs -->
 - **IR home**: a NEW `semantics/` module — a fresh bounded context for the validated
-  semantic IR; `interaction_facts.py` becomes a consumer of its output (Andrew's explicit
+  semantic IR; `interaction_facts.py` becomes a consumer of its output (the maintainer's explicit
   call, chosen over extending InteractionFacts in place). The ~28 compiled regexes across
   whattoplay/sideboard/card_tags/interaction_facts migrate to consumers.
 - **Validation ground truth**: internal hand-curated golden fixtures against verbatim
@@ -57,7 +57,7 @@ decomposes the strategic track.
 
 # Card-semantics rules layer — replace regex+memory with a validated semantic IR
 
-Andrew's observation (2026-07-03, model-switch review): the model has repeatedly misinterpreted
+the maintainer's observation (2026-07-03, model-switch review): the model has repeatedly misinterpreted
 card rules and card impact — "something about the overall understanding in the rules engine is
 off." Root cause analysis: card semantics currently enter the engine through THREE fragile layers:
 

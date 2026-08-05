@@ -1591,7 +1591,7 @@ class TestHateCoverability:
         assert not any(w.startswith("// hate-uncovered:") for w in model.warnings)
 
     def test_uncovered_hate_element_is_capped_to_real_coverage_scale(self, make_hoser):
-        """The Andrew's-Dimir-Tempo shape: a reactive UB deck where the only catalog `_hate`
+        """The the maintainer's-Dimir-Tempo shape: a reactive UB deck where the only catalog `_hate`
         card (Defense Grid) is anti-synergy-filtered (self-hoses a reactive deck), so the
         `_hate:combo` pseudo-element ends up with ZERO covering candidate. Its natural weight
         (which would otherwise dwarf real opponent coverage) is capped at

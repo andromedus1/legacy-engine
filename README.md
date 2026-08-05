@@ -101,7 +101,7 @@ is fetched once and mirrored. Every derived stat carries a confidence tier (`est
 Requires **Python 3.11+**.
 
 ```bash
-git clone git@github.com:andromedus1/legacy-engine.git
+git clone https://github.com/andromedus1/legacy-engine.git
 cd legacy-engine
 python3 -m venv .venv
 source .venv/bin/activate
@@ -193,7 +193,7 @@ legacy-engine report subgroup --archetype "Doomsday" --signature "Murktide Regen
 # Player identity and strength
 legacy-engine identify suggest          # candidate alias clusters (identity dedup)
 legacy-engine identify strong           # players clearing the strength gate in the current regime
-legacy-engine identify track "bosh95"  # per-regime archetype history for a player
+legacy-engine identify track "example42"  # per-regime archetype history for a player
 
 # Deck generation
 legacy-engine generate consensus --archetype "Dimir Tempo"           # consensus baseline (mode 1)
@@ -309,6 +309,20 @@ docs/          # vision, spec, architecture, principles, briefs, knowledge index
 tests/         # pytest suite (3,532 passing; one existing UMAP warning; no xfails)
 ```
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for a working checkout, the
+house rules (every number labeled; tests ship with the change; hermetic CLI tests), and where
+things live. The test suite is hermetic and needs no seeded corpus, so `pip install -e ".[dev]"`
+followed by `python -m pytest -q` works on a fresh clone.
+
+## Privacy
+
+This repository ships no personal data. `src/legacy_engine/data/players/aliases.json` — the
+cross-source player-identity map — is intentionally **empty**: linking one person's handles
+across MTGO, Melee, and paper is identifying information about a third party. Add your own
+entries locally and keep them out of commits.
+
 ## License
 
-Private project — all rights reserved.
+[MIT](LICENSE).

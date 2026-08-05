@@ -225,9 +225,9 @@ class TestResolveVenues:
 
     def test_unknown_key_raises_value_error_listing_valid(self):
         with pytest.raises(ValueError) as exc_info:
-            resolve_venues(None, ["online", "local:boulder"])  # type: ignore[arg-type]
+            resolve_venues(None, ["online", "local:local"])  # type: ignore[arg-type]
         msg = str(exc_info.value)
-        assert "local:boulder" in msg
+        assert "local:local" in msg
         assert "online" in msg
         assert "paper" in msg
 

@@ -15,7 +15,7 @@ summary: |
   hot-spare ambition: run the same scraper ourselves on a schedule, verify spare output against
   the existing cache parser, and flip CACHE_DIR only when upstream is down. Also pins the
   machine-readable sources and polling designs for B&R + set-release monitoring, launchd
-  scheduling patterns for Andrew's Mac, and a feasibility verdict on Card Kingdom prices.
+  scheduling patterns for the maintainer's Mac, and a feasibility verdict on Card Kingdom prices.
 key_findings:
   - "The entire upstream is one person's home server: no GitHub Actions in either fbettega repo, and the July 2026 outage (26 days of missed daily updates, 07-02→07-28) was caused by a house move + server hardware changes; April 2026 had a second multi-day stall — hot-spare is justified by observed base rate, not paranoia."
   - "Running the scraper ourselves is LOW effort: pure Python (beautifulsoup4/requests/dateutil/numpy), one CLI entry point defaulting to a self-backfilling trailing 7-day window, idempotent file writes; MTGO — the engine's primary Legacy source — needs no credentials at all (public pages with embedded JSON). Melee needs a real account login (undocumented endpoints, unverifiable ToS — the one gray zone); Topdeck has an official free-key API at 100 req/min."
@@ -39,7 +39,7 @@ Unblocks `epic-data-autonomy`. The epic's design decisions are **fixed inputs**:
 upstream-ownership ambition is a **hot spare** — build and periodically exercise our own
 tournament-data generation, keep consuming upstream normally, flip to ours only when upstream is
 down (not full replication, not archive-only); (b) the scheduling substrate is **local launchd on
-Andrew's Mac** against local `data/` + DuckDB, with session-start surfacing of results. This brief
+the maintainer's Mac** against local `data/` + DuckDB, with session-start surfacing of results. This brief
 answers what the builder needs: how the upstream actually runs and fails, what running it
 ourselves takes, how to verify the spare, which sources the B&R/release monitors should poll and
 how, the launchd mechanics, and whether Card Kingdom prices are ingestible.
@@ -72,7 +72,7 @@ on 07-02; then nothing until "first fix manual"/"second fix" and a resumed autom
 `[data-autonomy-cache-commits]{2}`. Root cause, from the maintainer on issue #3: "I've recently
 been through a home move and made several hardware upgrades/changes to my server environment,
 which put the automated script on hold" `[data-autonomy-outage-issue3]{3}`. Nobody's monitoring
-caught it — the report came from a downstream consumer (Andrew, as `andromedus1`) three weeks in,
+caught it — the report came from a downstream consumer (the maintainer, as `andromedus1`) three weeks in,
 and the issue closed as completed 2026-07-29 `[data-autonomy-outage-issue3]{3}`.
 
 **Not the first stall.** The repo's entire issue history is outage reports: issue #1 "Automatic
@@ -276,7 +276,7 @@ loudly-surfaced failure mode, not a stack trace in a log nobody reads.
 
 ---
 
-## 5. launchd scheduling on Andrew's Mac
+## 5. launchd scheduling on the maintainer's Mac
 
 ### 5.1 The load-bearing semantics
 

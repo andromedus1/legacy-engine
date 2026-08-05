@@ -3493,7 +3493,7 @@ field's mean estimate vs. its worst-tail (Dirichlet lower-quantile) estimate. ``
 means "tune entirely to the expected field" (bonus is always 0.0 — the documented disabled
 path); a smaller ``alpha`` means "hedge more toward the field you fear" (the bonus grows
 toward ``_OPTION_VALUE_SCALE * tail_share``). 0.7 is a conservative default, chosen by the
-field-scoped `advise backtest` acceptance run (Dimir Tempo vs the Boulder field, see this
+field-scoped `advise backtest` acceptance run (Dimir Tempo vs the local field, see this
 feature's design notes) so the bonus nudges ranking toward robust, multi-archetype cards
 without moving the already-validated recommendation off the overlap it earned."""
 

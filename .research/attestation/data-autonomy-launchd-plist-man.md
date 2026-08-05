@@ -12,7 +12,7 @@ version: Darwin 25.3.0 (macOS)
 ## Summary
 
 The authoritative reference for LaunchAgent job definitions, captured verbatim from
-`man launchd.plist` on the target machine (Andrew's Mac, Darwin 25.3.0) into the
+`man launchd.plist` on the target machine (the maintainer's Mac, Darwin 25.3.0) into the
 reference corpus. Load-bearing keys for the scheduled-refresh design:
 `StartCalendarInterval` (crontab-like calendar firing; and unlike cron, jobs missed
 while the Mac sleeps run once on wake, coalesced), `StartInterval` (every-N-seconds,

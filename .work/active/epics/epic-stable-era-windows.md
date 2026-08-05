@@ -15,7 +15,7 @@ updated: 2026-07-12
 
 ## Brief
 
-**Andrew's framing (2026-07-11, verbatim intent):** when we look for deck matchups, look across
+**the maintainer's framing (2026-07-11, verbatim intent):** when we look for deck matchups, look across
 card-release and ban notices to identify STABLE ERAS per archetype and subarchetype — grab the
 longest-running package of data that's in the entity's CURRENT era, where "current era" is a
 per-archetype-and-subarchetype definition. Need a way to assess whether an archetype was DISTURBED:
@@ -65,7 +65,7 @@ comparisons then use this to grab the biggest possible window of solid data.
 
 ## Design decisions
 
-Locked with Andrew via `--only-questions` (2026-07-11). Child feature designs treat these as
+Locked with the maintainer via `--only-questions` (2026-07-11). Child feature designs treat these as
 fixed inputs — do not re-ask.
 
 - **Shrinkage rollout — one shot, both default together**: hierarchical cell shrinkage

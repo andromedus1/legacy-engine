@@ -1,5 +1,5 @@
 # DOOMSDAY TEMPO + THE FANTASTICAR — combo-front, Fantasticar as the fair-plan threat
-# Base = doomsday-tempo-boulder maindeck. ONLY change: -2 Murktide Regent, +2 The Fantasticar.
+# Base = doomsday-tempo-local maindeck. ONLY change: -2 Murktide Regent, +2 The Fantasticar.
 # Combo core is byte-identical (density untouched); we swap the clunky delve threat for a
 # ritual-castable, graveyard-free, removal-dodging one. Fantasticar wants a spell-dense shell —
 # this is the densest one in Legacy, so both its abilities are live (animate every noncreature

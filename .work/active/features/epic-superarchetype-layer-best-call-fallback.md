@@ -55,7 +55,7 @@ substrate dependency.
 
 - Parent epic: `epic-superarchetype-layer`
 - Position in epic: **consumer feature, last** — validates the whole arc against the live corpus and
-  is where Andrew actually sees the change.
+  is where the maintainer actually sees the change.
 - **Composes with `feature-multi-split-matrix`** (declared `depends_on`): its
   `-best-call-onepass` child rewrites the exact per-parent camp loop and `make_cells` ladder this
   feature extends, and restores cross-camp `P(best)` from one shared-field MC. Extend the migrated

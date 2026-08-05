@@ -7,7 +7,7 @@ updated: 2026-07-04
 summary: |
   Distribution-first study of per-card sideboard copy-count distributions among top-finisher
   boards (archetype-sweep payloads, 2026-07-04: 26 archetypes, 293 top-finisher decks global /
-  153 Boulder-scoped). Tests idea-copy-count-tipping-point's "winners run fixers at 0 or 2+"
+  153 local-field-scoped). Tests idea-copy-count-tipping-point's "winners run fixers at 0 or 2+"
   hypothesis against the solver's pure-concave per-copy taper.
 key_findings:
   - "The 0-or-2+ tipping point is CARD-MECHANIC-SPECIFIC, not category-wide: the hypothesis as stated is NOT supported for reactive fixers as a class (winners run them 53-60% as 1-ofs, concave-decreasing — engine 1-ofs are legitimate there)."
@@ -16,7 +16,7 @@ key_findings:
   - "Category PMFs conditional on inclusion (global): broad-counter mode-at-2plus (P2=.54); color-blast, reactive-fixer, dedicated-hate concave-decreasing — the current concave taper is empirically right for 3 of 4 classified categories."
   - "Solver-vs-winners divergence concentrates where predicted: 42-45% of solver broad-counter picks are 1-ofs where winners' mode is 2+; only 17% for color-blasts."
   - "Modeling implication: per-card minimum-viable-count derived from MECHANICS (pitch-cost cards k_min=2; opening-hand threshold cards k_min≈4), not a category S-curve and never copied from winners' frequencies — feeds the rules-engine arc (idea-card-semantics-rules-layer)."
-  - "Shapes replicate across the global and Boulder-scoped payloads (robustness); most archetype winner samples are speculative-tier (n<30), honestly labeled — treat per-card PMFs with n>=20 as the reliable floor."
+  - "Shapes replicate across the global and local-field-scoped payloads (robustness); most archetype winner samples are speculative-tier (n<30), honestly labeled — treat per-card PMFs with n>=20 as the reliable floor."
 ---
 
 # Copy-count distribution study — winners' sideboard copy histograms vs the concave taper
@@ -28,7 +28,7 @@ or 2+ copies while our solver produces 1-ofs — is the per-copy value curve's p
 **Method** (distribution-first, per the idea's methodology addendum + ds-engine EDA
 inventory §2 caveats): characterize the OBSERVED distributions before choosing any model
 form. Inputs: the archetype-sweep `--json` payloads (2026-07-04; determinism-fixed solver,
-PR #35): 26 swept archetypes, 293 top-finisher decks (global field) / 153 (Boulder-scoped).
+PR #35): 26 swept archetypes, 293 top-finisher decks (global field) / 153 (local-field-scoped).
 Copy-count PMFs are conditional on running the card at all (0x reported separately as
 zero-inflation); no normality/dip p-values on support {1..4} — shapes are tabulated
 directly, per-category and per-card (n≥20 floor). Study script:
@@ -54,7 +54,7 @@ classified categories.
 
 | card | n | P(1) | P(2) | P(3) | P(4) | mechanism |
 |---|---|---|---|---|---|---|
-| Consign to Memory | 136 | .044 | .647 | .235 | .074 | pitch-adjacent redundancy (Boulder: .062/.593) |
+| Consign to Memory | 136 | .044 | .647 | .235 | .074 | pitch-adjacent redundancy (the local meta: .062/.593) |
 | Dismember | 57 | .140 | .684 | .175 | .000 | cheap-life-cost redundancy |
 | Force of Negation | 96 | .302 | .667 | .031 | .000 | pitch cost — a copy IS the fuel |
 | Mindbreak Trap | 57 | .281 | .509 | .211 | .000 | free-window timing wants multiples |
@@ -65,7 +65,7 @@ classified categories.
 
 | category | pairs | solver 1-of where winners' mode ≥2 |
 |---|---|---|
-| broad-counter | 31 | **42%** (Boulder payload: 45%) |
+| broad-counter | 31 | **42%** (the local meta payload: 45%) |
 | dedicated-hate | 31 | 29% |
 | unclassified | 10 | 30% |
 | color-blast | 18 | 17% |
@@ -99,6 +99,6 @@ Both triggers are oracle-text-derivable → natural early consumer of the rules-
   pooled floor and are listed with n. Self-selection + metagame-lag confounds apply (see
   `advisory/backtest.py` module docstring) — these distributions describe what winners
   RAN, not what is correct.
-- Shapes replicate across global and Boulder-scoped payloads (field-scoping robustness).
+- Shapes replicate across global and local-field-scoped payloads (field-scoping robustness).
 - The `unclassified` category (1210 deck-entries — the largest) reflects the hoser-catalog
   tag gap, tracked separately; its aggregate shape (concave) may mask subgroup structure.

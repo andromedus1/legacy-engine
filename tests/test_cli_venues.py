@@ -197,7 +197,7 @@ class TestReportMetaVenues:
         """Unknown venue key → error (fails loud per CLI pattern)."""
         result = runner.invoke(
             main,
-            ["report", "meta", "--db", venue_db, "--venues", "online,local:boulder",
+            ["report", "meta", "--db", venue_db, "--venues", "online,local:local",
              "--definition", "raw", "--all-time"],
         )
         assert result.exit_code != 0

@@ -18,11 +18,11 @@ Working decklists and field files for deck-prep (`scripts/deck-prep.sh`).
 ## Field files (`<share> <archetype>` per line; shares need not sum to 1 — the engine normalizes)
 - `current-covered-field.txt` — current-regime shares restricted to archetypes that actually have
   matchup data (so positioning S is meaningful, not dominated by the imputation prior).
-- `boulder-field.txt` — Andrew's local Boulder meta: big-mana-weighted (Lands/Eldrazi/Post up).
+- `local-field.txt` — the maintainer's local local meta: big-mana-weighted (Lands/Eldrazi/Post up).
   Hand-built estimate; edit the shares as the local meta moves.
 
 ## Usage
 ```bash
-scripts/deck-prep.sh decks/dimir-tempo.txt decks/boulder-field.txt Entomb
+scripts/deck-prep.sh decks/dimir-tempo.txt decks/local-field.txt Entomb
 ```
 See `scripts/deck-prep.sh` header for the full recipe and caveats.
