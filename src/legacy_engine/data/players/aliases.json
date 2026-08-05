@@ -1,15 +1,13 @@
 {
   "_schema": "Each key is a canonical player_id (stable, lower-kebab string). 'display' is the preferred display name. 'handles' is the exhaustive list of free-text strings that map to this player (across MTGO, Melee, Topdeck, etc.). 'notes' is optional human context. Absent handles resolve to themselves — never add a handle here unless you are certain the mapping is correct. Run 'identify suggest' to surface candidate clusters for review.",
-  "version": "2026-06-13",
-  "players": {
-    "bosh-n-roll": {
-      "display": "Bosh N Roll",
-      "handles": [
-        "Bosh N Roll",
-        "BoshNRoll_Brian",
-        "Bosh95"
-      ],
-      "notes": "local paper regulars + MTGO handle (Bosh95). Same person across all three sources."
+  "_privacy": "This file ships EMPTY on purpose. Linking one person's handles across platforms is identifying information about a third party, and this repository is public. Keep local entries local — do not commit them. An empty map is a fully supported path: every handle resolves to itself and cross-source pooling is a no-op.",
+  "_example": {
+    "example-player": {
+      "display": "Example Player",
+      "handles": ["Example Player", "ExamplePlayer_Alt", "Example42"],
+      "notes": "Illustrative shape only — not a real person."
     }
-  }
+  },
+  "version": "2026-08-05",
+  "players": {}
 }

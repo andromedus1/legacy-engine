@@ -48,7 +48,7 @@ def _standing(rank: int, player: str) -> dict:
 
 
 def _build_backtest_db(tmp_path) -> str:
-    """A tmp DuckDB with three 8-player tournaments seeding a known local top-finisher sample.
+    """A tmp DuckDB with three 8-player tournaments seeding a known the local meta top-finisher sample.
 
     Top-finisher threshold at `_TOP_FINISHER_QUANTILE=0.25` over an 8-player field is
     `ceil(0.25 * 8) = 2` — ranks 1-2 qualify in each tournament.
@@ -69,7 +69,7 @@ def _build_backtest_db(tmp_path) -> str:
 
     T3 is an OFF-FIELD tournament for feature-sfv-backtest-scoped's field-scoping tests:
     6/8 decks are Reanimator (a graveyard strategy), only 2/8 are the local meta. Its qualifying
-    local top-finishers (holly rank1, ivan rank2) run a DISTINCT card ("Grafdigger's
+    the local meta top-finishers (holly rank1, ivan rank2) run a DISTINCT card ("Grafdigger's
     Cage") that must NOT appear in observed_frequency under the default field-scoped
     backtest against a {the local meta, Doomsday} field (T3's the local meta-or-Doomsday share is
     2/8=0.25, below `_FIELD_OVERLAP_MIN=0.5`) — but MUST appear when field-scoping is
