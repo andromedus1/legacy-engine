@@ -89,7 +89,7 @@ A clean five-card pile (top → bottom): **Street Wraith · Edge of Autumn · Th
 
 ---
 
-## The local sideboard (15)
+## The local-meta sideboard (15)
 
 | Cards | Role |
 |---|---|

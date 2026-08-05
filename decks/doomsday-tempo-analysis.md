@@ -18,7 +18,7 @@ variant labels (re-derivable; the labeler may clear them on re-run):
 
 **Tier honesty: the tempo camp is EVOLVING (n=47, per the canonical 30-99 band), and paper-only is n=8 (speculative) — there is still
 no local-field-specific Doomsday Tempo meta.** These lists are predominantly online-informed;
-"local-field tuning" is the field-weighted board, not observed local practice.
+"the local meta-tuning" is the field-weighted board, not observed local practice.
 
 ## Camp contrast (consensus maindecks, tempo n=47 vs turbo n=49)
 

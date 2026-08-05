@@ -64,7 +64,7 @@ def _make_tournament(name: str, date: str, decks: list[dict]) -> dict:
 #
 # Archetype "ControlA":
 #   - 8 "field" players run: [CounterA×4, WipeA×4, LandA×2] (×10 = 60 with pad)
-#   - 2 "strong" players (bosh95, mengucci) also run: [FlexStrong×4] instead of a filler
+#   - 2 "strong" players (example42, example-two) also run: [FlexStrong×4] instead of a filler
 #
 # This gives:
 #   CounterA:   10/10 (inclusion=1.0) — appears in both field+strong
@@ -114,7 +114,7 @@ def _build_strong_deck(player: str) -> dict:
 def _build_corpus(date: str | None = None) -> dict:
     """Build 10-deck tournament: 8 field players + 2 strong players."""
     decks = [_build_field_deck(f"field{i}") for i in range(8)]
-    decks += [_build_strong_deck("bosh95"), _build_strong_deck("mengucci")]
+    decks += [_build_strong_deck("example42"), _build_strong_deck("example-two")]
     return _make_tournament("Test Challenge", date or in_current_regime(7), decks)
 
 
@@ -182,7 +182,7 @@ class TestPlayerFilterNarrowsPool:
         """FlexStrong appears in 100% of strong-player decks (2/2), not 20% overall."""
         freqs = card_frequencies(
             con, "ControlA", board="main",
-            players={"bosh95", "mengucci"},
+            players={"example42", "example-two"},
         )
         flex_cf = next((cf for cf in freqs if cf.name == "FlexStrong"), None)
         assert flex_cf is not None, "FlexStrong must appear in strong-player pool"
@@ -192,14 +192,14 @@ class TestPlayerFilterNarrowsPool:
         """FillerA should not appear in the strong-player pool (0/2)."""
         freqs = card_frequencies(
             con, "ControlA", board="main",
-            players={"bosh95", "mengucci"},
+            players={"example42", "example-two"},
         )
         filler_cf = next((cf for cf in freqs if cf.name == "FillerA"), None)
         assert filler_cf is None, "FillerA must not appear in the strong-player filtered pool"
 
     def test_sample_n_is_2_for_strong_players(self, con):
-        """Filtered pool has exactly 2 decks (bosh95 + mengucci)."""
-        deck = build_consensus(con, "ControlA", players={"bosh95", "mengucci"})
+        """Filtered pool has exactly 2 decks (example42 + example-two)."""
+        deck = build_consensus(con, "ControlA", players={"example42", "example-two"})
         assert deck.sample_n == 2
 
     def test_unfiltered_pool_has_filler(self, con):
@@ -218,11 +218,11 @@ class TestPlayerFilterNarrowsPool:
 
     def test_single_player_filter(self, con):
         """A single-player filter produces a pool from that player's deck alone."""
-        freqs = card_frequencies(con, "ControlA", board="main", players={"bosh95"})
+        freqs = card_frequencies(con, "ControlA", board="main", players={"example42"})
         names = {cf.name for cf in freqs}
         # Must contain the strong-player card.
         assert "FlexStrong" in names
-        # Must not contain the filler card (bosh95 doesn't run it).
+        # Must not contain the filler card (example42 doesn't run it).
         assert "FillerA" not in names
 
     def test_unknown_player_returns_empty(self, con):
@@ -246,20 +246,20 @@ class TestThinPoolHonestDegrade:
 
     def test_thin_pool_sample_n_below_floor(self, con):
         """2-deck strong-player pool is below the evolving floor (30)."""
-        deck = build_consensus(con, "ControlA", players={"bosh95", "mengucci"})
+        deck = build_consensus(con, "ControlA", players={"example42", "example-two"})
         # sample_n=2 → tier_for_sample(2) == "speculative"
         assert deck.sample_n == 2
         assert tier_for_sample(deck.sample_n) == "speculative"
 
     def test_thin_pool_banner_in_legality_errors(self, con):
         """A thin player-filtered pool attaches a loud banner to legality_errors."""
-        deck = build_consensus(con, "ControlA", players={"bosh95", "mengucci"})
+        deck = build_consensus(con, "ControlA", players={"example42", "example-two"})
         banners = [e for e in deck.legality_errors if "THIN" in e.upper()]
         assert banners, f"Expected thin-pool banner; got: {deck.legality_errors}"
 
     def test_thin_pool_banner_mentions_no_window_widening(self, con):
         """The banner must state the window was NOT widened."""
-        deck = build_consensus(con, "ControlA", players={"bosh95", "mengucci"})
+        deck = build_consensus(con, "ControlA", players={"example42", "example-two"})
         banners = [e for e in deck.legality_errors if "THIN" in e.upper()]
         assert banners
         assert "NOT widened" in banners[0] or "not widened" in banners[0].lower(), (
@@ -278,7 +278,7 @@ class TestThinPoolHonestDegrade:
         """The filtered pool uses the latest-regime window, not a wider one."""
         from legacy_engine.generation.consensus import _latest_regime_window
         expected_since, expected_until = _latest_regime_window()
-        deck = build_consensus(con, "ControlA", players={"bosh95", "mengucci"})
+        deck = build_consensus(con, "ControlA", players={"example42", "example-two"})
         # Deck window must equal the regime window, not be widened.
         assert deck.window[0] == expected_since
         assert deck.window[1] == expected_until
@@ -295,8 +295,8 @@ class TestRegimeSafety:
     def con_two_regimes(self):
         """Corpus with two regimes:
 
-        Regime 1 (2025-01-15 — pre current regime): bosh95 runs OldCard (4 copies).
-        Regime 2 (ledger-derived current-regime date): bosh95 runs NewCard (4 copies).
+        Regime 1 (2025-01-15 — pre current regime): example42 runs OldCard (4 copies).
+        Regime 2 (ledger-derived current-regime date): example42 runs NewCard (4 copies).
         Other cards are shared core so 60-card constraint is met.
         """
         core_small = [
@@ -321,13 +321,13 @@ class TestRegimeSafety:
             return _make_deck_raw(player, main)
 
         # Old regime (2025-01-15 — still within the full corpus but before current ban):
-        old_decks = [_make_regime_deck("bosh95", "OldCard")] + [
+        old_decks = [_make_regime_deck("example42", "OldCard")] + [
             _make_regime_deck(f"other{i}", "OldCard") for i in range(4)
         ]
         old_t = _make_tournament("OldRegimeEvent", "2025-01-15", old_decks)
 
         # Current regime (post latest confirmed ban):
-        new_decks = [_make_regime_deck("bosh95", "NewCard")] + [
+        new_decks = [_make_regime_deck("example42", "NewCard")] + [
             _make_regime_deck(f"current{i}", "NewCard") for i in range(4)
         ]
         new_t = _make_tournament("NewRegimeEvent", in_current_regime(7), new_decks)
@@ -359,10 +359,10 @@ class TestRegimeSafety:
         freqs = card_frequencies(
             con_two_regimes, "RegimeArch", board="main",
             since=since, until=until,
-            players={"bosh95"},
+            players={"example42"},
         )
         names = {cf.name for cf in freqs}
-        assert "NewCard" in names, "NewCard must appear for bosh95 in current regime"
+        assert "NewCard" in names, "NewCard must appear for example42 in current regime"
         assert "OldCard" not in names, "OldCard must NOT leak from prior regime"
 
     def test_explicit_all_time_shows_both_cards(self, con_two_regimes):
@@ -386,17 +386,17 @@ class TestRegimeSafety:
         since, until = _latest_regime_window()
         deck = build_consensus(
             con_two_regimes, "RegimeArch",
-            players={"bosh95"},
+            players={"example42"},
         )
         # Window must equal the latest regime — not widened.
         assert deck.window[0] == since
         assert deck.window[1] == until
 
     def test_old_card_not_in_current_regime_filtered_deck(self, con_two_regimes):
-        """The consensus maindeck for bosh95 in the current regime must not contain OldCard."""
+        """The consensus maindeck for example42 in the current regime must not contain OldCard."""
         deck = build_consensus(
             con_two_regimes, "RegimeArch",
-            players={"bosh95"},
+            players={"example42"},
         )
         assert "OldCard" not in deck.maindeck, (
             f"OldCard leaked from prior regime into filtered consensus: {deck.maindeck}"
@@ -411,28 +411,28 @@ class TestAliasResolutionInFilter:
     """Player filter respects the alias_map to expand player_ids to handle variants."""
 
     def test_alias_map_expands_player_id_to_handles(self, con):
-        """When alias_map maps 'bosh95' to 'bosh_canonical', filtering by
-        'bosh_canonical' still finds bosh95's decks."""
-        # Build alias_map: bosh95 (normalized: "bosh95") → "bosh_canonical"
-        alias_map = {"bosh95": "bosh_canonical"}
+        """When alias_map maps 'example42' to 'example_canonical', filtering by
+        'example_canonical' still finds example42's decks."""
+        # Build alias_map: example42 (normalized: "example42") → "example_canonical"
+        alias_map = {"example42": "example_canonical"}
         # Filter by the canonical id.
         freqs = card_frequencies(
             con, "ControlA", board="main",
-            players={"bosh_canonical"},
+            players={"example_canonical"},
             alias_map=alias_map,
         )
         names = {cf.name for cf in freqs}
-        # bosh95 runs FlexStrong (the strong player's card).
+        # example42 runs FlexStrong (the strong player's card).
         assert "FlexStrong" in names, (
-            "Alias resolution should expand bosh_canonical → bosh95 handle"
+            "Alias resolution should expand example_canonical → example42 handle"
         )
 
     def test_no_alias_map_still_resolves_by_player_id(self, con):
         """When alias_map is None or empty, player_id is matched directly as a handle."""
-        # "bosh95" is already a normalized handle in the DB (player name).
+        # "example42" is already a normalized handle in the DB (player name).
         freqs = card_frequencies(
             con, "ControlA", board="main",
-            players={"bosh95"},
+            players={"example42"},
             alias_map=None,
         )
         names = {cf.name for cf in freqs}
@@ -488,7 +488,7 @@ class TestIdentifyCLI:
     def test_identify_track_exits_zero(self, tmp_path):
         db_path = self._make_db(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["identify", "track", "bosh95", "--db", str(db_path)])
+        result = runner.invoke(main, ["identify", "track", "example42", "--db", str(db_path)])
         assert result.exit_code == 0, f"exit={result.exit_code}\n{result.output}"
 
     def test_identify_track_unknown_player(self, tmp_path):
@@ -501,7 +501,7 @@ class TestIdentifyCLI:
     def test_identify_track_known_player_shows_archetype(self, tmp_path):
         db_path = self._make_db(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["identify", "track", "bosh95", "--db", str(db_path)])
+        result = runner.invoke(main, ["identify", "track", "example42", "--db", str(db_path)])
         assert result.exit_code == 0
         # Should show "ControlA" in the history table.
         assert "ControlA" in result.output
@@ -513,7 +513,7 @@ class TestIdentifyCLI:
         result = runner.invoke(
             main,
             ["generate", "consensus", "--archetype", "ControlA",
-             "--players", "bosh95,mengucci", "--db", str(db_path)],
+             "--players", "example42,example-two", "--db", str(db_path)],
         )
         assert result.exit_code == 0, f"exit={result.exit_code}\n{result.output}"
         assert "player-filtered" in result.output.lower() or "Consensus deck" in result.output
