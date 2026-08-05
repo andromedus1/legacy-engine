@@ -33,7 +33,7 @@ the dup/uniq precedent in ``analytics.match_results``.
 FIELD SCOPING (feature-sfv-backtest-scoped): a global, all-time top-finisher sample mixes
 eras whose metagame looked nothing like the field being scored against — e.g. a
 graveyard-strategy-heavy period contributes Surgical Extraction / Grafdigger's Cage to
-``observed_frequency`` even when the caller's field (say, a current Boulder-dominated
+``observed_frequency`` even when the caller's field (say, a current local-field-dominated
 field) barely has a graveyard deck in it. ``field_scope`` (default on) filters OUT
 candidate tournaments whose own realized metagame does not overlap the caller's
 ``field`` archetype set by at least ``_FIELD_OVERLAP_MIN`` — see
@@ -256,8 +256,8 @@ def _apply_field_scope(
 
     A tournament counts as "in-field" when at least ``min_overlap`` of its labeled decks
     (per ``archetype_counts``) belong to an archetype in ``field_archetypes`` — e.g. a
-    tournament that was 6/8 Reanimator does not represent a Boulder field and is dropped
-    even though its top-finishing Boulder decks pass the rank cut on their own.
+    tournament that was 6/8 Reanimator does not represent a local field and is dropped
+    even though its top-finishing the local meta decks pass the rank cut on their own.
 
     Returns ``(kept_deck_keys, n_tournaments_considered, n_tournaments_excluded)`` where
     the counts are over the DISTINCT tournaments present in ``deck_keys`` (for the CLI's

@@ -166,8 +166,17 @@ class TestReduceDims:
             reduce_dims(X, method="bogus", n_components=10, seed=0)
 
     def test_umap_smoke(self):
-        """UMAP path is a smoke test only — skipped if umap-learn isn't installed."""
-        pytest.importorskip("umap")
+        """UMAP path is a smoke test only — skipped if umap-learn isn't usable.
+
+        Skips on any ImportError, not just a missing ``umap`` itself: the optional
+        extra pulls in numba, which caps the NumPy/Python versions it supports, so a
+        current interpreter can have umap installed but unimportable. That is an
+        optional-dependency gap, not a failure of this repo's code.
+        """
+        try:
+            import umap  # noqa: F401
+        except ImportError as exc:  # pragma: no cover — environment-dependent
+            pytest.skip(f"umap-learn not usable in this environment: {exc}")
         X = self._wide_matrix(n_rows=40, n_features=20)
         Xred = reduce_dims(X, method="umap", n_components=5, seed=0)
         assert Xred.shape == (40, 5)

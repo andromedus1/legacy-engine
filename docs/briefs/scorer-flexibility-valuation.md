@@ -161,14 +161,14 @@ winning boards disagree, that is a flag for a human — *missing mechanic* (fix 
 - **Option value (§3):** reuse the Dirichlet from `advisory/positioning.py`; compute board/card
   coverage over sampled or closed-form worst-tail field draws (a CVaR-style aggregation) as an
   additive objective term with a tunable `α`.
-- **Validation:** the acceptance oracle is `advise backtest` on the Dimir Tempo deck + Boulder field —
+- **Validation:** the acceptance oracle is `advise backtest` on the Dimir Tempo deck + local field —
   FoN/Consign should move from *winners-only* into *overlap*, and the Damping Sphere false-positive
   should drop, **with the mechanism being first-principles flexibility value, not an empirical prior.**
   Any residual divergence is surfaced, not scored away.
 
 ## 7. Worked example: Force of Negation, gain=0.0001 → competitive
 
-Today, against the Boulder field: FoN attaches to a few `combo` elements (Show&Tell/Doomsday/Saga
+Today, against the local field: FoN attaches to a few `combo` elements (Show&Tell/Doomsday/Saga
 Storm), each ~0.003 (deflated by D2), and its breadth across them isn't aggregated (D1) — total
 `gain≈0.0001`. After the fixes: (D3) FoN attaches to the *full* combo/control plurality (and, with
 the broad-interaction axis, the blue tempo decks it can counter); (D2) those elements carry real

@@ -3,14 +3,21 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+build/
+dist/
 
 # Project data (raw mirrors + derived DuckDB are rebuildable, not committed)
 /data/
 
 # peeragent cross-model review session scratch
 .peeragent/
+
+# agent session scratch (never part of the tracked corpus)
+.claude/scratch/
 
 # generated viz output (regenerate via scripts/*.py)
 decks/*.html

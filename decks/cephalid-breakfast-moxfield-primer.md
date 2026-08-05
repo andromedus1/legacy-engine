@@ -1,4 +1,4 @@
-# Cephalid Breakfast, Stoneforge camp (Moxfield primer, Andrew's list conventions)
+# Cephalid Breakfast, Stoneforge camp (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/cephalid-breakfast-sfm.txt (SFM-camp consensus n=42, winner-validated board, 2026-07-06).
@@ -54,7 +54,7 @@ List = decks/cephalid-breakfast-sfm.txt (SFM-camp consensus n=42, winner-validat
 
 ---
 ---
-**matchups & sideboard** // boulder field, archetype-level wr, nearly all speculative = priors // no reps — in/out plans are mechanics-derived judgment, tune at the table
+**matchups & sideboard** // local field, archetype-level wr, nearly all speculative = priors // no reps — in/out plans are mechanics-derived judgment, tune at the table
 
 **izzet delver — 11.2% of field, 48.8% wr (n=25, spec):**
 * their plan: bolt your combo creatures + counter war; every bolt aimed at illusionist is one off your face

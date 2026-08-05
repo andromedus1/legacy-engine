@@ -43,7 +43,7 @@ becomes a posterior rather than a hard min. The gated view stays the headline
 (auditable, legible); the lean view recovers the graded middle the binary gates
 discard (live stratum fell 24 -> 13 rows after the Nadu rule — much of the format now
 lives between "proven" and "unknown"). Divergence between the two views is itself
-diagnostic, per the divergence-as-diagnostic house pattern. Andrew's framing: "we're
+diagnostic, per the divergence-as-diagnostic house pattern. the maintainer's framing: "we're
 quite rigorous, but we sacrifice a lot of ability to view into the data."
 
 ---
@@ -79,7 +79,7 @@ methodology. Report: `decks/best-deck-best-call-ranking.html` (gitignored); gene
 `rank_all.py` + `gen_best_call_html.py` were session-scratchpad (2026-07-21 session —
 rebuild from the project-state memory description if lost).
 
-**Context.** Andrew caught two real holes in the floor analysis after it named Cephalid
+**Context.** the maintainer caught two real holes in the floor analysis after it named Cephalid
 Breakfast the top "agency" deck (high adjusted WR + high worst matchup):
 
 1. **Coverage hole** — the floor and adjusted-WR columns silently exclude field opponents

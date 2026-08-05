@@ -20,7 +20,7 @@ Two honest-degrade gaps in the ranking/field surfaces, both dogfooding-verified:
 (Mystic Forge #1 with data_coverage=0.00) — ranking needs an imputation quarantine so
 imputation-dominated rows are partitioned/labeled, not silently blended; (2) field-load
 should surface a regime-currency % and warn when a custom field's implied window is
-dominated by a prior ban regime (Andrew's "last 4 months" Boulder field was only ~29%
+dominated by a prior ban regime (the maintainer's "last 4 months" local field was only ~29%
 current-regime). Also absorbs the residual of roadmap-young-regime-data-strategy — the
 young-regime serving posture (the weeks between disturbance and era confirmation are
 where the engine serves its worst data with its most confident face); the structural spine
@@ -52,7 +52,7 @@ young post-ban field, so thin-cell leans are most of the available signal.
 **Surface a "regime-currency %" on field-load, and warn when a custom field's implied
 window is dominated by a *prior* ban regime.**
 
-Found dogfooding (2026-06-27): Andrew's "last 4 months" Boulder org data spans two ban
+Found dogfooding (2026-06-27): the maintainer's "last 4 months" local organizer data spans two ban
 regimes — only **~29%** of it is the current (Undercity Informer, 2026-05-18→) regime;
 **71%** is the prior post-Entomb/Nadu regime. We built a custom `--field` file from that
 4-month aggregate and ran best-deck/best-call on it. The conclusion **flipped** under
@@ -74,7 +74,7 @@ What to add:
   independent and should be set independently.
 - Stretch: a `--regime-window` flag on field-load that reweights a multi-regime custom
   field toward the current regime using the engine's own composition movers, for cases
-  where the user only has a blended aggregate (Andrew's Boulder data can't be split).
+  where the user only has a blended aggregate (the maintainer's local-meta data can't be split).
 
 Related honesty gaps from the same session: [[idea-archetype-conditioned-card-winrate]],
 idea-acquire-color-identity-filter. Methodology lives in the user-memory
@@ -124,6 +124,6 @@ eventually." Related parked items: [[idea-eras-alarm-stale-after-registration]],
 <!-- captured 2026-07-31 via feature-design --only-questions; treat as fixed inputs -->
 - **Quarantine presentation**: label-only single ranking is the DEFAULT (prominent
   coverage/imputation column), PLUS an opt-in partitioned view that splits grounded vs
-  imputation-dominated rows into labeled strata — both views are useful (Andrew).
+  imputation-dominated rows into labeled strata — both views are useful (the maintainer).
   Follows the opt-in-analytics-overlay pattern: the default body stays byte-identical
   except for the new label column; the strata view sits behind an explicit flag.

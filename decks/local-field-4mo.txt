@@ -1,4 +1,4 @@
-# Boulder paper meta, last 4 months — from Andrew's tournament-org data (Table 3).
+# local paper meta, last 4 months — from the maintainer's tournament-org data (Table 3).
 # Format: <share> <Engine Archetype> <player-count>.  Counts feed the Dirichlet field-share model.
 # Mapping notes (human label -> engine archetype):
 #   Izzet Tempo->Izzet Delver | Sneak and Show->Show and Tell | Red Painter->Painter

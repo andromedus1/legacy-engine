@@ -33,7 +33,7 @@ rules-engine arc ([[idea-card-semantics-rules-layer]]).
 
 ## Original idea (2026-07-04, pre-study): winners run fixers at 0 or 2+, our solver produces 1-ofs
 
-Andrew's observation (2026-07-04, reviewing the optimized-board analysis): winners don't usually run
+the maintainer's observation (2026-07-04, reviewing the optimized-board analysis): winners don't usually run
 **1-of "fixers"** (reactive answers like Dauthi Voidwalker, Engineered Explosives, Toxic Deluge).
 Hypothesis: humans apply a **tipping point** — once a card is worth including at all, 1 copy is too
 hard to draw to meaningfully impact the outcome, so the real decision is 0 vs 2+. Our board carries
@@ -50,7 +50,7 @@ domain literature (sb-construction-fusco attestation) says dedicated swap packag
 broad insurance (FoN-style). Also interacts with the option-value bonus (first-copy-only), which
 further subsidizes 1-ofs.
 
-**The data test (Andrew: "this should be visible in our data"):**
+**The data test (the maintainer: "this should be visible in our data"):**
 - Per SB card (or per category: reactive-fixer vs broad-counter vs dedicated-hate), compute the
   **copy-count histogram among top-finisher boards** — 0x/1x/2x/3x/4x, per the
   frequency-distribution-detail presentation preference — and test for bimodality (a valley at 1).
@@ -68,7 +68,7 @@ in live games), not from copying winners.
 copy-count histograms, not just presence) feeding the scorer as a follow-up fix. Related:
 idea-ilp-tiebreak-nondeterminism (determinism for reproducible sweeps).
 
-## Methodology addendum (Andrew, 2026-07-04): distribution-first modeling
+## Methodology addendum (the maintainer, 2026-07-04): distribution-first modeling
 
 Before choosing HOW to model copy counts, **test the distribution of the observed data itself** and
 let the identified distribution inform the model form. Don't assume the answer — the bimodal
@@ -83,7 +83,7 @@ taper, chosen a priori) are exactly what this exercise guards against. This gene
 engine variable we model (swings, shares, copy values) deserves the same
 observe-distribution-first discipline before a functional form is baked in.
 
-## Prior art (Andrew's pointer, 2026-07-04): ds-engine distribution-analysis inventory
+## Prior art (the maintainer's pointer, 2026-07-04): ds-engine distribution-analysis inventory
 
 `~/dev/ds-engine/docs/techniques/eda/inventory-legacy.md` §2 "Distribution Analysis" is directly
 reusable prior art for the distribution-first step: the normality-test battery (Shapiro-Wilk,

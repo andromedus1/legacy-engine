@@ -1,16 +1,16 @@
-# Dimir Tempo — sideboard optimization analysis (Boulder, 2026-07-04 refresh)
+# Dimir Tempo — sideboard optimization analysis (the local meta, 2026-07-04 refresh)
 
 Companion to [dimir-tempo-optimized.txt](dimir-tempo-optimized.txt) (Board A) and
 [dimir-tempo-optimized-owned.txt](dimir-tempo-optimized-owned.txt) (Board B — converges, see §6).
 Engine: post-sweep scorer (deterministic ILP, PR #35; equal-objective ties no longer vary
 run-to-run). Regenerate: `advise sideboard --deck decks/dimir-tempo-current.txt --field
-decks/boulder-field-since-518.txt --collection decks/binder.txt --smart` and `advise backtest
---archetype "Dimir Tempo" --field decks/boulder-field-since-518.txt --field-scope`.
+decks/local-field-since-518.txt --collection decks/binder.txt --smart` and `advise backtest
+--archetype "Dimir Tempo" --field decks/local-field-since-518.txt --field-scope`.
 
 **Data currency**: corpus refreshed 2026-07-04 to **2026-07-01** (was capped 2026-06-15), all
 regime decks labeled. Dimir Tempo current-regime pool 71→125 decks. Backtest winner sample
 **n=263 field-scoped top-finisher boards — ESTABLISHED tier** (283/449 candidate tournaments
-excluded as off-Boulder-field). Confounds (always): winning boards are self-selected and
+excluded as off-the local meta-field). Confounds (always): winning boards are self-selected and
 metagame-lagged; adoption %s validate, never drive, the scores.
 
 ## 1. The board (15) — and what changed
@@ -82,11 +82,11 @@ These stay diagnostic overrides, not score edits — the pure-mechanics guardrai
 
 ## 4. What the engine still dissents on (documented, not blindly followed)
 
-- **Surgical Extraction (55.9% of winners, mode 2)**: excluded — the Boulder room's graveyard
+- **Surgical Extraction (55.9% of winners, mode 2)**: excluded — the local room's graveyard
   share is thin (Doomsday piles use the yard lightly; no Reanimator at the venue). The winners'
   number is inflated by field-scope's tolerance (in-field tournaments can still contain graveyard
   decks). Watch item: if Grixis Reanimator (now #5 in the refreshed global regime, 157 decks)
-  reaches Boulder, Surgical is the first add (owns 3).
+  reaches the local meta, Surgical is the first add (owns 3).
 - **Grafdigger's Cage (51.3%)**: same axis, same call; also anti-synergistic with our own
   Murktide/delve angle at the margin.
 - **Feed the Cycle (20.2%, always 1-of)**: new-card watch item (owns 1). Not yet in the hoser
@@ -97,8 +97,8 @@ These stay diagnostic overrides, not score edits — the pure-mechanics guardrai
 ## 5. Online-lens variant (venue divergence — reported as a diff, never blended)
 
 Solve vs the online field (`provenance='online'`, current regime; Tron 11.7% #1, Izzet 8.1%,
-Show&Tell 7.2%, Energy 6.5%, Grixis Reanimator 6.4%): the raw engine board matches the Boulder
-solve on **14 of 15 cards** (insurance differs by one: Boulder holds Nihil Spellbomb where the
+Show&Tell 7.2%, Energy 6.5%, Grixis Reanimator 6.4%): the raw engine board matches the local meta
+solve on **14 of 15 cards** (insurance differs by one: the local meta holds Nihil Spellbomb where the
 online solve holds Toxic Deluge — corrected per review), and the dedicated core deepens
 (natural budget 9/15 vs 6/15; the online
 field is more concentrated, so more slots clear the τ floor). After the same overrides, the same
@@ -130,5 +130,5 @@ straight swap of the old 15 for the new 15, all owned.
 
 Winner sample ESTABLISHED (n=263) — first time this analysis clears the top tier. Per-matchup
 impact factors remain speculative-tier (per-card matchup cells are thin; the engine labels each).
-Field = Andrew's 107-player post-ban Boulder table snapshot; that field file predates the corpus
+Field = the maintainer's 107-player post-ban the local meta table snapshot; that field file predates the corpus
 refresh and is the next thing to re-derive if the venue shifts (regime window unchanged).

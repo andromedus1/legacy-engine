@@ -1,6 +1,6 @@
 # Death & Taxes
 
-*Legacy · post–Undercity Informer regime · the consensus mono-white hatebears deck, with a Boulder-tuned sideboard option*
+*Legacy · post–Undercity Informer regime · the consensus mono-white hatebears deck, with a locally tuned sideboard option*
 
 A white "tax-and-beatdown" deck: deploy disruptive creatures and deny the opponent's
 mana while a Stoneforge package and a stream of free removal grind them out. You're not
@@ -10,7 +10,7 @@ a deep sideboard); weak to decks that go *under* you (fast combo) or *over* you
 (sweepers, big mana).
 
 **Why it's here:** in this session's best-deck / best-call analysis, **Death & Taxes
-topped *both* lenses** for the current Boulder-proxy field — highest raw power
+topped *both* lenses** for the current local-meta-proxy field — highest raw power
 (ū ≈ 0.519) *and* best field-weighted positioning (S ≈ 0.523). It preys on the fair
 tempo decks the field is full of, and brings real combo hate for the combo half.
 
@@ -22,10 +22,10 @@ This is a **lean, not a verdict** — same caveats as everything this session:
 
 - **It's a lean:** P(best) for D&T was only ~12.6%, every candidate's CI overlaps, and
   the field model has **~54% coverage** (Jeskai/Esper/TES invisible).
-- **Field is regime-clean but global-paper**, not Boulder-specific — no geo dimension,
+- **Field is regime-clean but global-paper**, not local-field-specific — no geo dimension,
   and the local org data is MWP aggregates with no decklists.
 - **D&T's own paper sample** is 24 (current regime) / 68 (4-month) — healthier than most,
-  but "paper" still isn't "Boulder."
+  but "paper" still isn't "the local meta."
 - **The shape of its win rate is lopsided:** it *crushes* the fair decks (it's
   **Dimir Tempo's nightmare — Dimir is only ~34% into it**) but **folds to fast combo
   (it loses ~76% to Doomsday**, which simply goes under it). It's the field's best deck
@@ -93,33 +93,33 @@ This is a **lean, not a verdict** — same caveats as everything this session:
 | **1 Faerie Macabre** | Free graveyard hate |
 | **1 Yorion, Sky Nomad** | Value blink threat / grind finisher |
 
-*This board is **already well-aimed at Boulder** — the field is combo-heavy (Doomsday,
+*This board is **already well-aimed at the local meta** — the field is combo-heavy (Doomsday,
 Show & Tell, Painter, Storm ≈ 29%), and Deafening Silence + Disruptor Flute + Containment
 Priest + Grafdigger + Mindbreak Trap is a deep anti-combo package. D&T's tutors
 (Recruiter, Stoneforge) and Aether Vial make a singleton-heavy toolbox work.*
 
 ---
 
-## Boulder sideboard vs. the consensus
+## the local meta sideboard vs. the consensus
 
-The consensus board suits Boulder well as-is. The one local lean is toward your **biggest
+The consensus board suits the local meta well as-is. The one local lean is toward your **biggest
 matchup, Izzet Delver (~14%)** — a red tempo deck the consensus board doesn't directly
 answer. A modest, pool-grounded swap:
 
 | Change | Card | Why |
 |---|---|---|
-| **IN** | **+2 Path to Exile** | Cheap instant exile-removal for Izzet's threats (DRC, Murktide) + Painter's creatures. A real consensus-pool SB card (~32%), just not in the top 15. *Boulder lean.* |
+| **IN** | **+2 Path to Exile** | Cheap instant exile-removal for Izzet's threats (DRC, Murktide) + Painter's creatures. A real consensus-pool SB card (~32%), just not in the top 15. *the local meta lean.* |
 | **OUT** | **−1 Wrath of the Skies** (3→2) | Three sweepers is a lot for a field that's more combo + spot-removable tempo than go-wide. |
 | **OUT** | **−1 Mindbreak Trap** | Storm is only ~6% locally; the rest of the package (Deafening Silence, Disruptor Flute, Containment Priest, Grafdigger) covers combo broadly. |
 
-> **Honesty note:** D&T isn't a deck we have Boulder data for (paper ≠ Boulder, zero local
+> **Honesty note:** D&T isn't a deck we have local-meta data for (paper ≠ the local meta, zero local
 > decklists), and it isn't your home archetype — so Path to Exile is a *reasoned lean*, not
 > observed local tech. The consensus 15 is the safer default; this swap is a hypothesis to
 > test if your Izzet matchup feels light.
 
 ---
 
-## Matchup notes (vs the Boulder field)
+## Matchup notes (vs the local field)
 
 *Reasoned from card function — D&T sideboarding is a deep skill and these are starting points.*
 
@@ -155,7 +155,7 @@ answer. A modest, pool-grounded swap:
 ---
 
 *Build: Death & Taxes — global consensus current-regime maindeck + pool-grounded consensus
-sideboard, with a Boulder lean (+2 Path to Exile). 60 + 15. Tops both best-deck and
-best-call lenses for the Boulder-proxy field (ū ≈ 0.519, S ≈ 0.523) — a lean, not a
+sideboard, with a local-meta lean (+2 Path to Exile). 60 + 15. Tops both best-deck and
+best-call lenses for the local-meta-proxy field (ū ≈ 0.519, S ≈ 0.523) — a lean, not a
 verdict. The field's best fair deck: crushes tempo, folds to fast combo. ~$650 to build
 (Solitude/Stoneforge/Marsh Flats drive the cost).*

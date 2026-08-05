@@ -139,7 +139,7 @@ Bodies live in git history — read with `git show <git ref>:<path>`.
 | fix-analytics-peer-review-findings-metashare | Metashare coverage + blend fixes (findings 1 top-cut-half, 3, 4, 5, 6) | story | — | ae9265f |
 | fix-cruft-batch2 | Cruft sweep: batch 2 (gate-cruft, 1 High + Medium/Low) | story | — | ae9265f |
 | fix-cruft-dead-code-sweep | Dead-code / stale-comment sweep (gate-cruft) | story | — | ae9265f |
-| fix-deck-dashboard-readability | Fix: deck-dashboard readability (Andrew feedback) | story | — | ae9265f |
+| fix-deck-dashboard-readability | Fix: deck-dashboard readability (the maintainer feedback) | story | — | ae9265f |
 | fix-docs-drift-batch2 | Foundation-doc drift: batch 2 (PRs #8-#11) (gate-docs, 3 High + Medium) | story | — | ae9265f |
 | fix-foundation-doc-drift | Foundation-doc drift: ARCHITECTURE + SPEC (gate-docs, High) | story | — | ae9265f |
 | fix-infra-ijson-and-ci-lint | Infra: declare ijson; CI lint; path/SSRF hardening (gate-infra/security, Medium+Low) | story | — | ae9265f |

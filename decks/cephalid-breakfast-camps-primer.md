@@ -1,4 +1,4 @@
-# Cephalid Breakfast — Stoneforge vs non-Stoneforge camps (Moxfield primer, Andrew's list conventions)
+# Cephalid Breakfast — Stoneforge vs non-Stoneforge camps (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 Lists = decks/cephalid-breakfast-tempo.txt (non-Stoneforge, current) and

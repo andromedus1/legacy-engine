@@ -1,4 +1,4 @@
-# Grixis Thundertrap (wizards), Ark4n stock (Moxfield primer, Andrew's list conventions)
+# Grixis Thundertrap (wizards), Ark4n stock (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/grixis-thundertrap-75.txt (Ark4n 1st, Legacy Challenge 32 2025-11-08, 7-1, unmodified; 2026-07-20).
