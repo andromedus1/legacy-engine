@@ -16,7 +16,7 @@ updated: 2026-07-31
 
 # Dogfooding session workflow as an autonomous idea-processing loop
 
-Andrew's observation (2026-07-04, mid sweep-arc build): our typical dogfooding session
+the maintainer's observation (2026-07-04, mid sweep-arc build): our typical dogfooding session
 already follows a repeatable loop — pick a deck, start an idea about it, investigate using
 the data, output analysis, maybe test more, then find ideas for improvements to the engine,
 build those, and end the loop (with the option to loop again). We could use this same loop
@@ -29,5 +29,5 @@ autonomous process rather than an ad-hoc pattern.
   a dogfood-loop skill against this repo), consistent with epic-data-autonomy's launchd
   scheduling decision.
 - **Output contract**: each run parks ideas to .work/backlog/ and writes its analysis under
-  docs/analysis/ (or decks/); nothing is auto-promoted — Andrew reviews and scopes, exactly
+  docs/analysis/ (or decks/); nothing is auto-promoted — the maintainer reviews and scopes, exactly
   like today's manual sessions.

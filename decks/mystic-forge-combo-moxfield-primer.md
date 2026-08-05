@@ -1,4 +1,4 @@
-# Mystic Forge Combo (Moxfield primer, Andrew's list conventions)
+# Mystic Forge Combo (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/mystic-forge-combo.txt (Univerce's exact 75, Legacy Challenge 32 top-10, 2026-07-01).
@@ -111,7 +111,7 @@ Moxfield import text: `legacy-engine export deck --deck decks/mystic-forge-combo
 * chalice@1 is your best card: ritual, brainstorm, ponder, flusterstorm all mv1; flute names doomsday itself (+3 tax on a {B}{B}{B} sorcery hurts)
 * the dismember line: kill oracle IN RESPONSE to its trigger — devotion drops to 0 and the trigger fizzles (only works if their library isn't already empty; vs the standard 2-buffer pile it works)
 * in: +3 dismember +4 flute; out: -1 crypt -1 skateboard -2 manifold key -1 voltaic key -1 mystic forge -1 the one ring
-// forge mirror (online only, not a boulder deck): 50.0% n=106 pre-ban — whoever sticks forge + fleshraker first; dismember their fleshraker; note command can NOT exile the one ring (creatures only)
+// forge mirror (online only, not a local deck): 50.0% n=106 pre-ban — whoever sticks forge + fleshraker first; dismember their fleshraker; note command can NOT exile the one ring (creatures only)
 
 **eldrazi — 5.6%, 55.6% wr (n=185):**
 * THEIR chalice is the real danger at X=0 — it hits your 13 zero-drops (petal/opal/bauble/crypt); @1 only clips keys; TKS strips — forge doesn't care much

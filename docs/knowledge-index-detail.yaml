@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-02T03:43:34Z'
+generated_at: '2026-08-05T23:20:55Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -246,8 +246,8 @@ documents:
     - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
       per-deck findings, consensus decklists with primers — persists across sessions
       and is surfaced automatically; advice is grounded in a user profile (decks played,
-      collection, local meta). Andrew-first now, multi-user-ready by design: the profile
-      is data, not code.'
+      collection, local meta). maintainer-first now, multi-user-ready by design: the
+      profile is data, not code.'
     related:
     - slug: docs/SPEC.md
       relationship: refines
@@ -425,8 +425,8 @@ documents:
       boards (archetype-sweep payloads, 2026-07-04: 26 archetypes, 293 top-finisher
       decks global /
 
-      153 Boulder-scoped). Tests idea-copy-count-tipping-point''s "winners run fixers
-      at 0 or 2+"
+      153 local-field-scoped). Tests idea-copy-count-tipping-point''s "winners run
+      fixers at 0 or 2+"
 
       hypothesis against the solver''s pure-concave per-copy taper.
 
@@ -451,7 +451,7 @@ documents:
       (pitch-cost cards k_min=2; opening-hand threshold cards k_min≈4), not a category
       S-curve and never copied from winners'' frequencies — feeds the rules-engine
       arc (idea-card-semantics-rules-layer).'
-    - Shapes replicate across the global and Boulder-scoped payloads (robustness);
+    - Shapes replicate across the global and local-field-scoped payloads (robustness);
       most archetype winner samples are speculative-tier (n<30), honestly labeled
       — treat per-card PMFs with n>=20 as the reliable floor.
   docs/briefs/advisory-methods.md:
@@ -705,8 +705,8 @@ documents:
       machine-readable sources and polling designs for B&R + set-release monitoring,
       launchd
 
-      scheduling patterns for Andrew''s Mac, and a feasibility verdict on Card Kingdom
-      prices.
+      scheduling patterns for the maintainer''s Mac, and a feasibility verdict on
+      Card Kingdom prices.
 
       '
     key_findings:

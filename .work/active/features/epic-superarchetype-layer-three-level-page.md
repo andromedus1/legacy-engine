@@ -15,7 +15,7 @@ updated: 2026-08-01
 
 ## Brief
 
-**Andrew's directive (2026-08-01, verbatim intent):** whenever the superarchetype methodology is
+**the maintainer's directive (2026-08-01, verbatim intent):** whenever the superarchetype methodology is
 finished and producing nice quality output, add it to the best-deck/best-call doc as a THIRD table
 (superarchetype, archetype, subarchetype/camp). Also do an agency map for superarchetype — and
 maybe one for subarchetype as well.
@@ -37,7 +37,7 @@ Deliverables:
    Camp × camp is REJECTED for the map: mostly speculative cells (the thinness this epic exists
    to fight); revisit only if pooling changes that picture.
 
-## Quality gate (Andrew's bar: "nice quality output")
+## Quality gate (the maintainer's bar: "nice quality output")
 Ships only AFTER -chain and -best-call-fallback are done AND their output has passed a
 dogfooding quality review — the pooled/imputed cells must have survived real use before they
 anchor a headline table. Do not bind to a release before that review happens.

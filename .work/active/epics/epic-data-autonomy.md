@@ -36,7 +36,7 @@ first by epic-design.
   own tournament-data generation pipeline, but keep consuming upstream normally; flip to
   ours when upstream is down. The brief targets this feasibility level (not full
   replication, not archive-only).
-- **Scheduling substrate**: local scheduler (launchd) on Andrew's Mac, running refresh +
+- **Scheduling substrate**: local scheduler (launchd) on the maintainer's Mac, running refresh +
   B&R/release monitors against local data/ + DuckDB directly; session-start surfaces
   results. No cloud state to sync.
 
@@ -62,7 +62,7 @@ before, and owning the generation process removes that single point of failure.
 
 # Scheduled deck-data updates + B&R and new-release monitoring
 
-Andrew (2026-07-04): we need (1) scheduled updates of deck/tournament data, (2) monitoring
+the maintainer (2026-07-04): we need (1) scheduled updates of deck/tournament data, (2) monitoring
 of ban & restricted announcements, and (3) monitoring of new card releases — the engine's
 data currency and format awareness shouldn't depend on manual refreshes.
 
@@ -77,11 +77,11 @@ actually pays at CK — not just Scryfall/TCGplayer market.**
 Found dogfooding (2026-06-27): the engine's price pipeline (`seed prices` /
 `refresh --prices`) loads **Scryfall bulk USD = TCGplayer market**. For reserved-list /
 spiky cards this diverges hard from Card Kingdom. Concrete miss: I quoted Lion's Eye
-Diamond at a stale ~$55 from memory; Andrew sees **~$800 on Card Kingdom**. Scryfall
+Diamond at a stale ~$55 from memory; the maintainer sees **~$800 on Card Kingdom**. Scryfall
 provides a CK *purchase link* but not CK *price values*, so the engine literally cannot
 report CK prices today.
 
-Andrew prices and buys at Card Kingdom, so CK is the decision-relevant vendor for his
+the maintainer prices and buys at Card Kingdom, so CK is the decision-relevant vendor for his
 acquire/buy-list output.
 
 What to build:

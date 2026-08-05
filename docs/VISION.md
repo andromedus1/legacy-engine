@@ -17,7 +17,7 @@ decisions:
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
   - "Per-entity stable eras: every per-archetype/per-camp statistic windows to the entity's own detected stable era (change-point detection on composition/play-rate/win-rate — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint detection self-heals banlist announcement lag; every windowed figure names its window and triggering disturbance."
   - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. The superarchetype level exists to fight thin data: when an archetype-level matchup cell can't clear its tier gate, the cell falls back to the superarchetype aggregate with a labeled provenance chip, so every row gets signal against every major strategy. Intra-cluster matches count but carry an intra-cluster flag."
-  - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). Andrew-first now, multi-user-ready by design: the profile is data, not code."
+  - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). maintainer-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
 updated: 2026-07-31
 related:
@@ -100,7 +100,7 @@ session. Meta knowledge (tier reads, matchup insight, field trends), per-deck cr
 and the curated consensus-deck corpus with primers persist as maintained engine state, surfaced
 automatically when relevant — a session starts from accumulated knowledge, not from scratch. Advice
 is grounded in a **user profile** (decks owned and played, collection, local meta, preferences).
-Built Andrew-first; multi-user-ready by design — the profile is data, so serving another player is
+Built maintainer-first; multi-user-ready by design — the profile is data, so serving another player is
 a config swap, not a rewrite.
 
 ## Non-goals (for now)

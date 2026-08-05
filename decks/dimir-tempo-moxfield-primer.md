@@ -1,4 +1,4 @@
-# Dimir Tempo — Barrowgoyf Grind (Moxfield primer, Andrew's list conventions)
+# Dimir Tempo — Barrowgoyf Grind (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped winners, established tier).
@@ -45,7 +45,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 
 ---
 ---
-**matchups & sideboard** // wr = adaptive matrix vs boulder field; imputed = no cell data
+**matchups & sideboard** // wr = adaptive matrix vs local field; imputed = no cell data
 
 **izzet delver — 11% of field, 55% wr (evolving n=71):**
 * their plan: cheap threats + burn/counter, murktide top; bolts your tamiyo/kaito
@@ -155,7 +155,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 * slot-by-slot + copy histograms: decks/dimir-tempo-optimized-analysis.md
 
 **online config (-1 toxic deluge -> +1 surgical extraction):**
-* why: online field = grixis reanimator 6.4% + doomsday 5.1% (+dredge tail) vs boulder's near-zero yard share; fair-creature sweep targets thinner online
+* why: online field = grixis reanimator 6.4% + doomsday 5.1% (+dredge tail) vs local's near-zero yard share; fair-creature sweep targets thinner online
 * surgical targets: reanimator — exile the fatty in RESPONSE to entomb/reanimate (their yard, before it lands); dredge — exile the dredger; marginal: mirror murktide fuel
   * vs doomsday it does NOT hit the pile (library, not yard) — counters/consign stay the plan there
 * per-matchup deltas are inline above (the "// online config" lines); one online-only matchup to add:
@@ -166,7 +166,7 @@ Board = decks/dimir-tempo-optimized.txt (2026-07-04 refresh, n=263 field-scoped 
 ---
 **references:**
 * engine analysis: decks/dimir-tempo-optimized-analysis.md
-* cross-meta verdict (stay dimir for boulder): decks/dimir-vs-doomsday-tempo-comparison.md
+* cross-meta verdict (stay dimir for local): decks/dimir-vs-doomsday-tempo-comparison.md
 
 ---
 ---

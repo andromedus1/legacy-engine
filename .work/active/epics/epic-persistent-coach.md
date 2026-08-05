@@ -32,8 +32,8 @@ meta-report feature was scoped under it, not here); feature-web-interface may ev
 surface this layer but is not a dependency.
 
 ## Strategic decisions
-- **Audience framing (2026-07-31, scope gate)**: Andrew-first, multi-user-ready — build for
-  Andrew's workflow now; schema/storage designed so per-user profiles are a config swap,
+- **Audience framing (2026-07-31, scope gate)**: maintainer-first, multi-user-ready — build for
+  the maintainer's workflow now; schema/storage designed so per-user profiles are a config swap,
   not a rewrite. VISION.md rolled forward with the persistent-coach cross-cutting layer.
 
 ## Design decisions
@@ -66,7 +66,7 @@ use, so an agent picking up a later session starts from current meta state inste
 of regenerating it.
 
 **Motivating example (Dimir Tempo session, 2026-06-22):**
-I recommended graveyard hate (Nihil Spellbomb) for the sideboard. Andrew suspected
+I recommended graveyard hate (Nihil Spellbomb) for the sideboard. the maintainer suspected
 graveyard-heavy decks had fallen off — and the current-regime data confirmed it:
 Dimir Reanimator was down to **4 decks** in the current regime after the Entomb +
 Undercity Informer bans gutted the deck. Without a persisted meta-knowledge layer I
@@ -186,7 +186,7 @@ Forge session (2026-07-13):
 ### idea-user-profile-memory
 
 
-For legacy-engine to work for **other people** (not just Andrew), it needs a
+For legacy-engine to work for **other people** (not just the maintainer), it needs a
 per-user **memory of who's using it** — the typical LLM-memory-style thing:
 what decks they have/play, their location/local meta, their play style and
 preferences, their collection/binder, etc. Advice should be grounded in the
@@ -222,7 +222,7 @@ an opponent has played so far during a game; the system predicts the opponent's 
 archetype from that partial card sequence, driven by the engine's existing archetype
 knowledge.
 
-Intended use: by the player (Andrew) while playing, to train himself to correctly ID
+Intended use: by the player (the maintainer) while playing, to train himself to correctly ID
 opponent decks faster and earlier in a game.
 
 Raw notes on possible shape (not binding):

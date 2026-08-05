@@ -1,5 +1,5 @@
-# PAINTER — Boulder best-pick list (engine-generated, 2026-07-04)
-# Engine's top-ranked archetype for the Boulder field (S*=0.528, Q0.25=0.495, P(best)=0.093 — a
+# PAINTER — the local meta best-pick list (engine-generated, 2026-07-04)
+# Engine's top-ranked archetype for the local field (S*=0.528, Q0.25=0.495, P(best)=0.093 — a
 # LEAN, not a verdict; CIs overlap the whole top group; coverage 0.48). Consensus 60: current
 # regime, all provenance (n=37 — EVOLVING tier, thinnest of the four lists).
 # Board: natural budget stopped at 2 dedicated + 5 insurance = 7 slots — the engine declines to

@@ -94,20 +94,20 @@ def two_event_player_con() -> duckdb.DuckDBPyConnection:
 
 
 @pytest.fixture
-def alias_bosh_map() -> dict[str, str]:
-    """Bosh cluster alias map: three handles → 'bosh-n-roll'."""
+def alias_cluster_map() -> dict[str, str]:
+    """Alias cluster alias map: three handles → 'example-player'."""
     return {
-        "bosh n roll": "bosh-n-roll",
-        "boshnroll_brian": "bosh-n-roll",
-        "bosh95": "bosh-n-roll",
+        "example player": "example-player",
+        "exampleplayer_alt": "example-player",
+        "example42": "example-player",
     }
 
 
 @pytest.fixture
-def bosh_alias_con(alias_bosh_map: dict[str, str]) -> duckdb.DuckDBPyConnection:
-    """Three Bosh* handles each appearing in separate events."""
+def cluster_alias_con(alias_cluster_map: dict[str, str]) -> duckdb.DuckDBPyConnection:
+    """Three aliased handles each appearing in separate events."""
     con = _make_con()
-    handles = ["Bosh N Roll", "BoshNRoll_Brian", "Bosh95"]
+    handles = ["Example Player", "ExamplePlayer_Alt", "Example42"]
     # Each handle appears in ~3 events: 5 events total = 15 events for 1 logical player
     # wins/losses: 7W-3L per event = 70W-30L total across all 10 events
     for i, handle in enumerate(handles):
@@ -236,28 +236,28 @@ class TestComputePlayerRecords:
 
 
 class TestAliasPooling:
-    def test_bosh_aliases_pool_into_one_record(
+    def test_cluster_aliases_pool_into_one_record(
         self,
-        bosh_alias_con: duckdb.DuckDBPyConnection,
-        alias_bosh_map: dict[str, str],
+        cluster_alias_con: duckdb.DuckDBPyConnection,
+        alias_cluster_map: dict[str, str],
     ) -> None:
-        """Three Bosh* handles should produce one PlayerRecord under 'bosh-n-roll'."""
-        records = compute_player_records(bosh_alias_con, alias_map=alias_bosh_map)
+        """Three aliased handles should produce one PlayerRecord under 'example-player'."""
+        records = compute_player_records(cluster_alias_con, alias_map=alias_cluster_map)
         # Only one canonical player id
-        assert "bosh-n-roll" in records
+        assert "example-player" in records
         # None of the raw normalized handles appear as separate keys
-        assert "bosh n roll" not in records
-        assert "boshnroll_brian" not in records
-        assert "bosh95" not in records
+        assert "example player" not in records
+        assert "exampleplayer_alt" not in records
+        assert "example42" not in records
 
     def test_alias_pooling_sums_stats(
         self,
-        bosh_alias_con: duckdb.DuckDBPyConnection,
-        alias_bosh_map: dict[str, str],
+        cluster_alias_con: duckdb.DuckDBPyConnection,
+        alias_cluster_map: dict[str, str],
     ) -> None:
         """Stats from all three handles are summed into the single record."""
-        records = compute_player_records(bosh_alias_con, alias_map=alias_bosh_map)
-        rec = records["bosh-n-roll"]
+        records = compute_player_records(cluster_alias_con, alias_map=alias_cluster_map)
+        rec = records["example-player"]
         # 3 handles × 4 events each = 12 events; 7W-3L × 12 = 84W-36L
         assert rec.events == 12
         assert rec.match_wins == 84
@@ -265,25 +265,25 @@ class TestAliasPooling:
 
     def test_alias_pooling_tier(
         self,
-        bosh_alias_con: duckdb.DuckDBPyConnection,
-        alias_bosh_map: dict[str, str],
+        cluster_alias_con: duckdb.DuckDBPyConnection,
+        alias_cluster_map: dict[str, str],
     ) -> None:
         """Pooled record has enough volume to reach established tier."""
-        records = compute_player_records(bosh_alias_con, alias_map=alias_bosh_map)
-        rec = records["bosh-n-roll"]
+        records = compute_player_records(cluster_alias_con, alias_map=alias_cluster_map)
+        rec = records["example-player"]
         # 84+36 = 120 decisive matches → established
         assert rec.tier == "established"
 
     def test_no_alias_map_keeps_handles_separate(
-        self, bosh_alias_con: duckdb.DuckDBPyConnection
+        self, cluster_alias_con: duckdb.DuckDBPyConnection
     ) -> None:
         """With empty alias_map, each handle is its own record (gated-additive)."""
-        records = compute_player_records(bosh_alias_con, alias_map={})
-        assert "bosh n roll" in records
-        assert "boshnroll_brian" in records
-        assert "bosh95" in records
+        records = compute_player_records(cluster_alias_con, alias_map={})
+        assert "example player" in records
+        assert "exampleplayer_alt" in records
+        assert "example42" in records
         # The canonical id should not appear as a key
-        assert "bosh-n-roll" not in records
+        assert "example-player" not in records
 
 
 # ---------------------------------------------------------------------------
@@ -367,12 +367,12 @@ class TestIsStrong:
 
     def test_is_strong_with_alias_pooling(
         self,
-        bosh_alias_con: duckdb.DuckDBPyConnection,
-        alias_bosh_map: dict[str, str],
+        cluster_alias_con: duckdb.DuckDBPyConnection,
+        alias_cluster_map: dict[str, str],
     ) -> None:
-        """Bosh cluster pooled record clears all gates."""
-        records = compute_player_records(bosh_alias_con, alias_map=alias_bosh_map)
-        rec = records["bosh-n-roll"]
+        """Alias cluster pooled record clears all gates."""
+        records = compute_player_records(cluster_alias_con, alias_map=alias_cluster_map)
+        rec = records["example-player"]
         assert is_strong(rec)
 
 

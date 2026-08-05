@@ -1,38 +1,38 @@
-# Doomsday Tempo — Boulder build
+# Doomsday Tempo — the local meta build
 
-*Legacy · post–Undercity Informer regime · stock UB Tempo-Doomsday maindeck, sideboard **re-tuned to the Boulder field** around one finding: the standard grind pivot is flat against the decks Boulder is actually made of.*
+*Legacy · post–Undercity Informer regime · stock UB Tempo-Doomsday maindeck, sideboard **re-tuned to the local field** around one finding: the standard grind pivot is flat against the decks the local meta is actually made of.*
 
 A blue-black tempo deck that disrupts, clocks, and grinds like Dimir Tempo — but carries a **Doomsday → Thassa's Oracle** combo as a second way to win. You pick, game by game, whether to play fair or assemble the kill. Against the resilient permanent decks that crush fair tempo (Death & Taxes, prison, big mana) you combo *under* them; against the blue mirrors that punish all-in combo you fall back to the fair plan.
 
-**The maindeck is the stock current-regime consensus list, untouched.** Everything in this build that's specific to Boulder lives in the **sideboard** — and it's a sharper sideboard than the consensus default, because we audited the consensus board against the actual Boulder field and found it half-aimed at the wrong things.
+**The maindeck is the stock current-regime consensus list, untouched.** Everything in this build that's specific to the local meta lives in the **sideboard** — and it's a sharper sideboard than the consensus default, because we audited the consensus board against the actual local field and found it half-aimed at the wrong things.
 
 ---
 
-## Why this build for Boulder (read the gates first)
+## Why this build for the local meta (read the gates first)
 
 This is a **lean, not a verdict.** On a regime-clean current field, Doomsday Tempo positions roughly even with — slightly ahead of — dedicated Dimir Tempo, and it inverts your worst Dimir matchups (Death & Taxes 35%→72%, Energy 38%→60%) by going under them. But:
 
-- **Regime currency:** the Boulder paper sample is thin and only partly current-regime; the read leans on the global paper corpus as a proxy.
+- **Regime currency:** the local paper sample is thin and only partly current-regime; the read leans on the global paper corpus as a proxy.
 - **Coverage & significance:** roughly a third of the field has little reliable matchup data, every candidate's confidence interval overlaps, and **every sideboard win-rate swing below is statistically non-significant** — directional, not proven.
 - **Pilot skill:** Doomsday has a steep learning curve and rewards reps; local win-rates are pilot-inflated.
 
-**The risk this build is built around:** your single biggest Boulder matchup, **Izzet Delver (~11–12%), is Doomsday's worst (~41%)** — counters + a fast clock + burn punish a combo deck sitting at half life. The blue/cantrip decks (Izzet, the mirror, Show and Tell, Beanstalk, Jeskai, Esper) are **~45% of the field.** So the sideboard's first job is to win the blue matchups — and that's exactly where the consensus board comes up short.
+**The risk this build is built around:** your single biggest the local meta matchup, **Izzet Delver (~11–12%), is Doomsday's worst (~41%)** — counters + a fast clock + burn punish a combo deck sitting at half life. The blue/cantrip decks (Izzet, the mirror, Show and Tell, Beanstalk, Jeskai, Esper) are **~45% of the field.** So the sideboard's first job is to win the blue matchups — and that's exactly where the consensus board comes up short.
 
 ---
 
 ## The sideboard thesis (what this build changes and why)
 
-We audited the consensus Doomsday sideboard against the Boulder field, card by card. Two things fell out:
+We audited the consensus Doomsday sideboard against the local field, card by card. Two things fell out:
 
 **1. The standard grind pivot doesn't beat the blue decks.** Barrowgoyf is the consensus "transform into a fair deck" card, but in the matchup data it's **flat where it matters** — Barrowgoyf vs Izzet Delver `−0` (n=87), vs the Dimir mirror `−2` (n=133). It grinds *midrange* fine; it doesn't beat *tempo*. The card that beats blue tempo — **Orcish Bowmasters** — is in your stock list **zero times.**
 
 > **Orcish Bowmasters** `{1}{B}` — *Flash. When it enters and whenever an opponent draws a card except the first in each of their draw steps, deal 1 damage to any target. Then amass Orcs 1.* Every Brainstorm, Ponder, and Delver draw-step extra now costs them a creature or a life — it's the premier punisher of the entire blue plurality, and a flash body that ambushes their threats. The ~14-point gap between Dimir-vs-Izzet (55%) and Doomsday-vs-Izzet (41%) is, in large part, this card.
 
-**2. Some of the consensus hate is dead in this field.** **Surgical Extraction** has no real targets — Boulder has no Reanimator/Dredge — and it shows up *negative* in the data (a dead card you're forced to draw). And against the field's three "both-modes-bad" holes, the stock deck has **no answer at all**: it runs Hurkyl's Recall 3% of the time and Toxic Deluge ~never.
+**2. Some of the consensus hate is dead in this field.** **Surgical Extraction** has no real targets — the local meta has no Reanimator/Dredge — and it shows up *negative* in the data (a dead card you're forced to draw). And against the field's three "both-modes-bad" holes, the stock deck has **no answer at all**: it runs Hurkyl's Recall 3% of the time and Toxic Deluge ~never.
 
 So this build makes a **targeted reallocation** — cut what's dead or flat *in this meta*, add the tempo card the blue plurality demands plus the two missing answers, and **keep the hate that's actually working** (Hydroblast: Painter +8 / Energy +31; Consign vs Show and Tell; Force of Negation as combo insurance).
 
-| Out (dead / flat vs Boulder) | In (Boulder-demanded) |
+| Out (dead / flat vs the local meta) | In (the local meta-demanded) |
 |---|---|
 | 1 Surgical Extraction — *dead, no graveyard decks* | **4 Orcish Bowmasters** — *beats the blue ~45%* |
 | 2 Barrowgoyf (4→2) — *flat vs Izzet/mirror* | **1 Hurkyl's Recall** — *Blue Artifacts/Kappa, the missing answer* |
@@ -89,7 +89,7 @@ A clean five-card pile (top → bottom): **Street Wraith · Edge of Autumn · Th
 
 ---
 
-## The Boulder sideboard (15)
+## The local-meta sideboard (15)
 
 | Cards | Role |
 |---|---|
@@ -163,4 +163,4 @@ A clean five-card pile (top → bottom): **Street Wraith · Edge of Autumn · Th
 
 ---
 
-*Build: Tempo Doomsday — stock current-regime consensus maindeck, **Boulder-tuned sideboard**. 60 + 15. Combo-front, transforms into fair UB tempo vs the blue decks. The sideboard cuts the consensus board's meta-dead slots (Surgical / excess Barrowgoyf / Dauthi / Long Goodbye / Jace) for the tempo card the blue plurality demands (Orcish Bowmasters) plus the two answers the stock deck lacks (Hurkyl's, Toxic Deluge). **Every sideboard swing here is directional, not significant — and "Bowmasters lifts the blue matchups" is an inference from Dimir's numbers + card mechanics, not a measurement.** Register it and play the blue games to settle it.*
+*Build: Tempo Doomsday — stock current-regime consensus maindeck, **locally tuned sideboard**. 60 + 15. Combo-front, transforms into fair UB tempo vs the blue decks. The sideboard cuts the consensus board's meta-dead slots (Surgical / excess Barrowgoyf / Dauthi / Long Goodbye / Jace) for the tempo card the blue plurality demands (Orcish Bowmasters) plus the two answers the stock deck lacks (Hurkyl's, Toxic Deluge). **Every sideboard swing here is directional, not significant — and "Bowmasters lifts the blue matchups" is an inference from Dimir's numbers + card mechanics, not a measurement.** Register it and play the blue games to settle it.*

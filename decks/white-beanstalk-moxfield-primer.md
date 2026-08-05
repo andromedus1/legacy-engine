@@ -1,4 +1,4 @@
-# White Beanstalk — Phelia tempo-control (Moxfield primer, Andrew's list conventions)
+# White Beanstalk — Phelia tempo-control (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/white-beanstalk-moxfield.txt (unstar 6-2, Legacy Challenge 32 2026-07-05; post-Candelabra modal build).

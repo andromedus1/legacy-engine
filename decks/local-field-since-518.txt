@@ -1,4 +1,4 @@
-# Boulder paper meta, SINCE 5/18 ban (Undercity Informer) — from Andrew's tournament-org data (Table 3, post-ban pull).
+# local paper meta, SINCE 5/18 ban (Undercity Informer) — from the maintainer's tournament-org data (Table 3, post-ban pull).
 # Format: <share> <Engine Archetype> <player-count>.  Counts feed the Dirichlet field-share model.
 # 107 players total. Mapping (human label -> engine archetype), validated against decklist content:
 #   Izzet Tempo->Izzet Delver | Sneak and Show->Show and Tell | Red Painter->Painter
@@ -7,7 +7,7 @@
 #   Doomsday Tempo->Doomsday | Death and Taxes - BW (Yorion)->Death & Taxes | Boros Energy->Energy
 #   Saga Storm->Black Saga Storm  (Urza's Saga / Beseech / Ad Nauseam ritual storm — NOT TES)
 #   Affinity Stompy->Blue Artifacts  (Mox Opal / Emry / Kappa Cannoneer artifact deck)
-#   Affinity Combo (4 players) -> UNMAPPED: no Boulder decklists to classify it, and the name doesn't
+#   Affinity Combo (4 players) -> UNMAPPED: no local decklists to classify it, and the name doesn't
 #     pin the deck (could be a combo-Affinity = Blue Artifacts, or a big-mana artifact deck = Mystic Forge
 #     Combo). Held out of this field (103 of 107 players modeled) until the organizer confirms.
 0.112 Izzet Delver 12

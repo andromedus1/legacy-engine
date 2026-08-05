@@ -28,7 +28,7 @@ archetype in a cluster contribute to a win rate against that cluster — so a de
 grounded signal against all the major strategies even when it has never played the specific
 archetype in front of it.
 
-**Andrew's framing (2026-07-31, verbatim intent):** cluster the archetypes into
+**the maintainer's framing (2026-07-31, verbatim intent):** cluster the archetypes into
 superarchetypes, then use archetypes within each superarchetype cluster to generate a win
 rate against that superarchetype — getting signal against all the major strategies despite
 perhaps not having all the data on the archetypes within it. The open work is the *method*:
@@ -221,7 +221,7 @@ the clustering pass's own output and splitting it would leave `-clustering` with
 ### idea-superarchetype-matchup-aggregation
 
 
-**Thin data is the biggest problem to solve on the best-deck/best-call HTML.** Andrew's
+**Thin data is the biggest problem to solve on the best-deck/best-call HTML.** the maintainer's
 framing (2026-07-31): too many cells are unmeasured or speculative, so rows can't be
 grounded and the page's honesty gates discard most of the field.
 
@@ -272,7 +272,7 @@ intra-cluster matches count toward a member's record against its own cluster. Se
 
 
 The `Aluren` archetype label is a misnomer for what the deck now is: a **UG Show and Tell shell**.
-Andrew's read while studying it (2026-07-31): "seems like it's just a subarchetype of the show and
+the maintainer's read while studying it (2026-07-31): "seems like it's just a subarchetype of the show and
 tell archetype" — the composition data agrees.
 
 Measured (maindeck inclusion ≥50% = "core", since 2026-05-11):
@@ -303,7 +303,7 @@ surface the family relationship as a diagnostic. Relates to the era/generation-m
 
 ## Design decision addendum (2026-08-01) — subject-axis licensed imputation
 
-**Andrew's directive (verbatim intent):** the purpose was to aggregate data to a higher dimension
+**the maintainer's directive (verbatim intent):** the purpose was to aggregate data to a higher dimension
 to SEE MORE, not less. If all the archetypes in a superarchetype behave similarly, we may be able
 to IMPUTE across the superarchetype — archetypes within a superarchetype should all behave
 somewhat alike.
@@ -345,7 +345,7 @@ feature-ranking-honesty-guards).
 
 ## Design decision addendum #2 (2026-08-01) — era discipline for pooling and imputation
 
-**Andrew's directive:** apply the era-windowing lessons when aggregating across a superarchetype.
+**the maintainer's directive:** apply the era-windowing lessons when aggregating across a superarchetype.
 Reviewed against the shipped layer; five rules locked, one demonstrated live:
 
 **0. The taxonomy itself was era-mixed — fixed operationally today.** The first `superarchetype run`

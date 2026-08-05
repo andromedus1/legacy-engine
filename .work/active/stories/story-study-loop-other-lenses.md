@@ -16,7 +16,7 @@ updated: 2026-07-31
 
 # Run the study loop through non-Dimir archetype lenses
 
-Andrew (2026-07-04, reviewing the copy-count study): the study's findings sit very much in
+the maintainer (2026-07-04, reviewing the copy-count study): the study's findings sit very much in
 the lens of the Dimir Tempo archetype. The same study loop (sweep → divergence clusters →
 distribution-first analysis → engine build ideas) applied to other decks — **especially
 archetypes that play very differently from Dimir Tempo** (combo like TES/Oops, prison like
