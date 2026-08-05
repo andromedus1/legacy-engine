@@ -17,7 +17,7 @@ updated: 2026-06-13
 
 The engine's headline use case — "what's the meta, how do I attack it, how do I tune my deck?" — is
 in practice answered for a *global online-derived* field, but the real user (the maintainer) preps for a
-*local paper* meta near the maintainer's local paper meta that diverges sharply from the online data (big-mana-heavy). This
+*local paper* meta that diverges sharply from the online data (big-mana-heavy). This
 session modeled the local meta by hand-building a custom `--field` file and leaning on `--provenance paper`,
 which worked — but the path is undiscoverable and partial: the advise commands don't expose
 `--provenance`, the most insightful output (field-vulnerability / hate-equity) is gated behind

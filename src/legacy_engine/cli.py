@@ -4494,8 +4494,8 @@ def identify_track(
     Shows which archetypes the player registered in each ban-list regime and how
     many decks per archetype.
 
-    Example: legacy-engine identify track "bosh95"
-    Example: legacy-engine identify track "Andrea Mengucci"
+    Example: legacy-engine identify track "example42"
+    Example: legacy-engine identify track "Example Two"
     """
     _setup_logging(verbose)
     from legacy_engine.analytics.players.history import player_archetype_history
@@ -4845,7 +4845,7 @@ def generate_consensus(
     Example: legacy-engine generate consensus --archetype "Izzet Delver"
     Example: legacy-engine generate consensus --archetype "Dimir Tempo" --variant "Bauble"
     Example: legacy-engine generate consensus --archetype "Dimir Tempo" --strong
-    Example: legacy-engine generate consensus --archetype "Dimir Tempo" --players "bosh95,mengucci"
+    Example: legacy-engine generate consensus --archetype "Dimir Tempo" --players "example42,example-two"
     """
     _setup_logging(verbose)
 

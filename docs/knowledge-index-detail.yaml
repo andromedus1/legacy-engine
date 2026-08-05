@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-03T00:11:36Z'
+generated_at: '2026-08-05T23:17:43Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -259,8 +259,8 @@ documents:
     - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
       per-deck findings, consensus decklists with primers — persists across sessions
       and is surfaced automatically; advice is grounded in a user profile (decks played,
-      collection, local meta). maintainer-first now, multi-user-ready by design: the profile
-      is data, not code.'
+      collection, local meta). maintainer-first now, multi-user-ready by design: the
+      profile is data, not code.'
     related:
     - slug: docs/SPEC.md
       relationship: refines
@@ -438,8 +438,8 @@ documents:
       boards (archetype-sweep payloads, 2026-07-04: 26 archetypes, 293 top-finisher
       decks global /
 
-      153 local-field-scoped). Tests idea-copy-count-tipping-point''s "winners run fixers
-      at 0 or 2+"
+      153 local-field-scoped). Tests idea-copy-count-tipping-point''s "winners run
+      fixers at 0 or 2+"
 
       hypothesis against the solver''s pure-concave per-copy taper.
 
@@ -718,8 +718,8 @@ documents:
       machine-readable sources and polling designs for B&R + set-release monitoring,
       launchd
 
-      scheduling patterns for the maintainer''s Mac, and a feasibility verdict on Card Kingdom
-      prices.
+      scheduling patterns for the maintainer''s Mac, and a feasibility verdict on
+      Card Kingdom prices.
 
       '
     key_findings:

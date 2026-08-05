@@ -23,17 +23,17 @@ from legacy_engine.analytics.players.identity import (
 # ---------------------------------------------------------------------------
 
 
-BOSH_CLUSTER_JSON = json.dumps({
+ALIAS_CLUSTER_JSON = json.dumps({
     "version": "test",
     "players": {
-        "bosh-n-roll": {
-            "display": "Bosh N Roll",
-            "handles": ["Bosh N Roll", "BoshNRoll_Brian", "Bosh95"],
+        "example-player": {
+            "display": "Example Player",
+            "handles": ["Example Player", "ExamplePlayer_Alt", "Example42"],
             "notes": "Test cluster.",
         },
-        "andrea-mengucci": {
-            "display": "Andrea Mengucci",
-            "handles": ["Andrea Mengucci"],
+        "example-two": {
+            "display": "Example Two",
+            "handles": ["Example Two"],
             "notes": "Pro player, appears under full name only.",
         },
     },
@@ -43,7 +43,7 @@ BOSH_CLUSTER_JSON = json.dumps({
 @pytest.fixture
 def aliases_file(tmp_path: Path) -> Path:
     p = tmp_path / "aliases.json"
-    p.write_text(BOSH_CLUSTER_JSON)
+    p.write_text(ALIAS_CLUSTER_JSON)
     return p
 
 
@@ -67,24 +67,24 @@ def in_memory_con() -> duckdb.DuckDBPyConnection:
 def corpus_con() -> duckdb.DuckDBPyConnection:
     """In-memory DuckDB with tournaments + decks tables for suggest_aliases tests.
 
-    Bosh cluster design: a single person plays under three different handles across
+    Example cluster design: a single person plays under three different handles across
     three separate events — they never appear in the same tournament on the same day.
     This is the realistic scenario the heuristic is designed to surface.
 
     Corpus:
       tournament T1 (date 2026-01-01):
-        "Bosh N Roll", "Player X"
+        "Example Player", "Player X"
 
       tournament T2 (date 2026-01-15):
-        "BoshNRoll_Brian", "Player Y"
+        "ExamplePlayer_Alt", "Player Y"
 
       tournament T3 (date 2026-02-01):
-        "Bosh95", "Player Z"
+        "Example42", "Player Z"
 
       tournament T4 (date 2026-02-15):
         "Alice", "AliceB"  — co-occur on same day → must NOT be proposed
 
-    Since the three bosh handles share the normalized prefix "bosh" (≥4 chars) and
+    Since the three example handles share the normalized prefix "example" (≥4 chars) and
     never appear in the same (tournament_id, date) pair, suggest_aliases must propose
     a cluster containing all three.  Alice/AliceB share prefix "alic" but co-occur
     in T4, so they must NOT be proposed.
@@ -110,9 +110,9 @@ def corpus_con() -> duckdb.DuckDBPyConnection:
                 [tid, i, p],
             )
 
-    _add_event("t1", "2026-01-01", ["Bosh N Roll", "Player X"])
-    _add_event("t2", "2026-01-15", ["BoshNRoll_Brian", "Player Y"])
-    _add_event("t3", "2026-02-01", ["Bosh95", "Player Z"])
+    _add_event("t1", "2026-01-01", ["Example Player", "Player X"])
+    _add_event("t2", "2026-01-15", ["ExamplePlayer_Alt", "Player Y"])
+    _add_event("t3", "2026-02-01", ["Example42", "Player Z"])
     _add_event("t4", "2026-02-15", ["Alice", "AliceB"])  # co-occur → must NOT be proposed
 
     return con
@@ -124,15 +124,15 @@ def corpus_con() -> duckdb.DuckDBPyConnection:
 
 
 class TestLoadAliasMap:
-    def test_loads_three_bosh_handles(self, aliases_file: Path) -> None:
+    def test_loads_three_example_handles(self, aliases_file: Path) -> None:
         m = load_alias_map(aliases_file)
-        assert m["bosh n roll"] == "bosh-n-roll"
-        assert m["boshnroll_brian"] == "bosh-n-roll"
-        assert m["bosh95"] == "bosh-n-roll"
+        assert m["example player"] == "example-player"
+        assert m["exampleplayer_alt"] == "example-player"
+        assert m["example42"] == "example-player"
 
-    def test_loads_andrea_mengucci(self, aliases_file: Path) -> None:
+    def test_loads_second_cluster(self, aliases_file: Path) -> None:
         m = load_alias_map(aliases_file)
-        assert m["andrea mengucci"] == "andrea-mengucci"
+        assert m["example two"] == "example-two"
 
     def test_missing_file_returns_empty(self, tmp_path: Path) -> None:
         m = load_alias_map(tmp_path / "nonexistent.json")
@@ -157,14 +157,14 @@ class TestLoadAliasMap:
 
 
 class TestResolvePlayer:
-    def test_three_bosh_handles_resolve_to_one_id(self, alias_map: dict) -> None:
-        assert resolve_player("Bosh N Roll", alias_map) == "bosh-n-roll"
-        assert resolve_player("BoshNRoll_Brian", alias_map) == "bosh-n-roll"
-        assert resolve_player("Bosh95", alias_map) == "bosh-n-roll"
+    def test_three_example_handles_resolve_to_one_id(self, alias_map: dict) -> None:
+        assert resolve_player("Example Player", alias_map) == "example-player"
+        assert resolve_player("ExamplePlayer_Alt", alias_map) == "example-player"
+        assert resolve_player("Example42", alias_map) == "example-player"
 
-    def test_andrea_mengucci_resolves_to_itself(self, alias_map: dict) -> None:
-        # "Andrea Mengucci" is in the map; its canonical id is "andrea-mengucci".
-        assert resolve_player("Andrea Mengucci", alias_map) == "andrea-mengucci"
+    def test_second_cluster_resolves_to_itself(self, alias_map: dict) -> None:
+        # "Example Two" is in the map; its canonical id is "example-two".
+        assert resolve_player("Example Two", alias_map) == "example-two"
 
     def test_unknown_handle_resolves_to_normalized_self(self, alias_map: dict) -> None:
         result = resolve_player("UnknownPlayer99", alias_map)
@@ -177,20 +177,20 @@ class TestResolvePlayer:
         assert resolve_player("   ", alias_map) == ""
 
     def test_case_insensitive_resolution(self, alias_map: dict) -> None:
-        assert resolve_player("bosh n roll", alias_map) == "bosh-n-roll"
-        assert resolve_player("BOSH N ROLL", alias_map) == "bosh-n-roll"
+        assert resolve_player("example player", alias_map) == "example-player"
+        assert resolve_player("EXAMPLE PLAYER", alias_map) == "example-player"
 
     def test_empty_alias_map_resolves_to_self(self) -> None:
         """Gated-additive: with no alias_map, resolve is equivalent to normalize_player."""
         from legacy_engine.analytics.match_results import normalize_player
         empty: dict[str, str] = {}
-        for h in ["Bosh N Roll", "Alice", "  Bob  ", None]:
+        for h in ["Example Player", "Alice", "  Bob  ", None]:
             assert resolve_player(h, empty) == normalize_player(h)
 
     def test_deterministic(self, alias_map: dict) -> None:
         """Same handle always gives the same result."""
         for _ in range(10):
-            assert resolve_player("Bosh95", alias_map) == "bosh-n-roll"
+            assert resolve_player("Example42", alias_map) == "example-player"
 
 
 # ---------------------------------------------------------------------------
@@ -208,10 +208,10 @@ class TestMaterializePlayerAliases:
             "SELECT handle_norm, player_id FROM player_aliases ORDER BY handle_norm"
         ).fetchall()
         row_dict = dict(rows)
-        assert row_dict["bosh n roll"] == "bosh-n-roll"
-        assert row_dict["bosh95"] == "bosh-n-roll"
-        assert row_dict["boshnroll_brian"] == "bosh-n-roll"
-        assert row_dict["andrea mengucci"] == "andrea-mengucci"
+        assert row_dict["example player"] == "example-player"
+        assert row_dict["example42"] == "example-player"
+        assert row_dict["exampleplayer_alt"] == "example-player"
+        assert row_dict["example two"] == "example-two"
 
     def test_idempotent_run_twice_same_rows(
         self, in_memory_con: duckdb.DuckDBPyConnection, alias_map: dict
@@ -259,16 +259,16 @@ class TestMaterializePlayerAliases:
 
 
 class TestSuggestAliases:
-    def test_proposes_bosh_cluster(self, corpus_con: duckdb.DuckDBPyConnection) -> None:
-        """The three Bosh* handles (which never co-occur in the same tournament) should be
+    def test_proposes_example_cluster(self, corpus_con: duckdb.DuckDBPyConnection) -> None:
+        """The three Example* handles (which never co-occur in the same tournament) should be
         proposed as a cluster."""
         suggestions = suggest_aliases(corpus_con, min_overlap=4)
         # Flatten all suggested handles across all suggestions.
         all_handle_sets = [set(s.handles) for s in suggestions]
-        bosh_handles = {"Bosh N Roll", "BoshNRoll_Brian", "Bosh95"}
-        found = any(bosh_handles.issubset(s) for s in all_handle_sets)
+        example_handles = {"Example Player", "ExamplePlayer_Alt", "Example42"}
+        found = any(example_handles.issubset(s) for s in all_handle_sets)
         assert found, (
-            f"Expected a suggestion containing {bosh_handles}; got: {all_handle_sets}"
+            f"Expected a suggestion containing {example_handles}; got: {all_handle_sets}"
         )
 
     def test_does_not_propose_co_occurring_handles(
@@ -331,10 +331,10 @@ class TestSuggestAliases:
     ) -> None:
         """With a very high min_overlap, short-name handles are excluded from clustering."""
         suggestions_tight = suggest_aliases(corpus_con, min_overlap=20)
-        # No handle in the corpus has a 20-char normalized prefix, so expect empty (or no bosh match).
-        # "boshnroll_brian" is 15 chars, so we'd need >15 chars for bosh to match.
-        bosh_handles = {"Bosh N Roll", "BoshNRoll_Brian", "Bosh95"}
+        # No handle in the corpus has a 20-char normalized prefix, so expect empty (or no example match).
+        # "exampleplayer_alt" is 15 chars, so we'd need >15 chars for example to match.
+        example_handles = {"Example Player", "ExamplePlayer_Alt", "Example42"}
         for s in suggestions_tight:
-            assert not bosh_handles.issubset(set(s.handles)), (
-                "Bosh cluster should not appear with min_overlap=20"
+            assert not example_handles.issubset(set(s.handles)), (
+                "Example cluster should not appear with min_overlap=20"
             )

@@ -10,7 +10,7 @@ a deep sideboard); weak to decks that go *under* you (fast combo) or *over* you
 (sweepers, big mana).
 
 **Why it's here:** in this session's best-deck / best-call analysis, **Death & Taxes
-topped *both* lenses** for the current the local meta-proxy field — highest raw power
+topped *both* lenses** for the current local-meta-proxy field — highest raw power
 (ū ≈ 0.519) *and* best field-weighted positioning (S ≈ 0.523). It preys on the fair
 tempo decks the field is full of, and brings real combo hate for the combo half.
 
@@ -100,7 +100,7 @@ Priest + Grafdigger + Mindbreak Trap is a deep anti-combo package. D&T's tutors
 
 ---
 
-## local sideboard vs. the consensus
+## the local meta sideboard vs. the consensus
 
 The consensus board suits the local meta well as-is. The one local lean is toward your **biggest
 matchup, Izzet Delver (~14%)** — a red tempo deck the consensus board doesn't directly
@@ -155,7 +155,7 @@ answer. A modest, pool-grounded swap:
 ---
 
 *Build: Death & Taxes — global consensus current-regime maindeck + pool-grounded consensus
-sideboard, with a the local meta lean (+2 Path to Exile). 60 + 15. Tops both best-deck and
-best-call lenses for the the local meta-proxy field (ū ≈ 0.519, S ≈ 0.523) — a lean, not a
+sideboard, with a local-meta lean (+2 Path to Exile). 60 + 15. Tops both best-deck and
+best-call lenses for the local-meta-proxy field (ū ≈ 0.519, S ≈ 0.523) — a lean, not a
 verdict. The field's best fair deck: crushes tempo, folds to fast combo. ~$650 to build
 (Solitude/Stoneforge/Marsh Flats drive the cost).*

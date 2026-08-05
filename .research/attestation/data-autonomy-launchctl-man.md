@@ -14,7 +14,7 @@ version: Darwin 25.3.0 (macOS)
 Captured verbatim from `man launchctl` on the target machine. Load-bearing facts for
 operating LaunchAgents: per-user GUI jobs live in the `gui/<uid>` domain (the
 convenient form of the login domain — the right target for a job that should run while
-the maintainer is logged in); `kickstart` runs a loaded service immediately regardless of its
+the user is logged in); `kickstart` runs a loaded service immediately regardless of its
 schedule (the manual "run it now" and post-outage catch-up verb, with `-k` to restart a
 running instance); `print` inspects a domain or service's state including last exit
 status (the debugging verb). Modern bootstrap/bootout subcommands take these
