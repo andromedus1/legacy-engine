@@ -1,7 +1,7 @@
-# Doomsday Tempo (Moxfield primer, Andrew's list conventions)
+# Doomsday Tempo (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
-List = decks/doomsday-tempo-boulder.txt (consensus tempo camp n=47 + judgment board, 2026-07-04).
+List = decks/doomsday-tempo-local.txt (consensus tempo camp n=47 + judgment board, 2026-07-04).
 Online swap: -1 brazen borrower -> +1 thoughtseize (3rd).
 
 <!-- PASTE BELOW -->
@@ -54,7 +54,7 @@ Online swap: -1 brazen borrower -> +1 thoughtseize (3rd).
 
 ---
 ---
-**matchups & sideboard** // wr = adaptive matrix vs boulder field, ARCHETYPE-level (camps pooled); imputed = no cell data // online board: brazen lines become the 3rd thoughtseize
+**matchups & sideboard** // wr = adaptive matrix vs local field, ARCHETYPE-level (camps pooled); imputed = no cell data // online board: brazen lines become the 3rd thoughtseize
 
 **izzet delver — 11% of field, 41.5% wr (worst measured — their burn taxes doomsday's half-life):**
 * their plan: cheap clock + bolt your face (shrinks combo window) + counter war on the oracle
@@ -158,7 +158,7 @@ Online swap: -1 brazen borrower -> +1 thoughtseize (3rd).
 ---
 **references:**
 * build + camp analysis: decks/doomsday-tempo-analysis.md
-* cross-meta verdict (dimir for boulder; doomsday = online lean + field-drift option): decks/dimir-vs-doomsday-tempo-comparison.md
+* cross-meta verdict (dimir for local; doomsday = online lean + field-drift option): decks/dimir-vs-doomsday-tempo-comparison.md
 
 ---
 ---

@@ -30,7 +30,7 @@ comparison stage 4). Runs per archetype; composes only shipped engine surfaces.
    every deliverable header).
 2. Collection file current (`decks/binder.txt`); reconcile known gaps first (open item:
    dual-land accounting — plays 4 Underground Sea, binder lists none).
-3. Field files regime-scoped (`boulder-field-since-518.txt` pattern); online =
+3. Field files regime-scoped (`local-field-since-518.txt` pattern); online =
    `provenance='online'` current regime.
 
 ## The stages
@@ -58,7 +58,7 @@ The loop is deliberately mechanical enough to drive from a batch driver like the
 sweep: stages 1-2 are already scriptable per archetype (the sweep's `run_sweep` is stage 1's
 backtest half); stage 3 needs a marker-rule registry per archetype (curated JSON, same
 pattern as the hoser catalog); stage 4 is a pairwise driver over the loop's outputs. The
-payoff Andrew named: non-Dimir lenses (combo/prison/creature archetypes) stress different
+payoff the maintainer named: non-Dimir lenses (combo/prison/creature archetypes) stress different
 scorer mechanics and will mine different engine-improvement clusters — the loop IS the
 idea-processing machine.
 

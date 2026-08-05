@@ -1,4 +1,4 @@
-// Andrew's total collection (binder) — quantities summed across both binders.
+// the maintainer's total collection (binder) — quantities summed across both binders.
 // Source: full collection export. Used for collection-aware deck prep.
 4 Baleful Strix
 3 Barrowgoyf

@@ -169,7 +169,7 @@ Not decomposed: `idea-opponent-boarding-response` stays an absorbed member per t
 
 # `_hate:` coverage applies no impact factor — Defense Grid false positive (CONFIRMED mechanism)
 
-Field-scoped backtest: Defense Grid recommended at 4 copies; **0%** of 258 Boulder-relevant
+Field-scoped backtest: Defense Grid recommended at 4 copies; **0%** of 258 local-field-relevant
 top-finisher boards run it. Independent deep review (2026-07-03, pinned f53e6a4) confirmed the
 mechanism — stronger than first filed:
 
@@ -205,7 +205,7 @@ the field-scoped backtest. Relates to [[idea-card-semantics-rules-layer]] (prote
 
 The archetype sweep confirms this at full scale: **Defense Grid is scorer-only in 18 of 26
 swept archetypes** (global current-regime field; also scorer-only for Dimir Tempo vs the
-Boulder field) — the single most systematic false positive in the engine. Top-ranked
+local field) — the single most systematic false positive in the engine. Top-ranked
 scorer_only `_hate` cluster; winners' adoption ≤12% everywhere it's recommended.
 
 ---
@@ -215,7 +215,7 @@ scorer_only `_hate` cluster; winners' adoption ≤12% everywhere it's recommende
 
 # Damping Sphere scorer-only divergence — base-model near-miss (verified)
 
-Field-scoped backtest (Dimir Tempo + Boulder): Damping Sphere recommended but only **2.7%** of 258
+Field-scoped backtest (Dimir Tempo + the local meta): Damping Sphere recommended but only **2.7%** of 258
 top-finisher boards run it. Verified mechanism (option-value deep review, 2026-07-03): it is a
 PRE-EXISTING near-miss in the base mean-field model — greedy at `alpha=1.0` (option-value term
 fully disabled) already recommends it; the default ILP sits right at the margin (absent at α=1.0,
@@ -231,7 +231,7 @@ Defense Grid item (graded self-cost for symmetric cards). Never auto-calibrate i
 ## Sweep confirmation (2026-07-04, validated harness)
 
 Archetype sweep: **Damping Sphere is scorer-only in 6 archetypes** (global field, `ramp`
-cluster) and scorer-only for Dimir Tempo vs the Boulder field — session-1's finding is
+cluster) and scorer-only for Dimir Tempo vs the local field — session-1's finding is
 systematic, shares the symmetric-self-cost root cause with Defense Grid (18 archetypes).
 
 ---
@@ -261,7 +261,7 @@ via EE when the global best is off-color black.
 
 # Triage the remaining winners-only divergences — creature-interaction cluster looks systematic
 
-The field-scoped backtest (Dimir Tempo + Boulder, 2026-07-03) shows 9 winners-only cards at ≥20%
+The field-scoped backtest (Dimir Tempo + the local meta, 2026-07-03) shows 9 winners-only cards at ≥20%
 adoption; only Consign was investigated. The un-recommended creature-interaction cluster —
 Sheoldred's Edict (50.4%), Toxic Deluge, Snuff Out (each ~virtually always in real boards) — being
 absent from recommendations is a candidate SYSTEMATIC gap (is creature-based coverage under-weighted

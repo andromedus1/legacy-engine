@@ -272,11 +272,11 @@ class TestEnumerateArchetypes:
         db_path = _build_backtest_db(tmp_path)
         con = store.connect(db_path)
         try:
-            # Corpus: Doomsday 10 decks, Boulder 8, Reanimator 6 across T1-T3.
+            # Corpus: Doomsday 10 decks, the local meta 8, Reanimator 6 across T1-T3.
             rows = enumerate_archetypes(con, since=None, until=None, min_decks=7)
         finally:
             con.close()
-        assert rows == [("Doomsday", 10, True), ("Boulder", 8, True), ("Reanimator", 6, False)]
+        assert rows == [("Doomsday", 10, True), ("the local meta", 8, True), ("Reanimator", 6, False)]
 
     def test_unknown_and_null_are_excluded(self, tmp_path):
         db_path = _build_backtest_db(tmp_path)
@@ -287,7 +287,7 @@ class TestEnumerateArchetypes:
             rows = enumerate_archetypes(con, since=None, until=None, min_decks=1)
         finally:
             con.close()
-        assert [r[0] for r in rows] == ["Boulder"]
+        assert [r[0] for r in rows] == ["the local meta"]
 
 
 class TestRunSweep:
@@ -309,13 +309,13 @@ class TestRunSweep:
             con.close()
 
         by_arch = {e.archetype: e for e in result.entries}
-        assert by_arch["Boulder"].backtest is not None
+        assert by_arch["the local meta"].backtest is not None
         assert by_arch["Reanimator"].backtest is None
         assert "below --min-decks (6 < 7)" == by_arch["Reanimator"].skipped_reason
         # Progress fired once per enumerated archetype, in order, with the right total.
-        assert seen_progress == [(1, 3, "Doomsday"), (2, 3, "Boulder"), (3, 3, "Reanimator")]
+        assert seen_progress == [(1, 3, "Doomsday"), (2, 3, "the local meta"), (3, 3, "Reanimator")]
 
-        # Boulder's winners run Surgical Extraction (100%) which the fake scorer never
+        # the local meta's winners run Surgical Extraction (100%) which the fake scorer never
         # recommends -> a winners_only divergence exists; Surgical is catalog-curated so
         # it clusters under a real tag. Non-catalog cards (Ravenous Trap — the hermetic DB
         # has no `cards` oracle rows) land in the honest unclassified cluster, not dropped.
@@ -396,7 +396,7 @@ class TestAdviseSweepCLI:
             lambda *a, **k: _fake_package({"Toxic Deluge": 1}),
         )
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
 
         result = runner.invoke(
             main,
@@ -413,7 +413,7 @@ class TestAdviseSweepCLI:
         assert "// sweep: archetype-sweep backtest" in out
         assert "// window: since=2026-01-01" in out
         assert "min-decks=7" in out
-        assert "// [2/3] Boulder: winners n=" in out
+        assert "// [2/3] the local meta: winners n=" in out
         assert "Reanimator: SKIPPED — below --min-decks (6 < 7)" in out
         assert "Winners-only clusters" in out
         assert "Scorer-only clusters" in out
@@ -435,7 +435,7 @@ class TestAdviseSweepCLI:
             lambda *a, **k: _fake_package({"Toxic Deluge": 1}),
         )
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
 
         result = runner.invoke(
             main,
@@ -463,7 +463,7 @@ class TestAdviseSweepCLI:
             lambda *a, **k: _fake_package({"Toxic Deluge": 2}),
         )
         field_file = tmp_path / "field.txt"
-        field_file.write_text("0.6 Boulder\n0.4 Doomsday\n")
+        field_file.write_text("0.6 the local meta\n0.4 Doomsday\n")
         json_path = tmp_path / "sweep.json"
 
         result = runner.invoke(
@@ -484,11 +484,11 @@ class TestAdviseSweepCLI:
         assert payload["min_decks"] == 7
         assert payload["window"]["since"] == "2026-01-01"
         by_arch = {a["archetype"]: a for a in payload["archetypes"]}
-        boulder = by_arch["Boulder"]
+        local = by_arch["the local meta"]
         # The copy dimension the distribution study consumes: solver copies + histograms.
-        assert boulder["recommended_counts"] == {"Toxic Deluge": 2}
-        assert boulder["observed_copy_distribution"]["Surgical Extraction"] == {"1": 4}
-        assert boulder["n_winning_decks"] == 4
+        assert local["recommended_counts"] == {"Toxic Deluge": 2}
+        assert local["observed_copy_distribution"]["Surgical Extraction"] == {"1": 4}
+        assert local["n_winning_decks"] == 4
         # Skipped archetypes serialize their reason and no backtest keys.
         assert by_arch["Reanimator"]["skipped_reason"] is not None
         assert "n_winning_decks" not in by_arch["Reanimator"]
@@ -499,7 +499,7 @@ class TestAdviseSweepCLI:
         con = store.connect(db_path)
         con.close()
         field_file = tmp_path / "field.txt"
-        field_file.write_text("1.0 Boulder\n")
+        field_file.write_text("1.0 the local meta\n")
 
         result = runner.invoke(
             main,

@@ -1,4 +1,4 @@
-# Cephalid Breakfast, tempo — Loki generation (Moxfield primer, Andrew's list conventions)
+# Cephalid Breakfast, tempo — Loki generation (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/cephalid-breakfast-tempo.txt (L4rss0n 6-2 Challenge 3rd 2026-07-18; winner-modal of the 12-deck July generation).

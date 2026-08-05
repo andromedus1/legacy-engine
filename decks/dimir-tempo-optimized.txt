@@ -1,6 +1,6 @@
-# DIMIR TEMPO — optimized sideboard (Boulder field, 2026-07-04 refresh; corpus through 2026-07-01)
+# DIMIR TEMPO — optimized sideboard (local field, 2026-07-04 refresh; corpus through 2026-07-01)
 # Produced by the post-sweep engine (deterministic ILP, PR #35) + explicit human overrides.
-# Validation: field-scoped `advise backtest`, 263 Boulder-relevant top-finisher Dimir boards
+# Validation: field-scoped `advise backtest`, 263 local-field-relevant top-finisher Dimir boards
 # (ESTABLISHED tier; 283/449 candidate tournaments excluded as off-field). Every engine claim is
 # pure-mechanics (no winning-board prior in scores); winner-adoption %s are independent validation.
 #

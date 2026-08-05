@@ -38,7 +38,7 @@ per-candidate evaluation seam from `per-deck-castability`); replacement of the b
 cliff with a graded self-cost; and — as an explicit cut line if the feature runs long — conditioning
 Step-3 `_hate:` weights on which tags the interactive field actually attacks. Acceptance is
 mechanical, not adoption-matching: Defense Grid drops out of the recommended board on the
-field-scoped backtest for Dimir Tempo vs Boulder, Damping Sphere's near-miss resolves at the
+field-scoped backtest for Dimir Tempo vs the local meta, Damping Sphere's near-miss resolves at the
 DEFAULT alpha, and a control symmetric card that is genuinely correct for its deck (e.g. Engineered
 Explosives in a colorless-capable shell) is NOT suppressed.
 

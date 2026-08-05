@@ -6,7 +6,7 @@ tags: [analysis]
 
 Two-deck portfolio: pick a pair of decks that are foils of one another — both
 high-agency, partitioning the field so each covers the other's bad matchups —
-and choose per expected room. Andrew's anchor pairing: **Doomsday (his
+and choose per expected room. the maintainer's anchor pairing: **Doomsday (his
 Fantasticar tempo-juke build — owned in paper except the dual lands) + White
 Beanstalk (Phelia/Riddler, decks/white-beanstalk-moxfield.txt)**. He likes his
 Doomsday and has already identified it as high-agency; WB appears to be a great
@@ -31,8 +31,8 @@ Session evidence (2026-07-31, ranking-page ledger, corpus through 2026-07-30):
   wants Tundra/Trop/Savannah/Volcanic) so both stay sleeved; fetches and
   Forces are the contested cards; WB duals are likely binder gaps.
 - Caveats logged: WB cells are ban-window cross-generation blends; Dimir Tempo
-  n=9 / S&T n=8 thin; Andrew's Fantasticar Doomsday camp itself unmeasured
+  n=9 / S&T n=8 thin; the maintainer's Fantasticar Doomsday camp itself unmeasured
   (n=19 corpus decks); no reps on either 75.
 
-Possible directions Andrew voiced or implied: validate the pairing thesis;
+Possible directions the maintainer voiced or implied: validate the pairing thesis;
 explore other high-agency pairings anchored on his Doomsday deck.

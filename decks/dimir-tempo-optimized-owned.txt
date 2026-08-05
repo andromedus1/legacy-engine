@@ -1,4 +1,4 @@
-# DIMIR TEMPO — Board B: owned-constrained sideboard (Boulder field, 2026-07-04)
+# DIMIR TEMPO — Board B: owned-constrained sideboard (local field, 2026-07-04)
 # CONVERGES to Board A (dimir-tempo-optimized.txt): after the human overrides remove the engine's
 # only unowned picks (2 Defense Grid + Blue Elemental Blast → owned twin Hydroblast), Board A is
 # fully collection-covered, so the owned-constrained board is the SAME 15. Kept as a separate file

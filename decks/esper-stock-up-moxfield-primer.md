@@ -1,4 +1,4 @@
-# Esper Stock Up (Moxfield primer, Andrew's list conventions)
+# Esper Stock Up (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/esper-stock-up-60.txt (camp consensus n=53, winner-validated vs harmonywoods 6-2; 2026-07-20).

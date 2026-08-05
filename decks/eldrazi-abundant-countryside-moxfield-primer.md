@@ -1,4 +1,4 @@
-# Eldrazi [Abundant Countryside], colorless stock (Moxfield primer, Andrew's list conventions)
+# Eldrazi [Abundant Countryside], colorless stock (Moxfield primer, the maintainer's list conventions)
 
 Paste everything below the marker into the Moxfield deck description.
 List = decks/eldrazi-abundant-countryside.txt (modal camp 60, Gnurant-validated; 2026-07-21).

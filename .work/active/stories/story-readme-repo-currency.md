@@ -15,7 +15,7 @@ updated: 2026-08-01
 
 ## Brief
 
-**Andrew's directive (2026-08-01):** whenever all of this is done — including the HTML doc
+**the maintainer's directive (2026-08-01):** whenever all of this is done — including the HTML doc
 additions (the three-level best-call page) — make sure the GitHub repo is up to date, and update
 the README. **Review the README in its entirety** and make sure the whole thing is still
 descriptive of the project and its output — not a patch, a full read-through.

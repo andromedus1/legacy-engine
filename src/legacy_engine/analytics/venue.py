@@ -45,7 +45,7 @@ class Venue:
     so those future venues require no call-site changes here.
     """
 
-    key: str            # "online" | "paper"  (later: "local:boulder", "regional")
+    key: str            # "online" | "paper"  (later: "local:local", "regional")
     label: str          # "Online (MTGO)" | "Paper"
     provenance: str | None   # the only filter axis available today
 
