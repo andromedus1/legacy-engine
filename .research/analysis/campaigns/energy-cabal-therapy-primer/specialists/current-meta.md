@@ -104,7 +104,7 @@ the 24 local archetypes and mention public aliases at matchup headings.
   changes Legacy legality, or a major paper event shifts the local preparation target.
 - Archetype relabeling splits Blue Artifacts, Show and Tell, Energy, or the blue midrange families;
   their present umbrella labels conceal sideboard-relevant variants.
-- The intended tournament is specifically Boulder/local paper. In that case, replace the mixed
+- The intended tournament is specifically the maintainer's local paper meta. In that case, replace the mixed
   prevalence order with a venue-specific window while retaining low-share combo coverage.
 
 ## Acquisition candidates
