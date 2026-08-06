@@ -1,14 +1,14 @@
 ---
 id: story-deep-review-followups
 kind: story
-stage: review
+stage: done
 tags: [analytics, cleanup]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-08-01
-updated: 2026-08-02
+updated: 2026-08-05
 ---
 
 # Deep-review follow-ups (2026-08-01, 7-feature post-merge review)
@@ -90,3 +90,28 @@ Do not naively rebuild the registry from the thin 2026-06-29 global window. Adva
 `epic-superarchetype-layer-era-core-pools` through design and its offline representation benchmark,
 then select a validated serving method, generate a new preview, and obtain user approval before the
 three-level page uses superarchetype output as a headline ranking.
+
+## Review (2026-08-05)
+
+**Verdict: Approve.** Bounded inline review, standalone-story lane — no independent,
+fresh-context, or cross-model reviewer, per the story routing contract.
+
+Each claimed fix was verified against the code rather than accepted from the notes:
+- **Unit 1** (`aggregate.py:866-873`): the disposition is computed from the typed verdict
+  (`disposition = "refused" if het.band == "refused" else "served"`), so provenance can no
+  longer claim a label was served when the cell was refused; the not-computable branch emits
+  `served with heterogeneity label:`. Both directions pinned at `test_aggregate.py:530,534`.
+- **Unit 2** (`sideboard.py:225`): `_PLAN_STATUS_LAND_LOOKUP_FAILED = "land-resolution-failed"`
+  is a named degraded status carried into `_plan_matchups`, asserted at
+  `tests/test_sideboard.py:8969` — the silent `log.debug` path is gone.
+- **Unit 3**: the golden's representative cell now asserts independent exact expected values
+  instead of self-comparing floats; the family-first branch is actually executed via
+  `monkeypatch.setattr(chain, "FAMILY_FIRST_KINDS", frozenset({"release"}))`
+  (`test_matchup_superarchetype.py:296`) with the family-current imputation asserted at :304.
+
+Verification: focused suites 698 passed; full suite 3,540 passed / 1 skipped (the UMAP skip is
+an optional-dependency gap, tracked as `idea-local-ci-python-drift`).
+
+Finding 2 (serving-registry window) remains intentionally out of scope and continues in
+`epic-superarchetype-layer-era-core-pools`; the story is explicit that the registry must not be
+naively rebuilt from the thin 2026-06-29 window. No blockers.
