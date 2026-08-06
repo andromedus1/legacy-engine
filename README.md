@@ -3,7 +3,7 @@
 A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data: *"What is the meta, how do I attack it, and how do I tune my deck?"*
 
 legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every deck
-under a consistent two-level archetype taxonomy (parent archetype × data-driven subarchetype camps),
+under a consistent three-level taxonomy (**superarchetype → parent archetype → data-driven camp**),
 detects each deck's **stable eras** from the corpus itself (bans *and* releases rebuild decks —
 every statistic windows to the largest stretch of still-solid data and names the disturbance that
 bounds it), and computes the metagame, matchup matrix, and field-aware advice on top — every number
@@ -34,9 +34,10 @@ for how it's built.
 
 ## Status
 
-The **observed-data spine, meta analytics, subarchetype discovery, stable-era detection, deck
-generation, the advisory differentiator, and a local visualization layer** are built and tested
-(2964 passing tests, +1 documented xfail). Only the goldfish-simulation pillar remains deferred:
+The **observed-data spine, meta analytics, three-level taxonomy, stable-era detection, deck
+generation, advisory differentiator, and local visualization layer** are built and tested
+(**3,540 passing**, with one skip — the optional UMAP extra — and no xfails). Only the goldfish-simulation
+pillar remains deferred:
 
 | Capability | State |
 |---|---|
@@ -45,6 +46,7 @@ generation, the advisory differentiator, and a local visualization layer** are b
 | fbettega tournament ingestion (DuckDB) | ✅ built |
 | Archetype classifier (ported MTGOArchetypeParser) | ✅ built |
 | Sub-archetype variant tagging (`report meta --by-variant`, `generate consensus --variant`) | ✅ built |
+| Superarchetype strategy-cluster registry (`superarchetype run|list|explain`; reviewed `--promote`) | ✅ built |
 | Meta-share (3 definitions, online/paper; venue split `--venues`; sub-archetype split `report subgroup`) | ✅ built |
 | Matchup matrix (Wilson/Jeffreys CI + Beta-Binomial shrinkage + confidence tiers) | ✅ built |
 | Meta trends across ban-list regimes (version-stamped; `--movers N` biggest-movers digest) | ✅ built |
@@ -52,8 +54,9 @@ generation, the advisory differentiator, and a local visualization layer** are b
 | Head-to-head matchup lookup (`report matchups --a/--b` — single directed cell + Wilson CI) | ✅ built |
 | Per-entity stable-era detection (`eras run|list|explain|confirm` — change-point ensemble, fleet FDR, ban/release attribution, BOCPD drift alarm) | ✅ built |
 | Era-aware analytics & advisory (stable_since is the DEFAULT per-cell window; detection-derived global field era; ban-only fallback, loudly labeled) | ✅ built |
-| Hierarchical + cross-era cell shrinkage (camp → leave-camp-out parent → marginal priors; thin new-era cells anchor to their own pre-disturbance value, labeled) | ✅ built |
+| Hierarchical + cross-era cell shrinkage (camp → leave-camp-out parent → superarchetype → marginal priors; thin new-era cells anchor to their own pre-disturbance value, labeled) | ✅ built |
 | Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
+| Best Deck / Best Call review page (archetype-ranking authority; exploratory family evidence shown separately) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
@@ -129,6 +132,12 @@ legacy-engine eras run          # detect + attribute + persist (also raises the 
 legacy-engine eras list         # every entity's stable_since + triggering disturbance
 legacy-engine eras explain "Doomsday"   # walk one entity's boundary derivations (signals, p, verdicts)
 legacy-engine eras confirm 2026-06-29 "Candelabra of Tawnos" "Tron growth engine"  # register a confirmed ban → regime table heals
+
+# Superarchetype lifecycle — preview first, then explicitly replace the serving registry
+legacy-engine superarchetype run          # preview a candidate; does not alter serving data
+legacy-engine superarchetype list         # inspect serving clusters and member provenance
+legacy-engine superarchetype explain "Aluren"  # explain one parent archetype's assignment
+legacy-engine superarchetype run --promote # after review: replace serving JSON registry + DuckDB cache
 
 # Meta & performance reports
 legacy-engine report meta       # meta-share (raw / top-cut / win-rate-weighted; online vs paper)
@@ -231,6 +240,12 @@ Standalone analysis helpers that sit alongside the CLI:
   --deck "Dimir Tempo" --matchups-out decks/dimir-tempo-matchups.html
 ```
 
+```bash
+# Refresh the standalone Best Deck / Best Call review page (generated and git-ignored).
+.venv/bin/python scripts/refresh_best_call_ranking.py
+# writes decks/best-deck-best-call-ranking.html
+```
+
 `meta_view.py` is the **meta view** (where the field is, how it's moving, what's
 best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
 75 compares to the field). Both render to self-contained inline SVG (no Chrome / Node /
@@ -241,6 +256,11 @@ The cohort tool renders, per card, your count vs the cohort's 0x/1x/2x/3x/4x his
 inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plus a
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
+
+The Best Deck / Best Call page nests family, parent archetype, and camp views; includes a family
+heatmap and deterministic group descriptions; and keeps family-level evidence explicitly
+exploratory. Its ranking authority remains at the parent-archetype level. Matchup bands use raw
+win rate: **Blowout** <40%, **Half** 40–45%, **Edge** 55–60% inclusive, and **Dominant** >60%.
 
 Each leaf takes `-v/--verbose`; all `advise` leaves and `report matchups|meta` take
 `--provenance [online|paper|all]` and a `--db` path. Every emitted number is labeled with its
@@ -274,6 +294,7 @@ src/legacy_engine/
                #   eras/     (stable-era detection: series, bocpd, detect, ensemble, store,
                #              attribution, run, consume)
                #   players/  (identity, strength, history)
+               #   superarchetype/ (strategy clustering, registry, aggregation, consumption)
   advisory/    # field, positioning, sideboard, whattoplay, report, gaps, window,
                #   collection, acquire, primer, refresh
   generation/  # consensus, export, tuning, discovery (modes 1+2+3), card_distribution, models
@@ -283,9 +304,9 @@ src/legacy_engine/
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, Variant,
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
-scripts/       # standalone helpers: knowledge-index gen; viz prototypes (meta_view.py, deck_vs_cohort_viz.py)
+scripts/       # standalone helpers: knowledge-index gen; viz + Best Call refresh helpers
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (2964 passing + 1 documented xfail)
+tests/         # pytest suite (3,540 passing; one optional-extra skip; no xfails)
 ```
 
 ## Contributing

@@ -866,8 +866,11 @@ def aggregate_cluster_cell(
     provenance: list[str] = [_CALIBRATION_AUDIT_NOTE]
     if het.note:
         provenance.append(het.note)
+    elif het.band == "not-computable":
+        provenance.append(f"served with heterogeneity label: {het.reason}")
     if not conc.passed and conc.label:
-        provenance.append(f"served with concentration label: {conc.label}")
+        disposition = "refused" if het.band == "refused" else "served"
+        provenance.append(f"{disposition} with concentration label: {conc.label}")
 
     if het.band == "refused":
         reasons = [f"heterogeneity gate: {het.reason}"]

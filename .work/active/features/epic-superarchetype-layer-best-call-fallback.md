@@ -1,11 +1,11 @@
 ---
 id: epic-superarchetype-layer-best-call-fallback
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics, docs]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-chain, feature-multi-split-matrix]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-31
 updated: 2026-08-01
@@ -372,3 +372,11 @@ Full verification: `PYTHONPATH=. .venv/bin/pytest -q` -> **3,519 passed, 1 skipp
 (`.venv/bin/pytest -q` without the explicit repo-root path is not a valid invocation in this
 isolated checkout because an installed top-level `tests` package shadows the repo's namespace at
 collection time.)
+
+## Review disposition
+
+Approved and merged in PR #76 on 2026-08-01 after `Lint & test` passed. The real-corpus preview
+confirmed the fallback is structurally honest and useful as a labeled member-level lean, while also
+showing that it does not by itself create a decision-useful family ranking. That limitation is not a
+defect in this feature: the overlay remains isolated from grounded ranking claims, and the separate
+decision-useful-superarchetype research campaign now gates any future three-level decision surface.

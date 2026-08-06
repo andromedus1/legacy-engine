@@ -21,6 +21,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from test_matchup_multi_split import (
     PARENTS,
     adaptive_con,
@@ -102,22 +104,30 @@ class TestDefaultBuildGolden:
         con.close()
         cell = ams.multi.cells[("Doomsday [Murktide]", "Control")]
         got = {f: getattr(cell, f) for f in _CELL_FIELDS}
-        assert got == {
-            "archetype_a": "Doomsday [Murktide]",
-            "archetype_b": "Control",
-            "wins": 7,
-            "n": 16,
-            "p_raw": 0.4375,
-            "p_shrunk": got["p_shrunk"],
-            "ci_low": got["ci_low"],
-            "ci_high": got["ci_high"],
-            "tier": "speculative",
-            "is_mirror": False,
-            "display": False,
-            "prior_mean": got["prior_mean"],
-            "prior_source": "pre-disturbance value (window < 2026-03-01); hierarchy: "
-            "parent cell (leave-camp-out)",
-        }
+        # Floats compare with a tolerance rather than bit-for-bit: the derived statistics
+        # differ in the last ULP across interpreter/NumPy versions (CI runs 3.13, dev may run
+        # newer), which is not drift this test exists to catch. The full-output sha golden
+        # above already pins exact canonicalized output; this test's job is a *readable*
+        # field-for-field diff, so it asserts the values to well beyond display precision.
+        assert got == pytest.approx(
+            {
+                "archetype_a": "Doomsday [Murktide]",
+                "archetype_b": "Control",
+                "wins": 7,
+                "n": 16,
+                "p_raw": 0.4375,
+                "p_shrunk": 0.5657388986053412,
+                "ci_low": 0.22160595580094844,
+                "ci_high": 0.6738576259048334,
+                "tier": "speculative",
+                "is_mirror": False,
+                "display": False,
+                "prior_mean": 0.7025270571177049,
+                "prior_source": "pre-disturbance value (window < 2026-03-01); hierarchy: "
+                "parent cell (leave-camp-out)",
+            },
+            rel=1e-12,
+        )
         assert ams.cell_windows[("Doomsday [Murktide]", "Control")] == "2026-03-01"
 
     def test_representative_plain_cell_exact(self):

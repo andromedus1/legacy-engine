@@ -27,6 +27,7 @@ import datetime as dt
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,6 +65,38 @@ _ADDITIVE_FIELDS = {"p_best", "s_q", "s_cov", "s_caveated"}
 _FIELD_SINCE = "2026-01-01"
 
 _PRE_BAN_MATCH_DATE = "2025-10-01"  # inside [2025-03-31, 2025-11-10): the pre-Entomb regime
+
+
+def test_every_measured_cell_can_set_the_floor():
+    cells = [
+        {"opp": "bad", "share": .4, "p": .39, "n": 8, "measured": True},
+        {"opp": "good", "share": .6, "p": .58, "n": 20, "measured": True},
+    ]
+
+    stats = rbcr.row_stats(cells, top_k=2, cover_min=.8)
+
+    assert stats["floor"] == .39
+    assert stats["floor_opp"] == "bad"
+    assert stats["agency"] == .39
+
+
+def test_make_cells_embeds_both_sources_for_interactive_sample_gate():
+    def cell(n, p):
+        return SimpleNamespace(
+            n=n, p_shrunk=p, p_raw=p, ci_low=p - .1, ci_high=p + .1,
+            tier="speculative",
+        )
+
+    cells = rbcr.make_cells(
+        "Hero", ["Villain"], {"Villain": 1.0},
+        {("Hero", "Villain"): cell(5, .45)},
+        {None: {("Hero", "Villain"): cell(12, .55)}},
+        {"Villain": None}, 8,
+    )
+
+    assert cells[0]["window"] == "FC" and cells[0]["n"] == 12
+    assert cells[0]["sources"]["era"]["n"] == 5
+    assert cells[0]["sources"]["fallback"]["n"] == 12
 
 
 def _era_boundary(date: str) -> EraBoundary:
@@ -405,18 +438,7 @@ class TestCrossCampRanking:
 
 
 # ---------------------------------------------------------------------------
-# Superarchetype fallback overlay (epic-superarchetype-layer-best-call-fallback)
-#
-# The isolation contract is structural: the overlay may only ADD an `sa` key to
-# page-unmeasured cells and `// superarchetype` audit lines to meta.audit; every other
-# byte of the blob — row metrics (adj/floor/agency/coverage/grounded/P(best)), measured
-# cells, meta — must be identical with the layer on or off. The hero corpus + registry
-# are the chain tests' fixtures (test_matchup_superarchetype), tuned so all three lean
-# kinds genuinely materialize at the script level:
-#   (Hero, OppX)  n=4  -> imputed (licensed sa-fair siblings, pool n=50)
-#   (Solo, OppX)  n=3  -> pooled (Solo has no family; sa-enemy display pool clears n_eff>=30)
-#   (Hero, SibA)  n=6  -> range  (intra-family: imputation not attempted, own-family pool
-#                                 refused "single-member cluster" -> member split only)
+# Strategic-plan dropdown evidence remains independent of the composition overlay.
 # ---------------------------------------------------------------------------
 
 _HERO_FIELD_SINCE = "2020-01-01"  # covers both hero tournaments (field basis, not cell windows)
@@ -444,43 +466,19 @@ def hero_blobs():
 
 
 class TestSuperarchetypeIsolation:
-    def test_rows_identical_except_additive_sa_keys_on_unmeasured_cells(self, hero_blobs):
-        """The anti-leak contract, key for key: no row metric, no measured cell, and no
-        pre-existing unmeasured-cell field may move when the layer turns on."""
+    def test_rows_are_identical_when_composition_overlay_is_present(self, hero_blobs):
         off, on = hero_blobs
         for table in ("arch", "camps"):
             assert len(on[table]) == len(off[table])
             for r_on, r_off in zip(on[table], off[table]):
-                assert {k: v for k, v in r_on.items() if k != "cells"} == \
-                       {k: v for k, v in r_off.items() if k != "cells"}, r_on["subject"]
-                assert len(r_on["cells"]) == len(r_off["cells"])
-                for c_on, c_off in zip(r_on["cells"], r_off["cells"]):
-                    if c_off["measured"]:
-                        assert c_on == c_off, (r_on["subject"], c_off["opp"])
-                    else:
-                        assert {k: v for k, v in c_on.items() if k != "sa"} == c_off, \
-                            (r_on["subject"], c_off["opp"])
+                assert r_on == r_off
 
-    def test_meta_identical_except_superarchetype_audit_lines(self, hero_blobs):
+    def test_meta_has_no_superarchetype_presentation_audit(self, hero_blobs):
         off, on = hero_blobs
-        base_audit = off["meta"]["audit"]
-        assert on["meta"]["audit"][:len(base_audit)] == base_audit
-        extra = on["meta"]["audit"][len(base_audit):]
-        assert extra, "the layer must announce itself in the audit header"
-        assert all(line.startswith("// superarchetype") for line in extra)
-        assert {**on["meta"], "audit": base_audit} == off["meta"]
+        assert on["meta"] == off["meta"]
+        assert not any("superarchetype fallback" in line for line in on["meta"]["audit"])
 
-    def test_census_line_names_the_isolation_rule(self, hero_blobs):
-        _off, on = hero_blobs
-        census = next(
-            line for line in on["meta"]["audit"]
-            if line.startswith("// superarchetype fallback:")
-        )
-        assert "leans never enter agency, adj, floor, coverage, or strata" in census
-
-    def test_camp_rows_hold_the_anti_leak_contract_non_vacuously(self):
-        """The original hero assertion had no camps. Split Hero into two real camp rows so
-        this pins the registry-fed one-pass matrix at the exact surface that consumes it."""
+    def test_camp_rows_do_not_gain_family_lean_payloads(self):
         con = _hero_con()
         con.execute(
             "update decks set variant=case "
@@ -496,77 +494,40 @@ class TestSuperarchetypeIsolation:
         con.close()
 
         assert len(on["camps"]) == len(off["camps"]) == 2
-        added = 0
         for r_on, r_off in zip(on["camps"], off["camps"]):
-            assert {k: v for k, v in r_on.items() if k != "cells"} == \
-                   {k: v for k, v in r_off.items() if k != "cells"}
-            for c_on, c_off in zip(r_on["cells"], r_off["cells"]):
-                assert {k: v for k, v in c_on.items() if k != "sa"} == c_off
-                added += "sa" in c_on
-        assert added > 0  # the overlay engaged on camps; the equality is not an off-path proof
+            assert r_on == r_off
+            assert all("sa" not in cell for cell in r_on["cells"])
 
 
-class TestSuperarchetypeLeans:
-    def test_imputed_lean_with_the_locked_chip_fields(self, hero_blobs):
+class TestStrategicPlanPresentation:
+    def test_strategic_plan_payload_is_independent_of_composition_overlay(self, hero_blobs):
+        off, on = hero_blobs
+        assert on["plans"] == off["plans"]
+        assert [plan["id"] for plan in on["plans"]] == [
+            "disrupt-pressure", "go-off", "go-over", "go-wide", "lock-outlast",
+        ]
+        hero_plan = on["plans"][0]
+        assert hero_plan["members"][0]["archetype"] == "Hero"
+        assert hero_plan["members"][0]["secondary"] == ["go-off"]
+        assert len(hero_plan["cells"]) == 5
+        same = next(cell for cell in hero_plan["cells"] if cell["structural_same_plan"])
+        assert same["p"] == .5 and not same["measured"]
+        assert (same["wins"], same["losses"], same["n"]) == (0, 0, 0)
+        assert same["observed_n"] >= 0 and same["mirror_n"] >= 0
+
+    def test_archetype_rows_lead_with_exact_plan_cells_and_no_family_leans(self, hero_blobs):
         _off, on = hero_blobs
-        sa = _cell(on, "Hero", "OppX")["sa"]
-        assert sa["kind"] == "imputed"
-        # SibA 14/25 + SibB 13/25, leave-Hero-out (pinned by the chain tests).
-        assert sa["p"] == pytest.approx(27 / 50, abs=1e-4)
-        assert sa["ci_low"] < sa["p"] < sa["ci_high"]  # tau-widened CI survives serialization
-        assert (sa["family"], sa["cluster_id"]) == ("Fair", "sa-fair")
-        assert (sa["k"], sa["pool_n"]) == (2, 50)
-        assert sa["license"].startswith("license granted:")
-        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
-        assert sa["cur"] == 1.0
-        assert [m["a"] for m in sa["split"]] == ["SibA", "SibB"]
-
-    def test_pooled_lean_carries_gates_and_i2_band(self, hero_blobs):
-        _off, on = hero_blobs
-        sa = _cell(on, "Solo", "OppX")["sa"]
-        assert sa["kind"] == "pooled"
-        assert (sa["family"], sa["cluster_id"]) == ("Enemy", "sa-enemy")
-        assert sa["p"] is not None and sa["n_eff"] >= 30
-        assert sa["m_eff"] is not None and sa["i2_band"] in ("free", "labelled")
-        assert sa["concentration_passed"] is True
-        assert sa["concentration_label"] is None
-        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
-        assert "notes" not in sa  # aggregate display provenance is not a semantic input
-        assert "imputation not attempted: subject has no cluster in the registry" in sa["reasons"]
-
-    def test_refused_pool_renders_the_member_split_with_no_point_estimate(self, hero_blobs):
-        _off, on = hero_blobs
-        sa = _cell(on, "Hero", "SibA")["sa"]
-        assert sa["kind"] == "range"
-        assert "p" not in sa  # NO point estimate on a refused pool — split only
-        assert sa["source"] == "members"
-        assert sa["reason"].startswith("pooled cell refused: single-member cluster")
-        assert sa["one_sided_note"].startswith("I^2 is one-sided evidence:")
-        assert any(
-            r.startswith("imputation not attempted: SibA is inside Hero's own family")
-            for r in sa["reasons"]
-        )
-        assert sa["split"] and all({"a", "w", "n", "p", "tier", "intra"} <= m.keys()
-                                   for m in sa["split"])
-
-    def test_measured_cells_never_carry_sa(self, hero_blobs):
-        _off, on = hero_blobs
-        for table in ("arch", "camps"):
-            for row in on[table]:
-                for c in row["cells"]:
-                    if c["measured"]:
-                        assert "sa" not in c, (row["subject"], c["opp"])
-
-    def test_stale_registry_window_surfaces_in_the_page_audit(self):
-        """The stale-taxonomy warning (registry window predates the current regime start)
-        must reach meta.audit — it fires on the real corpus today, correctly."""
-        con = _hero_con()
-        stale = _registry(list(_hero_registry().clusters), window_since="2020-01-01")
-        blob = _hero_blob(con, superarchetypes=stale)
-        con.close()
-        assert any(
-            "predates the current regime start" in line for line in blob["meta"]["audit"]
-        )
+        hero = next(row for row in on["arch"] if row["subject"] == "Hero")
+        assert hero["strategic_plan"] == {
+            "primary": "disrupt-pressure", "secondary": ["go-off"],
+        }
+        assert [cell["opponent_id"] for cell in hero["plan_cells"]] == [
+            "disrupt-pressure", "go-off", "go-over", "go-wide", "lock-outlast",
+        ]
+        assert all({"wins", "losses", "mirror_n", "n", "raw", "p", "measured",
+                    "same_primary_plan", "since", "provenance"} <= cell.keys()
+                   for cell in hero["plan_cells"])
+        assert all("sa" not in cell for row in on["arch"] for cell in row["cells"])
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +536,23 @@ class TestSuperarchetypeLeans:
 
 
 class TestMainEndToEnd:
+    def test_blowouts_are_classified_from_raw_measured_win_rate(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "if (!c.measured || c.raw == null" in template
+        assert "if (c.raw < 0.40)" in template
+        assert "else if (c.raw < 0.45)" in template
+        assert "if (c.p != null && c.p < 0.40)" not in template
+        assert "else if (c.p != null && c.p < 0.45)" not in template
+
+    def test_positive_matchup_highlights_use_symmetric_raw_wr_bands(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "else if (c.raw > 0.60)" in template
+        assert 'class=\\"edge-dominant\\"' in template
+        assert "else if (c.raw >= 0.55)" in template
+        assert 'class=\\"edge\\"' in template
+        assert "dominant (&gt;60%)" in template
+        assert "edge (55–60%)" in template
+
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"
         con = store.connect(str(db_path))
@@ -598,6 +576,21 @@ class TestMainEndToEnd:
         assert '"p_best"' in html
         assert "// multi-split: one pass over" in html
         assert "P(best)" in html  # the camp table column ships in the template
+        assert 'position: sticky' in html
+        assert 'id="coverage-arch"' in html
+        assert 'id="coverage-camp"' in html
+        assert 'id="sample-plan"' in html
+        assert 'id="sample-arch"' in html
+        assert 'id="sample-camp"' in html
+        assert 'class="hint" role="note"' in html
+        assert 'class="hint-label">Interactive tables' in html
+        assert "function selectCell(c, minN)" in html
+        assert "function recalcRow(r, minN)" in html
+        assert "function recalcPlan(r, minN)" in html
+        assert 'class="${cls} expander plan-expander"' in html
+        assert 'el.querySelectorAll("tr.plan-expander")' in html
+        assert "event.stopPropagation()" in html
+        assert 'rows.filter(r => r.coverage >= st.minCoverage)' in html
 
     def _render(self, tmp_path, db_name, out_name, *, registry=None, extra_argv=(),
                 monkeypatch=None):
@@ -625,24 +618,31 @@ class TestMainEndToEnd:
         rbcr.main()
         return out_path.read_text()
 
-    def test_main_serves_the_registry_from_the_db_seam(self, tmp_path, monkeypatch):
+    def test_main_omits_family_leans_and_serves_archetype_plan_evidence(self, tmp_path, monkeypatch):
         html = self._render(
             tmp_path, "hero-sa.duckdb", "on.html",
             registry=_hero_registry(), monkeypatch=monkeypatch,
         )
-        assert '"kind": "imputed"' in html
-        assert '"kind": "pooled"' in html
-        assert '"kind": "range"' in html
-        assert "// superarchetype fallback:" in html
-        # The template's rendering half: the lean renderer, the definitional-card ladder
-        # prose with the locked copy discipline, and the I² one-sidedness caveat.
-        assert "saCellHtml" in html
-        assert "fewer blank cells and honest leans, never grounded coverage" in html
-        # The caveat appears in the definitional card and the per-row lean key; the typed
-        # one_sided_note payload (not copied display prose) rides pooled/range tooltips.
-        assert html.count("certificate of exchangeability") >= 2
-        assert '"one_sided_note": "I^2 is one-sided evidence:' in html
-        assert 'id="sa-fallback"' in html
+        assert '"plan_cells": [' in html
+        assert '"strategic_plan": {' in html
+        assert "Against strategic plans" in html
+        assert "Exact archetype matchups" in html
+        assert "saCellHtml" not in html
+        assert '"sa":' not in html
+        assert "// superarchetype fallback:" not in html
+        assert ".table-scroll > table > thead > tr > th { position: sticky" in html
+        assert ".plan-ledger thead" not in html
+        assert 'id="coverage-plan"' in html
+        assert 'id="t-plan"' in html
+        assert 'class="plan-toggle"' in html
+        assert 'aria-expanded=' in html and 'aria-controls=' in html
+        assert 'function planDetailHtml' in html
+        assert '"plans": [' in html
+        assert 'id="taxonomy-root"' not in html
+        assert 'id="family-heatmap"' not in html
+        assert 'id="camp-heatmap"' not in html
+        assert 'renderFamilyHeatmap' not in html
+        assert 'renderCampHeatmap' not in html
 
     def test_no_superarchetypes_flag_equals_the_registry_absent_page(self, tmp_path, monkeypatch):
         """--no-superarchetypes on a registry-bearing DB must be byte-identical to the page

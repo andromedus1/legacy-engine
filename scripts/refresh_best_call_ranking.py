@@ -19,8 +19,8 @@ Method (the page's definitional card is the authoritative prose):
     only when neither deck was ever ban-affected. A banned engine's matches (Nadu
     Cephalid, Candelabra Forge) can never inflate a row — in either direction.
   - adj field WR = field-share-weighted p_shrunk over n>=1 cells (normalized).
-  - floor = min p_shrunk over floor-eligible cells: measured AND (n >= 20 OR the 95% CI
-    upper bound < 50%) — a thin cell must prove its hole; agency = min(adj, floor).
+  - floor = min p_shrunk over every measured cell (n >= ``--ground-n``); agency =
+    min(adj, floor). Coverage + the upper-bound label carry incomplete-floor uncertainty.
   - coverage = measured share-mass / total opponent share-mass; grounded = the
     top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
   - Camps: ONE multi-split adaptive matrix over every staged parent in the discovery
@@ -34,14 +34,12 @@ Method (the page's definitional card is the authoritative prose):
     scored against the same sampled field. The MC ranks on the PAGE-USED cells (the
     ledger's own era-preferred, ban-scoped-fallback selection), so the column shares the
     page's Nadu-rule windows and its coverage-suppression honesty gates.
-  - Superarchetype fallback (LEDGER-ONLY): a page-unmeasured cell may carry an additive
-    ``sa`` payload resolved by the engine's display ladder (measured -> imputed -> pooled
-    -> family range), rendered as a labeled lean in the expanded ledger. Leans NEVER enter
-    adj/floor/agency/coverage/strata or the MC — every row metric computes from
-    bit-identical inputs with the layer on or off (the isolation decision in
-    .work/active/features/epic-superarchetype-layer-best-call-fallback.md). The registry
-    is read from the SAME --db (``superarchetype run``'s derived cache); absent tables =
-    layer off; ``--no-superarchetypes`` regenerates the baseline.
+  - Strategic plans: curated primary-plan assignments aggregate decisive matches directly;
+    plan rows and each archetype's five plan cells never average rendered archetype rates.
+    Same-plan diagonals are structural 50% context, not measured evidence or floor inputs.
+  - Superarchetypes remain internal matrix context only: the page emits no family payload,
+    lean, range, or ranking input. ``apply_superarchetype_priors=False`` keeps the page's
+    archetype/camp row metrics independent of that optional registry.
 
 Run after every data refresh cycle (refresh all -> label -> discover apply x N ->
 eras run) — the matchup matrices read eras + variants, so refresh THIS page LAST:
@@ -77,6 +75,13 @@ from legacy_engine.analytics.matchup import (
     build_matrix,
     build_multi_split_adaptive,
     build_multi_split_matrix,
+)
+from legacy_engine.analytics.match_results import compute_match_results
+from legacy_engine.analytics.strategy_plan import (
+    StrategicPlanResult,
+    aggregate_archetype_vs_plan_results,
+    aggregate_strategic_plan_results,
+    load_strategic_plan_registry,
 )
 from legacy_engine.analytics.superarchetype.aggregate import I2_ONE_SIDED_NOTE
 from legacy_engine.analytics.superarchetype.registry import read_superarchetype_members
@@ -130,9 +135,25 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             use, win = fc, fb_label
         else:
             use, win = (ec if ec is not None else fc), "era"
+        def source_payload(cell, window):
+            if cell is None:
+                return None
+            return {
+                "p": r4(cell.p_shrunk), "raw": r4(cell.p_raw),
+                "ci_low": r4(cell.ci_low), "ci_high": r4(cell.ci_high),
+                "n": cell.n, "window": window, "tier": str(cell.tier),
+            }
+
+        # Keep both candidates so the offline page can faithfully re-run the
+        # era-preferred / ban-scoped-fallback selection at an interactive n gate.
+        sources = {
+            "era": source_payload(ec, "era"),
+            "fallback": source_payload(fc, fb_label),
+        }
         if use is None:  # pair absent from the matrix (e.g. camp vs its own parent)
             cells.append({"opp": opp, "share": r4(shares[opp]), "p": None, "raw": None,
-                          "n": 0, "window": "era", "tier": "speculative", "measured": False})
+                          "n": 0, "window": "era", "tier": "speculative", "measured": False,
+                          "sources": sources})
             continue
         if out_used is not None:
             out_used[opp] = use
@@ -141,6 +162,7 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             "ci_low": r4(use.ci_low), "ci_high": r4(use.ci_high),
             "n": use.n, "window": win, "tier": str(use.tier),
             "measured": use.n >= ground_n,
+            "sources": sources,
         })
     return cells
 
@@ -263,18 +285,9 @@ def _sa_payload(subj, opp, msa, label_of):
     }
 
 
-# A thin measured cell can set the row's floor only when even its optimistic bound is
-# unfavorable — ambiguity is not a hole. Deep cells (n >= FLOOR_DEEP_N) qualify on their
-# point estimate; thinner ones must have a 95% CI upper bound below 50%.
-FLOOR_DEEP_N = 20
-FLOOR_PROOF_CI = 0.50
-
-
 def _floor_eligible(c) -> bool:
-    return c["measured"] and (
-        c["n"] >= FLOOR_DEEP_N
-        or (c["ci_high"] is not None and c["ci_high"] < FLOOR_PROOF_CI)
-    )
+    """Every cell that clears the page's measured-evidence gate can set the floor."""
+    return c["measured"]
 
 
 def row_stats(cells, top_k, cover_min):
@@ -298,6 +311,254 @@ def row_stats(cells, top_k, cover_min):
         "grounded": topk_ok and coverage >= cover_min,
         "topk_ok": topk_ok,
     }
+
+
+def build_strategic_plan_payload(
+    result: StrategicPlanResult,
+    archetype_rows,
+    *,
+    top_k: int,
+    cover_min: float,
+):
+    """Adapt typed match-level plan results for the self-contained report."""
+    by_subject = {row["subject"]: row for row in archetype_rows}
+    assignments = {item.archetype: item for item in result.assignments}
+    members_by_plan = {plan.id: [] for plan in result.plans}
+    for archetype, row in by_subject.items():
+        assignment = assignments[archetype]
+        members_by_plan[assignment.primary].append({
+            "archetype": archetype,
+            "primary": assignment.primary,
+            "secondary": list(assignment.secondary),
+            "field_share": row["field_share"],
+            "recent_4wk": row["recent_4wk"],
+        })
+    for members in members_by_plan.values():
+        members.sort(key=lambda item: (-item["field_share"], item["archetype"]))
+
+    shares = {
+        plan_id: sum(member["field_share"] for member in members)
+        for plan_id, members in members_by_plan.items()
+    }
+    out = []
+    for plan in result.plans:
+        external = []
+        cells = []
+        for opponent in result.plans:
+            cell = result.cells[(plan.id, opponent.id)]
+            share = shares[opponent.id]
+            payload = {
+                "opponent_id": opponent.id,
+                "opponent": opponent.label,
+                "share": r4(share),
+                "wins": cell.wins,
+                "losses": cell.losses,
+                "n": cell.n,
+                "observed_n": cell.observed_n,
+                "mirror_n": cell.mirror_n,
+                "raw": r4(cell.raw),
+                "p": r4(cell.shrunk),
+                "measured": cell.measured,
+                "structural_same_plan": cell.structural_same_plan,
+                "reason": (
+                    "structural same-plan expectation"
+                    if cell.structural_same_plan else
+                    (None if cell.measured else
+                     ("no decisive matches" if cell.n == 0 else
+                     f"n={cell.n} below measured gate")
+                    )
+                ),
+            }
+            if not cell.structural_same_plan:
+                external.append(payload)
+            cells.append(payload)
+
+        # Structural mirrors contribute exactly 50%; external cells contribute only
+        # once measured.  Unmeasured magnitudes remain visible in the ledger, not metrics.
+        weighted = [(shares[plan.id], 0.5)] + [
+            (cell["share"], cell["p"]) for cell in external if cell["measured"]
+        ]
+        weight = sum(item[0] for item in weighted)
+        adj = sum(w * p for w, p in weighted) / weight if weight else None
+        measured = [cell for cell in external if cell["measured"]]
+        floor_cell = min(measured, key=lambda cell: cell["p"]) if measured else None
+        external_share = sum(cell["share"] for cell in external)
+        coverage = sum(cell["share"] for cell in measured) / external_share if external_share else 0.0
+        top = sorted(external, key=lambda cell: (-cell["share"], cell["opponent_id"]))[
+            : min(top_k, len(external))
+        ]
+        grounded = bool(top) and all(cell["measured"] for cell in top) and coverage >= cover_min
+        floor = floor_cell["p"] if floor_cell else None
+        out.append({
+            "id": plan.id,
+            "label": plan.label,
+            "description": plan.description,
+            "field_share": r4(shares[plan.id]),
+            "recent_4wk": sum(member["recent_4wk"] for member in members_by_plan[plan.id]),
+            "adj": r4(adj),
+            "floor": r4(floor),
+            "floor_opp": floor_cell["opponent"] if floor_cell else None,
+            "agency": r4(min(adj, floor)) if adj is not None and floor is not None else None,
+            "coverage": r4(coverage),
+            "grounded": grounded,
+            "members": members_by_plan[plan.id],
+            "cells": cells,
+            "decisive_matches": result.decisive_matches,
+            "same_plan_matches": result.same_plan_matches,
+            "since": result.since,
+            "until": result.until,
+            "provenance": result.provenance,
+        })
+    return out
+
+
+def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cover_min):
+    """Build the exploratory family hierarchy + S×S agency-map payload.
+
+    The opponent-axis values are the engine's typed ``PooledCell`` outputs.  The subject axis is
+    summarized across current-field member archetypes using their field shares; a refused or
+    below-display-gate pool never becomes a number.  This payload is presentation-only and is not
+    consumed by archetype Best Call, camp P(best), or their grounding strata.
+    """
+    if registry is None or not registry.clusters:
+        return []
+
+    def display_label(label):
+        parts = label.split(" + ")
+        if len(label) <= 56 or len(parts) <= 2:
+            return label
+        return f"{parts[0]} + {parts[1]} + {len(parts) - 2} more"
+
+    by_subject = {row["subject"]: row for row in archetype_rows}
+    clusters = []
+    for cluster in registry.clusters:
+        members = [
+            by_subject[name] for name in cluster.archetypes
+            if name in by_subject and by_subject[name]["field_share"] > 0
+        ]
+        share = sum(row["field_share"] for row in members)
+        if not members or share <= 0:
+            continue
+        clusters.append((cluster, members, share))
+
+    family_shares = {cluster.id: share for cluster, _members, share in clusters}
+    total_family_share = sum(family_shares.values())
+    out = []
+    for cluster, members, share in clusters:
+        leading = sorted(members, key=lambda row: (-row["field_share"], row["subject"]))[:3]
+        leading_names = [row["subject"] for row in leading]
+        if len(leading_names) == 1:
+            anchors = leading_names[0]
+        elif len(leading_names) == 2:
+            anchors = " and ".join(leading_names)
+        else:
+            anchors = ", ".join(leading_names[:-1]) + f", and {leading_names[-1]}"
+        origin = "curated strategy" if cluster.curated else "composition-derived"
+        description = (
+            f"A {origin} family anchored in the current field by {anchors}. "
+            f"Its member archetypes represent {share:.1%} of published decks in this field window."
+        )
+        cells = []
+        for opponent, _opponent_members, opponent_share in clusters:
+            accepted = []
+            refused = []
+            for member in members:
+                pooled = cluster_cells.get((member["subject"], opponent.id))
+                if pooled is None:
+                    refused.append(f"{member['subject']}: no pooled evidence")
+                elif pooled.pooled_p is None:
+                    refused.append(f"{member['subject']}: {pooled.refused_reason}")
+                elif pooled.n_eff < DISPLAY_GATE_N:
+                    refused.append(
+                        f"{member['subject']}: n_eff {pooled.n_eff:.0f} < {DISPLAY_GATE_N}"
+                    )
+                else:
+                    accepted.append((member["field_share"], pooled))
+
+            accepted_weight = sum(weight for weight, _pooled in accepted)
+            support = accepted_weight / share if share else 0.0
+            p = (
+                sum(weight * pooled.pooled_p for weight, pooled in accepted)
+                / accepted_weight
+                if accepted_weight else None
+            )
+            n_eff = sum(pooled.n_eff for _weight, pooled in accepted)
+            current_weight = sum(
+                weight * pooled.current_regime_share
+                for weight, pooled in accepted
+                if pooled.current_regime_share is not None
+            )
+            current_den = sum(
+                weight for weight, pooled in accepted
+                if pooled.current_regime_share is not None
+            )
+            window_notes = sorted({pooled.window_note or "unknown" for _weight, pooled in accepted})
+            cells.append({
+                "opponent_id": opponent.id,
+                "opponent": display_label(opponent.label),
+                "share": r4(opponent_share / total_family_share) if total_family_share else 0.0,
+                "p": r4(p),
+                "n_eff": r4(n_eff),
+                "accepted_members": len(accepted),
+                "subject_members": len(members),
+                "support": r4(support),
+                "intra_family": cluster.id == opponent.id,
+                "current_regime_share": r4(current_weight / current_den) if current_den else None,
+                "window_notes": window_notes,
+                "refused_reason": "; ".join(refused) if not accepted else None,
+                "support_reason": "; ".join(refused) if refused else None,
+            })
+
+        # A family explains its internal diversity in the map, but its decision floor is against
+        # OTHER strategies (the epic's agency definition). The intra-family cell never ranks it.
+        external = [cell for cell in cells if not cell["intra_family"]]
+        measurable = [cell for cell in external if cell["p"] is not None]
+        den = sum(cell["share"] for cell in external)
+        coverage = sum(cell["share"] * cell["support"] for cell in measurable) / den if den else 0.0
+        adj = (
+            sum(cell["share"] * cell["support"] * cell["p"] for cell in measurable)
+            / sum(cell["share"] * cell["support"] for cell in measurable)
+            if measurable else None
+        )
+        floor_cell = min(measurable, key=lambda cell: cell["p"]) if measurable else None
+        floor = floor_cell["p"] if floor_cell else None
+        top = sorted(external, key=lambda cell: cell["share"], reverse=True)[:top_k]
+        grounded = bool(top) and all(
+            cell["p"] is not None and cell["support"] >= cover_min for cell in top
+        ) and coverage >= cover_min
+        vals = [value for value in (adj, floor) if value is not None]
+        out.append({
+            "id": cluster.id,
+            "label": display_label(cluster.label),
+            "full_label": cluster.label,
+            "curated": cluster.curated,
+            "description": description,
+            "field_share": r4(share),
+            "recent_4wk": sum(row["recent_4wk"] for row in members),
+            "adj": r4(adj),
+            "floor": r4(floor),
+            "floor_opp": floor_cell["opponent"] if floor_cell else None,
+            "agency": r4(min(vals)) if vals else None,
+            "coverage": r4(coverage),
+            "grounded": grounded,
+            "members": [
+                {
+                    "archetype": member["subject"],
+                    "field_share": member["field_share"],
+                    "provenance": next(
+                        registry_member.provenance
+                        for registry_member in cluster.members
+                        if registry_member.archetype == member["subject"]
+                    ),
+                }
+                for member in members
+            ],
+            "cells": cells,
+        })
+
+    # Registry order is stable identity order; presentation order is current field share.
+    out.sort(key=lambda family: (-family["field_share"], family["label"]))
+    return out
 
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
@@ -462,32 +723,52 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
           f"({len(camps_out)} camp rows)", flush=True)
 
-    # ── Superarchetype fallback overlay (LEDGER-ONLY) ──
-    # Additive `sa` keys on page-unmeasured cells; measured cells and every row-level field
-    # are untouched, so adj/floor/agency/coverage/grounded/P(best) are bit-identical with the
-    # layer on or off. Rung 1 (a measured cell) is the page's existing selection above.
-    sa_audit: list[str] = []
-    if superarchetypes is not None:
-        label_of = {c.id: c.label for c in superarchetypes.clusters}
-        sa_counts = {"imputed": 0, "pooled": 0, "range": 0}
-        for row in (*arch_out, *camps_out):
-            for c in row["cells"]:
-                if c["measured"]:
-                    continue
-                payload = _sa_payload(row["subject"], c["opp"], msa, label_of)
-                if payload is not None:
-                    c["sa"] = payload
-                    sa_counts[payload["kind"]] += 1
-        sa_audit = [
-            line for line in msa.audit_preamble if line.startswith("// superarchetype")
-        ]
-        sa_audit.append(
-            f"// superarchetype fallback: {sa_counts['imputed']} imputed + "
-            f"{sa_counts['pooled']} pooled + {sa_counts['range']} family-range leans in the "
-            "expanded ledgers — leans never enter agency, adj, floor, coverage, or strata"
-        )
-        print(f"  superarchetype fallback: {sa_counts['imputed']} imputed, "
-              f"{sa_counts['pooled']} pooled, {sa_counts['range']} range", flush=True)
+    # Strategic intent is a separate curated semantic layer. Recompute it from
+    # decisive match tallies rather than averaging any rendered row statistic.
+    plan_registry = load_strategic_plan_registry()
+    plan_matches = compute_match_results(con, since=field_since)
+    plan_result = aggregate_strategic_plan_results(
+        plan_matches,
+        plan_registry,
+        current_archetypes=[row["subject"] for row in arch_out],
+        ground_n=ground_n,
+        since=field_since,
+    )
+    archetype_plan_cells = aggregate_archetype_vs_plan_results(
+        plan_matches,
+        plan_registry,
+        current_archetypes=[row["subject"] for row in arch_out],
+        ground_n=ground_n,
+    )
+    assignment_by_archetype = {
+        assignment.archetype: assignment for assignment in plan_registry.assignments
+    }
+    for row in arch_out:
+        assignment = assignment_by_archetype[row["subject"]]
+        row["strategic_plan"] = {
+            "primary": assignment.primary,
+            "secondary": list(assignment.secondary),
+        }
+        row["plan_cells"] = []
+        for plan in plan_registry.plans:
+            cell = archetype_plan_cells[(row["subject"], plan.id)]
+            row["plan_cells"].append({
+                "opponent_id": plan.id,
+                "opponent": plan.label,
+                "wins": cell.wins,
+                "losses": cell.losses,
+                "mirror_n": cell.mirror_n,
+                "n": cell.n,
+                "raw": r4(cell.raw),
+                "p": r4(cell.shrunk),
+                "measured": cell.measured,
+                "same_primary_plan": plan.id == assignment.primary,
+                "since": field_since,
+                "provenance": plan_matches.provenance,
+            })
+    plans = build_strategic_plan_payload(
+        plan_result, arch_out, top_k=top_k, cover_min=cover_min,
+    )
 
     return {
         "meta": {
@@ -516,11 +797,19 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"{len(potential)} candidates (camps + unsplit archetypes with >= "
                 f"{_PBEST_SUPPRESS_COVERAGE:.0%} measured coverage) on the page-used "
                 f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
-                *sa_audit,
+                f"// strategic plans: registry v{plan_registry.schema_version}, "
+                f"{len(plan_registry.assignments)} assignments; "
+                f"{plan_result.decisive_matches} decisive matches "
+                f"({plan_result.same_plan_matches} same-plan), "
+                f"{plan_result.omitted_matches} omitted; window since {field_since}",
+                f"// archetype vs strategic plans: {len(arch_out)} archetypes × "
+                f"{len(plan_registry.plans)} primary opponent plans from underlying decisive "
+                "matches; archetype mirrors contribute structural 50% context",
             ],
         },
         "arch": arch_out,
         "camps": camps_out,
+        "plans": plans,
     }
 
 
@@ -536,7 +825,7 @@ def main() -> None:
     ap.add_argument("--cover-min", type=float, default=0.8)
     ap.add_argument("--min-row-share", type=float, default=0.001)
     ap.add_argument("--no-superarchetypes", action="store_true",
-                    help="skip the family-fallback ledger overlay (baseline/audit regeneration)")
+                    help="omit the optional internal superarchetype registry input")
     args = ap.parse_args()
 
     regime_card = latest_ban[1] if args.field_since == latest_ban[0].isoformat() else None

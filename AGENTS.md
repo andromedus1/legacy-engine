@@ -4,16 +4,19 @@ A Magic: The Gathering **Legacy** format analytics platform — sibling to edh-e
 3.11+ Click CLI. Four pillars: Meta & Performance, Deck Mechanics (goldfish), Deck Generation, and
 Meta Attack/Advisory. See `docs/VISION.md`, `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/PRINCIPLES.md`.
 
-## Start every session
-The terse `docs/knowledge-index.yaml` auto-loads at session start (titles, types, consumer hints).
-For full per-doc detail (summary, decisions, key_findings), read `docs/knowledge-index-detail.yaml`
-on demand. When you add or modify docs, run `/research-pipeline:knowledge-index` to regenerate both
-layers from frontmatter. **Do not hand-edit the index files** — they're derived from doc frontmatter.
+## Session orientation
+The compact `docs/knowledge-index-nav.yaml` and `.work/` snapshot load at session start. Read
+`docs/knowledge-index.yaml` for the full catalog and `docs/knowledge-index-detail.yaml` for
+summaries, decisions, findings, and relationships. When knowledge-bearing artifacts change, run
+`/research-pipeline:knowledge-index` to regenerate all three layers from frontmatter. **Do not
+hand-edit the index files.**
 
 ## Build process
 Follow the methodology at `~/dev/skills-v2/plugins/research-pipeline/docs/build-process.md`.
-Project knowledge lives under `docs/` (`architecture/`, `briefs/`, `designs/`, `programs/`). Parent
-`CLAUDE.md` files ship the pipeline and shared key rules — don't duplicate them here.
+Planning and foundation knowledge lives under `docs/`; grounded research uses `.research/` under
+`agentic-research`. Existing legacy research paths remain readable and are migrated only through
+the operator-confirmed convert flow. Parent `CLAUDE.md` files ship shared rules — don't duplicate
+them here. Workbench is not active in this project and its substrate schemas must not be mixed in.
 
 <!-- agile-workflow:start -->
 ## Agile-Workflow Substrate
@@ -87,19 +90,50 @@ When running, writing, or modifying tests:
   code happens to return, no deleting a test as "flaky" without
   root-causing first.
 
-Broad entry points:
-`/agile-workflow:ideate`, `/agile-workflow:epicize`,
-autopilot goals such as "Use agile-workflow autopilot to drain --all",
-and `/agile-workflow:release-deploy`.
+Broad entry points: `/research-pipeline:ideate`, `/research-pipeline:epicize`, autopilot goals such
+as "Use agile-workflow autopilot to drain --all", and the agile-workflow release flow.
 <!-- agile-workflow:end -->
 
 ## Imported Claude Code Instructions
 (Imported from the project `CLAUDE.md`, which remains in place as a Claude Code entrypoint.)
 Frontmatter convention: every doc ships `description`, `type`, `summary`, `updated`, and
-`decisions:`/`key_findings:` per kind — see `~/dev/skills/knowledge-index/SKILL.md` for the schema.
+`decisions:`/`key_findings:` per kind; `/research-pipeline:knowledge-index` owns the current schema.
 
 ## Imported Claude Pattern Rules
 (Imported from `.claude/rules/patterns.md`, which remains in place.)
 Established code patterns: follow existing patterns when writing new code. Use
 `/research-pipeline:knowledge-index` and the patterns skills to discover/document patterns;
 reusable structural patterns belong in `.agents/skills/patterns/`.
+
+<!-- ux-ui-design:installed -->
+## UI/UX Design Convention
+
+**Mockup-first.** All UI/UX design is done as standalone HTML/CSS/JS mockups
+before any production code is written. Mockups are committed.
+
+**Location.** Mockups live in `.mockups/` with three buckets:
+
+- `.mockups/design-system/` — palette, typography, tokens (project-wide)
+- `.mockups/screens/<feature-id>/` — single-screen options per feature
+- `.mockups/flows/<flow-name>/` — multi-page user journeys
+
+`<feature-id>` matches the agile-workflow item id when applicable, else a
+kebab-case short name.
+
+**Process.**
+- Single screen with options to align on: `/ux-ui-design:screens`
+- Multi-page user flow for sign-off: `/ux-ui-design:flows`
+- Palette / typography / design tokens: `/ux-ui-design:palette`
+- Convention reference (auto-loads): `/ux-ui-design:ux-ui-principles`
+
+**Tech rule.** Single-file HTML per mock, vanilla CSS in `<style>`, vanilla JS
+in `<script>`. No build step, no CSS framework CDNs. Hosted fonts (Google
+Fonts, etc.) are fine when the palette specifies one.
+
+**Linking.** Each substrate item with mocks gets a `## Mockups` section in its
+body pointing at the relevant `.mockups/` paths.
+
+**Skip mocking** for trivial copy changes, bug fixes that don't shift visual
+structure, behind-the-scenes refactors, or feature-level UI that cleanly
+reuses existing components and patterns. Mock new surfaces, design-system
+shifts, and multi-screen epics.
