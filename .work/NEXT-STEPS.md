@@ -12,9 +12,9 @@ Repo is **public**, MIT-licensed, and its history is rewritten to the pseudonymo
    xargs -n1 git push origin --delete`
 2. **Fix the CHANGELOG section order.** It currently reads v0.4.0, v0.2.0, v0.3.0, v0.1.0 —
    v0.2.0 and v0.3.0 are transposed. Cosmetic, but it is a public-facing doc now.
-3. **`gh auth switch --user andromedus1` before any push here.** The default active account
-   (`andrewclark88`) gets a 403 on this repo. Repo-local `git config` identity is already the
-   pseudonym, but the *credential* is account-scoped and global.
+3. **`gh auth switch --user andromedus1` before any push here.** `gh` holds more than one account
+   and the other one gets a 403 on this repo. Repo-local `git config` identity is already correct,
+   but the *credential* is account-scoped and global, so it does not follow the repo.
 
 ## The arc I'd take next: make the advisor trustworthy
 
