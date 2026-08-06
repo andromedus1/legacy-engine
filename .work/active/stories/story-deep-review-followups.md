@@ -1,14 +1,14 @@
 ---
 id: story-deep-review-followups
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, cleanup]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-08-05
 ---
 
 # Deep-review follow-ups (2026-08-01, 7-feature post-merge review)
@@ -40,3 +40,78 @@ exactly). File:line refs verified at review time.
 5. **Note hygiene:** chain's "557 imputations, all sa-003" rotted within hours (573 across
    sa-003 + sac-001 after PR #75) — timestamp real-corpus snapshots in implementation notes as a
    convention.
+
+## Implementation progress
+
+### Unit 1 — aggregate provenance honesty
+
+Fixed the typed-verdict/provenance mismatch before any further renderer work. A heterogeneity-
+refused cell now says `refused with concentration label:` when concentration also fails; it never
+claims that label was served. A served `not-computable` heterogeneity cell now carries
+`served with heterogeneity label: <typed reason>` instead of omitting the verdict from provenance.
+Regression coverage pins both directions against the typed `Heterogeneity.band` and
+`Concentration.passed` fields. Verification: `99 passed` in
+`tests/analytics/superarchetype/test_aggregate.py`.
+
+### Unit 2 — fail-safe land resolution
+
+Added a checked land-type lookup while preserving `_resolve_land_names` as the compatibility
+wrapper. Both the direct planner path and `recommend_sideboard` now carry lookup failure into
+`_plan_matchups`, which returns a named `land-resolution-failed` degraded plan with no swaps for
+every opponent. The missing-table regression proves a land can never become eligible merely
+because the `cards` lookup failed. Two pre-existing pure planner fixtures now inject their known
+empty land set explicitly instead of accidentally depending on a missing table.
+
+### Unit 3 — review-test integrity and snapshot hygiene
+
+- Replaced the golden representative cell's self-compared floats with independent exact expected
+  values while retaining the full-output hash.
+- Replaced the fixed-`logit_mean` partial-derivative `n_eff` test with a joint-estimator sequence
+  over observed member tallies whose fitted heterogeneity rises as effective sample falls.
+- Added a real builder test that enables `FAMILY_FIRST_KINDS` for a stored young release era and
+  proves the family-current imputation branch sets the prior and source label.
+- Timestamped and config-stamped the chain feature's original real-corpus spot check so its 557
+  imputation count is explicitly historical rather than a timeless assertion.
+
+### Integrated verification and bounded review
+
+- Focused sideboard verification: 7 passed.
+- Superarchetype golden/aggregation/chain verification: 122 passed.
+- Full suite: 3,522 passed, 1 warning (UMAP's existing seeded `n_jobs` warning).
+- `git diff --check`: clean.
+
+Bounded inline review found no remaining correctness blocker in this story's changed surfaces.
+The serving-registry decision remains intentionally outside this cleanup story and continues in
+`epic-superarchetype-layer-era-core-pools`; the three-level page remains gated on that output.
+
+## Next capability step
+
+Do not naively rebuild the registry from the thin 2026-06-29 global window. Advance
+`epic-superarchetype-layer-era-core-pools` through design and its offline representation benchmark,
+then select a validated serving method, generate a new preview, and obtain user approval before the
+three-level page uses superarchetype output as a headline ranking.
+
+## Review (2026-08-05)
+
+**Verdict: Approve.** Bounded inline review, standalone-story lane — no independent,
+fresh-context, or cross-model reviewer, per the story routing contract.
+
+Each claimed fix was verified against the code rather than accepted from the notes:
+- **Unit 1** (`aggregate.py:866-873`): the disposition is computed from the typed verdict
+  (`disposition = "refused" if het.band == "refused" else "served"`), so provenance can no
+  longer claim a label was served when the cell was refused; the not-computable branch emits
+  `served with heterogeneity label:`. Both directions pinned at `test_aggregate.py:530,534`.
+- **Unit 2** (`sideboard.py:225`): `_PLAN_STATUS_LAND_LOOKUP_FAILED = "land-resolution-failed"`
+  is a named degraded status carried into `_plan_matchups`, asserted at
+  `tests/test_sideboard.py:8969` — the silent `log.debug` path is gone.
+- **Unit 3**: the golden's representative cell now asserts independent exact expected values
+  instead of self-comparing floats; the family-first branch is actually executed via
+  `monkeypatch.setattr(chain, "FAMILY_FIRST_KINDS", frozenset({"release"}))`
+  (`test_matchup_superarchetype.py:296`) with the family-current imputation asserted at :304.
+
+Verification: focused suites 698 passed; full suite 3,540 passed / 1 skipped (the UMAP skip is
+an optional-dependency gap, tracked as `idea-local-ci-python-drift`).
+
+Finding 2 (serving-registry window) remains intentionally out of scope and continues in
+`epic-superarchetype-layer-era-core-pools`; the story is explicit that the registry must not be
+naively rebuilt from the thin 2026-06-29 window. No blockers.

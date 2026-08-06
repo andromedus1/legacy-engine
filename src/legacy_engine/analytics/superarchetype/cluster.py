@@ -795,6 +795,7 @@ def load_archetype_decks(
     *,
     since: str | None = None,
     until: str | None = None,
+    since_by_archetype: Mapping[str, str | None] | None = None,
 ) -> list[ArchetypeDeck]:
     """Read every labeled deck's maindeck card NAMES in the window into plain ``ArchetypeDeck`` rows.
 
@@ -803,7 +804,7 @@ def load_archetype_decks(
     """
     rows = con.execute(
         """
-        SELECT d.archetype, d.tournament_id, d.deck_idx, dc.name
+        SELECT d.archetype, d.tournament_id, d.deck_idx, dc.name, t.date
         FROM decks d
         JOIN tournaments t ON t.id = d.tournament_id
         JOIN deck_cards dc
@@ -820,7 +821,12 @@ def load_archetype_decks(
     ).fetchall()
 
     staged: dict[tuple[str, int], tuple[str, set[str]]] = {}
-    for archetype, tournament_id, deck_idx, name in rows:
+    for archetype, tournament_id, deck_idx, name, tournament_date in rows:
+        entity_since = (
+            since_by_archetype.get(archetype) if since_by_archetype is not None else None
+        )
+        if entity_since is not None and str(tournament_date)[:10] < entity_since:
+            continue
         key = (tournament_id, deck_idx)
         entry = staged.get(key)
         if entry is None:

@@ -1,28 +1,68 @@
-## Unreleased
+## v0.4.0 (2026-08-05)
 
 The stable-era release: every statistic windows to each archetype's (and camp's) own detected
 stable era — the largest stretch of still-solid data — with the triggering disturbance named.
 
 ### Features
 - **Per-entity stable-era detection** — new `analytics/eras/` package: density-adaptive entity
-  series, signal ensemble (presence cliffs/ramps, composition change-points via ruptures,
-  share shifts, win-rate corroboration), selection-corrected permutation p-values, fleet-wide
+  series, signal ensemble (presence cliffs/ramps, composition change-points via ruptures, share
+  shifts, win-rate corroboration), selection-corrected permutation p-values, fleet-wide
   Benjamini–Hochberg FDR, 30-deck era floors, camp inheritance. Calibrated against frozen
   real-corpus ground truths (the Flow State one-week adoption step; the Candelabra/Tron cliff).
 - **Era ledger + CLI** — `eras run|list|explain|confirm`: rebuildable `entity_eras` store,
   ban/release/unattributed attribution (corpus-first-seen release fallback), Beta-Binomial BOCPD
-  drift alarm ("possible unregistered B&R change"), and the confirm loop that appends to the
-  curated `BAN_EVENTS` JSON and heals the regime table.
+  drift alarm, and the confirm loop that appends to the curated `BAN_EVENTS` JSON and heals the
+  regime table.
 - **Era-aware windows are the default** — the adaptive matchup matrix sources each cell over
   `[max(stable_since(a), stable_since(b)), now)` (ban-only fallback, loudly labeled); the global
   field era is detection-derived; consensus/card-frequency surfaces window at the entity's own
   era (camp-aware); `discover run` pools within the parent's stable era (`--all-pool` escape) and
-  Gate C flags camps that are list generations (median date + %current per camp).
+  Gate C flags camps that are list generations.
 - **Hierarchical + cross-era cell shrinkage** — cells shrink toward informative priors (parent →
   shrunk marginal; camp → leave-camp-out parent cell; thin post-boundary cells → their own
   pre-disturbance value, labeled) instead of flat 0.5; `prior_source` carried and rendered.
+- **Superarchetype layer + serving lifecycle** — strategy clusters complete the taxonomy as
+  superarchetype → parent archetype → camp. `superarchetype run` previews a derived candidate;
+  `run --promote`, after operator review, explicitly replaces the serving JSON registry and its
+  DuckDB cache. `list` and `explain` inspect serving memberships and provenance. The layer is
+  internal matrix/statistical-borrowing context only — it emits no page-visible payload.
+- **Best Deck / Best Call agency ranking page** — `scripts/refresh_best_call_ranking.py` generates
+  the git-ignored `decks/best-deck-best-call-ranking.html`. Agency % = min(adjusted field WR,
+  worst measured matchup); grounded/ungrounded honesty strata never intermix under sorting;
+  ungrounded rows are explicit upper bounds. Adds a curated five-plan **strategic-plan view**
+  (`Disrupt + Pressure`, `Go Off`, `Go Over`, `Go Wide`, `Lock + Outlast`) aggregated from
+  decisive match records, and a direct five-cell plan block heading every archetype dropdown.
+- **One-pass multi-split camp matrix** — the camp sweep builds one `build_multi_split_adaptive`
+  plus one `build_multi_split_matrix` per distinct ban-scoped fallback date, serving all staged
+  parents at once: field-for-field identical to the retired per-parent path (parity-tested at
+  engine and script level) and ~21x cheaper (326s → 15s on the live corpus).
+- **Cross-camp P(best)** — one shared-field `rank_decks` Monte Carlo (fixed seed) scores every
+  camp and unsplit field archetype against the same sampled parent-level Dirichlet field, so
+  values are comparable across camps of different parents. Candidacy is gated at the display
+  coverage threshold so zero-coverage candidates cannot absorb the argmax as imputation noise.
+- **Incremental camp assignment** — `discover apply` assigns decks ingested after a split was
+  staged, using the staged candidate's frozen flex vocabulary and camp centroids, instead of
+  leaving them unlabeled.
 - **BAN_EVENTS as curated JSON** — migrated from code to package-shipped
   `data/banlist/events.json` (module API unchanged), appendable via `eras confirm`.
+
+### Fixes
+- **Refresh no longer wipes archetype labels** — `refresh all` performs a keyed reload that
+  preserves `decks.archetype` and `decks.variant` for unchanged decks. Previously a no-op refresh
+  could silently reset the entire label layer, requiring a full relabel plus per-parent re-apply.
+- **Sideboard land resolution fails loudly** — a `cards` lookup failure now yields a named
+  `land-resolution-failed` degraded plan with no swaps, instead of silently resurrecting the
+  land-cut defect at `log.debug`.
+- **Era drift alarm hygiene** — the alarm uses weekly recency with an 8-week recent-share gate,
+  so a cliff hidden in an incomplete trailing bucket is no longer missed.
+- **Aggregation provenance matches the typed verdict** — a heterogeneity-refused cell no longer
+  claims a concentration label was *served*; a served not-computable cell now carries its
+  heterogeneity verdict in provenance.
+
+### Internal
+- Test suite 2,578 → 3,540 passing. Review-test integrity pass replaced a golden's self-compared
+  floats with independent expected values, exercised the previously-uncovered family-first
+  imputation branch, and timestamped real-corpus spot checks so counts read as historical.
 
 ## v0.2.0 (2026-07-04)
 

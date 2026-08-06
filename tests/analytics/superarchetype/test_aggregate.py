@@ -195,16 +195,24 @@ class TestEffectiveN:
         n_eff = effective_n(headline_pair, re)
         assert n_eff == pytest.approx(3.3, abs=0.1)
 
-    def test_n_eff_is_non_increasing_in_tau2(self, headline_pair):
-        import dataclasses
+    def test_n_eff_falls_as_observed_member_heterogeneity_grows(self, make_tally):
+        """Exercise the joint estimator, not a synthetic partial derivative at fixed mean."""
+        win_pairs = ((10, 10), (9, 11), (7, 13), (4, 16), (1, 19))
+        fitted = []
+        for wins_a, wins_b in win_pairs:
+            members = [
+                make_tally("A", wins=wins_a, n=20),
+                make_tally("B", wins=wins_b, n=20),
+            ]
+            re = dersimonian_laird(members)
+            fitted.append((re.tau2, effective_n(members, re)))
 
-        re = dersimonian_laird(headline_pair)
-        values = [
-            effective_n(headline_pair, dataclasses.replace(re, tau2=tau2))
-            for tau2 in (0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0)
-        ]
-        assert all(a >= b for a, b in pairwise(values))
-        assert values[0] > values[-1]
+        tau2 = [value for value, _n_eff in fitted]
+        n_eff = [value for _tau2, value in fitted]
+        assert all(a <= b for a, b in pairwise(tau2))
+        assert all(a >= b for a, b in pairwise(n_eff))
+        assert tau2[-1] > tau2[0]
+        assert n_eff[-1] < n_eff[0]
 
     @pytest.mark.parametrize(
         "tallies",
@@ -518,6 +526,14 @@ class TestAggregateClusterCell:
         assert cell.heterogeneity.one_sided_note == I2_ONE_SIDED_NOTE
         assert cell.n_eff == pytest.approx(3.3, abs=0.1)
         assert cell.tier == "speculative"
+        assert any(
+            line.startswith("refused with concentration label:")
+            for line in cell.provenance
+        )
+        assert not any(
+            line.startswith("served with concentration label:")
+            for line in cell.provenance
+        )
 
     def test_dilution_fixtures_serve_with_labels_never_a_free_pool(self, make_tally):
         # Real-corpus dilution cells (feature file, 2026-07-31): thin members of different shape
@@ -541,6 +557,10 @@ class TestAggregateClusterCell:
             # Served (coverage is the point) but under the concentration label fallback.
             assert cell.pooled_p is not None
             assert any("dominated by Tron" in line for line in cell.provenance)
+            assert any(
+                line.startswith("served with heterogeneity label: heterogeneity not computable:")
+                for line in cell.provenance
+            )
 
     def test_tier_derives_from_n_eff_never_raw_pooled_n(self, make_tally):
         # Sum(n) = 32 would read "evolving"; the heterogeneous pool's n_eff ~ 12 reads

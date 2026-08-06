@@ -25,6 +25,9 @@ from conftest import in_current_regime
 from test_matchup_multi_split import PARENTS, adaptive_con
 
 from legacy_engine.analytics.matchup import DISPLAY_GATE_N, build_multi_split_adaptive
+from legacy_engine.analytics.eras.attribution import Attribution
+from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
+from legacy_engine.analytics.eras.store import write_entity_eras
 from legacy_engine.analytics.superarchetype.cluster import ClusterMember
 from legacy_engine.analytics.superarchetype.registry import (
     RegistryCluster,
@@ -264,6 +267,43 @@ class TestPriorRungs:
             line.startswith("// superarchetype: 2 clusters (6 contributors), window ")
             for line in overlay.audit_preamble
         )
+
+    def test_family_first_override_executes_for_a_configured_young_era(self, monkeypatch):
+        """The dormant calibration branch stays executable if a future harness enables a kind."""
+        from legacy_engine.analytics.superarchetype import chain
+
+        con = _hero_con()
+        boundary = EraBoundary(
+            date=_CURRENT_DATE, signals=(), pvalue=0.001,
+            bh_accepted=True, floor_rejected=False,
+        )
+        write_entity_eras(
+            con,
+            {"Hero": EntityEras(
+                entity="Hero", stable_since=_CURRENT_DATE,
+                boundaries=(boundary,), inherited_from_parent=False,
+            )},
+            {("Hero", _CURRENT_DATE): Attribution(
+                kind="release", card="Test Card", detail="test release",
+            )},
+            {},
+            run_meta={
+                "provenance": None, "alpha": 0.05,
+                "run_at": "2026-08-01T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"Hero": "Hero"},
+            },
+        )
+        monkeypatch.setattr(chain, "FAMILY_FIRST_KINDS", frozenset({"release"}))
+        overlay = build_multi_split_adaptive(
+            con, parents=(), superarchetypes=_hero_registry(),
+        )
+        con.close()
+
+        cell = overlay.multi.cells[("Hero", "OppX")]
+        assert cell.prior_source.startswith(
+            "family-current imputation (young release era; sa-fair, pool n=50;"
+        )
+        assert cell.prior_mean == pytest.approx(27 / 50)
 
 
 # ---------------------------------------------------------------------------

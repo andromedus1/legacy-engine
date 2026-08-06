@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, archetype]
 parent: epic-stable-era-windows-discovery-gate
 depends_on: [epic-stable-era-windows-discovery-gate-core]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-12
 updated: 2026-07-12

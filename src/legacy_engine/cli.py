@@ -7280,37 +7280,70 @@ def _echo_cluster(cluster, *, indent: str = "  ") -> None:
               help="Bootstrap resamples per scale.")
 @click.option("--seed", type=int, default=0, show_default=True, help="RNG seed (runs are exact).")
 @click.option("--dry-run", is_flag=True, default=False,
-              help="Compute and report without writing the registry or the DuckDB cache.")
+              help="Compatibility alias for the default preview-only behavior.")
+@click.option("--promote", is_flag=True, default=False,
+              help="Explicitly replace the serving JSON registry and DuckDB cache with this candidate.")
+@click.option("--compare-since", default=None,
+              help="In preview mode, compare era-aware cores to this uniform start date.")
 @_verbose
 def superarchetype_run(
     db: str | None, since: str | None, until: str | None, au_min: float | None,
-    min_bp: float | None, n_boot: int, seed: int, dry_run: bool, verbose: bool,
+    min_bp: float | None, n_boot: int, seed: int, dry_run: bool, promote: bool,
+    compare_since: str | None, verbose: bool,
 ) -> None:
     """Run the offline clustering pass: cores -> staple strip -> Jaccard -> average linkage ->
     AU cut -> assignment -> curated merge -> persisted registry + churn report.
 
     Sibling of `label` / `discover run` / `eras run`. Reads `deck_cards` only — never `rounds`.
 
-    Example: legacy-engine superarchetype run --since 2026-05-11
+    Preview: legacy-engine superarchetype run --compare-since 2026-05-11
+    Promote after review: legacy-engine superarchetype run --promote
     """
     _setup_logging(verbose)
     from legacy_engine.analytics.superarchetype.registry import run_superarchetypes
+    from legacy_engine.analytics.superarchetype.registry import membership_churn
     from legacy_engine.ingestion import store
 
+    if dry_run and promote:
+        raise click.ClickException("--dry-run and --promote are mutually exclusive")
+    if compare_since is not None and (since is not None or promote):
+        raise click.ClickException(
+            "--compare-since requires the default era-aware policy in preview mode"
+        )
+
     con = store.connect(db) if db else store.connect()
+    comparison = None
     try:
         result = run_superarchetypes(
             con, since=since, until=until, seed=seed, n_boot=n_boot,
-            au_min=au_min, min_bp=min_bp, write=not dry_run,
+            au_min=au_min, min_bp=min_bp, write=promote,
         )
+        if compare_since is not None:
+            comparison = run_superarchetypes(
+                con, since=compare_since, until=until, seed=seed, n_boot=n_boot,
+                au_min=au_min, min_bp=min_bp, write=False,
+            )
     finally:
         con.close()
 
     registry = result.registry
+    window_label = since or "per-entity eras"
     click.echo(
-        f"// superarchetype run: window {since or '—'} .. {until or '—'}  "
-        f"(seed={seed}, n_boot={n_boot})"
+        f"// superarchetype run: window {window_label} .. {until or '—'}  "
+        f"(policy={registry.window_policy}, seed={seed}, n_boot={n_boot})"
     )
+    for line in registry.audit_lines:
+        click.echo(line)
+    if registry.window_policy == "per-entity-era":
+        source_counts: dict[str, int] = {}
+        for _label, _horizon, source in registry.entity_horizons:
+            source_counts[source] = source_counts.get(source, 0) + 1
+        click.echo(
+            "// core horizons: "
+            + ", ".join(
+                f"{source}={count}" for source, count in sorted(source_counts.items())
+            )
+        )
     click.echo(
         f"// {result.n_archetypes} archetype label(s); {result.n_definers} definer(s) "
         f"covering {result.definer_field_share:.1%} of the field"
@@ -7352,7 +7385,24 @@ def superarchetype_run(
         click.echo("// DEGRADED taxonomy — see reasons below")
     for reason in registry.reasons:
         click.echo(f"// {reason}")
-    click.echo("// written" if result.written else "// dry run — nothing written")
+    if comparison is not None:
+        compared = membership_churn(result.registry, comparison.registry)
+        click.echo(f"// comparison: era-aware vs uniform since {compare_since}")
+        click.echo(
+            f"//   definers {result.n_definers} ({result.definer_field_share:.1%}) vs "
+            f"{comparison.n_definers} ({comparison.definer_field_share:.1%}); "
+            f"placed {result.assigned_field_share:.1%} vs {comparison.assigned_field_share:.1%}"
+        )
+        click.echo(
+            f"//   clusters {len(result.registry.clusters)} vs "
+            f"{len(comparison.registry.clusters)}; {compared.note}"
+        )
+        for archetype, old_id, new_id in compared.moves:
+            click.echo(f"//   comparison move {archetype}: {old_id} -> {new_id}")
+    click.echo(
+        "// promoted: serving registry + DuckDB cache replaced" if result.written else
+        "// preview — nothing written; review the candidate, then re-run with --promote"
+    )
 
 
 @superarchetype.command("list")
@@ -7377,7 +7427,10 @@ def superarchetype_list(db: str | None, cluster_id: str | None, verbose: bool) -
         con.close()
 
     if registry is None or not registry.clusters:
-        click.echo("(no superarchetype registry — run `superarchetype run` first)")
+        click.echo(
+            "(no superarchetype registry — review a candidate, then run "
+            "`superarchetype run --promote`)"
+        )
         return
 
     click.echo(

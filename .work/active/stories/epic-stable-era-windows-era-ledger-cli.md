@@ -5,7 +5,7 @@ stage: done
 tags: [analytics]
 parent: epic-stable-era-windows-era-ledger
 depends_on: [epic-stable-era-windows-era-ledger-run]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-11
 updated: 2026-07-11

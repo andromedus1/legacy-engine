@@ -1,14 +1,14 @@
 ---
 id: feature-multi-split-matrix-best-call-onepass
 kind: story
-stage: review
+stage: done
 tags: [advisory]
 parent: feature-multi-split-matrix
 depends_on: [feature-multi-split-matrix-adaptive-window]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-31
-updated: 2026-08-01
+updated: 2026-08-05
 ---
 
 # Best-call page one-pass migration + cross-camp P(best)
@@ -93,3 +93,37 @@ then reverted to green.
 Docs rolled: `docs/analysis/best-call-ranking.md` (one-pass method, P(best) column,
 timing), `docs/ARCHITECTURE.md` window.py row (`build_multi_split_inputs`; the matchup.py
 row was rolled by the sibling stories), knowledge index regenerated.
+
+**Review follow-up (2026-08-02):** the archetype and camp tables now render inside bounded
+vertical scroll regions with sticky column headers. Each table also has an independent minimum
+floor-coverage percentage filter; filtering precedes the existing honesty-stratum and active-column
+sort, and the UI reports visible versus total rows. Static render coverage pins both controls, the
+sticky-header rule, and the coverage predicate.
+
+**Review follow-up (floor sensitivity):** removed the secondary `n>=20`/CI-proof gate after the
+live page showed too few deep cells for it to surface credible apparent holes. Every measured cell
+(`n>=8` at the default) now participates in the shrunk floor. Ungrounded rows carry an explicit
+`upper bound` chip in addition to `≤`; headers now say `worst measured matchup` and `measured
+coverage`. A focused regression pins an `n=8` cell as floor-eligible. On the 2026-07-30 corpus,
+the contract change moves 28/94 archetype floors and 48/115 camp floors; agency falls for 21
+archetypes (16 by at least 2 points) and 45 camps (43 by at least 2 points). Aluren moves from
+`≤49.8%` (old floor 52.8% vs Blue Artifacts) to `≤38.7%` (new floor vs Azorius Midrange).
+
+## Closure (2026-08-05)
+
+Child-story verification closure, not a review verdict — parent `feature-multi-split-matrix`
+was already at `done`, so this normalizes legacy state where a child sat at `review`.
+
+Acceptance re-verified on the current corpus (through 2026-08-05):
+- hermetic parity + Nadu-pin + determinism suite green (`tests/test_refresh_best_call_ranking.py`,
+  22 passed);
+- one-pass camp sweep 15.1s over 111 camp rows / 6 ban-scoped fallback windows, inside the
+  "under ~30s" acceptance;
+- shared-field ranking 2.0s, 37 of 160 candidates.
+
+Follow-up parked, not blocking: `bug-pbest-coverage-zero-for-most-camps`. Unit 5's design
+deviation #1 moved the MC onto page-used cells specifically so camps would stop sitting at
+data_coverage ~0, but 80 of 111 camps still resolve to `s_cov` of *exactly* 0.0 — including
+`Doomsday [The Fantasticar]` at 39% displayed coverage. Verified identical on this story's
+committed code and on the prior HEAD, so it is not a regression from the one-pass migration;
+it is a pre-existing cell-lookup gap the migration inherited and surfaced.
