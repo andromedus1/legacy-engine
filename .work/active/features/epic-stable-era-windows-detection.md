@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, methodology]
 parent: epic-stable-era-windows
 depends_on: []
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-11
 updated: 2026-07-11
