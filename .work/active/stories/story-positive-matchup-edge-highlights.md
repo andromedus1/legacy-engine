@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, ui]
 parent: null
 depends_on: [story-fix-blowouts-use-raw-win-rate]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-08-02
 updated: 2026-08-02

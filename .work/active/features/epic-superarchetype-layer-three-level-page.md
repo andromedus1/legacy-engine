@@ -5,7 +5,7 @@ stage: done
 tags: [analytics, viz]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-chain, epic-superarchetype-layer-best-call-fallback]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-08-01
 updated: 2026-08-02
