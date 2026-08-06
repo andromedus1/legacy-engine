@@ -56,9 +56,34 @@ def test_advise_subcommands_require_deck(runner):
         assert result.exit_code != 0, f"advise {sub} should fail without --deck"
 
 
-def test_superarchetype_comparison_is_strictly_non_writing(runner):
+@pytest.fixture
+def db_for_superarchetype(tmp_path, make_rounds_corpus):
+    """File-backed hermetic DB for CLI invocation (file-backed-cli-test-db-builder).
+
+    Never let this command fall through to the default database: it passes locally only on a
+    machine that happens to have a seeded corpus, and fails in CI with a bare
+    ``Catalog Error: Table with name decks does not exist``.
+    """
+    db_path = tmp_path / "superarchetype.duckdb"
+    con_mem, _ = make_rounds_corpus(n_repeats=5)
+
+    from legacy_engine.ingestion import store as _store
+    con_file = _store.connect(str(db_path))
+    _store.init_schema(con_file)
+    for table in ("tournaments", "decks", "deck_cards", "rounds"):
+        rows = con_mem.execute(f"SELECT * FROM {table}").fetchall()
+        if rows:
+            placeholders = ", ".join(["?"] * len(rows[0]))
+            con_file.executemany(f"INSERT INTO {table} VALUES ({placeholders})", rows)
+    con_mem.close()
+    con_file.close()
+    return str(db_path)
+
+
+def test_superarchetype_comparison_is_strictly_non_writing(runner, db_for_superarchetype):
     result = runner.invoke(main, [
         "superarchetype", "run", "--compare-since", "2026-06-29",
+        "--db", db_for_superarchetype,
     ])
     assert result.exit_code == 0, result.output
     assert "// comparison: era-aware vs uniform since 2026-06-29" in result.output
