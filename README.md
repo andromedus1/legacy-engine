@@ -36,7 +36,7 @@ for how it's built.
 
 The **observed-data spine, meta analytics, three-level taxonomy, stable-era detection, deck
 generation, advisory differentiator, and local visualization layer** are built and tested
-(**3,532 passing**, with one existing UMAP warning and no xfails). Only the goldfish-simulation
+(**3,540 passing**, with one skip — the optional UMAP extra — and no xfails). Only the goldfish-simulation
 pillar remains deferred:
 
 | Capability | State |
@@ -306,7 +306,7 @@ src/legacy_engine/
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 scripts/       # standalone helpers: knowledge-index gen; viz + Best Call refresh helpers
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (3,532 passing; one existing UMAP warning; no xfails)
+tests/         # pytest suite (3,540 passing; one optional-extra skip; no xfails)
 ```
 
 ## Contributing
