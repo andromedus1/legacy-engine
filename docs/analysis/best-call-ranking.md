@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-02
+updated: 2026-08-03
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -164,6 +164,12 @@ frontmatter decisions above — the page prose is authoritative.
   holes earlier, while the explicit upper-bound marker and measured-coverage
   column keep incomplete rows from masquerading as fully mapped claims. Still
   check the expanded ledger (raw record and CI shown) before acting on one cell.
+- **The measured-cell gate is interactive in each table.** `Minimum matchup n`
+  defaults to the generated `--ground-n` value (normally 8) and recomputes the
+  era-preferred / ban-scoped-fallback selection, adjusted field WR, floor,
+  agency, blowouts, coverage, grounding strata, labels, and sorting in-browser.
+  Cross-camp P(best) remains the generated-threshold Monte Carlo and is shown as
+  n/a when the interactive gate differs rather than presenting a stale value.
 - **Fallback windows are ban-scoped** — a deck whose engine was banned (Nadu
   Cephalid, Candelabra Forge) keeps none of its banned-era matches in any cell
   that touches it; coverage drops honestly instead (Forge 95%→17% grounding was

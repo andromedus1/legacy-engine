@@ -19,8 +19,8 @@ Method (the page's definitional card is the authoritative prose):
     only when neither deck was ever ban-affected. A banned engine's matches (Nadu
     Cephalid, Candelabra Forge) can never inflate a row — in either direction.
   - adj field WR = field-share-weighted p_shrunk over n>=1 cells (normalized).
-  - floor = min p_shrunk over floor-eligible cells: measured AND (n >= 20 OR the 95% CI
-    upper bound < 50%) — a thin cell must prove its hole; agency = min(adj, floor).
+  - floor = min p_shrunk over every measured cell (n >= ``--ground-n``); agency =
+    min(adj, floor). Coverage + the upper-bound label carry incomplete-floor uncertainty.
   - coverage = measured share-mass / total opponent share-mass; grounded = the
     top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
   - Camps: ONE multi-split adaptive matrix over every staged parent in the discovery
@@ -34,14 +34,12 @@ Method (the page's definitional card is the authoritative prose):
     scored against the same sampled field. The MC ranks on the PAGE-USED cells (the
     ledger's own era-preferred, ban-scoped-fallback selection), so the column shares the
     page's Nadu-rule windows and its coverage-suppression honesty gates.
-  - Superarchetype fallback (LEDGER-ONLY): a page-unmeasured cell may carry an additive
-    ``sa`` payload resolved by the engine's display ladder (measured -> imputed -> pooled
-    -> family range), rendered as a labeled lean in the expanded ledger. Leans NEVER enter
-    adj/floor/agency/coverage/strata or the MC — every row metric computes from
-    bit-identical inputs with the layer on or off (the isolation decision in
-    .work/active/features/epic-superarchetype-layer-best-call-fallback.md). The registry
-    is read from the SAME --db (``superarchetype run``'s derived cache); absent tables =
-    layer off; ``--no-superarchetypes`` regenerates the baseline.
+  - Strategic plans: curated primary-plan assignments aggregate decisive matches directly;
+    plan rows and each archetype's five plan cells never average rendered archetype rates.
+    Same-plan diagonals are structural 50% context, not measured evidence or floor inputs.
+  - Superarchetypes remain internal matrix context only: the page emits no family payload,
+    lean, range, or ranking input. ``apply_superarchetype_priors=False`` keeps the page's
+    archetype/camp row metrics independent of that optional registry.
 
 Run after every data refresh cycle (refresh all -> label -> discover apply x N ->
 eras run) — the matchup matrices read eras + variants, so refresh THIS page LAST:
@@ -137,9 +135,25 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             use, win = fc, fb_label
         else:
             use, win = (ec if ec is not None else fc), "era"
+        def source_payload(cell, window):
+            if cell is None:
+                return None
+            return {
+                "p": r4(cell.p_shrunk), "raw": r4(cell.p_raw),
+                "ci_low": r4(cell.ci_low), "ci_high": r4(cell.ci_high),
+                "n": cell.n, "window": window, "tier": str(cell.tier),
+            }
+
+        # Keep both candidates so the offline page can faithfully re-run the
+        # era-preferred / ban-scoped-fallback selection at an interactive n gate.
+        sources = {
+            "era": source_payload(ec, "era"),
+            "fallback": source_payload(fc, fb_label),
+        }
         if use is None:  # pair absent from the matrix (e.g. camp vs its own parent)
             cells.append({"opp": opp, "share": r4(shares[opp]), "p": None, "raw": None,
-                          "n": 0, "window": "era", "tier": "speculative", "measured": False})
+                          "n": 0, "window": "era", "tier": "speculative", "measured": False,
+                          "sources": sources})
             continue
         if out_used is not None:
             out_used[opp] = use
@@ -148,6 +162,7 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             "ci_low": r4(use.ci_low), "ci_high": r4(use.ci_high),
             "n": use.n, "window": win, "tier": str(use.tier),
             "measured": use.n >= ground_n,
+            "sources": sources,
         })
     return cells
 
@@ -270,18 +285,9 @@ def _sa_payload(subj, opp, msa, label_of):
     }
 
 
-# A thin measured cell can set the row's floor only when even its optimistic bound is
-# unfavorable — ambiguity is not a hole. Deep cells (n >= FLOOR_DEEP_N) qualify on their
-# point estimate; thinner ones must have a 95% CI upper bound below 50%.
-FLOOR_DEEP_N = 20
-FLOOR_PROOF_CI = 0.50
-
-
 def _floor_eligible(c) -> bool:
-    return c["measured"] and (
-        c["n"] >= FLOOR_DEEP_N
-        or (c["ci_high"] is not None and c["ci_high"] < FLOOR_PROOF_CI)
-    )
+    """Every cell that clears the page's measured-evidence gate can set the floor."""
+    return c["measured"]
 
 
 def row_stats(cells, top_k, cover_min):
@@ -316,7 +322,6 @@ def build_strategic_plan_payload(
 ):
     """Adapt typed match-level plan results for the self-contained report."""
     by_subject = {row["subject"]: row for row in archetype_rows}
-    plan_by_id = {plan.id: plan for plan in result.plans}
     assignments = {item.archetype: item for item in result.assignments}
     members_by_plan = {plan.id: [] for plan in result.plans}
     for archetype, row in by_subject.items():
@@ -358,8 +363,10 @@ def build_strategic_plan_payload(
                 "reason": (
                     "structural same-plan expectation"
                     if cell.structural_same_plan else
-                    ("no decisive matches" if cell.n == 0 else
+                    (None if cell.measured else
+                     ("no decisive matches" if cell.n == 0 else
                      f"n={cell.n} below measured gate")
+                    )
                 ),
             }
             if not cell.structural_same_plan:
@@ -818,7 +825,7 @@ def main() -> None:
     ap.add_argument("--cover-min", type=float, default=0.8)
     ap.add_argument("--min-row-share", type=float, default=0.001)
     ap.add_argument("--no-superarchetypes", action="store_true",
-                    help="skip the family-fallback ledger overlay (baseline/audit regeneration)")
+                    help="omit the optional internal superarchetype registry input")
     args = ap.parse_args()
 
     regime_card = latest_ban[1] if args.field_since == latest_ban[0].isoformat() else None
