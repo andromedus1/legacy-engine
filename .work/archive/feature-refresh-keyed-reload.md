@@ -5,7 +5,7 @@ stage: done
 tags: [ingestion, hygiene]
 parent: null
 depends_on: []
-release_binding: null
+release_binding: v0.4.0
 archived_atop: v0.3.0
 git_ref: ba9b3ad
 created: 2026-07-12

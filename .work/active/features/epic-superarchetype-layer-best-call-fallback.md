@@ -5,7 +5,7 @@ stage: done
 tags: [advisory, analytics, docs]
 parent: epic-superarchetype-layer
 depends_on: [epic-superarchetype-layer-chain, feature-multi-split-matrix]
-release_binding: null
+release_binding: v0.4.0
 gate_origin: null
 created: 2026-07-31
 updated: 2026-08-01
