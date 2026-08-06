@@ -160,9 +160,9 @@ Matchup adjustments:
    All-time the two camps' intervals **separate** (54.6% [52,57] vs 50.2% [48,52]) on established
    samples — that is the strongest card-package evidence in this whole investigation. In the current
    regime they overlap ([48,67] vs [45,61]), so treat the *current* +5 as directional.
-3. **Field coverage against Boulder is only 53%** — positioning returns S = 0.533 [0.482, 0.583] with
+3. **Field coverage against the local meta is only 53%** — positioning returns S = 0.533 [0.482, 0.583] with
    Azorius Midrange, Jeskai Midrange, Black Midrange, Black Saga Storm, Esper Midrange, Painter, and
-   White Beanstalk all uncovered. Seven of fifteen Boulder slices are unmodeled.
+   White Beanstalk all uncovered. Seven of fifteen the local meta slices are unmodeled.
 4. **The no-Overlord half is growing.** June 2026 was the first month it outnumbered the Overlord camp
    (48 to 34), and July was close (24 to 31). Current-regime totals are 86 / 85 — a dead heat. Something
    is pulling pilots back toward the mono-white Flagstones/Thalia/Ghost Quarter build. Watch it.
@@ -202,7 +202,7 @@ about how a go-wide energy deck performs, and I should have drawn that line the 
 
 ## Matchups and sideboarding
 
-Ordered by share of the current Boulder field. Cells are the engine's D&T archetype row since
+Ordered by share of the current local field. Cells are the engine's D&T archetype row since
 2025-08-01 as `shrunk% | raw% n=`, plus the Overlord camp's own hand tally where n allows. Note the
 camp row and the parent row often disagree — where they do, that disagreement is the information.
 
@@ -212,13 +212,13 @@ must be equal in and out** or you lose Yorion: the companion condition is checke
 deck each game, so the moment your main dips to 79 you no longer have a companion. Every plan below is
 balanced for exactly that reason; do not "just take out two cards" the way you would in a 60.
 
-### 1. Izzet Delver — 11.2% of Boulder
+### 1. Izzet Delver — 11.2% of the local meta
 `camp 0.70 (raw 19-8, n=27, 2026)`. Vial is the card. It beats Daze, Force, and Stifle, and Thalia
 taxes their whole deck. Swords the Murktide, Skyclave the Cutter, and let Overlord grind them out —
 they run out of cards, you don't. Karakas protects Thalia and Phelia. Therapy of choice is Thoughtseize
 naming Force before your Overlord turn. **Board:** no change.
 
-### 2. Show and Tell — 10.3% of Boulder
+### 2. Show and Tell — 10.3% of the local meta
 `camp 0.55 (raw 21-17, n=38, 2026)` · `current regime 0.30 (raw 3-7, n=10 — speculative, a warning)`.
 Thalia taxes Show and Tell to {3}{U}. Karakas answers a legend. Thoughtseize the enabler. Static hate
 isn't available to you, so this is a discard-plus-clock plan with Deafening Silence as the breaker.
@@ -226,43 +226,43 @@ isn't available to you, so this is a discard-plus-clock plan with Deafening Sile
 Formalwear, -1 Cloak and Dagger`. Containment Priest looks right and mostly isn't — read the nonbo
 section; add it only if you're willing to switch off Vial and every blink for the game.
 
-### 3. White Beanstalk — 7.5% of Boulder
+### 3. White Beanstalk — 7.5% of the local meta
 `camp 0.36 (raw 4-7, n=11 — speculative)`. Near-mirror-ish grind. Thalia and Wasteland tax their
 Beanstalk/Stock Up engine; Skyclave and Meteor Sword answer the resolved threat; Karakas fights their
 Phelia. Don't overextend into Wrath. **Board:** `+3 Wrath of the Skies; -1 Thoughtseize, -1 Cloak and
 Dagger, -1 Flickerwisp`.
 
-### 4. Dimir Tempo — 7.5% of Boulder
+### 4. Dimir Tempo — 7.5% of the local meta
 `camp 0.68 (raw 23-11, n=34, 2026)` · `current regime 7-0 (n=7 — speculative)`. Your best matchup.
 Vial under Daze, Thalia taxing removal, Karakas saving legends, Overlord out-grinding one-for-ones.
 Save Swords for Barrowgoyf or Murktide. **Board:** no change.
 
-### 5. Jeskai Midrange — 7.5% of Boulder
+### 5. Jeskai Midrange — 7.5% of the local meta
 **No cell in either source.** Fair blue with burn: keep Vial, respect sweepers, and lean on White
 Orchid Phantom plus Wasteland if their mana is greedy. **Board:** `+3 Wrath of the Skies; -1 Cloak and
 Dagger, -1 Meteor Sword, -1 Lion Sash` if they're creature-forward, else no change.
 
-### 6. Azorius Midrange — 6.5% of Boulder
+### 6. Azorius Midrange — 6.5% of the local meta
 **No established cell.** Treat as Dimir Tempo with better sweepers and their own Phelia. Karakas is
 excellent — it answers their Phelia and their legends. **Board:** no change.
 
-### 7. Black Midrange — 6.5% of Boulder
+### 7. Black Midrange — 6.5% of the local meta
 **No cell.** Grind matchup you should win: Overlord recursion plus Solitude plus equipment beats
 one-for-one removal. Skyclave their engine. **Board:** `+1 Surgical Extraction, +1 Faerie Macabre;
 -1 Cloak and Dagger, -1 Flickerwisp` if Reanimate or an opposing Overlord is central; else no change.
 
-### 8. Black Saga Storm — 6.5% of Boulder
+### 8. Black Saga Storm — 6.5% of the local meta
 **No cell.** Thalia plus Deafening Silence plus Thoughtseize, and Mindbreak Trap is free on their
 big turn. Faerie Macabre and Lion Sash attack the graveyard axis without costing you a card.
 **Board:** `+3 Deafening Silence, +1 Mindbreak Trap, +1 Surgical Extraction, +1 Faerie Macabre;
 -1 Meteor Sword, -1 Lion Sash, -1 Pre-War Formalwear, -1 Cloak and Dagger, -2 Skyclave Apparition`.
 
-### 9. Death & Taxes (mirror, incl. the no-Overlord build) — 5.6% of Boulder
+### 9. Death & Taxes (mirror, incl. the no-Overlord build) — 5.6% of the local meta
 `camp 0.50 (raw 7-7, n=14 — speculative)`. Karakas wars, Vial wars, and Overlord is the tiebreaker —
 you have four, the mono-white build has none. Skyclave and Meteor Sword answer their equipment; Erode
 answers a Thalia or a Recruiter chain. **Board:** `+2 Erode; -1 Thoughtseize, -1 Cloak and Dagger`.
 
-### 10. Doomsday — 5.6% of Boulder
+### 10. Doomsday — 5.6% of the local meta
 **`camp 14.7% raw 5-29 n=34 evolving` · `parent 27.8% raw n=36 evolving`. This is the hole.**
 Everything you do is a permanent and they don't care. **The whole plan is turn-one Thalia or
 Thoughtseize, then Deafening Silence, then race.** Thalia taxing Doomsday to {B}{B}{B}{1} and every
@@ -272,24 +272,24 @@ Priest. **Board:** `+3 Deafening Silence, +1 Mindbreak Trap, +1 Surgical Extract
 -1 Lion Sash, -1 Pre-War Formalwear, -1 Cloak and Dagger, -1 Flickerwisp`. Expect to lose this
 matchup more than you win it and plan your event around that.
 
-### 11. Eldrazi — 5.6% of Boulder
+### 11. Eldrazi — 5.6% of the local meta
 `camp 0.50 (raw 6-6, n=12 — speculative)`. Solitude is free and exiles a Thought-Knot at instant
 speed; Wasteland and White Orchid Phantom attack the sol lands; Karakas is dead here. Skyclave gets
 mana value 4 or less, so it answers Thought-Knot ({3}{C}) but not Kozilek's Command targets above it.
 **Board:** `+2 Disruptor Flute; -1 Cloak and Dagger, -1 Thoughtseize`. Flute names Chalice or Ancient Tomb.
 
-### 12. Painter — 4.7% of Boulder
+### 12. Painter — 4.7% of the local meta
 `camp 0.90 (raw 9-1, n=10 — speculative)`. Witch Enchanter and Skyclave answer the combo halves,
 Disruptor Flute names Grindstone (shutting the activated ability, not just the cast), Meteor Sword
 destroys any permanent. Lion Sash eats Welder targets. **Board:** `+2 Disruptor Flute, +1 Surgical
 Extraction; -1 Cloak and Dagger, -1 Thoughtseize, -1 Flickerwisp`.
 
-### 13. Blue Artifacts — 3.7% of Boulder
+### 13. Blue Artifacts — 3.7% of the local meta
 `camp 0.57 (raw 13-10, n=23, 2026)`. Witch Enchanter ×2 is maindeck Disenchant; Wasteland the Urza's
 Saga; Skyclave the Emry or the Opal-fueled threat. **Board:** `+2 Disruptor Flute, +2 Erode;
 -1 Cloak and Dagger, -1 Thoughtseize, -1 Flickerwisp, -1 Pre-War Formalwear`.
 
-### 14. Energy (Boros / Mardu / Orzhov) — 3.7% of Boulder
+### 14. Energy (Boros / Mardu / Orzhov) — 3.7% of the local meta
 **`camp 0.33 (raw 8-16, n=24, 2026)` · `current regime 0.14 (raw 1-6, n=7 — speculative)`.
 Your second-worst modeled matchup, and it's the deck you already own.** They go wider than your
 removal and Goblin Bombardment beats your blockers and dodges your exile effects. Wrath of the Skies
@@ -297,11 +297,11 @@ is the swing card — with X=2 or 3 you sweep their Cats, Guides, and Ocelot tok
 because it also kills your Vial and equipment. Swords the Ajani or the pumped attacker; Solitude the
 Raptor engine. **Board:** `+3 Wrath of the Skies; -1 Cloak and Dagger, -1 Meteor Sword, -1 Lion Sash`.
 
-### 15. Esper Midrange — 3.7% of Boulder
+### 15. Esper Midrange — 3.7% of the local meta
 **No cell.** Fair blue with exile removal. Vial, Thalia, grind. **Board:** `+3 Wrath of the Skies;
 -1 Cloak and Dagger, -1 Meteor Sword, -1 Lion Sash`.
 
-### Global-field matchups Boulder doesn't currently have
+### Global-field matchups the local meta doesn't currently have
 
 **Lands** — `camp 0.65 (raw 13-7, n=20, 2026)`. Strong. Wasteland plus White Orchid Phantom plus
 Karakas for Marit Lage is the whole plan; Witch Enchanter answers Sphere and Mox Diamond.
@@ -317,9 +317,9 @@ uncast creatures onto the battlefield. **Board:** `+1 Containment Priest, +1 Fae
 **Tron** — Wasteland, White Orchid Phantom, and Thalia. Witch Enchanter answers the artifact engine.
 Good matchup on paper; no camp cell above n=5.
 
-## Boulder-tuned sideboard alternative (labeled: our reasoning, not observed)
+## locally tuned sideboard alternative (labeled: our reasoning, not observed)
 
-The consensus 15 above is what the corpus plays. Boulder is **22.4% combo** (Show and Tell 10.3 +
+The consensus 15 above is what the corpus plays. the local meta is **22.4% combo** (Show and Tell 10.3 +
 Black Saga Storm 6.5 + Doomsday 5.6) against a global field that isn't, and Doomsday is your hole.
 Two swaps derived from cards already in this camp's observed sideboard pool:
 
@@ -355,7 +355,7 @@ misteriggins (5-0, 07-23) — not a single pilot's brew. Camp definition: `arche
 n=75 current-regime lists for the composition histogram, n=757 decks / 1,429 decisive matches for the
 record. Matchup cells: engine `report matchups --a "Death & Taxes" --b <opp> --since 2025-08-01` for
 parent rows, hand tally from `rounds` via `parse_match_result` for camp rows, Wilson/Jeffreys
-intervals throughout. Field weights from `decks/boulder-field-current.txt` (103 of 107 players
+intervals throughout. Field weights from `decks/local-field-current.txt` (103 of 107 players
 modeled, post-2026-05-18).
 
 Refresh after a ban, a major release, or **2026-09-04** — and refresh sooner if the no-Overlord share

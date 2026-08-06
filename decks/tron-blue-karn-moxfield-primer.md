@@ -155,7 +155,7 @@ Matchup adjustments:
    unbiased slice is 12 Challenge entries plus 8 Last Chance entries, and their finishes are:
    2nd, 5th, 6th, 8th, 25th, 25th, 27th, 32nd, 32nd, and three sub-.500 records. That looks like a
    real but unremarkable deck, not a dominant one.
-3. **Zero paper data.** All 38 post-ban lists are online. For a Boulder read that is a hard
+3. **Zero paper data.** All 38 post-ban lists are online. For a the local meta read that is a hard
    limitation, not a footnote — this deck's whole plan is vulnerable to Wasteland and Boseiju, and
    paper fields differ.
 4. **The engine's own Tron numbers are currently blended and wrong.** `entity_eras` gives Tron
@@ -181,16 +181,16 @@ list — and you should expect to be generating the evidence rather than reading
 
 **No post-ban matchup cell in this archetype reaches n=3.** Every plan below is derived from card
 mechanics and from what the old Tron deck's cells implied, explicitly labelled as reasoning rather
-than measurement. Ordered by share of the current Boulder field.
+than measurement. Ordered by share of the current local field.
 
-### 1. Izzet Delver — 11.2% of Boulder
+### 1. Izzet Delver — 11.2% of the local meta
 **Their plan:** Channeler and Murktide behind Daze, Force, Bolt, Cori-Steel Cutter, and Wasteland.
 **Your plan:** Petrified Hamlet naming Wasteland is the single most important card in the matchup —
 it turns their mana denial off entirely. Kozilek's Command at X=1 or 2 answers everything they play.
 Force of Will their threat, then land Karn or Ring and bury them. **Board:** `+1 Force of Negation,
 +1 Hydroblast; -1 Dismember, -1 Lórien Revealed`. Hydroblast kills a resolved Cutter or Channeler.
 
-### 2. Show and Tell — 10.3% of Boulder
+### 2. Show and Tell — 10.3% of the local meta
 **Their plan:** cantrips and Stock Up plus protection into Show and Tell for Omniscience or a legend.
 **Your plan:** you are a permission deck with 7 counterspells — this is a fight you can actually
 have. Force of Negation is free on their turn and counters Show and Tell. Ugin cast after they land
@@ -199,14 +199,14 @@ and friends are expensive, so plan on Ugin or a counter instead. **Board:** `+1 
 +2 Hullbreacher; -1 Dismember, -1 Eldrazi Confluence, -1 Expedition Map`. Hullbreacher turns their
 Show-and-Tell-fuelled draws into your Treasures and blanks Stock Up.
 
-### 3. White Beanstalk — 7.5% of Boulder
+### 3. White Beanstalk — 7.5% of the local meta
 **Their plan:** Beanstalk/Stock Up value, exile removal, Phelia, planeswalkers, sweepers.
 **Your plan:** grind. You have more raw card advantage than they do once Ring or Ugin lands, and
 Ugin exiles their coloured permanents one per colourless spell. Hullbreacher taxes Beanstalk and
 Stock Up hard. **Board:** `+2 Hullbreacher, +1 The One Ring; -1 Dismember, -1 Tishana's Tidebinder,
 -1 Eldrazi Confluence`.
 
-### 4. Dimir Tempo — 7.5% of Boulder
+### 4. Dimir Tempo — 7.5% of the local meta
 The only post-ban cell that exists at all: **1-2, n=3.** Meaningless; noted for completeness.
 **Their plan:** cheap threats behind discard, Daze, Force, Wasteland, Kaito. **Your plan:** Hamlet
 on Wasteland, Command their threats, and remember their discard is at its best against your
@@ -214,22 +214,22 @@ on Wasteland, Command their threats, and remember their discard is at its best a
 Negation, +4 Barrowgoyf; -1 Ugin, -2 Expedition Map, -1 Eldrazi Confluence, -1 Lórien Revealed`.
 See the Barrowgoyf note below.
 
-### 5. Jeskai Midrange — 7.5% of Boulder
+### 5. Jeskai Midrange — 7.5% of the local meta
 **No cell.** Fair blue with burn and sweepers. Counter the engine, land Karn, Hydroblast the red
 permanent. **Board:** `+1 Hydroblast, +1 Force of Negation; -1 Dismember, -1 Lórien Revealed`.
 
-### 6. Azorius Midrange — 6.5% of Boulder
+### 6. Azorius Midrange — 6.5% of the local meta
 **No cell.** Their Stifle is a real problem for Expedition Map and for Tron assembly; sequence lands
 so a Stifle costs them the least. Karakas is answered by Petrified Hamlet naming it.
 **Board:** `+2 Hullbreacher, +1 Force of Negation; -1 Dismember, -1 Eldrazi Confluence, -1 Lórien
 Revealed`.
 
-### 7. Black Midrange — 6.5% of Boulder
+### 7. Black Midrange — 6.5% of the local meta
 **No cell.** Discard plus efficient threats. Kozilek's Command's graveyard mode fights their
 recursion; Ugin exiles their black permanents. This should be a good matchup — you go far over the
 top of a fair black deck. **Board:** `+4 Barrowgoyf; -2 Expedition Map, -1 Ugin, -1 Lórien Revealed`.
 
-### 8. Black Saga Storm — 6.5% of Boulder
+### 8. Black Saga Storm — 6.5% of the local meta
 **No cell, and this is your best structural matchup in the room.** Their engine is 4 Lion's Eye
 Diamond, 4 Lotus Petal, 4 Mox Opal, 4 Chrome Mox, 3.4 Urza's Saga — **Karn's static turns every one
 of those off**, and Petrified Hamlet naming Urza's Saga kills the Saga plan. Force of Negation is
@@ -238,21 +238,21 @@ free on their turn. Note their ~3 Veil of Summer does nothing against you: you h
 **Board:** `+1 Force of Negation, +1 Tormod's Crypt (via Karn or hard-cast); -1 Dismember,
 -1 Eldrazi Confluence`. Karn −2 for Tormod's Crypt answers Gaea's Will.
 
-### 9. Death & Taxes (80-card Yorion) — 5.6% of Boulder
+### 9. Death & Taxes (80-card Yorion) — 5.6% of the local meta
 **No cell.** Their Wasteland, White Orchid Phantom, and Karakas all attack your mana; **Petrified
 Hamlet answers two of the three** (name Wasteland, or name Karakas if their legends matter more).
 Karn shuts off Aether Vial. Their Solitude and Swords do nothing to your permanents. **Board:**
 `+1 Ensnaring Bridge (Karn target), +1 Engineered Explosives; -1 Lórien Revealed, -1 Dismember`.
 Ensnaring Bridge under a full grip is close to unbeatable for a creature deck.
 
-### 10. Doomsday — 5.6% of Boulder
+### 10. Doomsday — 5.6% of the local meta
 **No cell.** You have 7 counterspells and they have to resolve a 3-mana sorcery and then a pile —
 this is a much better matchup for this deck than for any creature deck. Force of Negation is free.
 Tishana's Tidebinder counters the Thassa's Oracle trigger. Kozilek's Command exiles their graveyard
 in response to Gaea's-Will-style rebuilds. **Board:** `+1 Force of Negation, +1 Tormod's Crypt;
 -1 Dismember, -1 Eldrazi Confluence`.
 
-### 11. Eldrazi — 5.6% of Boulder
+### 11. Eldrazi — 5.6% of the local meta
 **No cell.** The awkward one: **Ugin only exiles coloured permanents, so it does nothing here**, and
 their Chalice of the Void on 1 is bad for Expedition Map, Thundertrap-adjacent one-drops, and
 Sink into Stupor. Kozilek's Command exiles a creature with mana value X or less — that's your
@@ -262,19 +262,19 @@ artifacts) — do not board on the assumption Karn taxes their mana. **Board:**
 `+1 Engineered Explosives, +1 Walking Ballista, +1 Force of Negation; -1 Lórien Revealed,
 -1 Stock Up, -1 Tishana's Tidebinder`.
 
-### 12. Painter — 4.7% of Boulder
+### 12. Painter — 4.7% of the local meta
 **No cell; should be excellent.** Karn's static shuts off Grindstone entirely — the combo cannot be
 activated while Karn is on the battlefield. Tidebinder counters a Grindstone activation and strips
 its abilities. Their Pyroblast is the danger to your blue half; Hamlet cannot help there.
 **Board:** `+1 Hydroblast, +1 Force of Negation; -1 Dismember, -1 Lórien Revealed`.
 
-### 13. Blue Artifacts — 3.7% of Boulder
+### 13. Blue Artifacts — 3.7% of the local meta
 **No cell; also excellent.** Karn turns off Mox Opal, Bauble, Emry activations, and Urza's Saga
 constructs; Hamlet naming Urza's Saga finishes the job; Engineered Explosives on 1 sweeps their
 board. **Board:** `+1 Engineered Explosives, +1 Force of Negation, +1 Invasion Submersible;
 -1 Dismember, -1 Lórien Revealed, -1 Tishana's Tidebinder`.
 
-### 14. Energy — 3.7% of Boulder
+### 14. Energy — 3.7% of the local meta
 **No cell.** A genuine race problem: they deploy four bodies by turn three and you are a five-mana
 deck. Kozilek's Command at low X, Eldrazi Confluence's +3/−3 mode used three times, and Ensnaring
 Bridge are your outs. **Karn does almost nothing here** — his static hits activated abilities of
@@ -284,12 +284,12 @@ Karn is a 4-mana blank in this matchup unless they have Aether Vial or Null Rod-
 **Board:** `+1 Ensnaring Bridge, +1 Walking Ballista, +1 Engineered Explosives; -1 Lórien Revealed,
 -1 Expedition Map, -1 Tishana's Tidebinder`.
 
-### 15. Esper Midrange — 3.7% of Boulder
+### 15. Esper Midrange — 3.7% of the local meta
 **No cell.** Fair blue-black. Go over the top; Hullbreacher taxes their draw; Ugin exiles their
 coloured permanents. **Board:** `+2 Hullbreacher, +1 Force of Negation; -1 Dismember,
 -1 Eldrazi Confluence, -1 Lórien Revealed`.
 
-### Global-field matchups Boulder doesn't currently have
+### Global-field matchups the local meta doesn't currently have
 
 **Lands** — historically Tron's nightmare and still is: Wasteland, Ghost Quarter, Sphere of
 Resistance, Tabernacle, and Boseiju all attack you. **Petrified Hamlet can only name one of them at
@@ -327,7 +327,7 @@ because the engine's era window for Tron is wrong (see honesty gate 4) — n=38 
 18 from 5-0-only league dumps. Composition histogram over all 38; the 60 is the modal list,
 registered identically by AFX / Lans_NL / _Batutinha_ / MystikHawk. Match record: 2-4 (n=6) from
 `rounds` via `parse_match_result`. Pre-ban comparator: 211-178 (n=389) over 2026-01-01 to 06-29.
-Field weights from `decks/boulder-field-current.txt`.
+Field weights from `decks/local-field-current.txt`.
 
 **Refresh this early and often** — sooner than any other primer in this repo. Two specific triggers:
 (a) once ~3 more weeks of post-ban Challenge data accrue, the cells become readable and the

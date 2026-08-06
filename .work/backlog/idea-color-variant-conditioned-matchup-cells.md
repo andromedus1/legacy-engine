@@ -31,7 +31,7 @@ graveyard combo — Oops is bad for both, marginally worse for Mardu.
 
 The Show and Tell row is the operational sting: an archetype-level 47.8% reads
 "unfavored" and would talk a pilot out of the matchup, when the Mardu configuration is
-53% on the better-sampled side of the split. Show and Tell is 10.3% of the Boulder
+53% on the better-sampled side of the split. Show and Tell is 10.3% of the the local meta
 field.
 
 Shape of the work: the existing `(archetype, variant) x opponent` cell key from

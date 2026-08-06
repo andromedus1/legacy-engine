@@ -6,7 +6,7 @@ tags: [advisory, sideboard, honesty]
 
 `advise sideboard` can return a board that is obviously unusable while reporting no
 failure. Observed 2026-08-04 for a W/B Energy deck against
-`decks/boulder-field-current.txt` (`--since 2025-08-01`):
+`decks/local-field-current.txt` (`--since 2025-08-01`):
 
 ```
 === Sideboard Recommendation (solver=ilp, field_source=custom) ===

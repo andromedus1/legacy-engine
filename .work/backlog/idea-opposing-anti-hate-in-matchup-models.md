@@ -8,7 +8,7 @@ The sideboard scorer models **our** anti-hate (cards that protect our hate from 
 but has no notion that an **opponent's** maindeck card can blank a whole axis of our
 deck. That asymmetry hides real matchups.
 
-Concrete live case (2026-08-04). Black Saga Storm is **6.5% of the current Boulder
+Concrete live case (2026-08-04). Black Saga Storm is **6.5% of the current the local meta
 field** and runs **Veil of Summer at 3.24 average copies in 49 of 59 current-regime
 lists**:
 

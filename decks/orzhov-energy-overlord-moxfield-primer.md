@@ -220,9 +220,9 @@ Five gates, weakest first.
    established. The shared-core Energy matchup cells cited below are archetype-level and dominated by
    Boros/Mardu lists, so they describe the Guide/Ocelot/Ajani/Bowmasters shell you share, **not this
    list.** The engine has no separate matchup row for this camp.
-3. **Field coverage.** Against the current Boulder field, positioning runs at **67% coverage** —
+3. **Field coverage.** Against the current local field, positioning runs at **67% coverage** —
    Azorius Midrange, Jeskai Midrange, Black Midrange, Black Saga Storm, and Esper Midrange have no
-   n≥30 cells at all. Five of Boulder's fifteen slices are unmodeled.
+   n≥30 cells at all. Five of the local meta's fifteen slices are unmodeled.
 4. **CI separation: none — and the flattering comparison was window-mismatched.** The camp's 57.1%
    (raw 48-36, n=84) is an **all-time** number, and Mardu's all-time 53.5% (raw 516-449, n=965) is
    dragged down by pre-Amped-Raptor-boom lists. Window both to the same era (since 2025-12-22, the
@@ -256,7 +256,7 @@ hypothesis to validate with reps.
 **The one matchup that should worry you:** the Overlord package is **0.33 against Energy** (raw
 8-16, n=24, 2026) and 0.14 in the current regime (raw 1-6, n=7 — speculative, treat as a flag not a
 number). The Mardu list is 0.50 in that same matchup (raw 11-11, n=22). Amped Raptor decks appear to
-beat Overlord decks. In Boulder, Energy is only 3.7% of the field, so this is survivable. In a field
+beat Overlord decks. In the local meta, Energy is only 3.7% of the field, so this is survivable. In a field
 where Energy is 5.8% and climbing, it is a real cost of the switch.
 
 ## Matchups and sideboarding
@@ -270,9 +270,9 @@ Two data sources are cited per matchup where they exist, and they are *different
 
 Where the two disagree, that disagreement *is* the information. Do not average them.
 
-Ordered by share of the current Boulder field.
+Ordered by share of the current local field.
 
-### 1. Izzet Delver — 11.2% of Boulder
+### 1. Izzet Delver — 11.2% of the local meta
 
 `core 63.3% | raw 64.5% n=107 (established)` · `pkg 0.70 (raw 19-8, n=27)`
 
@@ -284,7 +284,7 @@ Therapy names: Bolt blind, Force before your key spell, Cutter after a setup can
 
 **Board:** no change. Your maindeck is already the correct 60 here.
 
-### 2. Show and Tell — 10.3% of Boulder
+### 2. Show and Tell — 10.3% of the local meta
 
 `core 47.8% | raw 46.9% n=113 (established)` · `pkg 0.55 (raw 21-17, n=38)`
 
@@ -299,7 +299,7 @@ Storyteller`. Containment Priest is *available* but it exiles your own transform
 Overlord — only add `+2 Priest; -2 Cabal Therapy` when their creature branch is confirmed and you are
 willing to stop using both engines.
 
-### 3. White Beanstalk — 7.5% of Boulder
+### 3. White Beanstalk — 7.5% of the local meta
 
 `core 51.4% | raw 50.0% n=32 (evolving)` · `pkg 0.36 (raw 4-7, n=11 — speculative)`
 
@@ -312,7 +312,7 @@ Phelia. Therapy names: the known sweeper, Swords, or their draw engine.
 **Board:** `+2 Wrath of the Skies; -2 Staff of the Storyteller`. Against a build with six or more
 creature threats, `+2 Wrath, +2 Static Prison; -2 Staff, -2 Cabal Therapy`.
 
-### 4. Dimir Tempo — 7.5% of Boulder
+### 4. Dimir Tempo — 7.5% of the local meta
 
 `core 63.0% | raw 63.9% n=133 (established)` · `pkg 0.68 (raw 23-11, n=34)`
 
@@ -325,16 +325,16 @@ one-for-ones. Therapy names: Brainstorm blind, Push to protect an engine, inform
 
 **Board:** no change.
 
-### 5. Jeskai Midrange — 7.5% of Boulder
+### 5. Jeskai Midrange — 7.5% of the local meta
 
-**No matchup cell in either source.** Unmodeled — this is one of the five Boulder slices with no
+**No matchup cell in either source.** Unmodeled — this is one of the five the local meta slices with no
 data. Play it as a fair blue matchup: layered threats, respect sweepers, don't overextend, lean on
 Overlord recursion to out-grind them. Therapy names: the sweeper, Force, or their draw engine.
 
 **Board:** `+2 Wrath of the Skies; -2 Staff of the Storyteller` if they're creature-forward;
 otherwise no change.
 
-### 6. Azorius Midrange — 6.5% of Boulder
+### 6. Azorius Midrange — 6.5% of the local meta
 
 **No established cell** (n=5, online only — ignore it). Their Phelia/Tamiyo/Stifle/Daze shell is a
 fair blue deck; treat it like Dimir Tempo but respect the exile removal. Karakas answers their
@@ -344,7 +344,7 @@ names: Swords, Force, Phelia, or a known Wrath.
 **Board:** no change. Add `+2 Static Prison; -2 Staff` only if they're on planeswalkers you can't
 otherwise answer.
 
-### 7. Black Midrange — 6.5% of Boulder
+### 7. Black Midrange — 6.5% of the local meta
 
 **No matchup cell.** Discard, efficient threats, removal, graveyard value. **Counter:** go wide,
 preserve engines, Swords the threat that dominates combat, and win the attrition war with Overlord —
@@ -353,7 +353,7 @@ this is the archetype the recursion engine was built to beat. Avoid blind Therap
 **Board:** no change. If Reanimate or an opposing Overlord is central, `+2 Surgical Extraction; -2
 Cabal Therapy`.
 
-### 8. Black Saga Storm — 6.5% of Boulder
+### 8. Black Saga Storm — 6.5% of the local meta
 
 **No matchup cell.** Graveyard-and-Saga-driven storm. **Counter:** discard the payoff, land Deafening
 Silence (it breaks the multi-spell turn), Surgical the recursion engine, and clock them.
@@ -361,7 +361,7 @@ Silence (it breaks the multi-spell turn), Surgical the recursion engine, and clo
 **Board:** `+4 Deafening Silence, +2 Surgical Extraction; -4 Swords to Plowshares, -2 Staff of the
 Storyteller`.
 
-### 9. Death & Taxes — 5.6% of Boulder
+### 9. Death & Taxes — 5.6% of the local meta
 
 `core 55.1% | raw 55.3% n=47 (evolving)` · `pkg 0.50 (raw 7-7, n=14 — speculative)`
 
@@ -374,7 +374,7 @@ edge. Karakas fights their legends. Therapy names: Vial, Solitude, Stoneforge, o
 **Board:** `+3 Disruptor Flute; -2 Staff of the Storyteller, -1 Cabal Therapy`. Flute names Aether
 Vial. Against Vial-light mono-white, `+2 Static Prison; -2 Staff` instead.
 
-### 10. Doomsday — 5.6% of Boulder
+### 10. Doomsday — 5.6% of the local meta
 
 `core 44.2% | raw 41.2% n=51 (evolving)` · `pkg 0.19 (raw 3-13, n=16)`
 
@@ -391,7 +391,7 @@ effect once observed.
 Plowshares, -3 Solitude, -2 Staff of the Storyteller`. Flute names Doomsday. Against a creature
 pivot in game three, return `+3 Solitude; -3 Disruptor Flute`.
 
-### 11. Eldrazi — 5.6% of Boulder
+### 11. Eldrazi — 5.6% of the local meta
 
 `core 56.1% | raw 56.5% n=62 (evolving)` · `pkg 0.50 (raw 6-6, n=12 — speculative)`
 
@@ -403,7 +403,7 @@ to buy a full turn. Therapy names: Command, Thought-Knot, or Chalice.
 **Board:** `+2 Static Prison, +3 Disruptor Flute; -3 Cabal Therapy, -2 Staff of the Storyteller`.
 Flute names Chalice of the Void or Ancient Tomb.
 
-### 12. Painter — 4.7% of Boulder
+### 12. Painter — 4.7% of the local meta
 
 `core 58.8% | raw 60.5% n=38 (evolving)` · `pkg 0.90 (raw 9-1, n=10 — speculative)`
 
@@ -415,7 +415,7 @@ Servant, Pyroblast before your hate, Engineer, or the known half.
 **Board:** `+3 Disruptor Flute, +2 Surgical Extraction; -3 Cabal Therapy, -2 Staff of the
 Storyteller`.
 
-### 13. Blue Artifacts / Affinity — 3.7% of Boulder
+### 13. Blue Artifacts / Affinity — 3.7% of the local meta
 
 `core 49.6% | raw 48.5% n=68 (evolving)` · `pkg 0.57 (raw 13-10, n=23)`
 
@@ -425,7 +425,7 @@ engines survive artifact hate. Wasteland the Saga. Therapy names: Force before y
 
 **Board:** `+3 Disruptor Flute, +2 Static Prison; -3 Cabal Therapy, -2 Staff of the Storyteller`.
 
-### 14. Energy mirror (Boros / Mardu) — 3.7% of Boulder
+### 14. Energy mirror (Boros / Mardu) — 3.7% of the local meta
 
 `core 50% (mirror row, uninformative)` · `pkg 0.33 (raw 8-16, n=24)`
 
@@ -438,14 +438,14 @@ try to race.
 
 **Board:** `+2 Wrath of the Skies, +2 Static Prison; -2 Cabal Therapy, -2 Staff of the Storyteller`.
 
-### 15. Esper Midrange — 3.7% of Boulder
+### 15. Esper Midrange — 3.7% of the local meta
 
 **No matchup cell.** Treat as fair blue with exile removal and better sweepers. Layered threats,
 Overlord grind, don't overextend. Therapy names: the sweeper, Force, or their draw engine.
 
 **Board:** `+2 Wrath of the Skies; -2 Staff of the Storyteller`.
 
-### Global-field matchups Boulder doesn't currently have
+### Global-field matchups the local meta doesn't currently have
 
 Keep these plans available for online play and for out-of-town events.
 
@@ -478,9 +478,9 @@ Same Priest nonbo applies.
 
 ## Tournament shorthand
 
-- **Fair blue (44% of Boulder):** develop stable mana, go wide, board lightly, respect sweepers.
+- **Fair blue (44% of the local meta):** develop stable mana, go wide, board lightly, respect sweepers.
   This is why you're playing the deck.
-- **Combo (22% of Boulder):** discard plus Deafening Silence plus a clock. Trim Swords and Staff.
+- **Combo (22% of the local meta):** discard plus Deafening Silence plus a clock. Trim Swords and Staff.
 - **Creature decks:** keep Swords and Solitude; board only hate that answers a demonstrated engine.
 - **Graveyard combo:** your weakest board. Surgical plus Priest plus pressure, and know the Priest
   nonbo before you sleeve it up.
@@ -497,14 +497,14 @@ Ajani 74%, Staff 54% (always exactly 2 when present).
 
 Two deliberate deviations, both in the sideboard:
 
-- **Cut Damping Sphere and Erode** from Lemure90's board. Boulder has no Tron or Post, and a fifth
+- **Cut Damping Sphere and Erode** from Lemure90's board. the local meta has no Tron or Post, and a fifth
   removal spell is worse than a fifth answer to combo.
 - **Added 2 Static Prison and 2 Containment Priest** in their place. Static Prison is a one-mana
   catch-all that ignores mana value (Omniscience, Marit Lage, Thought-Knot) and the camp runs it in
-  43% of lists; Priest addresses Boulder's 10.3% Show and Tell, with the Ajani/Overlord nonbo
+  43% of lists; Priest addresses the local meta's 10.3% Show and Tell, with the Ajani/Overlord nonbo
   documented above.
 
-**Paper cost.** Against Andrew's binder this is 56 cards to acquire, roughly **$1,530** at cheapest
+**Paper cost.** Against the maintainer's binder this is 56 cards to acquire, roughly **$1,530** at cheapest
 printings — and **$860 of that is four Scrubland at $215 each.** The budget mana base, if you want
 one: `4 Marsh Flats · 2 Arid Mesa · 2 Godless Shrine · 2 Shadowy Backstreet · 2 Silent Clearing ·
 4 Wasteland · 2 Karakas · 2 Plains · 1 Swamp` (21) saves about **$830**. What you actually pay for it:
@@ -522,7 +522,7 @@ maindeck, no blue or green, and ≥4 combined copies of Overlord/Solitude/Phelia
 lists, 84 decisive matches, 0% current-regime. Package proxy: Death & Taxes lists with mainboard
 Overlord of the Balemurk, n=107 current-regime decisive matches. Archetype-level cells from
 `report matchups --a Energy --b <opp> --since 2025-08-01`, shown shrunk|raw with n per the project's
-triple-display rule. Field weights from `decks/boulder-field-current.txt` (103 of 107 players
+triple-display rule. Field weights from `decks/local-field-current.txt` (103 of 107 players
 modeled, post-2026-05-18).
 
 The engine's own camp discovery (`discover run --archetype Energy`) splits Energy into three
