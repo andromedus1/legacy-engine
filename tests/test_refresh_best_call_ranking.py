@@ -27,6 +27,7 @@ import datetime as dt
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,6 +65,38 @@ _ADDITIVE_FIELDS = {"p_best", "s_q", "s_cov", "s_caveated"}
 _FIELD_SINCE = "2026-01-01"
 
 _PRE_BAN_MATCH_DATE = "2025-10-01"  # inside [2025-03-31, 2025-11-10): the pre-Entomb regime
+
+
+def test_every_measured_cell_can_set_the_floor():
+    cells = [
+        {"opp": "bad", "share": .4, "p": .39, "n": 8, "measured": True},
+        {"opp": "good", "share": .6, "p": .58, "n": 20, "measured": True},
+    ]
+
+    stats = rbcr.row_stats(cells, top_k=2, cover_min=.8)
+
+    assert stats["floor"] == .39
+    assert stats["floor_opp"] == "bad"
+    assert stats["agency"] == .39
+
+
+def test_make_cells_embeds_both_sources_for_interactive_sample_gate():
+    def cell(n, p):
+        return SimpleNamespace(
+            n=n, p_shrunk=p, p_raw=p, ci_low=p - .1, ci_high=p + .1,
+            tier="speculative",
+        )
+
+    cells = rbcr.make_cells(
+        "Hero", ["Villain"], {"Villain": 1.0},
+        {("Hero", "Villain"): cell(5, .45)},
+        {None: {("Hero", "Villain"): cell(12, .55)}},
+        {"Villain": None}, 8,
+    )
+
+    assert cells[0]["window"] == "FC" and cells[0]["n"] == 12
+    assert cells[0]["sources"]["era"]["n"] == 5
+    assert cells[0]["sources"]["fallback"]["n"] == 12
 
 
 def _era_boundary(date: str) -> EraBoundary:
@@ -543,6 +576,21 @@ class TestMainEndToEnd:
         assert '"p_best"' in html
         assert "// multi-split: one pass over" in html
         assert "P(best)" in html  # the camp table column ships in the template
+        assert 'position: sticky' in html
+        assert 'id="coverage-arch"' in html
+        assert 'id="coverage-camp"' in html
+        assert 'id="sample-plan"' in html
+        assert 'id="sample-arch"' in html
+        assert 'id="sample-camp"' in html
+        assert 'class="hint" role="note"' in html
+        assert 'class="hint-label">Interactive tables' in html
+        assert "function selectCell(c, minN)" in html
+        assert "function recalcRow(r, minN)" in html
+        assert "function recalcPlan(r, minN)" in html
+        assert 'class="${cls} expander plan-expander"' in html
+        assert 'el.querySelectorAll("tr.plan-expander")' in html
+        assert "event.stopPropagation()" in html
+        assert 'rows.filter(r => r.coverage >= st.minCoverage)' in html
 
     def _render(self, tmp_path, db_name, out_name, *, registry=None, extra_argv=(),
                 monkeypatch=None):

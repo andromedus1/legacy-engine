@@ -8,7 +8,7 @@ depends_on: [feature-multi-split-matrix-adaptive-window]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # Best-call page one-pass migration + cross-camp P(best)
@@ -93,3 +93,18 @@ then reverted to green.
 Docs rolled: `docs/analysis/best-call-ranking.md` (one-pass method, P(best) column,
 timing), `docs/ARCHITECTURE.md` window.py row (`build_multi_split_inputs`; the matchup.py
 row was rolled by the sibling stories), knowledge index regenerated.
+
+**Review follow-up (2026-08-02):** the archetype and camp tables now render inside bounded
+vertical scroll regions with sticky column headers. Each table also has an independent minimum
+floor-coverage percentage filter; filtering precedes the existing honesty-stratum and active-column
+sort, and the UI reports visible versus total rows. Static render coverage pins both controls, the
+sticky-header rule, and the coverage predicate.
+
+**Review follow-up (floor sensitivity):** removed the secondary `n>=20`/CI-proof gate after the
+live page showed too few deep cells for it to surface credible apparent holes. Every measured cell
+(`n>=8` at the default) now participates in the shrunk floor. Ungrounded rows carry an explicit
+`upper bound` chip in addition to `≤`; headers now say `worst measured matchup` and `measured
+coverage`. A focused regression pins an `n=8` cell as floor-eligible. On the 2026-07-30 corpus,
+the contract change moves 28/94 archetype floors and 48/115 camp floors; agency falls for 21
+archetypes (16 by at least 2 points) and 45 camps (43 by at least 2 points). Aluren moves from
+`≤49.8%` (old floor 52.8% vs Blue Artifacts) to `≤38.7%` (new floor vs Azorius Midrange).
