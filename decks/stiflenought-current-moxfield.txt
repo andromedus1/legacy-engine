@@ -1,0 +1,32 @@
+4 Brainstorm
+4 Doorkeeper Thrull
+4 Dress Down
+4 Flooded Strand
+4 Force of Will
+4 Nulldrifter
+4 Phyrexian Dreadnought
+4 Ponder
+4 Stifle
+4 Swords to Plowshares
+4 Wasteland
+3 Daze
+3 Tamiyo, Inquisitive Student
+2 Island
+2 Polluted Delta
+2 Tundra
+1 Abhorrent Oculus
+1 Meticulous Archive
+1 Misty Rainforest
+1 Plains
+
+Sideboard
+2 Clarion Conqueror
+2 Consign to Memory
+2 Force of Negation
+2 Harbinger of the Seas
+2 Surgical Extraction
+1 Containment Priest
+1 Grafdigger's Cage
+1 Hydroblast
+1 Prismatic Ending
+1 Wrath of the Skies

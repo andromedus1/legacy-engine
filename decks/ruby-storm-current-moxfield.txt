@@ -1,0 +1,31 @@
+12 Mountain
+4 Ancient Tomb
+4 Burning Wish
+4 Manamorphose
+4 Ral, Monsoon Mage
+4 Reckless Impulse
+4 Ruby Medallion
+4 Seething Song
+4 Wrenn's Resolve
+3 Jeska's Will
+3 Lotus Petal
+3 Rite of Flame
+2 Bonus Round
+2 Desperate Ritual
+2 Storm of Memories
+1 Will of the Jeskai
+
+Sideboard
+2 Blast Zone
+2 Hexing Squelcher
+1 Alchemist's Gambit
+1 Bonus Round
+1 Elemental Eruption
+1 Fiery Confluence
+1 Galvanic Relay
+1 Inspired Tinkering
+1 Jeska's Will
+1 Meltdown
+1 Rite of Flame
+1 Storm of Memories
+1 Will of the Jeskai
