@@ -100,3 +100,28 @@ invisible to composition clustering while three non-seam camps were visible).
 Anomaly worth chasing at validation time: D&T mono-W's internal radius is 30.5 slots (vs 5.7
 for Mardu Energy, 6.5 for SnT Sneak) — the mono-W cohort is itself heterogeneous; there may be
 a third D&T deck inside it.
+
+## Addendum 2 (2026-08-08): Doomsday sideboard-transform probe — zones are channels
+
+Andrew asked whether the slot metric catches the Doomsday group whose sideboard transforms
+into a Dimir Tempo shell, given the swap lives mostly in the 15. Findings (field window):
+
+- **The transform won.** 145/162 window Doomsday decks (90%) carry the tempo board package
+  (Barrowgoyf ~3.6 mean copies, Dauthi Voidwalker, Murktide); the 17 residual old-school
+  boards (Carpet of Flowers / StP / Surgical) are the minority. The archetype row already IS
+  the transform deck.
+- **Zone-split ratios, transform vs residual** (matched null: random 17-vs-145, 50 draws,
+  p95 0.49, max 0.55 both zones): main-only **0.85**, side-only **1.32**, combined-75 **1.07**.
+  The metric catches it ONLY with a per-zone channel — concatenating all 75 slots DILUTES a
+  sideboard-resident seam below its side-only reading. Design rule: compute per zone, report
+  both, never only the 75-slot concat.
+- **Main echo is real but sub-split**: 0.85 beats the null ceiling (fetch mix, Fantasticar /
+  Thoughtseize counts co-vary with the board plan) yet sits far below the 1.8–2.0
+  different-deck band.
+- **Murktide-in-side vs not = knob confirmed**: 0.56/0.71/0.63 across zones, at or near the
+  null band. First measured knob anchor for the threshold's lower edge.
+- **Interpretation for the gate**: a sideboard transform is a genuinely intermediate object —
+  same game-1 deck, different games 2–3 — and lands between the knob band (~0.6) and the
+  split band (1.8–2.0). Default verdict: one decision unit (you sleeve one 60), with the
+  transform surfaced as a labeled property, unless matchup-vector divergence independently
+  clears the gate. Pilot stickiness should also read "same humans" here — worth confirming.
