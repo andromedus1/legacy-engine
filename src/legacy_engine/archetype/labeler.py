@@ -8,6 +8,11 @@ When an optional ``VariantRegistry`` is provided, also resolves a sub-archetype 
 into ``decks.variant`` (new nullable column).  No registry → variant stays NULL → byte-identical
 behaviour to the pre-variant codebase (gated-additive contract).
 
+When an optional ``ColorSplitRegistry`` is provided, an archetype the registry splits has its
+label replaced by the matching colour branch (e.g. ``Energy`` → ``Boros Energy`` /
+``Mardu Energy``) BEFORE variant resolution, so variant rules key on the label consumers see.
+No registry, or an archetype the registry doesn't split → the label passes through untouched.
+
 ``resolve_card`` is injected (name -> Card | None) so this is testable without the Scryfall bulk; the
 CLI passes ``ScryfallClient.get_card``.
 """
@@ -21,6 +26,7 @@ from legacy_engine.archetype.rules import RuleSet
 from legacy_engine.colors import compute_deck_colors
 from legacy_engine.ingestion import store
 from legacy_engine.models.card import Card
+from legacy_engine.models.color_split import ColorSplitRegistry
 from legacy_engine.models.variant import VariantRegistry
 
 
@@ -29,6 +35,7 @@ def label_decks(
     ruleset: RuleSet,
     resolve_card: Callable[[str], Card | None],
     registry: VariantRegistry | None = None,
+    color_splits: ColorSplitRegistry | None = None,
 ) -> int:
     """Classify every deck in the store and write its archetype (and optional variant).
 
@@ -37,6 +44,10 @@ def label_decks(
     When ``registry`` is provided, resolves a variant tag for each deck and writes it to
     ``decks.variant``.  When ``registry`` is ``None`` the variant column is left untouched
     (stays NULL) — byte-identical to the pre-variant behaviour.
+
+    When ``color_splits`` is provided, a split parent's label is replaced by its matching colour
+    branch before the variant step.  ``None`` (or a parent the registry doesn't carry) leaves the
+    classifier's label exactly as-is.
     """
     store.init_schema(con)
     deck_keys = con.execute("SELECT tournament_id, deck_idx FROM decks").fetchall()
@@ -60,6 +71,21 @@ def label_decks(
 
         colors = compute_deck_colors(cards)
         result = classify(mainboard, sideboard, ruleset, colors)
+        label = result.archetype
+
+        if color_splits is not None:
+            from legacy_engine.archetype.color_splits import (
+                count_deck_colors,
+                resolve_color_split,
+            )
+            # Keyed on the FINAL display label for the same reason variants are (below), and
+            # applied FIRST so a variant rule written against 'Boros Energy' resolves against
+            # the label that actually lands in decks.archetype.
+            branch = resolve_color_split(
+                label, count_deck_colors(mainboard, resolve_card), color_splits
+            )
+            if branch is not None:
+                label = branch
 
         if registry is not None:
             from legacy_engine.archetype.variants import resolve_variant
@@ -68,13 +94,13 @@ def label_decks(
             # consumers see in decks.archetype, and a color-prefixed base (e.g. 'Delver')
             # spans multiple display archetypes — keying on it would smear one archetype's
             # variant rules across its siblings.
-            variant = resolve_variant(result.archetype, mainboard, sideboard, registry)
+            variant = resolve_variant(label, mainboard, sideboard, registry)
         else:
             variant = None
 
         con.execute(
             "UPDATE decks SET archetype = ?, variant = ? WHERE tournament_id = ? AND deck_idx = ?",
-            [result.archetype, variant, tid, idx],
+            [label, variant, tid, idx],
         )
         labeled += 1
 

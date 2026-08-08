@@ -19,14 +19,17 @@
       "id": "sac-001",
       "label": "White creature",
       "archetypes": [
+        "Boros Energy",
         "Death & Taxes",
-        "Energy",
+        "Mardu Energy",
         "Orzhov Midrange",
         "Orzhov Scam"
       ],
       "_justification": [
         "Behavioral family the era-windowed composition clustering cannot see: these labels'",
         "CURRENT cores diverged (Energy's Sand Scout package) while their matchup behavior did not.",
+        "Both Energy colour branches are members: the 2026-08-08 colour split carved Energy into",
+        "Boros and Mardu, and each branch is the same white-creature family the probe measured.",
         "Coherence probe 2026-08-01 (since 2026-01-01, members with n>=12, chi2 per column):",
         "10 evaluable opponent columns, 0 significantly divergent, median within-family spread 0.05",
         "-- the tightest measured of all 12 probed families. Recorded in",

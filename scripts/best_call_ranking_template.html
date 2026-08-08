@@ -126,6 +126,19 @@ svg text { font-family: inherit; }
 .plan-members { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
 .plan-member { border:1px solid var(--ring); border-radius:7px; padding:3px 6px; }
 .plan-ledger td:first-child { font-weight:600; }
+/* Nested disclosures inside an archetype row's dropdown — the plan block and the exact
+   archetype ledger open independently, so neither has to be scrolled past to reach the other. */
+.subsection { border:1px solid var(--ring); border-radius:9px; margin:8px 0 0;
+  background: var(--surface-1); }
+.subsection > summary { cursor:pointer; list-style:none; padding:8px 11px;
+  font-weight:650; font-size:14px; border-radius:9px; }
+.subsection > summary::-webkit-details-marker { display:none; }
+.subsection > summary::before { content:"▸ "; color:var(--s1); }
+.subsection[open] > summary::before { content:"▾ "; }
+.subsection[open] > summary { border-bottom:1px solid var(--ring); border-radius:9px 9px 0 0; }
+.subsection > summary:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+.subsection > summary .chip { font-weight:500; }
+.subsection > .subsection-body { padding:9px 11px 11px; }
 @media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -646,9 +659,19 @@ function archetypePlanHtml(r) {
     return `<tr><td>${escT(c.opponent)}${same}</td><td>${result}</td><td>${c.n}</td>`+
       `<td><span class="chip">since ${escT(c.since)}</span>${c.provenance ? ` <span class="chip">${escT(c.provenance)}</span>` : ""}</td></tr>`;
   }).join("");
-  return `<section><h3 style="margin:4px 0 7px">Against strategic plans</h3>`+
+  const measured = r.plan_cells.filter(c => c.measured).length;
+  return subsectionHtml("plans", `Against strategic plans`,
+    `<span class="chip">${measured} of ${r.plan_cells.length} measured</span>`,
     `<table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Result</th><th>n</th><th>Window</th></tr></thead><tbody>${rows}</tbody></table>`+
-    `<div class="footnote">Built directly from this archetype's decisive matches against every member of each primary plan; no rendered row averages or composition-family leans.</div></section>`;
+    `<div class="footnote">Built directly from this archetype's decisive matches against every member of each primary plan; no rendered row averages or composition-family leans.</div>`);
+}
+
+// Open/closed state of the two nested disclosures, remembered across row expansions so a
+// reader who only wants one of them stops re-collapsing the other on every row.
+const subsectionOpen = { plans: true, exact: false };
+function subsectionHtml(key, title, chip, body) {
+  return `<details class="subsection" data-sub="${key}"${subsectionOpen[key] ? " open" : ""}>`+
+    `<summary>${title} ${chip}</summary><div class="subsection-body">${body}</div></details>`;
 }
 
 function renderTable(id, rows, camp) {
@@ -705,10 +728,20 @@ function renderTable(id, rows, camp) {
         `<span class="sw" style="background:var(--amber)"></span>half (40–45%)` +
         `<span class="sw" style="background:var(--edge)"></span>edge (55–60%)` +
         `<span class="sw" style="background:var(--edge-dominant)"></span>dominant (&gt;60%)</div>`;
+      const measured = r.cells.filter(c => c.measured).length;
+      const exactBody = `${key}<div class="cells">${cells}</div>`;
+      // Camp rows carry no plan block, so there is nothing to scroll past — they keep the
+      // plain always-open section rather than a disclosure that only ever hides its own content.
+      const body = camp
+        ? `<section><h3 style="margin:4px 0 7px">Exact archetype matchups</h3>${exactBody}</section>`
+        : archetypePlanHtml(r) + subsectionHtml("exact", "Exact archetype matchups",
+            `<span class="chip">${measured} of ${r.cells.length} measured</span>`, exactBody);
       const d = document.createElement("tr");
       d.className = "detail";
-      d.innerHTML = `<td colspan="${cols.length}">${camp ? "" : archetypePlanHtml(r)}`+
-        `<section><h3 style="margin:14px 0 7px">Exact archetype matchups</h3>${key}<div class="cells">${cells}</div></section></td>`;
+      d.innerHTML = `<td colspan="${cols.length}">${body}</td>`;
+      d.querySelectorAll("details.subsection").forEach(el => el.addEventListener("toggle", () => {
+        subsectionOpen[el.dataset.sub] = el.open;
+      }));
       tr.after(d);
     });
   });

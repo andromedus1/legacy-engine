@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 import duckdb
 
@@ -50,14 +52,41 @@ def _classify_deck(
     mainboard: dict[str, int],
     sideboard: dict[str, int],
 ) -> ArchetypeResult:
-    """Resolve cards (local cards table), compute colors, load the ruleset, and classify."""
+    """Resolve cards (local cards table), compute colors, load the ruleset, and classify.
+
+    Applies the curated colour split last so a pasted list lands on the SAME label the corpus
+    carries (``Boros Energy``, not ``Energy``) — otherwise every downstream matrix lookup for a
+    split archetype would miss.
+    """
     from legacy_engine.advisory.whattoplay import _load_deck_cards
+    from legacy_engine.archetype.color_splits import resolve_color_split
+    from legacy_engine.config import COLOR_SPLITS_REGISTRY_PATH
 
     cards_with_counts = _load_deck_cards(con, mainboard)
     card_objects = [card for card, _count in cards_with_counts]
     deck_colors = compute_deck_colors(card_objects)
     ruleset = load_ruleset(RULES_DIR)
-    return classify(mainboard, sideboard, ruleset, deck_colors)
+    result = classify(mainboard, sideboard, ruleset, deck_colors)
+
+    registry = _color_split_registry(COLOR_SPLITS_REGISTRY_PATH)
+    if registry is None:
+        return result
+    color_counts: dict[str, int] = {}
+    for card, count in cards_with_counts:
+        if card.is_land:
+            continue
+        for color in card.colors:
+            color_counts[color] = color_counts.get(color, 0) + count
+    branch = resolve_color_split(result.archetype, color_counts, registry)
+    return result if branch is None else result.model_copy(update={"archetype": branch})
+
+
+@lru_cache(maxsize=1)
+def _color_split_registry(path):
+    """Load the curated colour-split registry once, or ``None`` when it isn't shipped."""
+    from legacy_engine.archetype.color_splits import load_color_split_registry
+
+    return load_color_split_registry(path) if Path(path).exists() else None
 
 
 def _load_field(

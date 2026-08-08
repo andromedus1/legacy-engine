@@ -458,10 +458,15 @@ def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: b
 def label(verbose: bool) -> None:
     """Label ingested decklists with archetypes."""
     _setup_logging(verbose)
+    from legacy_engine.archetype.color_splits import load_color_split_registry
     from legacy_engine.archetype.labeler import label_decks
     from legacy_engine.archetype.rules import load_ruleset
     from legacy_engine.archetype.variants import load_variant_registry
-    from legacy_engine.config import RULES_DIR, VARIANTS_REGISTRY_PATH
+    from legacy_engine.config import (
+        COLOR_SPLITS_REGISTRY_PATH,
+        RULES_DIR,
+        VARIANTS_REGISTRY_PATH,
+    )
     from legacy_engine.ingestion import store
     from legacy_engine.ingestion.scryfall import ScryfallClient
 
@@ -473,11 +478,20 @@ def label(verbose: bool) -> None:
     if VARIANTS_REGISTRY_PATH.exists():
         registry = load_variant_registry(VARIANTS_REGISTRY_PATH)
 
+    color_splits = None
+    if COLOR_SPLITS_REGISTRY_PATH.exists():
+        color_splits = load_color_split_registry(COLOR_SPLITS_REGISTRY_PATH)
+        for split in color_splits.splits:
+            branches = ", ".join(b.name for b in split.buckets)
+            click.echo(f"// colour split: {split.parent} -> {branches}")
+
     con = store.connect()
     try:
         with ScryfallClient() as client:
             client.load_card_index()
-            n = label_decks(con, ruleset, client.get_card, registry=registry)
+            n = label_decks(
+                con, ruleset, client.get_card, registry=registry, color_splits=color_splits
+            )
     finally:
         con.close()
     click.echo(f"Labeled {n} decks")

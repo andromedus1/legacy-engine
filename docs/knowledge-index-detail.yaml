@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-06T01:57:42Z'
+generated_at: '2026-08-08T18:33:27Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -176,9 +176,16 @@ documents:
       are reported separately as mirror_n and shown only as structural 50% context;
       they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured
       gate. The exact archetype ledger remains below.
-    - Composition-derived superarchetypes remain an internal matrix/statistical-borrowing
-      layer only. They emit no page-visible dropdown payload, family lean, family
-      range, or presentation audit line.
+    - 'Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes
+      stay internal to matrix construction and statistical borrowing — no page-visible
+      dropdown payload, family lean, family range, or presentation audit line. A COLOUR
+      SPLIT is archetype-level: the curated registry rewrites decks.archetype at label
+      time, so each branch earns its own archetype row, its own field share, and its
+      own column in every OTHER archetype''s ledger. Camps stay subject-side only
+      (the multi-split matrix pools the opponent side back to parent), so a distinction
+      that changes how opponents must play against you belongs in a colour split,
+      not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland
+      black.'
     - The output page is gitignored and disposable; the template + refresh script
       are the tracked artifacts — regenerate, don't hand-edit (data changes go in
       the script, presentation changes in the template).

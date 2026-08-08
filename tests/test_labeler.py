@@ -297,3 +297,85 @@ def test_shipped_registry_wired_end_to_end():
     assert variant3 is None, f"Expected NULL variant for Unknown archetype, got {variant3!r}"
 
     con.close()
+
+
+# ---------------------------------------------------------------------------
+# Colour-split regression tests (gated-additive contract)
+# ---------------------------------------------------------------------------
+#
+# A colour split rewrites decks.archetype for the split parent only. With no registry the
+# archetype column must be byte-identical to the pre-colour-split behaviour.
+
+_ENERGY_RULES = RuleSet(
+    archetypes=[
+        ArchetypeRule(
+            name="Energy",
+            include_color_in_name=False,
+            conditions=[Condition(type="InMainboard", cards=["Ocelot Pride"])],
+        )
+    ],
+    fallbacks=[],
+)
+
+_ENERGY_CARD_DB = {
+    "Ocelot Pride": Card(name="Ocelot Pride", type_line="Creature — Cat", colors=["W"]),
+    "Amped Raptor": Card(name="Amped Raptor", type_line="Creature — Dinosaur", colors=["R"]),
+    "Thoughtseize": Card(name="Thoughtseize", type_line="Sorcery", colors=["B"]),
+    "Plateau": Card(name="Plateau", type_line="Land — Mountain Plains", produced_mana=["R", "W"]),
+    # Taps for black but casts nothing — proves the split reads casting cost, not the manabase.
+    "Scrubland": Card(name="Scrubland", type_line="Land — Plains Swamp", produced_mana=["W", "B"]),
+}
+
+_ENERGY_TOURNEY = {
+    "Tournament": {"Name": "Legacy Challenge", "Date": "2026-07-05",
+                   "Uri": "https://www.mtgo.com/decklist/legacy-challenge-2026-07-05",
+                   "Formats": "Legacy"},
+    "Decks": [
+        {"Player": "boros", "Result": "1st",
+         "Mainboard": [{"Count": 4, "CardName": "Ocelot Pride"},
+                       {"Count": 4, "CardName": "Amped Raptor"},
+                       {"Count": 8, "CardName": "Plateau"},
+                       {"Count": 4, "CardName": "Scrubland"}],
+         "Sideboard": []},
+        {"Player": "mardu", "Result": "2nd",
+         "Mainboard": [{"Count": 4, "CardName": "Ocelot Pride"},
+                       {"Count": 4, "CardName": "Amped Raptor"},
+                       {"Count": 4, "CardName": "Thoughtseize"},
+                       {"Count": 8, "CardName": "Plateau"}],
+         "Sideboard": []},
+    ],
+    "Rounds": [], "Standings": [],
+}
+
+
+def _label_energy(color_splits):
+    con = store.connect(":memory:")
+    tid = store.load_tournament(con, parse_cache_item(_ENERGY_TOURNEY, "MTGO"))
+    label_decks(con, _ENERGY_RULES, _ENERGY_CARD_DB.get, color_splits=color_splits)
+    rows = {
+        player: archetype
+        for player, archetype in con.execute(
+            "SELECT player, archetype FROM decks WHERE tournament_id = ? ORDER BY deck_idx", [tid]
+        ).fetchall()
+    }
+    con.close()
+    return rows
+
+
+def test_no_color_splits_archetype_unchanged():
+    """color_splits=None → the classifier's label is written verbatim."""
+    assert _label_energy(None) == {"boros": "Energy", "mardu": "Energy"}
+
+
+def test_shipped_color_splits_carve_energy_in_two():
+    """The shipped registry, through the exact path the `label` CLI takes."""
+    from legacy_engine.archetype.color_splits import load_color_split_registry
+    from legacy_engine.config import COLOR_SPLITS_REGISTRY_PATH
+
+    if not COLOR_SPLITS_REGISTRY_PATH.exists():
+        import pytest as _pytest
+        _pytest.skip("Shipped colour-split registry not found")
+
+    rows = _label_energy(load_color_split_registry(COLOR_SPLITS_REGISTRY_PATH))
+    # Scrubland taps for black in the boros list; only Thoughtseize's casting cost counts.
+    assert rows == {"boros": "Boros Energy", "mardu": "Mardu Energy"}

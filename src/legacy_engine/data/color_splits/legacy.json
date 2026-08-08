@@ -1,0 +1,14 @@
+{
+  "version": "2026-08-08",
+  "splits": [
+    {
+      "parent": "Energy",
+      "min_copies": 1,
+      "note": "Boros vs Mardu is a deck boundary, not a configuration knob: the black branch pays real mana and real life for Thoughtseize / Cabal Therapy / Orcish Bowmasters and a Scrubland-Badlands manabase, which changes what it does to combo and to other creature decks. Measured over the field window opening at the 2026-06-29 Candelabra ban: 97 Boros / 47 Mardu of 144 Energy decks (67% / 33%). Black commitment is bimodal, not a splash — of those 47, 45 play 8 or more black mainboard copies and only 2 play fewer than 8, so a >= 1 threshold and a heavier one label the same decks. Written as a colour predicate rather than a card list because the black core turns over every set (42 distinct black mainboard cards across the corpus) while the colour never does.",
+      "buckets": [
+        {"name": "Mardu Energy", "requires_any": ["B"]},
+        {"name": "Boros Energy", "forbids_all": ["B"]}
+      ]
+    }
+  ]
+}
