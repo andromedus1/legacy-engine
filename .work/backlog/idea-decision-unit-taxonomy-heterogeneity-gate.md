@@ -62,6 +62,45 @@ n=15-30 — some are noise. The layer needs a real test, never eyeballed max-gap
 - Show and Tell Sneak/non-Sneak (composition axis)
 - Death & Taxes W/WB (color axis)
 
+## Addendum (2026-08-08, same-day discussion)
+
+Andrew's additions after the initial park:
+
+1. **Pilot stickiness is in.** "You play one deck at a time" operationalized literally: for a
+   candidate partition, do the same humans pilot both halves? Same pilots floating across →
+   one deck with a knob; disjoint pilot populations → two decks. Orthogonal to composition and
+   matchup divergence; `player_aliases` / `normalize_player` already exist.
+
+2. **Slot-distance metric as the tunable knob.** Distance between camps = mean difference in
+   card count: `0.5 * Σ_c |mean_copies_A(c) − mean_copies_B(c)|` over mainboards = "slots you'd
+   swap to move between the two consensus lists." Interpretable units (card slots). Tune the
+   threshold for best differentiation — or expose it as a filterable field/knob on the page.
+   Statistical form: separation ratio = between-consensus distance / mean within-cohort radius.
+
+Same-day calibration (field window since 2026-06-29, mainboard only):
+
+| pair | between (slots) | separation ratio |
+|---|---|---|
+| Energy Boros/Mardu (CONFIRMED split) | 18.9 | 2.02 |
+| SnT Sneak/non-Sneak (candidate) | 23.5 | 1.95 |
+| D&T W/WB (candidate) | 37.9 | 1.80 |
+| NULL — random 50/50 of Boros Energy, 20 draws | 4.3 | 0.33 (max 0.57) |
+| NULL — random 50/50 of SnT [Sneak], 20 draws | 1.6 | 0.25 (max 0.36) |
+
+Real splits land ~1.8–2.0; the permutation null never exceeded 0.57. Wide gap — the knob's
+useful range is inside it, and known-knob pairs (e.g. Bauble/non-Bauble, unavailable in the
+current window because camp labels overwrote the curated variants) should pin the lower edge.
+Threshold tuning has natural labels: the behavioral gate's FDR-passing verdicts.
+
+Role in the gate: slot distance is the cheap SCREEN (computable for every candidate partition
+instantly) and prioritizes/pre-filters what the expensive matchup-vector test runs on — it is
+NOT the decision line itself (Energy proved composition alone can't adjudicate; the seam was
+invisible to composition clustering while three non-seam camps were visible).
+
+Anomaly worth chasing at validation time: D&T mono-W's internal radius is 30.5 slots (vs 5.7
+for Mardu Energy, 6.5 for SnT Sneak) — the mono-W cohort is itself heterogeneous; there may be
+a third D&T deck inside it.
+
 ## Addendum 2 (2026-08-08): Doomsday sideboard-transform probe — zones are channels
 
 Andrew asked whether the slot metric catches the Doomsday group whose sideboard transforms
