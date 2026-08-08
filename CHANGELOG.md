@@ -1,3 +1,33 @@
+## Unreleased
+
+### Features
+- **Colour-split archetype layer** — a curated, tracked registry
+  (`src/legacy_engine/data/color_splits/legacy.json`) carves one parent archetype label into
+  mutually exclusive children keyed on the colours its **mainboard nonland** cards actually cast.
+  It fills the gap between the archetype rule DSL (card names only) and MTGOFormatData's
+  `IncludeColorInName` (full guild identity — a fixed core with a two-card splash fragments into
+  a dozen labels). `label` applies it before variant resolution, so `decks.variant` rules and
+  every downstream surface key on the label consumers see; `advise`'s pasted-decklist classifier
+  applies it too, so a pasted list lands on the same label the corpus carries. Loader fails fast
+  on an unknown colour, a duplicate parent, an unreachable bucket, or a one-bucket "split";
+  the resolver fails fast when two buckets match the same deck. No registry, or a parent it
+  doesn't carry → the classifier's label passes through untouched.
+- **Energy splits into Boros Energy and Mardu Energy** — the first colour split. Over the field
+  window opening at the 2026-06-29 Candelabra ban: 97 Boros / 47 Mardu of 144 Energy decks
+  (67% / 33%). Black commitment is bimodal rather than a splash — 45 of the 47 Mardu lists play
+  8+ black mainboard copies (Thoughtseize, Cabal Therapy, Orcish Bowmasters) — so the two
+  branches are separate decks and now hold separate archetype rows everywhere, including in
+  every *opponent's* ledger. Strategic-plan assignments and the `sac-001` white-creature
+  superarchetype cluster carry both branches; the stale 3-camp `Energy` discovery split is
+  retired.
+
+### Changes
+- **Archetype dropdowns are two independent disclosures** — on the agency ranking page, the
+  strategic-plan block and the exact archetype ledger each open and close on their own, with a
+  measured-cell count in each header, so neither has to be scrolled past to reach the other.
+  Open/closed state is remembered across row expansions. Camp rows, which carry no plan block,
+  keep their single always-open section.
+
 ## v0.4.0 (2026-08-05)
 
 The stable-era release: every statistic windows to each archetype's (and camp's) own detected

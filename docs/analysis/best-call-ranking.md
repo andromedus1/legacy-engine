@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-03
+updated: 2026-08-08
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -23,7 +23,7 @@ decisions:
   - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
   - "Strategic-plan same-plan play is structural 50% context: the diagonal displays zero directional wins, losses, and n, while observed_n separately reports cross-archetype same-plan matches and mirror_n reports mirror context. It contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
   - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive non-mirror MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's uniform field window/provenance, and measured/thin state. Exact-archetype mirrors are reported separately as mirror_n and shown only as structural 50% context; they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured gate. The exact archetype ledger remains below."
-  - "Composition-derived superarchetypes remain an internal matrix/statistical-borrowing layer only. They emit no page-visible dropdown payload, family lean, family range, or presentation audit line."
+  - "Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes stay internal to matrix construction and statistical borrowing — no page-visible dropdown payload, family lean, family range, or presentation audit line. A COLOUR SPLIT is archetype-level: the curated registry rewrites decks.archetype at label time, so each branch earns its own archetype row, its own field share, and its own column in every OTHER archetype's ledger. Camps stay subject-side only (the multi-split matrix pools the opponent side back to parent), so a distinction that changes how opponents must play against you belongs in a colour split, not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland black."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
 ---
 
@@ -43,7 +43,8 @@ The page reads eras + variants, so run it **last**, after the standard cycle:
 
 ```bash
 .venv/bin/legacy-engine refresh all          # mirror + ingest new events
-.venv/bin/legacy-engine label                # full-corpus archetype relabel
+.venv/bin/legacy-engine label                # full-corpus archetype relabel; also applies the
+                                             # curated colour splits (echoes each one it applied)
 # re-apply every staged camp split (variant labels are wiped by label):
 .venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
   while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
@@ -120,7 +121,11 @@ external cells, and the structural same-plan diagonal in text rather than color
 alone.
 
 **Archetype dropdowns lead with direct plan evidence.** Opening any archetype row
-first shows **Against strategic plans**, exactly five cells in registry order.
+shows two independent disclosures: **Against strategic plans** (open by default) and
+**Exact archetype matchups**. Each carries a measured-of-total cell count in its header and
+opens or closes on its own, so neither must be scrolled past to reach the other; the
+open/closed choice persists across row expansions. Camp rows have no plan block and keep a
+single always-open section. The plan block is exactly five cells in registry order.
 Each cell is aggregated directly from that archetype's decisive `MatchResults`
 against opponents assigned to the corresponding primary plan; it is not derived
 from rendered archetype percentages or from composition-family evidence. Each
