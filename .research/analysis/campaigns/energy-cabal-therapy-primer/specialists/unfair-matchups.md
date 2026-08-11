@@ -2,7 +2,7 @@
 description: Unfair-matchup specialist report for the Energy Cabal Therapy primer
 type: research
 summary: Exact-75 plans for current combo, graveyard, Lands, prison, and artifact strategies.
-updated: 2026-08-03
+updated: 2026-08-11
 decisions:
   - Board to the opposing engine actually observed, especially for hybrid Aluren and broad Blue Artifacts labels.
   - Preserve a real clock while adding narrow hate; the deck cannot win by locking alone.
@@ -11,6 +11,7 @@ key_findings:
   - Null Rod and Clarion Conqueror overlap against activated artifact engines but not triggered or static abilities.
   - Leyline plus Priest covers Reanimator's graveyard plan and its current non-graveyard sideboard pivot.
   - Dredge labeling in the corpus requires card-level verification before matchup advice is attached.
+provenance: agent-synthesis
 ---
 
 # Unfair-matchup report: Energy Cabal Therapy

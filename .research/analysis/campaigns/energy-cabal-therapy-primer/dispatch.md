@@ -9,6 +9,7 @@ primitives_opts_out: []
 decision_relevance: Produce a tournament-ready primer for the maintainer's exact Energy Cabal Therapy 75, determining how to pilot and sideboard it against the current Legacy field and whether it remains a credible complement to Doomsday Tempo.
 scope_authority: mixed
 analytical_artifact_type: per-campaign-brief
+provenance: agent-synthesis
 ---
 
 # Energy Cabal Therapy comprehensive primer
