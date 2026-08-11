@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-measurement-integrity
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, advisory, honesty]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -466,3 +466,13 @@ separate roadmap item.
 current-cycle measurement-integrity defects. Security, concurrency, and migration lenses were not
 applicable. Browser behavior was reviewed through deterministic payload/JavaScript flow because a
 headless browser runtime was unavailable.
+
+## Review closure (2026-08-11)
+
+- Named fix story `feature-ranking-measurement-integrity-review-fixes` completed in `a2a06e4`.
+- Canonical browser/Python projection, candidate-bound concentration, complete floor observability,
+  selected pair-window validation, and separate strict-common coverage were all regression-tested.
+- Focused integrated verification: 517 passed. Full repository verification: 3638 passed, 1
+  skipped. The accepted ranking policy and thresholds are unchanged.
+- The standard review is closed from its named fix verification; no second independent pass was
+  run, per the review closure contract.
