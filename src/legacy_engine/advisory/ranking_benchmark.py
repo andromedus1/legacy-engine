@@ -12,6 +12,10 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from legacy_engine.models.base import LegacyEngineModel
+from legacy_engine.advisory.ranking_measurement import (
+    MethodologyVariantSpec,
+    RankingCellMeasurement,
+)
 
 BenchmarkEstimatorId = Literal[
     "coin-50", "recent-raw-wr", "field-share", "top-finish-conversion",
@@ -120,6 +124,41 @@ class SnapshotManifest(LegacyEngineModel):
     reasons: tuple[str, ...]
 
 
+class FrozenMatchupPrediction(LegacyEngineModel):
+    estimator: BenchmarkEstimatorId
+    subject: str
+    opponent: str
+    probability: float
+    served: bool
+    source_kind: str
+    imputed: bool
+    refusal_reason: str | None
+
+
+class FrozenRecommendation(LegacyEngineModel):
+    estimator: BenchmarkEstimatorId
+    chosen_action: str | None
+    ranked_actions: tuple[str, ...]
+    scores: dict[str, float | None]
+    served: bool
+    refusal_reason: str | None
+
+
+class FrozenOriginPredictions(LegacyEngineModel):
+    protocol_hash: str
+    snapshot_manifest_sha256: str
+    fold: BenchmarkFold
+    generated_at: str
+    code_commit: str
+    estimator_registry: tuple[BenchmarkEstimatorId, ...]
+    action_universe: tuple[str, ...]
+    field_shares: dict[str, float]
+    matchup_predictions: tuple[FrozenMatchupPrediction, ...]
+    recommendations: tuple[FrozenRecommendation, ...]
+    methodology: dict[str, dict[str, object]]
+    seeds: dict[str, int]
+
+
 def canonical_json_bytes(value: object) -> bytes:
     """Stable, finite JSON encoding used by every benchmark hash boundary."""
     if isinstance(value, LegacyEngineModel):
@@ -135,6 +174,51 @@ def content_sha256(value: object) -> str:
 
 def protocol_sha256(protocol: BenchmarkProtocol) -> str:
     return content_sha256(protocol)
+
+
+_VARIANT_ESTIMATOR: dict[str, BenchmarkEstimatorId] = {
+    "raw": "production-raw",
+    "ci-gated": "production-ci-gated",
+    "ban-scoped": "production-ban-scoped",
+    "era-only": "production-era-only",
+}
+
+
+def project_matchup_probability(
+    cell: RankingCellMeasurement,
+    *,
+    spec: MethodologyVariantSpec,
+    unresolved_center: float = 0.5,
+) -> FrozenMatchupPrediction:
+    """Project one typed production cell without turning imputation into serving authority."""
+    if not 0.0 <= unresolved_center <= 1.0:
+        raise ValueError("unresolved_center must be in [0, 1]")
+    source = {
+        "selected": cell.selected,
+        "fallback": cell.fallback,
+        "era": cell.era,
+    }[spec.source_policy]
+    estimator = _VARIANT_ESTIMATOR[spec.id]
+    value = None
+    if source is not None:
+        value = source.cell.p_raw if spec.rate_basis == "raw" else source.cell.p_shrunk
+    resolved = source is not None and source.cell.n > 0 and value is not None
+    served = resolved and source.cell.n >= spec.evidence_n
+    return FrozenMatchupPrediction(
+        estimator=estimator, subject=cell.subject, opponent=cell.opponent,
+        probability=float(value) if resolved else unresolved_center,
+        served=served,
+        source_kind=source.kind if source is not None else "unresolved",
+        imputed=not resolved,
+        refusal_reason=None if served else (
+            f"source evidence n={source.cell.n} below n={spec.evidence_n}"
+            if resolved else "no frozen matchup evidence; explicit 0.5 forecast"
+        ),
+    )
+
+
+def write_frozen_predictions(path: Path, predictions: FrozenOriginPredictions) -> str:
+    return atomic_write_canonical(path, predictions)
 
 
 def _fold_id(cutoff: date, until: date) -> str:

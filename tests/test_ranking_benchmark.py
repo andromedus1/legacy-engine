@@ -9,7 +9,12 @@ from legacy_engine.advisory.ranking_benchmark import (
     BenchmarkProtocol,
     TaxonomySnapshotManifest,
     plan_walk_forward_folds,
+    project_matchup_probability,
     protocol_sha256,
+)
+from legacy_engine.advisory.ranking_measurement import (
+    MethodologyVariantSpec,
+    RankingCellMeasurement,
 )
 
 
@@ -57,3 +62,18 @@ def test_future_dated_taxonomy_manifest_shape_is_typed():
         rules_sha256=hashlib.sha256(payload).hexdigest(),
     )
     assert json.loads(manifest.model_dump_json())["action_level"] == "parent"
+
+
+def test_unresolved_production_projection_is_explicit_unserved_half():
+    cell = RankingCellMeasurement(
+        subject="A", opponent="B", field_share=1.0, era=None, fallback=None,
+        selected_kind=None, selected=None, selection_reason="none", measured=False,
+        concentration_warning=None,
+    )
+    projected = project_matchup_probability(cell, spec=MethodologyVariantSpec(
+        id="ci-gated", label="gated", source_policy="selected", rate_basis="shrunk",
+        evidence_n=8,
+    ))
+    assert projected.probability == 0.5
+    assert projected.imputed is True and projected.served is False
+    assert "no frozen matchup evidence" in projected.refusal_reason

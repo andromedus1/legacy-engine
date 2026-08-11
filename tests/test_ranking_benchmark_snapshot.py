@@ -7,9 +7,14 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from legacy_engine.advisory.ranking_benchmark import BenchmarkFold
+from legacy_engine.advisory.ranking_benchmark import (
+    BenchmarkFold,
+    BenchmarkProtocol,
+    protocol_sha256,
+    write_frozen_predictions,
+)
 from legacy_engine.ingestion import store
-from legacy_engine.workflows.ranking_benchmark import build_origin_snapshot
+from legacy_engine.workflows.ranking_benchmark import build_origin_snapshot, freeze_origin_predictions
 
 
 def _source_db(path: Path, *, future_result: str = "2-0") -> Path:
@@ -67,6 +72,14 @@ def _fold() -> BenchmarkFold:
     )
 
 
+def _protocol() -> BenchmarkProtocol:
+    return BenchmarkProtocol(
+        protocol_id="snapshot-test", created_at="2026-01-01T00:00:00Z",
+        taxonomy_mode="retrospective-fixed-parent", first_cutoff="2026-01-01",
+        final_evaluation_until="2026-01-29",
+    )
+
+
 def test_snapshot_excludes_every_future_or_derived_surface(tmp_path):
     source = _source_db(tmp_path / "source.duckdb")
     output = tmp_path / "snapshot.duckdb"
@@ -111,3 +124,29 @@ def test_contemporaneous_taxonomy_fails_closed_when_future_dated(tmp_path):
             source, tmp_path / "snapshot.duckdb", fold=_fold(), protocol_hash="p",
             taxonomy_mode="contemporaneous", taxonomy_snapshot=taxonomy,
         )
+
+
+def test_freeze_is_deterministic_and_emits_every_preregistered_estimator(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    snapshot = tmp_path / "snapshot.duckdb"
+    configured = _protocol()
+    manifest = build_origin_snapshot(
+        source, snapshot, fold=_fold(), protocol_hash=protocol_sha256(configured),
+    )
+    first = freeze_origin_predictions(snapshot, protocol=configured, manifest=manifest)
+    second = freeze_origin_predictions(snapshot, protocol=configured, manifest=manifest)
+    assert first == second
+    assert {item.estimator for item in first.recommendations} == set(configured.estimator_ids)
+    assert {item.estimator for item in first.matchup_predictions} == set(configured.estimator_ids)
+    assert all("future" not in item.subject.casefold() for item in first.matchup_predictions)
+    ci = next(item for item in first.matchup_predictions if (
+        item.estimator == "production-ci-gated" and item.subject == "Alpha"
+        and item.opponent == "Beta"
+    ))
+    selected = first.methodology["Alpha"]["canonical"]["cells"][1]["selected"]
+    assert ci.probability == selected["cell"]["p_shrunk"]
+
+    one_hash = write_frozen_predictions(tmp_path / "one.json", first)
+    two_hash = write_frozen_predictions(tmp_path / "two.json", second)
+    assert one_hash == two_hash
+    assert (tmp_path / "one.json").read_bytes() == (tmp_path / "two.json").read_bytes()
