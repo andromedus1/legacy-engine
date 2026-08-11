@@ -1,7 +1,7 @@
 ---
 id: epic-best-deck-decision-trust
 kind: epic
-stage: review
+stage: implementing
 tags: [analytics, advisory, ingestion, infra]
 parent: null
 depends_on: []
@@ -88,3 +88,29 @@ adjudication, named fix verification, and closure:
 The epic is ready for its deeper aggregate review. The latest repository verification recorded by
 the final child closure is 3,710 passed and 1 expected optional-stack skip; the canonical knowledge
 index reports 0 errors and 11 pre-existing advisory warnings.
+
+## Aggregate review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context epic pass completed. Closure
+requires verification of the named fix set only; no second independent epic pass.
+
+**Blockers**: tracked by `epic-best-deck-decision-trust-review-fixes`.
+
+- Retrospective benchmark training must replay pinned parent rules (or fail exact parity) just as
+  held-out evaluation does; mutable stored labels cannot define the frozen experiment.
+- The benchmark primary recommendation must call the same grounded/current/Agency ordering used by
+  the production page, including the frozen last-four-corpus-weeks currency tier.
+- Player fit-summary identity/familiarity counts below the privacy floor must be suppressed in both
+  canonical JSON and Markdown.
+
+**Important**: included in the same checkpoint because they cross feature boundaries: benchmark
+methodology evidence must use a real strict-common uniform matrix or explicit unavailable reason;
+the page/runbook must expose benchmark status and artifact identity instead of leaving empirical
+validation implicit.
+
+**Empirical closure**: after the code contracts are fixed, execute the preregistered benchmark on
+the repository corpus without mutating source data. Persist/report the artifact identity and honest
+claim status (`not-evaluable`, `descriptive`, or `predictive-claim-supported`); a non-supporting
+result is valid evidence and must not be tuned away.
+
+**Nits**: none. **Rejected**: none.
