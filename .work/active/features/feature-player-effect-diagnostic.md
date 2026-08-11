@@ -1,7 +1,7 @@
 ---
 id: feature-player-effect-diagnostic
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, players, experimental]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-future-only-benchmark]
@@ -725,3 +725,34 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
 - The pure freeze function receives already-built inner folds explicitly, keeping DuckDB/filesystem
   recomputation in the workflow adapter. These are boundary-preserving signature clarifications,
   not changes to the preregistered estimator, fold, privacy, or stop-go contracts.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-player-effect-diagnostic-review-fixes`.
+
+- Reconcile all train/validation rows to the frozen action universe with explicit exclusions; real
+  historical parents outside the current base grid may not crash fitting.
+- Validate the loaded BenchmarkProtocol hash and identity-snapshot digest against the frozen
+  experiment before selection/evaluation.
+- Fit the declared centered model inside the penalized objective, including frequency-weighted-zero
+  familiarity constraints; do not post-center into a different predictor.
+- Apply the benchmark support verdict and proportionate cold/venue floors before folds/strata can
+  count toward promotion evidence.
+- Make accessibility denominators ambiguity-inclusive, compute repeat/familiarity support within
+  each venue, and suppress all small-cell counts—not only rates.
+
+**Important**: included in the same checkpoint because they are accepted model/uncertainty/status
+contracts: enforce distinct chronological inner origins and base-prediction identity; preserve event
+bootstrap multiplicity and use paired event-block neutral-regret differences; classify measured
+calibration/cold/venue/regret harm as `stop` rather than merely `diagnostic-only`.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: The independent review passed the focused 13-test suite but reproduced each blocker with
+hermetic probes. A read-only real-corpus probe found 66,309 pre-cutoff matches and 30,052 with at
+least one parent outside the 71-action frozen grid, proving the end-to-end KeyError path.
