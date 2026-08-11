@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-future-only-benchmark
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -642,3 +642,25 @@ path.
 **Notes**: Independent affected-surface verification passed 325 tests and hermetic probes reproduced
 the five blockers. The review was same-harness fresh-context and did not rerun the recorded full
 suite.
+
+## Review closure (2026-08-11)
+
+- Completed the named standard-review fix set in
+  `feature-ranking-future-only-benchmark-review-fixes`; no second independent review pass was
+  required.
+- The protocol now freezes its exact fold schedule and dated B&R ledger. B&R-boundary origins use a
+  declared trailing pre-cutoff field horizon, while retrospective and contemporaneous held-out
+  classification both bind to the taxonomy identity frozen before evaluation.
+- Held-out matches and classified deck mass are separate hashed ledgers. Deck mass owns the 80%
+  coverage denominator and field weighting; structural mirror utility and event-block oracle
+  stability own regret, with named practical-tie/unstable/insufficient-support censors.
+- External snapshots validate parent taxonomy and expose eligible/common coverage; JSON and Markdown
+  render the complete evidence contract. Deterministic artifact paths allow byte-identical replay
+  and reject different content.
+- Verification: focused benchmark suite 22 passed; the broader ranking/matchup/era suite exited
+  green; full repository suite passed 3,692 tests with 1 skip in 193.74s. Focused Ruff, compilation,
+  and diff checks passed. Canonical knowledge-index regeneration reported 0 errors and 11 existing
+  warnings. The mandatory fresh documentation/code audit reported 0 Critical/High/Medium/Low.
+- Production ranking remains authoritative and unchanged. Benchmark evidence still cannot tune,
+  select, promote, or deploy an estimator automatically. No findings were deferred and no adjacent
+  bugs were found.
