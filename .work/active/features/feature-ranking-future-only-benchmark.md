@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-future-only-benchmark
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -513,19 +513,19 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str: ...
 
 **Acceptance criteria**:
 
-- [ ] A synthetic signal change after cutoff is detected as better by future-only scores without
+- [x] A synthetic signal change after cutoff is detected as better by future-only scores without
   affecting any frozen byte; swapping future outcomes reverses evaluation only.
-- [ ] Proper scores use one identical decisive non-mirror common-case set, while served coverage and
+- [x] Proper scores use one identical decisive non-mirror common-case set, while served coverage and
   all exclusion/censoring reasons remain separately visible.
-- [ ] Event-block bootstrap is deterministic by seed; player identity is absent from predictions and
+- [x] Event-block bootstrap is deterministic by seed; player identity is absent from predictions and
   used only by the optional coverage-gated sensitivity.
-- [ ] Thin folds, unsupported actions, emergent field mass, and tied/noisy future oracles emit honest
+- [x] Thin folds, unsupported actions, emergent field mass, and tied/noisy future oracles emit honest
   nulls and named reasons; none can accidentally satisfy the claim gate.
-- [ ] An external snapshot dated after the fold cutoff fails loudly; a valid partial snapshot is
+- [x] An external snapshot dated after the fold cutoff fails loudly; a valid partial snapshot is
   labeled and scored only where supported.
-- [ ] Hermetic CLI tests pass `--db`, produce canonical artifacts, verify hash tampering fails, and
+- [x] Hermetic CLI tests pass `--db`, produce canonical artifacts, verify hash tampering fails, and
   prove `plan -> freeze -> evaluate` plus composed historical `run` parity.
-- [ ] Focused benchmark/ranking tests, normal documentation/index validation if knowledge-bearing
+- [x] Focused benchmark/ranking tests, normal documentation/index validation if knowledge-bearing
   docs change, and the full repository suite pass.
 
 ## Dependency order
@@ -587,3 +587,28 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str: ...
   service, web page, notebook, scraper, or artifact migration/version ladder.
 - Keep estimator ids/thresholds in one protocol registry. Evaluation reports disagreement; it does
   not blend estimators, tune them, or write back into production.
+
+## Implementation summary
+
+- Delivered the preregistered protocol, whole-date/B&R-aware fold planner, cutoff-safe raw-fact
+  snapshot, recomputed eras, dated taxonomy replay, and adversarial leakage guards in `c4735c4`.
+- Delivered immutable predictions for the five production variants and five declared baselines,
+  explicit unserved `0.5` forecasts, canonical hashes, and the shared typed ranking-measurement
+  contract in `605b03a`.
+- Delivered proper/calibration/rank/regret evaluation, support and censoring ledgers, event-block and
+  coverage-gated player-component uncertainty, dated external comparators, Markdown evidence, and
+  hermetic `advise benchmark plan|freeze|evaluate|run` commands in `815c08f`.
+- Closed a documentation-review finding by binding taxonomy mode/effective-at/taxonomy/rules hashes
+  into frozen predictions and rejecting a different evaluation snapshot before held-out outcomes
+  are classified. Aggregate predictive claims require both calibration intercept and slope.
+- Design deviations stayed within the declared boundaries: snapshot/freeze/held-out extraction are
+  filesystem/DuckDB workflow adapters; the existing package-owned ranking-measurement contract made
+  a page-script extraction unnecessary; event uncertainty is retained per fold and aggregated over
+  preregistered non-overlapping folds; contemporaneous replay requires a strict rules directory.
+- Verification: integrated focused suite — 232 passed in 16.53s; full repository suite — 3688
+  passed, 1 skipped in 198.15s; focused Ruff, compilation, and diff checks passed. Canonical
+  knowledge-index regeneration reported 0 errors and 11 pre-existing warnings. The required
+  post-fix documentation re-audit reported 0 Critical/High/Medium/Low findings.
+- Review handoff: standard independent feature review remains required. Production ranking remains
+  authoritative and unchanged; benchmark output is evaluation evidence only and never tunes or
+  promotes an estimator automatically.
