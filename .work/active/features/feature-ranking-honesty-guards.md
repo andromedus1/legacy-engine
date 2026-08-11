@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-honesty-guards
 kind: feature
-stage: review
+stage: implementing
 tags: [advisory, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -483,3 +483,31 @@ Then run the project-standard broader suite before advancing the feature to revi
 - No design deviations. In particular, no blended-field reweighting, refresh orchestration,
   card-dimension work, or second ranking estimator was introduced.
 - Integrated verification: `uv run --no-sync python -m pytest -q` — 3634 passed, 1 skipped.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-ranking-honesty-guards-review-fixes`.
+
+- `# current_regime_n` may claim exact currency only when every custom row has a real count (or an
+  explicitly complete alternative basis); partial counts must fail or report currency unavailable.
+- Interactive sample-gate changes must not leave generated-gate evidence percentages/strata and row
+  grouping presented as current.
+- Zero-presence candidacy must use raw presence/count evidence before display rounding, so a tiny
+  positive share cannot become inactive.
+- Roll the CLI help and current runbook/foundation assertions forward to the shipped currency,
+  evidence-strata, inactive, and unscorable contracts; regenerate the knowledge index.
+
+**Important**: none deferred. The receiver elevated the review's interactive, rounding, and stale
+assertion findings because they directly govern evidence honesty in the current feature.
+
+**Nits**: none.
+
+**Rejected**: P(best) parity/budget, global regime-window provenance, and default ranking-order
+regression proposals were rejected by the reviewer after focused evidence confirmed those paths.
+
+**Notes**: Focused review verification passed 379 tests. The pass was same-harness fresh-context,
+not cross-model; browser interaction was inspected statically because no browser runtime was
+available.
