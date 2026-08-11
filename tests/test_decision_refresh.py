@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from legacy_engine.ingestion.card_coverage import CardCoverageReport
+from legacy_engine.workflows.decision_refresh import (
+    CampApplyResult,
+    EraRunResult,
+    RefreshStepStatus,
+    SourceRefreshResult,
+    decision_refresh_audit_lines,
+    run_decision_refresh,
+)
+
+
+class RecordingPorts:
+    def __init__(self, *, fail_at: str | None = None, degrade_sources: bool = False):
+        self.calls: list[str] = []
+        self.fail_at = fail_at
+        self.degrade_sources = degrade_sources
+
+    def _record(self, name: str):
+        self.calls.append(name)
+        if self.fail_at == name:
+            raise RuntimeError(f"{name} broke")
+
+    def refresh_sources(self, db_path: Path):
+        self._record("sources")
+        return SourceRefreshResult(
+            new_card_names=frozenset({"New Card"}),
+            upcoming_releases=("up: Upcoming",),
+            recent_releases=("new: Recent",),
+            release_scan_reason="scan offline" if self.degrade_sources else None,
+            summary="sources current",
+        )
+
+    def reconcile_cards(self, db_path: Path, source_result: SourceRefreshResult):
+        self._record("card_coverage")
+        assert source_result.new_card_names == frozenset({"New Card"})
+        return CardCoverageReport(distinct_names=2, affected_decks=1)
+
+    def label(self, db_path: Path):
+        self._record("label")
+        return 3
+
+    def apply_staged_camps(self, db_path: Path):
+        self._record("staged_camps")
+        return CampApplyResult(parents=("A", "B"), labeled=2, incrementally_assigned=1)
+
+    def run_eras(self, db_path: Path):
+        self._record("eras")
+        return EraRunResult(entities=4, alarms=("possible change",))
+
+    def write_ranking(self, db_path: Path, out_path: Path):
+        self._record("ranking")
+        out_path.write_text("stable ranking")
+
+
+class TestDecisionRefresh:
+    def test_runs_exact_order_and_writes_ranking_last_to_explicit_paths(self, tmp_path):
+        ports = RecordingPorts()
+        db_path = tmp_path / "tiny.duckdb"
+        db_path.touch()
+        out_path = tmp_path / "ranking.html"
+
+        result = run_decision_refresh(ports, db_path=db_path, out_path=out_path)
+
+        assert ports.calls == ["sources", "card_coverage", "label", "staged_camps", "eras", "ranking"]
+        assert all(step.status is RefreshStepStatus.COMPLETED for step in result.steps)
+        assert out_path.read_text() == "stable ranking"
+        assert result.ranking_output == str(out_path)
+        assert result.format_awareness.recent_releases == ("new: Recent",)
+        assert result.format_awareness.era_alarms == ("possible change",)
+
+    def test_required_failure_marks_all_dependents_not_run_and_preserves_last_good_output(self, tmp_path):
+        ports = RecordingPorts(fail_at="label")
+        out_path = tmp_path / "ranking.html"
+        out_path.write_text("last good")
+
+        result = run_decision_refresh(ports, db_path=tmp_path / "db.duckdb", out_path=out_path)
+
+        assert ports.calls == ["sources", "card_coverage", "label"]
+        assert [step.status for step in result.steps] == [
+            RefreshStepStatus.COMPLETED,
+            RefreshStepStatus.COMPLETED,
+            RefreshStepStatus.FAILED,
+            RefreshStepStatus.NOT_RUN,
+            RefreshStepStatus.NOT_RUN,
+            RefreshStepStatus.NOT_RUN,
+        ]
+        assert out_path.read_text() == "last good"
+        assert result.ranking_output is None
+        lines = decision_refresh_audit_lines(result)
+        assert any("label — failed — label broke" in line for line in lines)
+        assert any("ranking — not_run" in line for line in lines)
+
+    def test_advisory_source_failure_degrades_but_continues(self, tmp_path):
+        ports = RecordingPorts(degrade_sources=True)
+        result = run_decision_refresh(
+            ports, db_path=tmp_path / "db.duckdb", out_path=tmp_path / "ranking.html",
+        )
+        assert result.steps[0].status is RefreshStepStatus.DEGRADED
+        assert result.steps[-1].status is RefreshStepStatus.COMPLETED

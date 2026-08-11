@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-08
+updated: 2026-08-11
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -39,25 +39,25 @@ tables. Only direct headers of those outer peer tables are sticky; headers in
 nested plan ledgers scroll with their expanded row. Rows expand to accessible
 per-opponent matchup ledgers.
 
-## Refresh (one command, after a data cycle)
+## Refresh (one command)
 
-The page reads eras + variants, so run it **last**, after the standard cycle:
+The composed refresh calls reusable Python primitives in dependency order, reports card-dimension
+coverage plus B&R/release/era awareness, and writes the ranking only after every prerequisite
+succeeds:
 
 ```bash
-.venv/bin/legacy-engine refresh all          # mirror + ingest new events
-.venv/bin/legacy-engine label                # full-corpus archetype relabel; also applies the
-                                             # curated colour splits (echoes each one it applied)
-# re-apply every staged camp split (variant labels are wiped by label):
-.venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
-  while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
-.venv/bin/legacy-engine eras run             # re-detect era boundaries + drift alarms
-# Preview a candidate over each archetype's own stable era. Review its membership,
-# churn, and quality output; this does not replace the serving family registry:
-.venv/bin/legacy-engine superarchetype run --compare-since 2026-06-29
-# Only after explicitly approving that candidate, promote it to the serving registry:
-# .venv/bin/legacy-engine superarchetype run --promote
-.venv/bin/python scripts/refresh_best_call_ranking.py
+.venv/bin/python scripts/refresh_decision_data.py
 ```
+
+The order is tournament cache + rules + release-aware cards, exact name reconciliation, full
+labeling, every staged camp parent in sorted order, era detection, then ranking. Required failures
+stop dependent steps and leave the prior ranking untouched. Release scanning and alias-download
+outages degrade explicitly and retain last-good inputs. B&R awareness reads the operator-confirmed
+ledger; it does not scrape announcements or confirm changes automatically.
+
+The individual CLI commands and `scripts/refresh_best_call_ranking.py` remain available for focused
+operation and debugging. The composition excludes prices, upstream hot-spare behavior, cloud state,
+git commits, and pushes.
 
 Optionally re-run discovery first (`discover run --archetype <parent> --since 2024-12-16`
 per parent) when the corpus has grown materially — staged splits carry frozen

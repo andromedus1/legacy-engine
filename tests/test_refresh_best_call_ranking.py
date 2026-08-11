@@ -564,6 +564,26 @@ class TestStrategicPlanPresentation:
 
 
 class TestMainEndToEnd:
+    def test_generate_ranking_callable_matches_cli_defaults(self, tmp_path, monkeypatch):
+        db_path = tmp_path / "callable.duckdb"
+        con = store.connect(str(db_path))
+        try:
+            _build_fixture(con)
+        finally:
+            con.close()
+        direct_path = tmp_path / "direct.html"
+        cli_path = tmp_path / "cli.html"
+        monkeypatch.setattr(rbcr, "staged_split_parents", lambda: sorted(PARENTS))
+        rbcr.generate_ranking(
+            db_path=db_path, out_path=direct_path, field_since=_FIELD_SINCE, ground_n=3,
+        )
+        monkeypatch.setattr(sys, "argv", [
+            "refresh_best_call_ranking.py", "--db", str(db_path), "--out", str(cli_path),
+            "--field-since", _FIELD_SINCE, "--ground-n", "3",
+        ])
+        rbcr.main()
+        assert direct_path.read_bytes() == cli_path.read_bytes()
+
     def test_blowouts_are_classified_from_raw_measured_win_rate(self):
         template = rbcr.TEMPLATE_PATH.read_text()
         assert "if (!c.measured || c.raw == null" in template

@@ -164,14 +164,18 @@ class ScryfallClient:
                 encoding = (resp.headers.get("content-encoding") or "").lower()
                 with tmp_path.open("wb") as fh:
                     if "gzip" in encoding or meta["download_uri"].endswith(".gz"):
-                        for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                        # Preserve transport gzip bytes. httpx.iter_bytes() decodes content
+                        # encodings, which would leave a plain JSON body at our .json.gz path.
+                        for chunk in resp.iter_raw(chunk_size=64 * 1024):
                             fh.write(chunk)
                     else:
                         with gzip.GzipFile(fileobj=fh, mode="wb") as zipped:
                             for chunk in resp.iter_bytes(chunk_size=64 * 1024):
                                 zipped.write(chunk)
-            # Validate the stream before replacing last-good raw data.
-            next(self.iter_printed_aliases(tmp_path), None)
+            # Consume the full stream before replacing last-good raw data; corruption after the
+            # first valid row must not become the persisted mirror.
+            for _alias in self.iter_printed_aliases(tmp_path):
+                pass
             tmp_path.replace(SCRYFALL_ALL_CARDS_PATH)
             SCRYFALL_ALL_CARDS_META_PATH.write_text(json.dumps({
                 "updated_at": meta.get("updated_at"),

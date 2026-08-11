@@ -1,0 +1,340 @@
+"""Composed refresh for every input consumed by the Best Deck / Best Call ranking."""
+
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timezone
+from enum import StrEnum
+from pathlib import Path
+from typing import Protocol
+
+from legacy_engine.ingestion.card_coverage import CardCoverageReport
+from legacy_engine.models.base import LegacyEngineModel
+from legacy_engine.models.card import CardAliasManifest
+
+
+class RefreshStepStatus(StrEnum):
+    COMPLETED = "completed"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+    NOT_RUN = "not_run"
+
+
+class RefreshStepResult(LegacyEngineModel):
+    name: str
+    status: RefreshStepStatus
+    summary: str
+    reason: str | None = None
+
+
+class FormatAwareness(LegacyEngineModel):
+    latest_registered_ban_date: str
+    latest_registered_ban_card: str
+    upcoming_releases: tuple[str, ...] = ()
+    recent_releases: tuple[str, ...] = ()
+    era_alarms: tuple[str, ...] = ()
+
+
+class SourceRefreshResult(LegacyEngineModel):
+    new_card_names: frozenset[str] = frozenset()
+    alias_manifest: CardAliasManifest | None = None
+    alias_snapshot_reason: str | None = None
+    upcoming_releases: tuple[str, ...] = ()
+    recent_releases: tuple[str, ...] = ()
+    release_scan_reason: str | None = None
+    summary: str
+
+
+class CampApplyResult(LegacyEngineModel):
+    parents: tuple[str, ...] = ()
+    labeled: int = 0
+    incrementally_assigned: int = 0
+    degraded_reasons: tuple[str, ...] = ()
+
+
+class EraRunResult(LegacyEngineModel):
+    entities: int = 0
+    alarms: tuple[str, ...] = ()
+
+
+class DecisionRefreshResult(LegacyEngineModel):
+    steps: tuple[RefreshStepResult, ...]
+    card_coverage: CardCoverageReport
+    format_awareness: FormatAwareness
+    ranking_output: str | None = None
+
+
+class DecisionRefreshPorts(Protocol):
+    def refresh_sources(self, db_path: Path) -> SourceRefreshResult: ...
+    def reconcile_cards(
+        self, db_path: Path, source_result: SourceRefreshResult,
+    ) -> CardCoverageReport: ...
+    def label(self, db_path: Path) -> int: ...
+    def apply_staged_camps(self, db_path: Path) -> CampApplyResult: ...
+    def run_eras(self, db_path: Path) -> EraRunResult: ...
+    def write_ranking(self, db_path: Path, out_path: Path) -> None: ...
+
+
+_STEP_NAMES = ("sources", "card_coverage", "label", "staged_camps", "eras", "ranking")
+
+
+def _empty_coverage(reason: str) -> CardCoverageReport:
+    return CardCoverageReport(
+        distinct_names=0,
+        affected_decks=0,
+        alias_snapshot_degraded=True,
+        alias_snapshot_reason=reason,
+    )
+
+
+def run_decision_refresh(
+    ports: DecisionRefreshPorts,
+    *,
+    db_path: Path,
+    out_path: Path,
+) -> DecisionRefreshResult:
+    """Run required steps in dependency order and retain last-good ranking on failure."""
+    steps: list[RefreshStepResult] = []
+    source: SourceRefreshResult | None = None
+    coverage = _empty_coverage("card reconciliation not run")
+    awareness = FormatAwareness(latest_registered_ban_date="unknown", latest_registered_ban_card="unknown")
+    era_result = EraRunResult()
+
+    actions = (
+        ("sources", lambda: ports.refresh_sources(db_path)),
+        ("card_coverage", lambda: ports.reconcile_cards(db_path, source)),  # type: ignore[arg-type]
+        ("label", lambda: ports.label(db_path)),
+        ("staged_camps", lambda: ports.apply_staged_camps(db_path)),
+        ("eras", lambda: ports.run_eras(db_path)),
+        ("ranking", lambda: ports.write_ranking(db_path, out_path)),
+    )
+    failed = False
+    for index, (name, action) in enumerate(actions):
+        if failed:
+            steps.append(RefreshStepResult(
+                name=name, status=RefreshStepStatus.NOT_RUN,
+                summary="not run because a prerequisite failed",
+            ))
+            continue
+        try:
+            value = action()
+            status = RefreshStepStatus.COMPLETED
+            reason = None
+            summary = "completed"
+            if name == "sources":
+                source = value
+                assert isinstance(source, SourceRefreshResult)
+                reasons = tuple(filter(None, (source.release_scan_reason, source.alias_snapshot_reason)))
+                if reasons:
+                    status = RefreshStepStatus.DEGRADED
+                    reason = "; ".join(reasons)
+                summary = source.summary
+            elif name == "card_coverage":
+                coverage = value
+                assert isinstance(coverage, CardCoverageReport)
+                if coverage.alias_snapshot_degraded:
+                    status = RefreshStepStatus.DEGRADED
+                    reason = coverage.alias_snapshot_reason
+                summary = f"{coverage.distinct_names} names; {coverage.unresolved_count} unresolved"
+            elif name == "label":
+                summary = f"{value} decks labeled"
+            elif name == "staged_camps":
+                assert isinstance(value, CampApplyResult)
+                if value.degraded_reasons:
+                    status = RefreshStepStatus.DEGRADED
+                    reason = "; ".join(value.degraded_reasons)
+                summary = f"{len(value.parents)} parents; {value.labeled} exact + {value.incrementally_assigned} incremental"
+            elif name == "eras":
+                era_result = value
+                assert isinstance(era_result, EraRunResult)
+                summary = f"{era_result.entities} entities; {len(era_result.alarms)} alarms"
+            elif name == "ranking":
+                summary = str(out_path)
+            steps.append(RefreshStepResult(name=name, status=status, summary=summary, reason=reason))
+        except Exception as exc:
+            failed = True
+            steps.append(RefreshStepResult(
+                name=name, status=RefreshStepStatus.FAILED,
+                summary="required step failed", reason=str(exc),
+            ))
+
+    if source is not None:
+        from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+        latest = max(BAN_EVENTS, key=lambda event: event[0])
+        awareness = FormatAwareness(
+            latest_registered_ban_date=latest[0].isoformat(),
+            latest_registered_ban_card=latest[1],
+            upcoming_releases=source.upcoming_releases,
+            recent_releases=source.recent_releases,
+            era_alarms=era_result.alarms,
+        )
+    ranking_output = str(out_path) if steps[-1].status is RefreshStepStatus.COMPLETED else None
+    return DecisionRefreshResult(
+        steps=tuple(steps), card_coverage=coverage,
+        format_awareness=awareness, ranking_output=ranking_output,
+    )
+
+
+def decision_refresh_audit_lines(result: DecisionRefreshResult) -> tuple[str, ...]:
+    lines = [
+        f"// refresh step: {step.name} — {step.status.value}"
+        + (f" — {step.reason}" if step.reason else "")
+        for step in result.steps
+    ]
+    fmt = result.format_awareness
+    lines.append(
+        f"// B&R ledger: {fmt.latest_registered_ban_card} registered {fmt.latest_registered_ban_date} "
+        "(operator-confirmed; no announcement scrape)"
+    )
+    lines.append(f"// releases: recent={len(fmt.recent_releases)}, upcoming={len(fmt.upcoming_releases)}")
+    lines.extend(f"// era alarm: {alarm}" for alarm in fmt.era_alarms)
+    if result.ranking_output:
+        lines.append(f"// ranking: {result.ranking_output}")
+    return tuple(lines)
+
+
+class DefaultDecisionRefreshPorts:
+    """Production adapters; orchestration above remains independently testable."""
+
+    def refresh_sources(self, db_path: Path) -> SourceRefreshResult:
+        from legacy_engine.ingestion import cache, store
+        from legacy_engine.ingestion.releases import fetch_sets, upcoming_and_recent
+        from legacy_engine.ingestion.rules_vendor import refresh_rules
+        from legacy_engine.ingestion.scryfall import ScryfallClient
+        from legacy_engine.models.card import Card, CardAliasManifest
+
+        cache.mirror_cache()
+        con = store.connect(db_path)
+        try:
+            cache_stats = cache.ingest_cache(con)
+        finally:
+            con.close()
+        refresh_rules()
+
+        scan_reason = None
+        alias_reason = None
+        upcoming = ()
+        recent = ()
+        recent_codes: tuple[str, ...] = ()
+        with ScryfallClient() as client:
+            try:
+                scan = upcoming_and_recent(fetch_sets(client), today=date.today())
+                upcoming = tuple(f"{item.code}: {item.name}" for item in scan.upcoming)
+                recent = tuple(f"{item.code}: {item.name}" for item in scan.recently_released)
+                recent_codes = tuple(item.code for item in scan.recently_released)
+            except Exception as exc:
+                scan_reason = f"release scan unavailable: {exc}"
+            client.download_bulk_data(force=bool(recent_codes))
+            index = client.load_card_index()
+            cards = [Card.from_scryfall(raw) for raw in {raw["name"]: raw for raw in index.values()}.values()]
+            con = store.connect(db_path)
+            try:
+                from legacy_engine.ingestion.scryfall import METADATA_PATH
+                updated_at = json.loads(METADATA_PATH.read_text()).get("updated_at") if METADATA_PATH.exists() else None
+                diff = store.load_cards_diff(con, cards, scryfall_updated_at=updated_at)
+                store.persist_ingest_diff(diff)
+                manifest = store.load_card_alias_manifest(con)
+                if store.alias_snapshot_needs_refresh(manifest, recent_codes):
+                    try:
+                        alias_path = client.download_all_cards_bulk(force=True)
+                        from legacy_engine.config import SCRYFALL_ALL_CARDS_META_PATH
+                        alias_meta = json.loads(SCRYFALL_ALL_CARDS_META_PATH.read_text())
+                        candidate = CardAliasManifest(
+                            source_updated_at=alias_meta.get("updated_at") or "unknown",
+                            built_at=datetime.now(timezone.utc),
+                            release_codes=tuple(sorted(set((manifest.release_codes if manifest else ()) + recent_codes))),
+                            alias_count=0,
+                            ambiguous_key_count=0,
+                        )
+                        manifest = store.rebuild_card_aliases(
+                            con, client.iter_printed_aliases(alias_path), manifest=candidate,
+                        )
+                    except Exception as exc:
+                        alias_reason = f"alias snapshot refresh unavailable; retained last-good: {exc}"
+                        manifest = store.load_card_alias_manifest(con)
+            finally:
+                con.close()
+        return SourceRefreshResult(
+            new_card_names=frozenset(diff.new_names), alias_manifest=manifest,
+            alias_snapshot_reason=alias_reason, upcoming_releases=upcoming,
+            recent_releases=recent, release_scan_reason=scan_reason,
+            summary=f"{cache_stats.loaded} events reloaded; {len(diff.new_names)} new card names",
+        )
+
+    def reconcile_cards(self, db_path: Path, source_result: SourceRefreshResult) -> CardCoverageReport:
+        from legacy_engine.ingestion import store
+        from legacy_engine.ingestion.card_coverage import reconcile_card_dimension
+
+        con = store.connect(db_path)
+        try:
+            return reconcile_card_dimension(
+                con, new_card_names=source_result.new_card_names,
+                alias_manifest=source_result.alias_manifest,
+                alias_snapshot_reason=source_result.alias_snapshot_reason,
+                resolved_at=datetime.now(timezone.utc),
+            )
+        finally:
+            con.close()
+
+    def label(self, db_path: Path) -> int:
+        from legacy_engine.archetype.color_splits import load_color_split_registry
+        from legacy_engine.archetype.labeler import label_decks
+        from legacy_engine.archetype.rules import load_ruleset
+        from legacy_engine.archetype.variants import load_variant_registry
+        from legacy_engine.config import COLOR_SPLITS_REGISTRY_PATH, RULES_DIR, VARIANTS_REGISTRY_PATH
+        from legacy_engine.ingestion import store
+        from legacy_engine.ingestion.scryfall import ScryfallClient
+
+        rules = load_ruleset(RULES_DIR)
+        variants = load_variant_registry(VARIANTS_REGISTRY_PATH) if VARIANTS_REGISTRY_PATH.exists() else None
+        colors = load_color_split_registry(COLOR_SPLITS_REGISTRY_PATH) if COLOR_SPLITS_REGISTRY_PATH.exists() else None
+        con = store.connect(db_path)
+        try:
+            with ScryfallClient() as client:
+                client.load_card_index()
+                return label_decks(con, rules, client.get_card, registry=variants, color_splits=colors)
+        finally:
+            con.close()
+
+    def apply_staged_camps(self, db_path: Path) -> CampApplyResult:
+        from legacy_engine.archetype.discovered import apply_split, assign_incremental, staged_split_parents
+        from legacy_engine.ingestion import store
+
+        parents = tuple(sorted(staged_split_parents()))
+        labeled = 0
+        incremental = 0
+        degraded: list[str] = []
+        con = store.connect(db_path)
+        try:
+            for parent in parents:
+                labeled += apply_split(con, parent)
+                result = assign_incremental(con, parent)
+                incremental += result.n_assigned
+                if result.degraded and result.note:
+                    degraded.append(result.note)
+        finally:
+            con.close()
+        return CampApplyResult(
+            parents=parents, labeled=labeled, incrementally_assigned=incremental,
+            degraded_reasons=tuple(degraded),
+        )
+
+    def run_eras(self, db_path: Path) -> EraRunResult:
+        from legacy_engine.analytics.eras.run import run_eras
+        from legacy_engine.ingestion import store
+
+        con = store.connect(db_path)
+        try:
+            result = run_eras(con)
+        finally:
+            con.close()
+        return EraRunResult(
+            entities=result.n_entities,
+            alarms=tuple(result.alarms[key].note for key in sorted(result.alarms)),
+        )
+
+    def write_ranking(self, db_path: Path, out_path: Path) -> None:
+        from scripts.refresh_best_call_ranking import generate_ranking
+
+        generate_ranking(db_path=db_path, out_path=out_path)

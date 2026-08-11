@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.card_coverage import reconcile_card_dimension
+from legacy_engine.ingestion import scryfall
 from legacy_engine.ingestion.scryfall import ScryfallClient, normalize_alias_key
 from legacy_engine.models.card import Card, CardAliasManifest, CardNameStatus
 
@@ -62,6 +63,47 @@ class TestPrintedAliasStream:
     def test_alias_key_normalizes_unicode_apostrophe_accents_case_and_space(self):
         assert normalize_alias_key("  CONTRAMÁGICA  ") == "contramagica"
         assert normalize_alias_key("Urza’s   Saga") == "urza's saga"
+
+    def test_download_preserves_transport_gzip_and_validates_full_stream(self, tmp_path, monkeypatch):
+        raw = (json.dumps({
+            "id": "pt-1", "lang": "pt", "name": "Counterspell",
+            "printed_name": "Contramágica",
+        }, ensure_ascii=False) + "\n").encode()
+        compressed = gzip.compress(raw)
+
+        class Response:
+            headers = {"content-encoding": "gzip"}
+            def raise_for_status(self):
+                return None
+            def iter_raw(self, chunk_size):
+                yield compressed
+            def iter_bytes(self, chunk_size):
+                raise AssertionError("decoded bytes must not be persisted as .gz")
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        class Http:
+            def stream(self, *args, **kwargs):
+                return Response()
+            def close(self):
+                return None
+
+        monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+        monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_PATH", tmp_path / "all.json.gz")
+        monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_META_PATH", tmp_path / "meta.json")
+        client = ScryfallClient()
+        client.client.close()
+        client.client = Http()
+        monkeypatch.setattr(client, "_fetch_all_cards_metadata", lambda: {
+            "download_uri": "https://data.scryfall.io/all.json", "updated_at": "2026-08-10",
+        })
+
+        path = client.download_all_cards_bulk(force=True)
+
+        assert gzip.decompress(path.read_bytes()) == raw
+        assert [item.canonical_name for item in client.iter_printed_aliases(path)] == ["Counterspell"]
 
 
 class TestAliasStore:
