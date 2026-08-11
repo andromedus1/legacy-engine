@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND.
 # On-demand layer — load when surfacing a specific doc's full context.
-generated_at: '2026-08-11T19:41:37Z'
+generated_at: '2026-08-11T20:09:54Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -185,6 +185,12 @@ documents:
       as ONE-SIDED evidence). Typed family cells carry labeled provenance and intra-cluster flags; the
       Best Call page keeps them exploratory and ledger/navigation-only until the future-only decision
       benchmark passes.'
+    - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters exactly ten estimators
+      with production-ci-gated as the production-CI primary; retrospective-fixed-parent and dated contemporaneous
+      taxonomy replay are separate modes. Raw pre-cutoff snapshots and prediction-before-evaluation hashes,
+      whole-date non-overlapping 28-day folds reset/truncated at B&R, explicit support/censoring gates,
+      player-sensitivity coverage boundaries, proper scores, decision endpoints, and optional dated exact-mapped
+      external snapshots are part of the protocol. Evaluation is read-only and never tunes production.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on

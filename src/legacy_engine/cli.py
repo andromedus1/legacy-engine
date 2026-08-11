@@ -2612,6 +2612,247 @@ def advise() -> None:
     """Meta attack / advisory — how to attack the field."""
 
 
+@advise.group("benchmark")
+def advise_benchmark() -> None:
+    """Freeze rankings at historical cutoffs and evaluate them on later events."""
+
+
+@advise_benchmark.command("plan")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol-id", required=True)
+@click.option("--created-at", required=True, help="Frozen ISO timestamp for reproducible artifacts.")
+@click.option("--first-cutoff", required=True, help="First prediction origin (YYYY-MM-DD).")
+@click.option("--until", "final_until", required=True, help="Final evaluation bound (exclusive).")
+@click.option(
+    "--taxonomy-mode",
+    type=click.Choice(["retrospective-fixed-parent", "contemporaneous"]),
+    default="retrospective-fixed-parent", show_default=True,
+)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_plan(
+    db: str, protocol_id: str, created_at: str, first_cutoff: str, final_until: str,
+    taxonomy_mode: str, out: str, verbose: bool,
+) -> None:
+    """Preregister the estimator set, support gates, and whole-date folds."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    import duckdb
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, atomic_write_canonical, plan_walk_forward_folds, protocol_sha256,
+    )
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    protocol = BenchmarkProtocol(
+        protocol_id=protocol_id, created_at=created_at, taxonomy_mode=taxonomy_mode,
+        first_cutoff=first_cutoff, final_evaluation_until=final_until,
+    )
+    con = duckdb.connect(db, read_only=True)
+    try:
+        event_dates = [row[0] for row in con.execute(
+            "SELECT DISTINCT substr(date,1,10) FROM tournaments ORDER BY 1"
+        ).fetchall()]
+    finally:
+        con.close()
+    folds = plan_walk_forward_folds(
+        event_dates, [event[0].isoformat() for event in BAN_EVENTS], protocol,
+    )
+    digest = atomic_write_canonical(Path(out), protocol)
+    click.echo(f"// benchmark protocol: {protocol.protocol_id} hash={protocol_sha256(protocol)}")
+    click.echo(f"// taxonomy: {protocol.taxonomy_mode}; folds={len(folds)}; artifact={digest}")
+    for fold in folds:
+        click.echo(
+            f"// fold {fold.fold_id}: {len(fold.event_dates)} event dates; "
+            f"regime={fold.regime_start}"
+        )
+
+
+def _benchmark_protocol_and_folds(db: str, protocol_path: str):
+    from pathlib import Path
+
+    import duckdb
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol, plan_walk_forward_folds
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
+    con = duckdb.connect(db, read_only=True)
+    try:
+        event_dates = [row[0] for row in con.execute(
+            "SELECT DISTINCT substr(date,1,10) FROM tournaments ORDER BY 1"
+        ).fetchall()]
+    finally:
+        con.close()
+    folds = plan_walk_forward_folds(
+        event_dates, [event[0].isoformat() for event in BAN_EVENTS], protocol,
+    )
+    return protocol, folds
+
+
+@advise_benchmark.command("freeze")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--fold", "fold_id", required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_freeze(
+    db: str, protocol_path: str, fold_id: str, artifact_dir: str,
+    taxonomy_snapshot: str | None, verbose: bool,
+) -> None:
+    """Create a cutoff-safe DB and immutable prediction artifact for one fold."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        atomic_write_canonical, protocol_sha256, write_frozen_predictions,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        build_origin_snapshot, freeze_origin_predictions,
+    )
+
+    protocol, folds = _benchmark_protocol_and_folds(db, protocol_path)
+    fold = next((candidate for candidate in folds if candidate.fold_id == fold_id), None)
+    if fold is None:
+        raise click.ClickException(f"unknown benchmark fold: {fold_id}")
+    root = Path(artifact_dir)
+    snapshot_path = root / f"{fold.fold_id}.duckdb"
+    manifest = build_origin_snapshot(
+        Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
+        taxonomy_mode=protocol.taxonomy_mode,
+        taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+    )
+    manifest_path = root / f"{fold.fold_id}.manifest.json"
+    atomic_write_canonical(manifest_path, manifest)
+    predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
+    predictions_path = root / f"{fold.fold_id}.predictions.json"
+    digest = write_frozen_predictions(predictions_path, predictions)
+    atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
+    click.echo(f"// benchmark cutoff: {fold.cutoff}; taxonomy={manifest.taxonomy_mode}")
+    click.echo(f"// snapshot manifest: {manifest_path} sha256={predictions.snapshot_manifest_sha256}")
+    click.echo(f"// frozen predictions: {predictions_path} sha256={digest}")
+    for reason in manifest.reasons:
+        click.echo(f"// ⚠ {reason}")
+
+
+@advise_benchmark.command("evaluate")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--predictions", "predictions_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--checksum", "checksum_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--external", "external_paths", type=click.Path(exists=True, dir_okay=False), multiple=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_evaluate(
+    db: str, protocol_path: str, predictions_path: str, checksum_path: str,
+    external_paths: tuple[str, ...], taxonomy_snapshot: str | None,
+    out: str, report: str, verbose: bool,
+) -> None:
+    """Verify frozen bytes, open later outcomes, and write a separate evaluation."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, ExternalRankingSnapshot, FrozenOriginPredictions,
+        aggregate_benchmark, atomic_write_canonical, atomic_write_text, evaluate_origin, load_hashed_model,
+        render_benchmark_markdown,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_matches, validate_frozen_taxonomy,
+    )
+
+    protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
+    if protocol.taxonomy_mode == "contemporaneous" and taxonomy_snapshot is None:
+        raise click.ClickException("contemporaneous evaluation requires --taxonomy-snapshot")
+    checksum = json.loads(Path(checksum_path).read_text())["sha256"]
+    predictions, digest = load_hashed_model(
+        Path(predictions_path), FrozenOriginPredictions, checksum,
+    )
+    validate_frozen_taxonomy(
+        predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+    )
+    external = tuple(
+        ExternalRankingSnapshot.model_validate_json(Path(path).read_bytes())
+        for path in external_paths
+    )
+    evaluation = evaluate_origin(
+        predictions, load_heldout_matches(
+            Path(db), predictions.fold,
+            taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+        ),
+        protocol=protocol, external=external,
+    )
+    summary = aggregate_benchmark(protocol, [evaluation])
+    atomic_write_canonical(Path(out), evaluation)
+    atomic_write_text(Path(report), render_benchmark_markdown(summary))
+    click.echo(f"// verified frozen predictions: sha256={digest}")
+    click.echo(f"// exclusions: {evaluation.exclusions}")
+    click.echo(f"// support: {evaluation.status}; {'; '.join(evaluation.reasons) or 'all fold gates pass'}")
+    click.echo(f"// evaluation: {out}; report: {report}")
+
+
+@advise_benchmark.command("run")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_run(
+    db: str, protocol_path: str, artifact_dir: str,
+    taxonomy_snapshot: str | None, verbose: bool,
+) -> None:
+    """Compose historical freeze-then-evaluate for every preregistered fold."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        aggregate_benchmark, atomic_write_canonical, atomic_write_text, evaluate_origin, protocol_sha256,
+        render_benchmark_markdown, write_frozen_predictions,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        build_origin_snapshot, freeze_origin_predictions, load_heldout_matches,
+        validate_frozen_taxonomy,
+    )
+
+    protocol, folds = _benchmark_protocol_and_folds(db, protocol_path)
+    root = Path(artifact_dir)
+    evaluations = []
+    for fold in folds:
+        snapshot_path = root / f"{fold.fold_id}.duckdb"
+        manifest = build_origin_snapshot(
+            Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
+            taxonomy_mode=protocol.taxonomy_mode,
+            taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+        )
+        atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
+        predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
+        validate_frozen_taxonomy(
+            predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+        )
+        digest = write_frozen_predictions(root / f"{fold.fold_id}.predictions.json", predictions)
+        atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
+        evaluation = evaluate_origin(
+            predictions, load_heldout_matches(
+                Path(db), fold,
+                taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            ), protocol=protocol,
+        )
+        atomic_write_canonical(root / f"{fold.fold_id}.evaluation.json", evaluation)
+        evaluations.append(evaluation)
+        click.echo(f"// fold {fold.fold_id}: {evaluation.status}; predictions={digest}")
+    summary = aggregate_benchmark(protocol, evaluations)
+    atomic_write_canonical(root / "summary.json", summary)
+    atomic_write_text(root / "summary.md", render_benchmark_markdown(summary))
+    click.echo(f"// benchmark status: {summary.status}; evaluable={summary.evaluable_folds}/{len(folds)}")
+    for reason in summary.reasons:
+        click.echo(f"// ⚠ {reason}")
+
+
 def _parse_lift_spec(spec: str | None) -> dict[str, float]:
     """Parse `--*-lift` "opp=+0.11,opp2=-0.03" → {opponent: delta}. Opp names may contain spaces."""
     out: dict[str, float] = {}

@@ -14,7 +14,12 @@ from legacy_engine.advisory.ranking_benchmark import (
     write_frozen_predictions,
 )
 from legacy_engine.ingestion import store
-from legacy_engine.workflows.ranking_benchmark import build_origin_snapshot, freeze_origin_predictions
+from legacy_engine.workflows.ranking_benchmark import (
+    build_origin_snapshot,
+    freeze_origin_predictions,
+    load_heldout_matches,
+    validate_frozen_taxonomy,
+)
 
 
 def _source_db(path: Path, *, future_result: str = "2-0") -> Path:
@@ -124,6 +129,88 @@ def test_contemporaneous_taxonomy_fails_closed_when_future_dated(tmp_path):
             source, tmp_path / "snapshot.duckdb", fold=_fold(), protocol_hash="p",
             taxonomy_mode="contemporaneous", taxonomy_snapshot=taxonomy,
         )
+
+
+def _taxonomy_snapshot(path: Path) -> Path:
+    rules = path / "rules" / "Formats" / "Legacy" / "Archetypes"
+    rules.mkdir(parents=True)
+    (rules / "Alpha.json").write_text(json.dumps({
+        "Name": "Alpha", "Conditions": [{"Type": "InMainboard", "Cards": ["Brainstorm"]}],
+    }))
+    (rules / "Beta.json").write_text(json.dumps({
+        "Name": "Beta", "Conditions": [{"Type": "InMainboard", "Cards": ["Ponder"]}],
+    }))
+    digest = hashlib.sha256()
+    root = path / "rules"
+    for item in sorted(file for file in root.rglob("*") if file.is_file()):
+        digest.update(item.relative_to(root).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(item.read_bytes())
+        digest.update(b"\0")
+    (path / "manifest.json").write_text(json.dumps({
+        "source": "fixture", "effective_at": "2025-12-01", "action_level": "parent",
+        "rules_manifest": "rules", "rules_sha256": digest.hexdigest(),
+    }))
+    return path
+
+
+def test_contemporaneous_rules_classify_training_and_holdout_with_same_payload(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    con = store.connect(source)
+    con.execute("INSERT INTO cards (name) VALUES ('Ponder')")
+    con.execute(
+        "UPDATE cards SET cmc=1, type_line='Instant', colors='U', produced_mana='', "
+        "oracle_text='', layout='normal', is_land=false"
+    )
+    con.execute("UPDATE deck_cards SET name='Ponder' WHERE deck_idx=1")
+    con.execute("DELETE FROM deck_cards WHERE tournament_id='future'")
+    con.executemany(
+        "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+        [("future", 0, "main", "Brainstorm", 4), ("future", 1, "main", "Ponder", 4)],
+    )
+    con.execute("UPDATE decks SET archetype='Wrong Current Label'")
+    con.close()
+    taxonomy = _taxonomy_snapshot(tmp_path / "taxonomy")
+    snapshot = tmp_path / "snapshot.duckdb"
+    configured = _protocol().model_copy(update={"taxonomy_mode": "contemporaneous"})
+    build_origin_snapshot(
+        source, snapshot, fold=_fold(), protocol_hash=protocol_sha256(configured),
+        taxonomy_mode="contemporaneous", taxonomy_snapshot=taxonomy,
+    )
+    con = duckdb.connect(str(snapshot), read_only=True)
+    assert con.execute("SELECT archetype FROM decks ORDER BY deck_idx").fetchall() == [
+        ("Alpha",), ("Beta",),
+    ]
+    con.close()
+    heldout = load_heldout_matches(source, _fold(), taxonomy_snapshot=taxonomy)
+    assert [(match.subject, match.opponent) for match in heldout] == [("Alpha", "Beta")]
+
+
+def test_evaluation_taxonomy_must_match_frozen_prediction_identity(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    con = store.connect(source)
+    con.execute(
+        "UPDATE cards SET cmc=1, type_line='Instant', colors='U', produced_mana='', "
+        "oracle_text='', layout='normal', is_land=false"
+    )
+    con.close()
+    snapshot = tmp_path / "snapshot.duckdb"
+    configured = _protocol().model_copy(update={"taxonomy_mode": "contemporaneous"})
+    frozen_taxonomy = _taxonomy_snapshot(tmp_path / "frozen-taxonomy")
+    manifest = build_origin_snapshot(
+        source, snapshot, fold=_fold(), protocol_hash=protocol_sha256(configured),
+        taxonomy_mode="contemporaneous", taxonomy_snapshot=frozen_taxonomy,
+    )
+    predictions = freeze_origin_predictions(snapshot, protocol=configured, manifest=manifest)
+    validate_frozen_taxonomy(predictions, frozen_taxonomy)
+
+    different_taxonomy = _taxonomy_snapshot(tmp_path / "different-taxonomy")
+    different_manifest_path = different_taxonomy / "manifest.json"
+    different_manifest = json.loads(different_manifest_path.read_text())
+    different_manifest["effective_at"] = "2025-12-02"
+    different_manifest_path.write_text(json.dumps(different_manifest))
+    with pytest.raises(ValueError, match="does not match frozen predictions"):
+        validate_frozen_taxonomy(predictions, different_taxonomy)
 
 
 def test_freeze_is_deterministic_and_emits_every_preregistered_estimator(tmp_path):

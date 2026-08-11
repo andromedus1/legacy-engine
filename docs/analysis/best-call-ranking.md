@@ -63,6 +63,42 @@ The individual CLI commands and `scripts/refresh_best_call_ranking.py` remain av
 operation and debugging. The composition excludes prices, upstream hot-spare behavior, cloud state,
 git commits, and pushes.
 
+## Future-only ranking benchmark
+
+The ranking benchmark is a preregistered, future-only validation of the parent-archetype
+decision surface. Its immutable registry has ten estimators: `coin-50`, `recent-raw-wr`,
+`field-share`, `top-finish-conversion`, `simple-jeffreys-shrinkage`, and five production
+variants (`production-raw`, `production-ci-gated`, `production-ban-scoped`,
+`production-era-only`, `production-lean`). `production-ci-gated` is the required primary;
+evaluation cannot tune or promote any production estimator.
+
+There are two taxonomy replay modes. `retrospective-fixed-parent` uses the current parent
+ontology as a fixed, deliberately degraded benchmark surface (no camps or families). The
+optional `contemporaneous` mode requires a dated, exact-mapped taxonomy snapshot effective no
+later than the fold cutoff. Both modes build a raw-facts snapshot strictly before the cutoff;
+the prediction artifact is hashed before later outcomes are opened, and evaluation records both
+the prediction and evaluation-data hashes.
+
+Folds are walk-forward, non-overlapping, whole-date windows of 28 days, truncated and reset at
+confirmed B&R boundaries. Held-out outcomes exclude mirrors, byes/draws, ambiguous players,
+unclassified labels, emerging labels, and actions outside the frozen universe. Fold support gates
+are explicit (common matches, events, dates, supported actions, and future
+field coverage); insufficient fold support censors decision claims, while calibration
+intercept/slope are independently censored below their registered prediction minimum and must be
+available for any predictive claim. Player identity is evaluation metadata only: player-sensitivity
+analysis is reported only when identity coverage reaches 80%.
+
+Forecast quality uses log loss, Brier score, calibration intercept/slope, and cumulative
+calibration. Decision quality uses Kendall rank tau, top-three hit, and realized regret with
+event-block bootstrap intervals. Optional external estimators are accepted only as dated,
+exact-mapped snapshots and are scored on the same held-out outcomes.
+
+Plan and freeze/evaluate/run commands require an explicit `--db`; `plan` writes the protocol,
+`freeze` writes the cutoff-safe snapshot and immutable predictions, `evaluate` verifies hashes
+and scores one fold, and `run` composes every fold. These artifacts are evidence, not a tuning
+loop, and a predictive claim requires the preregistered fold, regime, calibration, and primary
+vs baseline gates.
+
 Optionally re-run discovery first (`discover run --archetype <parent> --since 2024-12-16`
 per parent) when the corpus has grown materially — staged splits carry frozen
 membership, so **new decks get camp labels only after a re-staged PASS + apply**.

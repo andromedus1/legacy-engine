@@ -18,6 +18,7 @@ from legacy_engine.advisory.ranking_benchmark import (
     FrozenMatchupPrediction,
     FrozenOriginPredictions,
     FrozenRecommendation,
+    HeldoutMatch,
     SnapshotManifest,
     TaxonomySnapshotManifest,
     content_sha256,
@@ -38,7 +39,12 @@ from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.eras.consume import clamp_pair_window
 from legacy_engine.analytics.eras.run import run_eras
 from legacy_engine.analytics.match_results import compute_match_results
+from legacy_engine.analytics.match_results import normalize_player, parse_match_result
 from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
+from legacy_engine.archetype.labeler import label_decks
+from legacy_engine.archetype.matcher import classify
+from legacy_engine.archetype.rules import load_ruleset
+from legacy_engine.colors import compute_deck_colors
 from legacy_engine.config import RULES_DIR
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.banlist import BAN_EVENTS
@@ -95,6 +101,25 @@ def _load_taxonomy_snapshot(path: Path, cutoff: str) -> tuple[TaxonomySnapshotMa
     if actual != manifest.rules_sha256:
         raise ValueError("taxonomy rules hash mismatch")
     return manifest, rules_path
+
+
+def validate_frozen_taxonomy(
+    predictions: FrozenOriginPredictions,
+    taxonomy_snapshot: Path | None,
+) -> None:
+    """Bind held-out classification to the taxonomy identity frozen at prediction time."""
+    if predictions.taxonomy_mode == "retrospective-fixed-parent":
+        if taxonomy_snapshot is not None:
+            raise ValueError("retrospective benchmark does not accept a taxonomy snapshot")
+        return
+    if taxonomy_snapshot is None:
+        raise ValueError("contemporaneous evaluation requires a taxonomy snapshot")
+    manifest, _rules_path = _load_taxonomy_snapshot(taxonomy_snapshot, predictions.fold.cutoff)
+    if (
+        manifest.effective_at != predictions.taxonomy_effective_at
+        or manifest.rules_sha256 != predictions.rules_sha256
+    ):
+        raise ValueError("evaluation taxonomy identity does not match frozen predictions")
 
 
 def _copy_training_facts(
@@ -181,13 +206,23 @@ def build_origin_snapshot(
     try:
         store.init_schema(destination)
         facts = _copy_training_facts(source, destination, cutoff)
+        if taxonomy_mode == "contemporaneous":
+            if not rules_path.is_dir():
+                raise ValueError("contemporaneous taxonomy rules payload must be a rules directory")
+            ruleset = load_ruleset(rules_path)
+            label_decks(destination, ruleset, lambda name: store.load_card(destination, name))
         destination.execute("UPDATE decks SET variant = NULL")
         _validate_closure(destination)
         events_as_of = tuple(event for event in BAN_EVENTS if event[0] <= date.fromisoformat(cutoff))
         run_eras(destination, ban_events=events_as_of)
 
         event_ids = [row[0] for row in facts["tournaments"]]
-        labels = sorted((row[0], row[1], row[4]) for row in facts["decks"])
+        labels = destination.execute(
+            "SELECT tournament_id, deck_idx, archetype FROM decks ORDER BY 1, 2"
+        ).fetchall()
+        if taxonomy_mode == "contemporaneous" and taxonomy.labels_sha256 is not None:
+            if content_sha256(labels) != taxonomy.labels_sha256:
+                raise ValueError("taxonomy precomputed label hash mismatch")
         card_names = [row[0] for row in facts["cards"]]
         max_date = max(row[2][:10] for row in facts["tournaments"]) if facts["tournaments"] else ""
         decisive = sum(
@@ -464,6 +499,10 @@ def freeze_origin_predictions(
     return FrozenOriginPredictions(
         protocol_hash=expected_protocol_hash,
         snapshot_manifest_sha256=content_sha256(manifest), fold=manifest.fold,
+        taxonomy_mode=manifest.taxonomy_mode,
+        taxonomy_effective_at=manifest.taxonomy_effective_at,
+        taxonomy_sha256=manifest.taxonomy_sha256,
+        rules_sha256=manifest.rules_sha256,
         generated_at=protocol.created_at, code_commit=code_commit,
         estimator_registry=ESTIMATOR_REGISTRY, action_universe=actions,
         field_shares={action: shares[action] for action in actions},
@@ -473,3 +512,104 @@ def freeze_origin_predictions(
         recommendations=tuple(sorted(recommendations, key=lambda item: item.estimator)),
         methodology=methodology, seeds={"benchmark": protocol.seed, "lean": protocol.seed},
     )
+
+
+def _classified_labels(
+    con: duckdb.DuckDBPyConnection, taxonomy_snapshot: Path, cutoff: str,
+) -> dict[tuple[str, int], str]:
+    _manifest, rules_path = _load_taxonomy_snapshot(taxonomy_snapshot, cutoff)
+    if not rules_path.is_dir():
+        raise ValueError("contemporaneous taxonomy rules payload must be a rules directory")
+    ruleset = load_ruleset(rules_path)
+    labels: dict[tuple[str, int], str] = {}
+    for tournament_id, deck_idx in con.execute(
+        "SELECT tournament_id, deck_idx FROM decks ORDER BY 1, 2"
+    ).fetchall():
+        main: dict[str, int] = {}
+        side: dict[str, int] = {}
+        cards = []
+        for board, name, count in con.execute(
+            "SELECT board, name, count FROM deck_cards WHERE tournament_id=? AND deck_idx=?",
+            [tournament_id, deck_idx],
+        ).fetchall():
+            target = main if board == "main" else side
+            target[name] = target.get(name, 0) + count
+            card = store.load_card(con, name)
+            if card is not None:
+                cards.append(card)
+        labels[(str(tournament_id), int(deck_idx))] = classify(
+            main, side, ruleset, compute_deck_colors(cards),
+        ).archetype
+    return labels
+
+
+def load_heldout_matches(
+    source_db: Path, fold: BenchmarkFold, *, taxonomy_snapshot: Path | None = None,
+) -> tuple[HeldoutMatch, ...]:
+    """Read and orient future outcomes; player identity remains evaluation-only metadata."""
+    con = duckdb.connect(str(source_db), read_only=True)
+    try:
+        classified = (
+            _classified_labels(con, taxonomy_snapshot, fold.cutoff)
+            if taxonomy_snapshot is not None else None
+        )
+        rows = con.execute(
+            """
+            WITH dup AS (
+              SELECT tournament_id, lower(trim(player)) AS norm
+              FROM decks GROUP BY tournament_id, lower(trim(player)) HAVING count(*) > 1
+            )
+            SELECT t.id, substr(t.date,1,10), coalesce(t.provenance,''),
+                   r.player1, r.player2, r.result,
+                   d1.deck_idx, d2.deck_idx, d1.archetype, d2.archetype,
+                   du1.norm IS NOT NULL, du2.norm IS NOT NULL
+            FROM rounds r JOIN tournaments t ON t.id=r.tournament_id
+            LEFT JOIN decks d1 ON d1.tournament_id=r.tournament_id
+              AND lower(trim(d1.player))=lower(trim(r.player1))
+            LEFT JOIN decks d2 ON d2.tournament_id=r.tournament_id
+              AND lower(trim(d2.player))=lower(trim(r.player2))
+            LEFT JOIN dup du1 ON du1.tournament_id=r.tournament_id
+              AND du1.norm=lower(trim(r.player1))
+            LEFT JOIN dup du2 ON du2.tournament_id=r.tournament_id
+              AND du2.norm=lower(trim(r.player2))
+            WHERE substr(t.date,1,10)>=? AND substr(t.date,1,10)<?
+            ORDER BY t.date, t.id, r.match_idx
+            """,
+            [fold.cutoff, fold.evaluation_until],
+        ).fetchall()
+    finally:
+        con.close()
+    heldout: list[HeldoutMatch] = []
+    for (
+        event_id, event_date, provenance, player1, player2, result,
+        deck1, deck2, arch1, arch2, amb1, amb2,
+    ) in rows:
+        if classified is not None:
+            arch1 = classified.get((str(event_id), int(deck1))) if deck1 is not None else None
+            arch2 = classified.get((str(event_id), int(deck2))) if deck2 is not None else None
+        outcome = parse_match_result(result)
+        reason = None
+        if amb1 or amb2:
+            reason = "ambiguous-player"
+        elif outcome is None or outcome.winner is None or not (player2 and str(player2).strip()):
+            reason = "bye-draw-invalid"
+        elif arch1 is None or arch2 is None:
+            reason = "unclassified"
+        if arch1 is not None and arch2 is not None and str(arch2) < str(arch1):
+            subject, opponent = str(arch2), str(arch1)
+            subject_player, opponent_player = player2, player1
+            subject_won = outcome is not None and outcome.winner == "p2"
+        else:
+            subject = str(arch1) if arch1 is not None else None
+            opponent = str(arch2) if arch2 is not None else None
+            subject_player, opponent_player = player1, player2
+            subject_won = outcome is not None and outcome.winner == "p1"
+        heldout.append(HeldoutMatch(
+            event_id=str(event_id), event_date=str(event_date), provenance=str(provenance),
+            subject=subject, opponent=opponent,
+            subject_player_key=normalize_player(subject_player) or None,
+            opponent_player_key=normalize_player(opponent_player) or None,
+            subject_won=subject_won if reason is None else None,
+            exclusion_reason=reason,
+        ))
+    return tuple(heldout)
