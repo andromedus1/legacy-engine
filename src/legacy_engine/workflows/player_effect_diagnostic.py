@@ -6,6 +6,8 @@ from datetime import date
 import hashlib
 import json
 from pathlib import Path
+import tempfile
+from typing import TYPE_CHECKING
 
 import duckdb
 
@@ -13,22 +15,15 @@ from legacy_engine.analytics.match_results import normalize_player, parse_match_
 from legacy_engine.analytics.players.diagnostic import (
     IdentityReplayMode,
     PilotRegistration,
+    PlayerDiagnosticProtocol,
     PlayerIdentitySnapshotManifest,
     scoped_player_key,
 )
-from legacy_engine.models.base import LegacyEngineModel
+from legacy_engine.analytics.players.effect import PlayerTrainingMatch, ScheduledPlayerMatch
+from legacy_engine.advisory.ranking_benchmark import BenchmarkFold, BenchmarkProtocol, content_sha256
 
-
-class _PlayerTrainingMatch(LegacyEngineModel):
-    match_id: str
-    event_id: str
-    event_date: str
-    provenance: str
-    subject: str
-    opponent: str
-    subject_player_key: str | None
-    opponent_player_key: str | None
-    subject_won: bool
+if TYPE_CHECKING:
+    from legacy_engine.analytics.players.effect import PlayerInnerFold
 
 
 def load_player_identity_snapshot(
@@ -76,7 +71,7 @@ def load_player_diagnostic_rows(
     until: str,
     identity_mode: IdentityReplayMode,
     identity_snapshot: Path | None,
-) -> tuple[tuple[PilotRegistration, ...], tuple[_PlayerTrainingMatch, ...], str | None]:
+) -> tuple[tuple[PilotRegistration, ...], tuple[PlayerTrainingMatch, ...], str | None]:
     """Load cutoff-safe registrations and decisive parent matches with scoped identity keys."""
     aliases, identity_sha = load_player_identity_snapshot(
         identity_snapshot, mode=identity_mode, cutoff=until,
@@ -142,7 +137,7 @@ def load_player_diagnostic_rows(
             identity_basis=basis, exclusion_reason=reason,
         ))
 
-    matches: list[_PlayerTrainingMatch] = []
+    matches: list[PlayerTrainingMatch] = []
     for event_id, match_idx, event_date, provenance, p1, p2, result in round_rows:
         outcome = parse_match_result(result)
         key1_lookup = (str(event_id), normalize_player(p1))
@@ -167,10 +162,168 @@ def load_player_diagnostic_rows(
             subject, opponent = str(a1), str(a2)
             subject_key, opponent_key = key1, key2
             won = outcome.winner == "p1"
-        matches.append(_PlayerTrainingMatch(
+        matches.append(PlayerTrainingMatch(
             match_id=f"{event_id}:{match_idx}", event_id=str(event_id),
             event_date=str(event_date), provenance=str(provenance), subject=subject,
             opponent=opponent, subject_player_key=subject_key,
             opponent_player_key=opponent_key, subject_won=won,
         ))
     return tuple(registrations), tuple(matches), identity_sha
+
+
+def load_scheduled_player_matches(
+    source_db: Path,
+    fold: BenchmarkFold,
+    *,
+    identity_mode: IdentityReplayMode,
+    identity_snapshot: Path | None,
+    taxonomy_snapshot: Path | None = None,
+) -> tuple[ScheduledPlayerMatch, ...]:
+    """Load participant/deck schedule without projecting or reading ``rounds.result``."""
+    if taxonomy_snapshot is not None:
+        raise ValueError(
+            "player schedule currently supports the frozen retrospective parent labels only"
+        )
+    aliases, _identity_sha = load_player_identity_snapshot(
+        identity_snapshot, mode=identity_mode, cutoff=fold.cutoff,
+    )
+    con = duckdb.connect(str(source_db), read_only=True)
+    try:
+        deck_rows = con.execute(
+            """
+            SELECT d.tournament_id, d.player, d.archetype
+            FROM decks d JOIN tournaments t ON t.id=d.tournament_id
+            WHERE substr(t.date,1,10)>=? AND substr(t.date,1,10)<?
+            ORDER BY d.tournament_id, d.deck_idx
+            """,
+            [fold.cutoff, fold.evaluation_until],
+        ).fetchall()
+        # Outcome-free by construction: result is deliberately absent from this projection.
+        rows = con.execute(
+            """
+            SELECT r.tournament_id, r.match_idx, substr(t.date,1,10),
+                   coalesce(t.provenance,''), r.player1, r.player2
+            FROM rounds r JOIN tournaments t ON t.id=r.tournament_id
+            WHERE substr(t.date,1,10)>=? AND substr(t.date,1,10)<?
+            ORDER BY t.date, r.tournament_id, r.match_idx
+            """,
+            [fold.cutoff, fold.evaluation_until],
+        ).fetchall()
+    finally:
+        con.close()
+    deck_map: dict[tuple[str, str], list[str | None]] = {}
+    for event_id, player, archetype in deck_rows:
+        key = (str(event_id), normalize_player(player))
+        deck_map.setdefault(key, []).append(str(archetype) if archetype is not None else None)
+    scheduled: list[ScheduledPlayerMatch] = []
+    for event_id, match_idx, event_date, provenance, player1, player2 in rows:
+        left = deck_map.get((str(event_id), normalize_player(player1)), ())
+        right = deck_map.get((str(event_id), normalize_player(player2)), ())
+        reason = None
+        if len(left) != 1 or len(right) != 1:
+            reason = "ambiguous-player"
+        elif left[0] is None or right[0] is None:
+            reason = "unclassified"
+        elif left[0] == right[0]:
+            reason = "mirror"
+        key1, _basis1 = scoped_player_key(player1, str(provenance), aliases)
+        key2, _basis2 = scoped_player_key(player2, str(provenance), aliases)
+        if len(left) == 1 and len(right) == 1 and str(right[0]) < str(left[0]):
+            subject, opponent = right[0], left[0]
+            subject_key, opponent_key = key2, key1
+        else:
+            subject = left[0] if len(left) == 1 else None
+            opponent = right[0] if len(right) == 1 else None
+            subject_key, opponent_key = key1, key2
+        scheduled.append(ScheduledPlayerMatch(
+            match_id=f"{event_id}:{match_idx}", event_id=str(event_id),
+            event_date=str(event_date), provenance=str(provenance), subject=subject,
+            opponent=opponent, subject_player_key=subject_key,
+            opponent_player_key=opponent_key, exclusion_reason=reason,
+        ))
+    return tuple(scheduled)
+
+
+def build_player_inner_folds(
+    source_db: Path,
+    outer_fold: BenchmarkFold,
+    *,
+    benchmark_protocol: BenchmarkProtocol,
+    player_protocol: PlayerDiagnosticProtocol,
+    identity_snapshot: Path | None,
+    taxonomy_snapshot: Path | None,
+) -> tuple["PlayerInnerFold", ...]:
+    """Recompute production base grids at earlier whole-date origins for penalty selection."""
+    from legacy_engine.advisory.ranking_benchmark import protocol_sha256
+    from legacy_engine.analytics.players.effect import BaseDeckProbability, PlayerInnerFold
+    from legacy_engine.workflows.ranking_benchmark import (
+        build_origin_snapshot,
+        freeze_origin_predictions,
+    )
+
+    con = duckdb.connect(str(source_db), read_only=True)
+    try:
+        dates = [row[0] for row in con.execute(
+            "SELECT DISTINCT substr(date,1,10) FROM tournaments "
+            "WHERE substr(date,1,10) < ? ORDER BY 1",
+            [outer_fold.cutoff],
+        ).fetchall()]
+    finally:
+        con.close()
+    if len(dates) < 3:
+        return ()
+    candidates = dates[1:]
+    output = []
+    ban_dates = tuple(event[0] for event in benchmark_protocol.ban_events_as_of)
+    for index, cutoff in enumerate(candidates):
+        until = candidates[index + 1] if index + 1 < len(candidates) else outer_fold.cutoff
+        if until <= cutoff:
+            continue
+        regime_start = max((value for value in ban_dates if value <= cutoff), default=dates[0])
+        fold = BenchmarkFold(
+            fold_id=f"inner-{cutoff}--{until}", cutoff=cutoff, evaluation_until=until,
+            regime_start=regime_start, regime_end=next(
+                (value for value in ban_dates if value > cutoff), None,
+            ), event_dates=(cutoff,),
+        )
+        inner_protocol = benchmark_protocol.model_copy(update={
+            "protocol_id": f"{benchmark_protocol.protocol_id}:player-inner:{cutoff}",
+            "first_cutoff": cutoff, "final_evaluation_until": until,
+            "planned_folds": (),
+        })
+        try:
+            with tempfile.TemporaryDirectory(prefix="legacy-player-inner-") as directory:
+                snapshot = Path(directory) / "snapshot.duckdb"
+                manifest = build_origin_snapshot(
+                    source_db, snapshot, fold=fold,
+                    protocol_hash=protocol_sha256(inner_protocol),
+                    taxonomy_mode=benchmark_protocol.taxonomy_mode,
+                    taxonomy_snapshot=taxonomy_snapshot,
+                    ban_events=benchmark_protocol.ban_events_as_of,
+                )
+                frozen = freeze_origin_predictions(
+                    snapshot, protocol=inner_protocol, manifest=manifest,
+                )
+            _registrations, training, _identity_sha = load_player_diagnostic_rows(
+                source_db, until=cutoff, identity_mode=player_protocol.identity_mode,
+                identity_snapshot=identity_snapshot,
+            )
+            _registrations, all_until, _identity_sha = load_player_diagnostic_rows(
+                source_db, until=until, identity_mode=player_protocol.identity_mode,
+                identity_snapshot=identity_snapshot,
+            )
+            validation = tuple(row for row in all_until if row.event_date >= cutoff)
+            grid = tuple(BaseDeckProbability(
+                subject=item.subject, opponent=item.opponent, probability=item.probability,
+            ) for item in frozen.matchup_predictions if item.estimator == "production-ci-gated")
+            output.append(PlayerInnerFold(
+                cutoff=cutoff, training_rows=training, validation_rows=validation,
+                base_predictions_sha256=content_sha256([
+                    item.model_dump(mode="json") for item in grid
+                ]), base_deck_predictions=grid,
+            ))
+        except (OSError, ValueError):
+            # An origin with no cutoff-safe field/support is retained as absent; selection reports
+            # the final valid-origin count rather than silently fitting on the outer base grid.
+            continue
+    return tuple(output)

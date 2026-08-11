@@ -6,10 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from legacy_engine.advisory.ranking_benchmark import BenchmarkFold, content_sha256
 from legacy_engine.ingestion import store
 from legacy_engine.workflows.player_effect_diagnostic import (
     load_player_diagnostic_rows,
     load_player_identity_snapshot,
+    load_scheduled_player_matches,
 )
 
 
@@ -94,3 +96,24 @@ def test_workflow_reconciles_blank_duplicate_alias_and_provenance(tmp_path):
     assert {row.configuration for row in aliased_regs if row.parent == "A"} == {
         "A::one", "A::two",
     }
+
+
+def test_scheduled_rows_are_outcome_blind(tmp_path):
+    db = _db(tmp_path / "players.duckdb")
+    fold = BenchmarkFold(
+        fold_id="f", cutoff="2025-12-01", evaluation_until="2026-01-01",
+        regime_start="2025-11-01", regime_end=None,
+        event_dates=("2025-12-10", "2025-12-11"),
+    )
+    first = load_scheduled_player_matches(
+        db, fold, identity_mode="provenance-local-handle", identity_snapshot=None,
+    )
+    first_hash = content_sha256([row.model_dump(mode="json") for row in first])
+    con = store.connect(db)
+    con.execute("UPDATE rounds SET result='0-2'")
+    con.close()
+    second = load_scheduled_player_matches(
+        db, fold, identity_mode="provenance-local-handle", identity_snapshot=None,
+    )
+    assert first == second
+    assert content_sha256([row.model_dump(mode="json") for row in second]) == first_hash
