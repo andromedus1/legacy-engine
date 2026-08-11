@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-honesty-guards
 kind: feature
-stage: implementing
+stage: done
 tags: [advisory, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -511,3 +511,14 @@ regression proposals were rejected by the reviewer after focused evidence confir
 **Notes**: Focused review verification passed 379 tests. The pass was same-harness fresh-context,
 not cross-model; browser interaction was inspected statically because no browser runtime was
 available.
+
+## Review closure (2026-08-11)
+
+- Named fix story `feature-ranking-honesty-guards-review-fixes` completed in `0f91929`; prerequisite
+  frontmatter-only index repair is isolated in `70f6c59`.
+- Partial-count false exactness, interactive evidence/grouping staleness, positive-share display
+  rounding, and stale CLI/foundation/runbook assertions are fixed with focused regressions.
+- Focused verification: 238 passed. Full repository verification: 3644 passed, 1 skipped. Normal
+  linted knowledge-index regeneration completed with 0 errors and 11 pre-existing warnings.
+- Ranking score policy and thresholds are unchanged. The standard review is closed through named
+  fix verification; no second independent pass was run, per the closure contract.
