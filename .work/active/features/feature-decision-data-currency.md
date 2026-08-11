@@ -1,7 +1,7 @@
 ---
 id: feature-decision-data-currency
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, infra, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -463,3 +463,30 @@ def generate_ranking(
   registered ledger and data-driven era alarms, not guarantee discovery of a brand-new WotC announcement.
   This limitation must be explicit in output and docs; a reliable announcement source needs separate
   research before automation.
+
+## Implementation summary
+
+- Execution capability: frontier/high; selected by the caller for consequential external-data and
+  runtime reproducibility contracts.
+- Review weight: standard (caller); feature intentionally stops at review for independent assessment.
+- Child stories completed:
+  - `feature-decision-data-currency-card-coverage` — `79c7b44`
+  - `feature-decision-data-currency-runtime-alignment` — `cfeba46`
+  - `feature-decision-data-currency-refresh-cycle` — `21354e7`
+- Delivered the Python 3.11–3.13 contract, collision-preserving every-language alias snapshot,
+  exact derived-cache reconciliation with compact honest coverage, release-code refresh cadence,
+  typed stop-on-failure refresh composition, B&R/release/era awareness, and ranking-last output.
+- Simplification: one in-process command replaces the manual shell pipeline while preserving each
+  focused CLI/script surface.
+- Discrepancies from design: `generate_ranking` landed in concurrent ranking-foundation commit
+  `60cebbf`; this feature owns its byte-parity regression and workflow integration. The alias parser
+  accepts both provider JSON arrays and JSONL gzip fixtures. `uv.lock` remained untouched because it
+  contains the user's unrelated pre-existing modification.
+- Adjacent issues parked: none.
+
+## Integrated verification
+
+- `.venv/bin/python -m pytest -q` — 3,592 passed, 1 expected optional-stack skip in 191.94s.
+- Focused ingestion/runtime/workflow/ranking suite — 168 passed.
+- Python bytecode compilation of the new workflow, coverage, and script surfaces — passed.
+- All three child stories are `stage: done`; the feature is ready for standard independent review.
