@@ -75,6 +75,7 @@ tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 
 .cells { font-size: 12px; columns: 3; column-gap: 24px; padding: 4px 0; }
 .cells div { break-inside: avoid; padding: 1px 0; }
 .cells .unm { color: var(--muted); }
+.evidence-warn { color: var(--amber); font-weight: 650; }
 /* Raw-WR matchup highlights in the expanded ledger. Text chips carry the meaning,
    never color alone; only measured rows reach these four mutually exclusive bands. */
 .cells .bo-full, .cells .bo-half, .cells .edge, .cells .edge-dominant {
@@ -447,6 +448,21 @@ function pbestHtml(r) {
   return `${(100 * r.p_best).toFixed(1)}%` +
     ` <span class="chip">Q${q} ${s} ${fmtP(r.s_q)}</span>`;
 }
+function reconciliationHtml(r) {
+  const x = r.reconciliation;
+  if (!x || !x.headline_eligible)
+    return `n/a <span class="chip">${escT((x && x.reason) || "non-reproducible headline")}</span>`;
+  const common = x.strict_common == null ? "common n/a" : `common ${fmtP(x.strict_common)}`;
+  const delta = x.estimator_delta == null ? "" : ` · Δ ${x.estimator_delta >= 0 ? "+" : ""}${fmtP(x.estimator_delta)}`;
+  const cov = `adaptive ${(100*r.coverage).toFixed(0)}% · common ${(100*x.strict_common_coverage).toFixed(0)}%`;
+  return `${fmtP(r.adj)} <span class="chip" title="${escA(cov)}; fixed generated-threshold reconciliation">${common}${delta}</span>`;
+}
+function floorObservabilityHtml(r) {
+  const o = r.floor_observability;
+  if (!o) return "";
+  if (!o.floor_observed) return `<div class="evidence-warn">${escT(o.reason)}</div>`;
+  return `<div><span class="chip">display-grade floor ${o.opponents_display_grade}/${o.opponents_total} · ${(100*o.display_grade_field_coverage).toFixed(0)}% field</span></div>`;
+}
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
   const cls = (r.grounded ? "" : "thin") + stale;
@@ -454,8 +470,8 @@ function rowHtml(r, i, camp) {
   const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
   const w = Math.max(2, Math.round((r.agency || 0) * 220));
   const agencyTxt = (r.grounded ? "" : "≤ ") + fmtP(r.agency);
-  const floorTxt = r.floor == null ? "—" :
-    `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`;
+  const floorTxt = (r.floor == null ? "—" :
+    `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`) + floorObservabilityHtml(r);
   const b = blowouts(r);
   const bTxt = `${b.score % 1 ? b.score.toFixed(1) : b.score}` +
     ` <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span>`;
@@ -464,7 +480,7 @@ function rowHtml(r, i, camp) {
     <td>${i + 1}</td>
     <td class="name">${name}</td>
     <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
-    <td>${fmtP(r.adj)}</td>
+    <td>${reconciliationHtml(r)}</td>
     ${camp ? `<td>${pbestHtml(r)}</td>` : ""}
     <td>${floorTxt}</td>
     <td>${bTxt}</td>
@@ -721,7 +737,9 @@ function renderTable(id, rows, camp) {
         else if (c.raw > 0.60) { cls = " class=\"edge-dominant\""; tag = ` <span class="chip">dominant</span>`; }
         else if (c.raw >= 0.55) { cls = " class=\"edge\""; tag = ` <span class="chip">edge</span>`; }
         const ci = c.ci_low != null ? ` · 95% ${fmtP(c.ci_low)}–${fmtP(c.ci_high)}` : "";
-        return `<div${cls}>${lbl} ${fmtP(c.p)}%${raw}${ci} · n=${c.n} <span class="chip">${c.window}</span>${tag}</div>`;
+        const concentration = c.concentration_warning ?
+          `<div class="evidence-warn">${escT(c.concentration_warning)}</div>` : "";
+        return `<div${cls}>${lbl} ${fmtP(c.p)}%${raw}${ci} · n=${c.n} <span class="chip">${c.window}</span>${tag}${concentration}</div>`;
       }).join("");
       const key = `<div class="bo-key">measured matchups tinted by raw WR:` +
         `<span class="sw" style="background:var(--bo-critical)"></span>blowout (&lt;40%)` +

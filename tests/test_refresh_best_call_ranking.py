@@ -82,6 +82,18 @@ def test_every_measured_cell_can_set_the_floor():
     assert stats["agency"] == .39
 
 
+def test_ranking_row_payload_carries_reconciliation_and_floor_observability():
+    payload = rbcr.row_stats(
+        [{"opp": "bad", "share": 1.0, "p": .39, "n": 8, "measured": True}],
+        top_k=1,
+        cover_min=.8,
+    )
+    assert payload["reconciliation"]["headline_eligible"] is True
+    assert payload["reconciliation"]["parity_delta"] == 0.0
+    assert payload["floor_observability"]["floor_observed"] is False
+    assert "absence of bad cells" in payload["floor_observability"]["reason"]
+
+
 def test_make_cells_embeds_both_sources_for_interactive_sample_gate():
     def cell(n, p):
         return SimpleNamespace(
@@ -381,6 +393,19 @@ class TestScriptParity:
         assert cell["n"] == 15
         assert cell["measured"] is True
 
+    def test_selected_cells_surface_event_or_month_concentration(self):
+        con = script_con()
+        blob = _blob(con, ground_n=3)
+        con.close()
+        warnings = [
+            cell["concentration_warning"]
+            for row in [*blob["arch"], *blob["camps"]]
+            for cell in row["cells"]
+            if cell.get("concentration_warning")
+        ]
+        assert warnings
+        assert any("selected window" in warning and "matches" in warning for warning in warnings)
+
 
 # ---------------------------------------------------------------------------
 # Cross-camp P(best): the additive fields + their honesty gates
@@ -555,6 +580,13 @@ class TestMainEndToEnd:
         assert 'class=\\"edge\\"' in template
         assert "dominant (&gt;60%)" in template
         assert "edge (55–60%)" in template
+
+    def test_measurement_honesty_surfaces_are_rendered(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "fixed generated-threshold reconciliation" in template
+        assert "display-grade floor" in template
+        assert "floorObservabilityHtml" in template
+        assert "c.concentration_warning" in template
 
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"

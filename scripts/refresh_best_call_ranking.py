@@ -335,6 +335,21 @@ def _floor_eligible(c) -> bool:
     return c["measured"]
 
 
+def ranking_row_payload(row):
+    """Stable report projection of the package-owned row measurement."""
+    return {
+        "adj": r4(row.adjusted_field_wr),
+        "floor": r4(row.floor),
+        "floor_opp": row.floor_opponent,
+        "agency": r4(row.agency),
+        "coverage": r4(row.measured_coverage),
+        "grounded": row.grounded,
+        "topk_ok": row.top_k_measured,
+        "floor_observability": row.floor_observability.model_dump(mode="json"),
+        "reconciliation": row.reconciliation.model_dump(mode="json"),
+    }
+
+
 def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
     measurements = []
     for cell in cells:
@@ -365,16 +380,7 @@ def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
         cover_min=cover_min,
         strict_common_sources=strict_common_sources or {},
     )
-    return {
-        "adj": r4(row.adjusted_field_wr), "floor": r4(row.floor),
-        "floor_opp": row.floor_opponent,
-        "agency": r4(row.agency),
-        "coverage": r4(row.measured_coverage),
-        "grounded": row.grounded,
-        "topk_ok": row.top_k_measured,
-        "floor_observability": row.floor_observability.model_dump(mode="json"),
-        "reconciliation": row.reconciliation.model_dump(mode="json"),
-    }
+    return ranking_row_payload(row)
 
 
 def build_strategic_plan_payload(

@@ -25,6 +25,8 @@ decisions:
   - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive non-mirror MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's uniform field window/provenance, and measured/thin state. Exact-archetype mirrors are reported separately as mirror_n and shown only as structural 50% context; they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured gate. The exact archetype ledger remains below."
   - "Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes stay internal to matrix construction and statistical borrowing — no page-visible dropdown payload, family lean, family range, or presentation audit line. A COLOUR SPLIT is archetype-level: the curated registry rewrites decks.archetype at label time, so each branch earns its own archetype row, its own field share, and its own column in every OTHER archetype's ledger. Camps stay subject-side only (the multi-split matrix pools the opponent side back to parent), so a distinction that changes how opponents must play against you belongs in a colour split, not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland black."
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
+  - "Every ranking row is derived from a typed selected-cell ledger. Its serialized replay must reproduce adjusted field WR exactly; a mismatch suppresses the headline. A strict-common-era estimate is shown separately as a divergence diagnostic and is never averaged into the adaptive headline."
+  - "Every row reports floor observability at n>=10 and display-grade n>=30 independently of the interactive page gate. Zero display-grade cells means floor unobserved; missing bad matchups are not evidence of none. Event/month concentration >=40% is labeled on measured selected cells, never automatically corrected away."
 ---
 
 # Best Deck / Best Call agency ranking — refresh runbook
@@ -149,6 +151,20 @@ phase's wall time.
 
 Metric definitions live in the page's "What is Agency %?" card and in the
 frontmatter decisions above — the page prose is authoritative.
+
+**Measurement reconciliation.** Each cell keeps the era and ban-scoped fallback candidates, the
+selected source, the outcome-blind selection reason, its exact window, and concentration evidence.
+The package-owned ledger computes the row; replaying its serialized projection must match the
+headline within floating roundoff or the page emits `n/a` with a named reason. A separate
+strict-common-era matrix uses one uniform start at the latest subject/opponent horizon. The page
+shows its estimate, coverage, and delta beside the adaptive value as a diagnostic—never as a blend.
+
+**Observable floors.** The interactive `--ground-n` still determines which cells can set the page
+floor. Alongside it, the page reports how many opponents reach n>=10 and the engine display gate
+(n>=30), plus display-grade field-share coverage. A row with no n>=30 cells says `floor unobserved
+-- absence of bad cells is not evidence of none`. When one event or calendar month supplies at
+least 40% of a selected measured cell, the expanded ledger names that cluster, its match count,
+share, and selected window; the rate is left unchanged for inspection.
 
 ## Interpretation guardrails
 
