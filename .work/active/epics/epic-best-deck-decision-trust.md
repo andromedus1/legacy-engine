@@ -1,0 +1,66 @@
+---
+id: epic-best-deck-decision-trust
+kind: epic
+stage: drafting
+tags: [analytics, advisory, ingestion, infra]
+parent: null
+depends_on: []
+release_binding: null
+gate_origin: null
+created: 2026-08-11
+updated: 2026-08-11
+---
+
+# Best-deck decision trust — correct, validate, and keep the evidence current
+
+## Brief
+
+Make legacy-engine's answer to “what are the best decks right now?” scientifically and
+operationally trustworthy. The arc repairs known ranking defects, reconciles competing
+measurement bases before adding richer presentation, validates frozen predictions against
+future events, keeps the inputs current enough for those claims, and tests player effects as a
+diagnostic rather than assuming they improve deck-strength estimates.
+
+This epic is deliberately narrower than the full data-autonomy, sideboard-advisor, and rules
+simulation programs. It owns the evidence chain behind archetype/camp ranking. Observed
+top-finisher sideboards remain the primary sideboard evidence; the modeled recommender and
+goldfish/rules engine are deferred and outside this autopilot scope.
+
+## Strategic decisions
+
+- **Order of proof**: correct the measurement basis and candidacy coverage before adding
+  stability or posterior presentation.
+- **Meaning of “best right now”**: candidates with zero current presence cannot compete for
+  the headline P(best), but remain visible as explicitly inactive historical evidence.
+- **Validation standard**: a chronological, future-only walk-forward benchmark is the proof
+  gate for predictive claims; unit tests prove implementation correctness, not usefulness.
+- **Comparison standard**: benchmark against simple internal baselines first and support
+  operator-supplied dated external snapshots without making a brittle scraper a prerequisite.
+- **Player effects**: start with identity coverage and pilot-stickiness diagnostics; expose a
+  player-adjusted deck claim only if a strictly pre-match model improves future-only scoring.
+- **Currency scope**: fix local/CI environment drift, localized and new-card resolution,
+  coverage reporting, and repeatable refresh orchestration. Defer upstream hot-spare ownership,
+  vendor-price expansion, and unrelated catalog programs.
+- **Sideboards and simulation**: use observed deck choices; defer recommender-model rescue and
+  goldfish/rules simulation.
+
+## Child feature graph
+
+- `feature-ranking-measurement-integrity` — reconcile adjusted-WR/window divergences and make
+  unobserved floors explicit.
+- `feature-ranking-honesty-guards` — repair P(best) coverage/candidacy and quarantine imputation.
+- `feature-agency-page-methodology` — add estimator stability, posterior leans, and paths to
+  grounding after the underlying measures are trustworthy.
+- `feature-decision-data-currency` — make the local environment and ranking refresh inputs
+  current, repeatable, and visibly covered.
+- `feature-ranking-future-only-benchmark` — frozen walk-forward evaluation against baselines and
+  optional dated external snapshots.
+- `feature-player-effect-diagnostic` — pilot stickiness plus experimental strictly pre-match
+  player effects evaluated inside the benchmark.
+
+## Simplification opportunity
+
+Consolidate ranking recomputation and coverage definitions so the page, Monte Carlo ranker, and
+validation harness cannot maintain subtly different versions of “measured coverage” or adjusted
+field win rate. Prefer one refresh pipeline and one frozen prediction artifact over session
+scratchpads. Do not retain a second ranking implementation solely for benchmark use.

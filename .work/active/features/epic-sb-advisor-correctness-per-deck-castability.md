@@ -2,13 +2,13 @@
 id: epic-sb-advisor-correctness-per-deck-castability
 kind: feature
 stage: drafting
-tags: [advisory]
+tags: [advisory, deferred]
 parent: epic-sb-advisor-correctness
 depends_on: [epic-sb-advisor-correctness-backtest-ci-gate]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Per-deck element impact — replace the global-best-hoser gate

@@ -3,15 +3,21 @@ id: feature-agency-page-methodology
 kind: feature
 stage: drafting
 tags: [analytics, advisory]
-parent: null
-depends_on: [feature-multi-split-matrix]
+parent: epic-best-deck-decision-trust
+depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Agency-page methodology v2 — lean view, path-to-grounding, verdict stability, floor fix
+
+## Epic alignment (2026-08-11)
+
+Methodology presentation follows—not substitutes for—the measurement-integrity and ranking-honesty
+features. The stability variants must reuse their reconciled row/cell primitives, and the lean view
+must expose rather than erase disagreements between estimator families.
 
 ## Brief
 
@@ -26,7 +32,7 @@ STABILITY column computed across the page's own methodological variants (raw / C
 ban-scoped / era-only) — robustness-across-estimators beat any single metric's #1;
 (4) the agency (worst-matchup floor) methodology fix. Full member texts below.
 
-Depends on feature-multi-split-matrix: camp-level ranking currently needs ~29 separate
+The released `feature-multi-split-matrix` supplies the one-pass camp matrix: camp-level ranking previously needed ~29 separate
 per-parent split-matrix builds and P(best) is incomparable across them; the stability
 column and lean view multiply that cost without the one-pass multi-split matrix.
 

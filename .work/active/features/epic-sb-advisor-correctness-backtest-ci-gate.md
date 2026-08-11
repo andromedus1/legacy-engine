@@ -2,16 +2,19 @@
 id: epic-sb-advisor-correctness-backtest-ci-gate
 kind: feature
 stage: drafting
-tags: [advisory, infra]
+tags: [advisory, infra, deferred]
 parent: epic-sb-advisor-correctness
-depends_on: [epic-sb-advisor-correctness-fourof-guard, epic-sb-advisor-correctness-acquire-color-filter]
+depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Backtest CI divergence gate — hermetic fixture + pinned budget
+
+The four-of guard and acquire color filter prerequisites shipped in v0.4.0; no active dependency
+edge remains.
 
 ## Brief
 

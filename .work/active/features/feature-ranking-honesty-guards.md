@@ -3,15 +3,24 @@ id: feature-ranking-honesty-guards
 kind: feature
 stage: drafting
 tags: [advisory, analytics]
-parent: null
+parent: epic-best-deck-decision-trust
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Ranking honesty guards — imputation quarantine + regime-currency warning
+
+## Epic alignment (2026-08-11)
+
+This feature now owns the verified cross-camp P(best) coverage/key defect from backlog item
+`bug-pbest-coverage-zero-for-most-camps` in addition to the existing imputation quarantine. Its
+design must repair the false-zero coverage path first, make zero-cell degradation loud, and exclude
+zero-current-presence camps from “best right now” candidacy while keeping them visibly inactive.
+The regime-currency warning remains in scope and shares the focused currency contract with
+`feature-decision-data-currency`; do not duplicate refresh/card-dimension implementation here.
 
 ## Brief
 

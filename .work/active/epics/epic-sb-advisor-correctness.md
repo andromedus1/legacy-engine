@@ -2,16 +2,23 @@
 id: epic-sb-advisor-correctness
 kind: epic
 stage: implementing
-tags: [advisory]
+tags: [advisory, deferred]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Sideboard-advisor correctness — close the gap between recommendations and observed boards
+
+## Deferred decision (2026-08-11)
+
+Deferred by operator direction. Trust in the modeled recommender is low, the remaining mechanism
+work is large with uncertain payoff, and observed top-finisher sideboard choices are the primary
+decision evidence for now. This epic and its children are outside the best-deck-decision-trust
+autopilot scope; retain the findings for a future explicit resumption.
 
 ## Brief
 

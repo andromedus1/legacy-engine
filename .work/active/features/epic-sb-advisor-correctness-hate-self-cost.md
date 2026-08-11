@@ -2,13 +2,13 @@
 id: epic-sb-advisor-correctness-hate-self-cost
 kind: feature
 stage: drafting
-tags: [advisory]
+tags: [advisory, deferred]
 parent: epic-sb-advisor-correctness
 depends_on: [epic-sb-advisor-correctness-per-deck-castability]
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Representable self-cost for symmetric cards — price `_hate:` coverage honestly
