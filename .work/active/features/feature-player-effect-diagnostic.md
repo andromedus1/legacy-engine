@@ -1,7 +1,7 @@
 ---
 id: feature-player-effect-diagnostic
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, players, experimental]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-future-only-benchmark]
@@ -756,3 +756,25 @@ calibration/cold/venue/regret harm as `stop` rather than merely `diagnostic-only
 **Notes**: The independent review passed the focused 13-test suite but reproduced each blocker with
 hermetic probes. A read-only real-corpus probe found 66,309 pre-cutoff matches and 30,052 with at
 least one parent outside the 71-action frozen grid, proving the end-to-end KeyError path.
+
+## Review closure (2026-08-11)
+
+- Closed the single standard review through
+  `feature-player-effect-diagnostic-review-fixes`; no second independent pass was run.
+- Real-corpus action-universe reconciliation now emits named outer/inner training and validation
+  exclusions instead of indexing absent base probabilities. The representative hermetic DuckDB
+  path covers a historical parent absent from the frozen grid.
+- Benchmark, full/grid inner base, player protocol, identity snapshot, schedule, and outer artifact
+  identities are verified at their owning boundaries. Inner origins are distinct, non-overlapping,
+  chronological, row-date safe, and end before the outer cutoff.
+- Weighted identifiability is fitted inside the objective; benchmark support and declared
+  cold/venue floors govern evaluability; identity denominators retain ambiguity and recompute by
+  venue; below-floor identity counts are suppressed.
+- Event bootstrap preserves sampled-block multiplicity, neutral regret uses paired event-block
+  differences, and supported calibration/cold/venue/regret harm returns `stop`.
+- Verification: 18 focused player review probes passed; 107 affected player/benchmark/ranking tests
+  passed; full repository verification passed with 3710 tests and 1 skip in 196.89 seconds. Owned
+  Ruff, compile, diff, and canonical knowledge-index checks passed; index lint remained at zero
+  errors and 11 pre-existing advisory warnings.
+- Closure commit for the named fix story: `e6a7055`.
+- Production ranking, Agency, P(best), and the ten-estimator registry remain unchanged.
