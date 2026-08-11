@@ -114,6 +114,51 @@ def test_make_cells_embeds_both_sources_for_interactive_sample_gate():
     assert cells[0]["sources"]["fallback"]["n"] == 12
 
 
+def test_make_cells_ledger_is_canonical_browser_projection_at_same_gate():
+    def cell(n, p):
+        return SimpleNamespace(
+            n=n, p_shrunk=p, p_raw=p, ci_low=p - .123456, ci_high=p + .123456,
+            tier="speculative", concentration=None,
+        )
+
+    cells = rbcr.make_cells(
+        "Hero", ["Villain"], {"Villain": 1 / 3},
+        {("Hero", "Villain"): cell(8, .555555)},
+        {None: {("Hero", "Villain"): cell(20, .444444)}},
+        {"Villain": None}, 8,
+    )
+    rendered = cells[0]
+    ledger = rendered["ledger"]
+    assert ledger["field_share"] == rendered["share"] == 0.3333
+    assert ledger["selected"]["cell"]["p_shrunk"] == rendered["p"] == 0.5556
+    stats = rbcr.row_stats(cells, top_k=1, cover_min=0.0)
+    assert stats["adj"] == rendered["p"]
+
+
+def test_interactive_sources_carry_their_own_concentration_warning():
+    from legacy_engine.models.matchup import CellConcentration
+
+    def cell(n, p, event):
+        concentration = CellConcentration(
+            event_id=event, event_n=n, event_share=1.0,
+            month="2026-07", month_n=n, month_share=1.0,
+        )
+        return SimpleNamespace(
+            n=n, p_shrunk=p, p_raw=p, ci_low=p - .1, ci_high=p + .1,
+            tier="speculative", concentration=concentration,
+        )
+
+    rendered = rbcr.make_cells(
+        "Hero", ["Villain"], {"Villain": 1.0},
+        {("Hero", "Villain"): cell(5, .45, "era-event")},
+        {None: {("Hero", "Villain"): cell(12, .55, "fallback-event")}},
+        {"Villain": None}, 8,
+    )[0]
+    assert "era-event" in rendered["ledger"]["era"]["concentration_warning"]
+    assert "fallback-event" in rendered["ledger"]["fallback"]["concentration_warning"]
+    assert "fallback-event" in rendered["concentration_warning"]
+
+
 def _era_boundary(date: str) -> EraBoundary:
     return EraBoundary(
         date=date, signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False,
@@ -310,7 +355,8 @@ def _old_path_camp_rows(con, *, field_since, ground_n, top_k, cover_min, min_row
         for lbl in (r for r in adp.matrix.archetypes if r.startswith(prefix)):
             camp = lbl[len(prefix):-1]
             cells = rbcr.make_cells(lbl, field_opps, sh, adp.matrix.cells, fbp, ban_since,
-                                    ground_n, subj_ban=p_ban, ad_windows=adp.cell_windows)
+                                    ground_n, subj_ban=p_ban, ad_windows=adp.cell_windows,
+                                    valid_since=adp.valid_since)
             frac = camp_frac.get((parent, camp), 0.0)
             camps_out.append({
                 "subject": lbl, **rbcr.row_stats(cells, top_k, cover_min),

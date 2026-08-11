@@ -154,17 +154,22 @@ frontmatter decisions above — the page prose is authoritative.
 
 **Measurement reconciliation.** Each cell keeps the era and ban-scoped fallback candidates, the
 selected source, the outcome-blind selection reason, its exact window, and concentration evidence.
-The package-owned ledger computes the row; replaying its serialized projection must match the
-headline within floating roundoff or the page emits `n/a` with a named reason. A separate
+The package-owned ledger is the canonical rounded cell projection consumed by both Python and the
+offline browser controls; replaying it must match the headline within floating roundoff or the page
+emits `n/a` with a named reason. Each selected candidate also carries validated subject/opponent
+pair-window provenance; invalid provenance suppresses the headline. A separate
 strict-common-era matrix uses one uniform start at the latest subject/opponent horizon. The page
-shows its estimate, coverage, and delta beside the adaptive value as a diagnostic—never as a blend.
+shows its exact start, contributing coverage, display-grade coverage, estimate, and delta beside
+the adaptive value as a diagnostic—never as a blend, even when the estimate is unavailable.
 
 **Observable floors.** The interactive `--ground-n` still determines which cells can set the page
 floor. Alongside it, the page reports how many opponents reach n>=10 and the engine display gate
 (n>=30), plus display-grade field-share coverage. A row with no n>=30 cells says `floor unobserved
 -- absence of bad cells is not evidence of none`. When one event or calendar month supplies at
 least 40% of a selected measured cell, the expanded ledger names that cluster, its match count,
-share, and selected window; the rate is left unchanged for inspection.
+share, and selected window. Concentration evidence belongs to each candidate source, so changing
+the interactive gate selects or clears the warning together with its numeric cell; the rate is left
+unchanged for inspection.
 
 ## Interpretation guardrails
 

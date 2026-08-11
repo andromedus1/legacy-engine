@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-measurement-integrity-review-fixes
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, honesty, bug, tests]
 parent: feature-ranking-measurement-integrity
 depends_on: []
@@ -35,3 +35,19 @@ changing ranking policy beyond the accepted design.
 
 This story is the named fix set for a `standard`-weight review. Green implementation verification
 returns the parent feature directly to `done`; do not run a second independent review pass.
+
+## Implementation notes
+
+- The rounded typed ledger is now the canonical serialized cell projection used by Python row
+  reconciliation and browser source selection; awkward share/rate regression coverage proves
+  same-threshold idempotence.
+- Era and fallback candidates carry their own concentration evidence and validated `PairWindow`;
+  interactive selection moves or clears the warning with the selected numeric source, and invalid
+  provenance suppresses headline fields with a reason.
+- Floor audit output always states n>=10 and display-grade counts, including the unobserved-floor
+  warning. Strict-common diagnostics separately report contributing/display-grade coverage and
+  retain the exact start for null estimates.
+- Focused verification: 517 passed across the ranking, refresh, field, matchup, and era-contract
+  suites. Full verification: `uv run --no-sync python -m pytest -q` — 3638 passed, 1 skipped.
+- Design deviations: none. No ranking policy, thresholds, source order, or estimator blending
+  changed.

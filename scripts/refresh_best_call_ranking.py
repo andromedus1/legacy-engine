@@ -71,6 +71,7 @@ from legacy_engine.advisory.positioning import (
     rank_decks,
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
+from legacy_engine.analytics.eras.consume import clamp_pair_window
 from legacy_engine.analytics.matchup import (
     DISPLAY_GATE_N,
     MatchupMatrix,
@@ -164,7 +165,7 @@ def _typed_cell(cell, subject: str, opponent: str) -> MatchupCell:
 
 
 def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground_n,
-               subj_ban=None, out_used=None, ad_windows=None):
+               subj_ban=None, out_used=None, ad_windows=None, valid_since=None):
     """One row's cells vs every current-field opponent (mirror excluded).
 
     ``fb_by_date`` maps a window-start ISO date (or ``None`` = full corpus) to that
@@ -181,14 +182,26 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
         if opp == subj:
             continue
         ec = ad_cells.get((subj, opp))
-        fb_date = max((d for d in (subj_ban, ban_since.get(opp)) if d), default=None)
+        fallback_window = clamp_pair_window(
+            subj, opp, subject_since=subj_ban, opponent_since=ban_since.get(opp),
+        )
+        fb_date = fallback_window.effective_since
         fc = fb_by_date[fb_date].get((subj, opp)) if fb_date in fb_by_date else None
         ec = _typed_cell(ec, subj, opp) if ec is not None else None
         fc = _typed_cell(fc, subj, opp) if fc is not None else None
         fb_label = f"BA {fb_date}" if fb_date else "FC"
+        era_since = (ad_windows or {}).get((subj, opp))
+        era_window = clamp_pair_window(
+            subj,
+            opp,
+            subject_since=(valid_since or {}).get(subj),
+            opponent_since=(valid_since or {}).get(opp),
+            requested_since=era_since if valid_since is None else None,
+        )
         era_source = (
             RankingCellSource(
-                kind="era", since=(ad_windows or {}).get((subj, opp)), cell=ec,
+                kind="era", since=era_since, cell=ec,
+                pair_window=era_window,
             ) if ec is not None else None
         )
         fallback_source = None
@@ -197,28 +210,53 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
                 kind="ban-fallback" if fb_date else "full-corpus",
                 since=fb_date,
                 cell=fc,
+                pair_window=fallback_window,
             )
+        def with_concentration(source):
+            if source is None:
+                return None
+            warning = select_ranking_cell(
+                subj, opp, shares[opp], era=source, fallback=None, ground_n=1,
+            ).concentration_warning
+            return source.model_copy(update={"concentration_warning": warning})
+
+        era_source = with_concentration(era_source)
+        fallback_source = with_concentration(fallback_source)
+
+        def canonical_source(source):
+            if source is None:
+                return None
+            cell = source.cell.model_copy(update={
+                name: r4(getattr(source.cell, name))
+                for name in ("p_raw", "p_shrunk", "ci_low", "ci_high")
+            })
+            return source.model_copy(update={"cell": cell})
+
+        era_source = canonical_source(era_source)
+        fallback_source = canonical_source(fallback_source)
         measurement = select_ranking_cell(
-            subj, opp, shares[opp], era=era_source, fallback=fallback_source, ground_n=ground_n,
+            subj, opp, r4(shares[opp]), era=era_source, fallback=fallback_source, ground_n=ground_n,
         )
         use = measurement.selected.cell if measurement.selected is not None else None
         win = (
             "era" if measurement.selected_kind == "era" else fb_label
         )
-        def source_payload(cell, window):
-            if cell is None:
+        def source_payload(source, window):
+            if source is None:
                 return None
+            cell = source.cell
             return {
                 "p": r4(cell.p_shrunk), "raw": r4(cell.p_raw),
                 "ci_low": r4(cell.ci_low), "ci_high": r4(cell.ci_high),
                 "n": cell.n, "window": window, "tier": str(cell.tier),
+                "concentration_warning": source.concentration_warning,
             }
 
         # Keep both candidates so the offline page can faithfully re-run the
         # era-preferred / ban-scoped-fallback selection at an interactive n gate.
         sources = {
-            "era": source_payload(ec, "era"),
-            "fallback": source_payload(fc, fb_label),
+            "era": source_payload(era_source, "era"),
+            "fallback": source_payload(fallback_source, fb_label),
         }
         if use is None:  # pair absent from the matrix (e.g. camp vs its own parent)
             cells.append({"opp": opp, "share": r4(shares[opp]), "p": None, "raw": None,
@@ -377,7 +415,9 @@ def ranking_row_payload(row):
     }
 
 
-def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
+def row_stats(
+    cells, top_k, cover_min, *, strict_common_sources=None, strict_common_since=None,
+):
     measurements = []
     for cell in cells:
         if "ledger" in cell:
@@ -386,6 +426,9 @@ def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
         source = RankingCellSource(
             kind="era",
             since=None,
+            pair_window=clamp_pair_window(
+                "row", cell["opp"], subject_since=None, opponent_since=None,
+            ),
             cell=MatchupCell(
                 archetype_a="row", archetype_b=cell["opp"],
                 wins=round(cell["p"] * cell["n"]), n=cell["n"],
@@ -406,6 +449,7 @@ def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
         top_k=top_k,
         cover_min=cover_min,
         strict_common_sources=strict_common_sources or {},
+        strict_common_since=strict_common_since,
     )
     return ranking_row_payload(row)
 
@@ -713,10 +757,13 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         arch_used[subj] = {}
         cells = make_cells(subj, field_opps, sh, ad.matrix.cells, fb_by_date, ban_since,
                            ground_n, subj_ban=ban_since.get(subj), out_used=arch_used[subj],
-                           ad_windows=ad.cell_windows)
+                           ad_windows=ad.cell_windows, valid_since=ad.valid_since)
         strict_since = max(
-            (ad.valid_since.get(name) for name in [subj, *field_opps]
-             if ad.valid_since.get(name) is not None),
+            (window.effective_since for opp in field_opps
+             if (window := clamp_pair_window(
+                 subj, opp, subject_since=ad.valid_since.get(subj),
+                 opponent_since=ad.valid_since.get(opp),
+             )).effective_since is not None),
             default=None,
         )
         if strict_since not in strict_arch_cache:
@@ -727,12 +774,17 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             opp: RankingCellSource(
                 kind="strict-common-era", since=strict_since,
                 cell=strict_arch_cache[strict_since][(subj, opp)],
+                pair_window=clamp_pair_window(
+                    subj, opp, subject_since=ad.valid_since.get(subj),
+                    opponent_since=ad.valid_since.get(opp), requested_since=strict_since,
+                ),
             )
             for opp in field_opps if (subj, opp) in strict_arch_cache[strict_since]
         }
         arch_out.append({
             "subject": subj, **row_stats(
                 cells, top_k, cover_min, strict_common_sources=strict_sources,
+                strict_common_since=strict_since,
             ),
             "since": ad.valid_since.get(subj),
             "horizon": horizon_text(ad.horizon_meta.get(subj)),
@@ -759,7 +811,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     # camp labels inherit the parent's ban-affectedness date. One multi-split matrix per
     # DISTINCT date serves every parent's pairs at that date.
     camp_fb_dates = {
-        max((d for d in (ban_since.get(camp_parent[c]), ban_since.get(o)) if d), default=None)
+        clamp_pair_window(
+            c, o, subject_since=ban_since.get(camp_parent[c]),
+            opponent_since=ban_since.get(o),
+        ).effective_since
         for c in camp_labels for o in field_opps
     }
     camp_fb = {}
@@ -782,10 +837,13 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             camp_used[lbl] = {}
             cells = make_cells(lbl, field_opps, sh, msa.multi.cells, camp_fb, ban_since,
                                ground_n, subj_ban=p_ban, out_used=camp_used[lbl],
-                               ad_windows=msa.cell_windows)
+                               ad_windows=msa.cell_windows, valid_since=msa.valid_since)
             strict_since = max(
-                (msa.valid_since.get(name) for name in [lbl, *field_opps]
-                 if msa.valid_since.get(name) is not None),
+                (window.effective_since for opp in field_opps
+                 if (window := clamp_pair_window(
+                     lbl, opp, subject_since=msa.valid_since.get(lbl),
+                     opponent_since=msa.valid_since.get(opp),
+                 )).effective_since is not None),
                 default=None,
             )
             if strict_since not in strict_camp_cache:
@@ -796,6 +854,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 opp: RankingCellSource(
                     kind="strict-common-era", since=strict_since,
                     cell=strict_camp_cache[strict_since][(lbl, opp)],
+                    pair_window=clamp_pair_window(
+                        lbl, opp, subject_since=msa.valid_since.get(lbl),
+                        opponent_since=msa.valid_since.get(opp), requested_since=strict_since,
+                    ),
                 )
                 for opp in field_opps if (lbl, opp) in strict_camp_cache[strict_since]
             }
@@ -803,6 +865,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             camps_out.append({
                 "subject": lbl, **row_stats(
                     cells, top_k, cover_min, strict_common_sources=strict_sources,
+                    strict_common_since=strict_since,
                 ),
                 "since": msa.valid_since.get(lbl),
                 "horizon": horizon_text(msa.horizon_meta.get(lbl)),

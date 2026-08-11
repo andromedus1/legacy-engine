@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from legacy_engine.analytics.matchup import DISPLAY_GATE_N
+from legacy_engine.analytics.eras.consume import PairWindow
 from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.models.matchup import MatchupCell
 
@@ -16,6 +17,8 @@ class RankingCellSource(LegacyEngineModel):
     kind: CellSourceKind
     since: str | None
     cell: MatchupCell
+    pair_window: PairWindow | None = None
+    concentration_warning: str | None = None
 
 
 class RankingCellMeasurement(LegacyEngineModel):
@@ -46,6 +49,7 @@ class RowReconciliation(LegacyEngineModel):
     parity_delta: float | None
     strict_common_since: str | None
     strict_common: float | None
+    strict_common_contributing_coverage: float
     strict_common_coverage: float
     estimator_delta: float | None
     headline_eligible: bool
@@ -122,8 +126,13 @@ def select_ranking_cell(
         selected=selected,
         selection_reason=reason,
         measured=selected is not None and selected.cell.n >= ground_n,
-        concentration_warning=_concentration_warning(
-            selected, ground_n=ground_n, warn_share=concentration_warn_share,
+        concentration_warning=(
+            selected.concentration_warning
+            if selected is not None and selected.cell.n >= ground_n
+            and selected.concentration_warning is not None
+            else _concentration_warning(
+                selected, ground_n=ground_n, warn_share=concentration_warn_share,
+            )
         ),
     )
 
@@ -142,6 +151,7 @@ def measure_ranking_row(
     top_k: int,
     cover_min: float,
     strict_common_sources: Mapping[str, RankingCellSource],
+    strict_common_since: str | None = None,
     display_gate_n: int = DISPLAY_GATE_N,
 ) -> RankingRowMeasurement:
     """Derive every ranking row metric from the selected-cell ledger once."""
@@ -175,9 +185,15 @@ def measure_ranking_row(
         (cell.field_share, strict_common_sources[cell.opponent])
         for cell in cells if cell.opponent in strict_common_sources
     ])
-    common_since = max(
+    inferred_common_since = max(
         (source.since for source in strict_common_sources.values() if source.since is not None),
         default=None,
+    )
+    common_since = strict_common_since if strict_common_since is not None else inferred_common_since
+    common_contributing_mass = sum(
+        cell.field_share for cell in cells
+        if (source := strict_common_sources.get(cell.opponent)) is not None
+        and source.cell.n >= 1 and source.cell.p_shrunk is not None
     )
     common_measured_mass = sum(
         cell.field_share for cell in cells
@@ -210,29 +226,47 @@ def measure_ranking_row(
         (adaptive is None and serialized is None)
         or (parity_delta is not None and parity_delta <= 1e-12)
     )
-    reason = None if parity_ok else "selected-cell ledger does not reproduce serialized row"
+    invalid_window = next((
+        cell for cell in cells
+        if cell.selected is not None and (
+            cell.selected.pair_window is None
+            or cell.selected.pair_window.subject != cell.subject
+            or cell.selected.pair_window.opponent != cell.opponent
+            or cell.selected.pair_window.effective_since != cell.selected.since
+        )
+    ), None)
+    headline_ok = parity_ok and invalid_window is None
+    if not parity_ok:
+        reason = "selected-cell ledger does not reproduce serialized row"
+    elif invalid_window is not None:
+        reason = f"invalid pair-window provenance for {invalid_window.opponent}"
+    else:
+        reason = None
     reconciliation = RowReconciliation(
         adaptive_selected=adaptive,
         serialized_recompute=serialized,
         parity_delta=parity_delta,
         strict_common_since=common_since,
         strict_common=common,
+        strict_common_contributing_coverage=(
+            common_contributing_mass / total_share if total_share else 0.0
+        ),
         strict_common_coverage=common_coverage,
         estimator_delta=(adaptive - common if adaptive is not None and common is not None else None),
-        headline_eligible=parity_ok,
+        headline_eligible=headline_ok,
         reason=reason,
     )
     valid_values = [value for value in (adaptive, floor) if value is not None]
     return RankingRowMeasurement(
         subject=subject,
         cells=tuple(cells),
-        adjusted_field_wr=adaptive if parity_ok else None,
-        floor=floor if parity_ok else None,
-        floor_opponent=floor_cell.opponent if parity_ok and floor_cell is not None else None,
-        agency=min(valid_values) if parity_ok and valid_values else None,
+        adjusted_field_wr=adaptive if headline_ok else None,
+        floor=floor if headline_ok else None,
+        floor_opponent=floor_cell.opponent if headline_ok and floor_cell is not None else None,
+        agency=min(valid_values) if headline_ok and valid_values else None,
         measured_coverage=measured_coverage,
         top_k_measured=top_k_measured,
-        grounded=parity_ok and top_k_measured and measured_coverage >= cover_min,
+        grounded=headline_ok and top_k_measured and measured_coverage >= cover_min,
         floor_observability=observability,
         reconciliation=reconciliation,
     )

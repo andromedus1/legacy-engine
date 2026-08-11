@@ -465,14 +465,16 @@ function reconciliationHtml(r) {
     return `n/a <span class="chip">${escT((x && x.reason) || "non-reproducible headline")}</span>`;
   const common = x.strict_common == null ? "common n/a" : `common ${fmtP(x.strict_common)}`;
   const delta = x.estimator_delta == null ? "" : ` · Δ ${x.estimator_delta >= 0 ? "+" : ""}${fmtP(x.estimator_delta)}`;
-  const cov = `adaptive ${(100*r.coverage).toFixed(0)}% · common ${(100*x.strict_common_coverage).toFixed(0)}%`;
-  return `${fmtP(r.adj)} <span class="chip" title="${escA(cov)}; fixed generated-threshold reconciliation">${common}${delta}</span>`;
+  const since = x.strict_common_since || "full corpus";
+  const cov = `adaptive ${(100*r.coverage).toFixed(0)}% · common contributing ${(100*x.strict_common_contributing_coverage).toFixed(0)}% · common display-grade ${(100*x.strict_common_coverage).toFixed(0)}%`;
+  return `${fmtP(r.adj)} <span class="chip" title="${escA(cov)}; fixed generated-threshold reconciliation">${common} since ${escT(since)}${delta}</span>`;
 }
 function floorObservabilityHtml(r) {
   const o = r.floor_observability;
   if (!o) return "";
-  if (!o.floor_observed) return `<div class="evidence-warn">${escT(o.reason)}</div>`;
-  return `<div><span class="chip">display-grade floor ${o.opponents_display_grade}/${o.opponents_total} · ${(100*o.display_grade_field_coverage).toFixed(0)}% field</span></div>`;
+  const counts = `<span class="chip">n≥10 ${o.opponents_n10}/${o.opponents_total} · display-grade floor ${o.opponents_display_grade}/${o.opponents_total} · ${(100*o.display_grade_field_coverage).toFixed(0)}% field</span>`;
+  const warning = o.floor_observed ? "" : `<div class="evidence-warn">${escT(o.reason)}</div>`;
+  return `<div>${counts}</div>${warning}`;
 }
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
@@ -532,8 +534,16 @@ const tableState = {
   "t-camp": {col: 2, dir: -1, minCoverage: 0, minN: D.meta.ground_n, input: "coverage-camp", sample: "sample-camp", count: "count-camp"},
 };
 function selectCell(c, minN) {
-  if (!c.sources) return {...c, measured: c.n >= minN};
-  const era = c.sources.era, fallback = c.sources.fallback;
+  const sourceView = source => source ? {
+    p:source.cell.p_shrunk, raw:source.cell.p_raw,
+    ci_low:source.cell.ci_low, ci_high:source.cell.ci_high,
+    n:source.cell.n, tier:source.cell.tier,
+    window:source.kind === "era" ? "era" : (source.kind === "full-corpus" ? "FC" : `BA ${source.since}`),
+    concentration_warning: source.cell.n >= minN ? source.concentration_warning : null,
+  } : null;
+  const era = c.ledger ? sourceView(c.ledger.era) : c.sources && c.sources.era;
+  const fallback = c.ledger ? sourceView(c.ledger.fallback) : c.sources && c.sources.fallback;
+  if (!era && !fallback) return {...c, measured: c.n >= minN};
   const use = era && era.n >= minN ? era :
     fallback && fallback.n >= minN ? fallback : (era || fallback);
   return {...c, ...(use || {p:null,raw:null,ci_low:null,ci_high:null,n:0,window:"era",tier:"speculative"}),
