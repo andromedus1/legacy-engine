@@ -58,3 +58,5 @@ returns the parent feature directly to `done`; do not run a second independent r
   tests/test_card_coverage_cli.py tests/test_scryfall.py tests/test_releases.py
   tests/test_runtime_contract.py` — 99 passed.
 - Bytecode compilation of every changed production module — passed.
+- `.venv/bin/python -m pytest -q` — 3,634 passed, 1 expected optional-stack skip in
+  212.94s.

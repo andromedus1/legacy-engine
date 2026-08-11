@@ -1,7 +1,7 @@
 ---
 id: feature-decision-data-currency
 kind: feature
-stage: implementing
+stage: done
 tags: [ingestion, infra, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -517,3 +517,19 @@ derived-data-integrity risks inside the accepted feature contract.
 
 **Notes**: The focused review suite passed 89 tests. No live all-cards download or Python 3.11 CI
 runner was exercised; those limitations do not weaken the hermetic failure-path findings.
+
+## Review closure (2026-08-11)
+
+- Verdict: fixed and verified; the standard-weight review closes without a second independent pass.
+- Fix story: `feature-decision-data-currency-review-fixes` (`098df4f`), advanced directly to done.
+- Release-scan failure now marks a retained manifest's alias currency uncertain in both the source
+  step and card-coverage report.
+- Ranking generation writes a complete same-directory temporary file, fsyncs it, and atomically
+  replaces the destination; injected failure preserves the prior page byte-for-byte.
+- B&R audit initializes from the curated operator ledger independently of external source refresh
+  and renders an honest unavailable marker if no confirmed event exists.
+- All-cards input now rejects invalid shape, missing provenance, empty/implausibly incomplete
+  candidates, and implausible alias shrinkage before replacing last-good raw or DuckDB state.
+- Verification: focused review-fix suite 99 passed; full repository suite 3,634 passed with one
+  expected optional-stack skip in 212.94s; changed-module bytecode compilation passed.
+- Deferred findings: none. Rejected findings: none. Adjacent issues parked: none.
