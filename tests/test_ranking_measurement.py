@@ -3,12 +3,15 @@ from __future__ import annotations
 import pytest
 
 from legacy_engine.advisory.ranking_measurement import (
+    GroundingCellState,
     VariantRowMeasurement,
     RankingCellSource,
+    grounding_cell_states,
     measure_lean_agency,
     measure_ranking_row,
     measure_variant_row,
     methodology_variant_specs,
+    plan_path_to_grounding,
     rank_variant_rows,
     select_ranking_cell,
 )
@@ -263,3 +266,111 @@ class TestRankStability:
         assert result.rank_span is None
         assert result.missing_variants == ("era-only",)
         assert result.reason == "not ranked by: era-only"
+
+
+class TestPathToGrounding:
+    def test_mandatory_top_k_precedes_efficient_coverage_actions(self):
+        cells = (
+            GroundingCellState(
+                opponent="Top", field_share=0.35, era_n=2, fallback_n=4, measured=False,
+            ),
+            GroundingCellState(
+                opponent="Covered", field_share=0.30, era_n=8, fallback_n=20, measured=True,
+            ),
+            GroundingCellState(
+                opponent="Efficient", field_share=0.20, era_n=7, fallback_n=7, measured=False,
+            ),
+            GroundingCellState(
+                opponent="Slow", field_share=0.15, era_n=0, fallback_n=0, measured=False,
+            ),
+        )
+        path = plan_path_to_grounding(
+            cells, ground_n=8, top_k=2, cover_min=0.8,
+        )
+        assert [action.opponent for action in path.actions] == ["Top", "Efficient"]
+        assert path.actions[0].mandatory_top_k is True
+        assert path.actions[0].additional_matches == 4
+        assert path.actions[0].projected_source == "ban-fallback"
+        assert path.actions[1].mandatory_top_k is False
+        assert path.projected_coverage == pytest.approx(0.85)
+        assert path.would_ground is True
+
+        increments = {action.opponent: action.additional_matches for action in path.actions}
+        replayed = tuple(
+            cell.model_copy(update={
+                "era_n": cell.era_n + increments.get(cell.opponent, 0),
+                "fallback_n": cell.fallback_n + increments.get(cell.opponent, 0),
+                "measured": (
+                    max(cell.era_n, cell.fallback_n) + increments.get(cell.opponent, 0) >= 8
+                ),
+            })
+            for cell in cells
+        )
+        assert plan_path_to_grounding(
+            replayed, ground_n=8, top_k=2, cover_min=0.8,
+        ).grounded is True
+
+    def test_full_path_retains_remainder_and_total_shortfall(self):
+        cells = tuple(
+            GroundingCellState(
+                opponent=f"Opp {index}", field_share=0.2, era_n=index,
+                fallback_n=index, measured=False,
+            )
+            for index in range(5)
+        )
+        path = plan_path_to_grounding(
+            cells, ground_n=8, top_k=5, cover_min=0.8, display_limit=3,
+        )
+        assert len(path.actions) == 5
+        assert len(path.display_actions) == 3
+        assert path.undisplayed_actions == 2
+        assert path.total_additional_matches == sum(8 - index for index in range(5))
+        assert path.would_ground is True
+
+    def test_era_wins_projected_source_tie_and_grounded_row_needs_nothing(self):
+        tied = GroundingCellState(
+            opponent="Tie", field_share=1.0, era_n=0, fallback_n=0, measured=False,
+            fallback_kind="full-corpus",
+        )
+        path = plan_path_to_grounding([tied], ground_n=8, top_k=1, cover_min=0.8)
+        assert path.actions[0].projected_source == "era"
+
+        grounded = GroundingCellState(
+            opponent="Done", field_share=1.0, era_n=8, fallback_n=40, measured=True,
+        )
+        complete = plan_path_to_grounding(
+            [grounded], ground_n=8, top_k=1, cover_min=0.8,
+        )
+        assert complete.grounded is True
+        assert complete.actions == ()
+        assert complete.reason == "already grounded"
+
+    def test_typed_ledger_adapter_preserves_candidate_counts_and_source_kind(self):
+        measurement = select_ranking_cell(
+            "Deck", "A", 1.0,
+            era=source("era", 2, 4, opponent="A"),
+            fallback=source("full-corpus", 5, 10, opponent="A"),
+            ground_n=8,
+        )
+        state = grounding_cell_states([measurement])[0]
+        assert state == GroundingCellState(
+            opponent="A", field_share=1.0, era_n=4, fallback_n=10,
+            measured=True, fallback_kind="full-corpus",
+        )
+
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"ground_n": 0}, "ground_n"),
+            ({"top_k": 0}, "top_k"),
+            ({"cover_min": 1.1}, "cover_min"),
+            ({"display_limit": 0}, "display_limit"),
+        ],
+    )
+    def test_invalid_configuration_fails(self, kwargs, message):
+        cell = GroundingCellState(
+            opponent="A", field_share=1.0, era_n=8, fallback_n=8, measured=True,
+        )
+        defaults = {"ground_n": 8, "top_k": 1, "cover_min": 0.8, "display_limit": 3}
+        with pytest.raises(ValueError, match=message):
+            plan_path_to_grounding([cell], **(defaults | kwargs))

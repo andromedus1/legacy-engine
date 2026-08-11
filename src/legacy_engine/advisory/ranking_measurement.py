@@ -126,6 +126,34 @@ class RankStability(LegacyEngineModel):
     reason: str | None
 
 
+class GroundingCellState(LegacyEngineModel):
+    opponent: str
+    field_share: float
+    era_n: int
+    fallback_n: int
+    measured: bool
+    fallback_kind: Literal["ban-fallback", "full-corpus"] = "ban-fallback"
+
+
+class GroundingAction(LegacyEngineModel):
+    opponent: str
+    additional_matches: int
+    projected_source: CellSourceKind
+    field_share_gain: float
+    mandatory_top_k: bool
+
+
+class GroundingPath(LegacyEngineModel):
+    grounded: bool
+    actions: tuple[GroundingAction, ...]
+    display_actions: tuple[GroundingAction, ...]
+    undisplayed_actions: int
+    total_additional_matches: int
+    projected_coverage: float
+    would_ground: bool
+    reason: str | None
+
+
 def methodology_variant_specs(ground_n: int) -> tuple[MethodologyVariantSpec, ...]:
     """The predeclared, outcome-blind perturbations used by Best Call."""
     if ground_n < 1:
@@ -485,6 +513,139 @@ def rank_variant_rows(
             ),
         )
     return result
+
+
+def grounding_cell_states(
+    cells: Sequence[RankingCellMeasurement],
+) -> tuple[GroundingCellState, ...]:
+    """Project the typed source ledger into rate-free grounding inputs."""
+    if cells:
+        _validate_cells(cells)
+    states: list[GroundingCellState] = []
+    for cell in cells:
+        fallback_kind: Literal["ban-fallback", "full-corpus"] = "ban-fallback"
+        if cell.fallback is not None and cell.fallback.kind == "full-corpus":
+            fallback_kind = "full-corpus"
+        states.append(GroundingCellState(
+            opponent=cell.opponent,
+            field_share=cell.field_share,
+            era_n=cell.era.cell.n if cell.era is not None else 0,
+            fallback_n=cell.fallback.cell.n if cell.fallback is not None else 0,
+            measured=cell.measured,
+            fallback_kind=fallback_kind,
+        ))
+    return tuple(states)
+
+
+def plan_path_to_grounding(
+    cells: Sequence[GroundingCellState],
+    *,
+    ground_n: int,
+    top_k: int,
+    cover_min: float,
+    display_limit: int = 3,
+) -> GroundingPath:
+    """Prioritize matchup collection needed to satisfy the existing row gate."""
+    if ground_n < 1:
+        raise ValueError("ground_n must be >= 1")
+    if top_k < 1:
+        raise ValueError("top_k must be >= 1")
+    if not 0.0 <= cover_min <= 1.0:
+        raise ValueError("cover_min must be between 0 and 1")
+    if display_limit < 1:
+        raise ValueError("display_limit must be >= 1")
+    if not cells:
+        return GroundingPath(
+            grounded=False, actions=(), display_actions=(), undisplayed_actions=0,
+            total_additional_matches=0, projected_coverage=0.0, would_ground=False,
+            reason="path unavailable: no field opponents",
+        )
+
+    opponents: set[str] = set()
+    total_share = 0.0
+    for cell in cells:
+        if cell.opponent in opponents:
+            raise ValueError(f"duplicate grounding opponent: {cell.opponent}")
+        opponents.add(cell.opponent)
+        if not math.isfinite(cell.field_share) or cell.field_share < 0.0:
+            raise ValueError("field shares must be finite and non-negative")
+        if cell.era_n < 0 or cell.fallback_n < 0:
+            raise ValueError("grounding counts must be non-negative")
+        if cell.measured != (max(cell.era_n, cell.fallback_n) >= ground_n):
+            raise ValueError(f"measured state is inconsistent for {cell.opponent}")
+        total_share += cell.field_share
+    if total_share <= 0.0:
+        return GroundingPath(
+            grounded=False, actions=(), display_actions=(), undisplayed_actions=0,
+            total_additional_matches=0, projected_coverage=0.0, would_ground=False,
+            reason="path unavailable: field share is zero",
+        )
+
+    top = sorted(cells, key=lambda cell: (-cell.field_share, cell.opponent))[:top_k]
+    top_names = {cell.opponent for cell in top}
+    current_coverage = sum(cell.field_share for cell in cells if cell.measured) / total_share
+    current_top_ok = bool(top) and all(cell.measured for cell in top)
+    if current_top_ok and current_coverage >= cover_min:
+        return GroundingPath(
+            grounded=True, actions=(), display_actions=(), undisplayed_actions=0,
+            total_additional_matches=0, projected_coverage=current_coverage,
+            would_ground=True, reason="already grounded",
+        )
+
+    def action_for(cell: GroundingCellState, *, mandatory: bool) -> GroundingAction:
+        additional = ground_n - max(cell.era_n, cell.fallback_n)
+        projected_source: CellSourceKind = (
+            "era" if cell.era_n + additional >= ground_n else cell.fallback_kind
+        )
+        return GroundingAction(
+            opponent=cell.opponent,
+            additional_matches=additional,
+            projected_source=projected_source,
+            field_share_gain=cell.field_share / total_share,
+            mandatory_top_k=mandatory,
+        )
+
+    mandatory_cells = sorted(
+        (cell for cell in cells if not cell.measured and cell.opponent in top_names),
+        key=lambda cell: (-cell.field_share, cell.opponent),
+    )
+    actions = [action_for(cell, mandatory=True) for cell in mandatory_cells]
+    projected_mass = sum(cell.field_share for cell in cells if cell.measured)
+    projected_mass += sum(cell.field_share for cell in mandatory_cells)
+
+    optional_cells = sorted(
+        (
+            cell for cell in cells
+            if not cell.measured and cell.opponent not in top_names
+        ),
+        key=lambda cell: (
+            -(cell.field_share / (ground_n - max(cell.era_n, cell.fallback_n))),
+            -cell.field_share,
+            cell.opponent,
+        ),
+    )
+    for cell in optional_cells:
+        if projected_mass / total_share >= cover_min:
+            break
+        actions.append(action_for(cell, mandatory=False))
+        projected_mass += cell.field_share
+
+    projected_coverage = projected_mass / total_share
+    projected_top_ok = all(
+        cell.measured or any(action.opponent == cell.opponent for action in actions)
+        for cell in top
+    )
+    display_actions = tuple(actions[:display_limit])
+    return GroundingPath(
+        grounded=False,
+        actions=tuple(actions),
+        display_actions=display_actions,
+        undisplayed_actions=len(actions) - len(display_actions),
+        total_additional_matches=sum(action.additional_matches for action in actions),
+        projected_coverage=projected_coverage,
+        would_ground=projected_top_ok and projected_coverage >= cover_min,
+        reason=None,
+    )
 
 
 def measure_ranking_row(
