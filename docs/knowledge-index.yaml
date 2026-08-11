@@ -6,7 +6,7 @@
 #   2 = enforce (missing v2 fields are errors)
 # Set to 2 once the project's docs are fully backfilled to v2 frontmatter.
 schema_version: 2
-generated_at: 2026-08-11T21:05:51Z
+generated_at: 2026-08-11T21:10:25Z
 generated_from: frontmatter
 total_docs: 48
 

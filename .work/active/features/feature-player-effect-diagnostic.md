@@ -1,7 +1,7 @@
 ---
 id: feature-player-effect-diagnostic
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, players, experimental]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-future-only-benchmark]
@@ -265,15 +265,15 @@ def load_player_diagnostic_rows(
 
 **Acceptance criteria**:
 
-- [ ] Identical unaliased strings on online and paper produce different scoped keys; a valid dated
+- [x] Identical unaliased strings on online and paper produce different scoped keys; a valid dated
   curated mapping may merge them, and a future-dated or hash-invalid mapping fails loudly.
-- [ ] Empty shipped aliases remain a fully supported, explicitly provenance-local path with no
+- [x] Empty shipped aliases remain a fully supported, explicitly provenance-local path with no
   automatic alias suggestions applied.
-- [ ] One-event handles never enter stickiness or model-repeat support; 3-event/30-match players and
+- [x] One-event handles never enter stickiness or model-repeat support; 3-event/30-match players and
   3-event/15-match player-parent pairs enter only their respective gates.
-- [ ] Pairwise pilot overlap is aggregate, deterministic, event-bootstrap annotated, privacy-
+- [x] Pairwise pilot overlap is aggregate, deterministic, event-bootstrap annotated, privacy-
   suppressed when thin, and never emits a taxonomy verdict or player identifier.
-- [ ] Online/paper accessibility and every exclusion denominator reconcile exactly on a hermetic
+- [x] Online/paper accessibility and every exclusion denominator reconcile exactly on a hermetic
   corpus containing blanks, duplicate within-event handles, aliases, repeat pilots, and variants.
 
 ---
@@ -462,19 +462,19 @@ def build_player_inner_folds(
 
 **Acceptance criteria**:
 
-- [ ] Swapping training row orientation negates every side-specific term and preserves reciprocal
+- [x] Swapping training row orientation negates every side-specific term and preserves reciprocal
   probabilities; repeated identical fits/predictions are byte-identical.
-- [ ] Deck-residual, player-intercept, and familiarity terms shrink toward zero as their registered
+- [x] Deck-residual, player-intercept, and familiarity terms shrink toward zero as their registered
   penalty increases; cold-start and below-floor players contribute exactly zero with different
   support labels.
-- [ ] Inner selection never sees the outer fold or its later-trained base grid and uses the
+- [x] Inner selection never sees the outer fold or its later-trained base grid and uses the
   documented strongest-shrinkage/stable-tuple tie break; fewer than 3 valid inner origins is
   not-evaluable.
-- [ ] A synthetic crossed corpus recovers the direction of a repeat-player effect without assigning
+- [x] A synthetic crossed corpus recovers the direction of a repeat-player effect without assigning
   it to the deck residual; a deck-only corpus does not invent player benefit.
-- [ ] Changing only future result strings changes no scheduled row, fit summary, neutral deck grid,
+- [x] Changing only future result strings changes no scheduled row, fit summary, neutral deck grid,
   or player-aware frozen match prediction.
-- [ ] Frozen artifacts contain no raw/canonical player identifiers or individual coefficient table,
+- [x] Frozen artifacts contain no raw/canonical player identifiers or individual coefficient table,
   bind base/snapshot/identity/schedule hashes, and never extend the production estimator registry.
 
 ---
@@ -605,18 +605,18 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
 
 **Acceptance criteria**:
 
-- [ ] Proper scores compare identical common cases; dropping hard cases cannot improve the primary
+- [x] Proper scores compare identical common cases; dropping hard cases cannot improve the primary
   comparison, and player-aware heldout-event, player-masked heldout-player, every unsupported/
   cold-start stratum, and every venue remain visible.
-- [ ] A synthetic repeat-player signal improves the player-aware estimator while a deck-only signal
+- [x] A synthetic repeat-player signal improves the player-aware estimator while a deck-only signal
   credits the deck-residual control; outcome reversal changes evaluation but no frozen byte.
-- [ ] A model that wins on known-known players but harms cold-start, one venue, calibration, or
+- [x] A model that wins on known-known players but harms cold-start, one venue, calibration, or
   neutral-deck regret cannot emit `candidate-for-promotion-study`.
-- [ ] Thin identity, repeat-player, familiarity, fold, or regime support yields typed
+- [x] Thin identity, repeat-player, familiarity, fold, or regime support yields typed
   `not-evaluable`; a completed adverse comparison yields `stop`, never an optimistic null fill.
-- [ ] `plan -> freeze -> evaluate` and composed `run` are hermetic and equivalent; checksum,
+- [x] `plan -> freeze -> evaluate` and composed `run` are hermetic and equivalent; checksum,
   future-dated alias, schedule/outcome join, or protocol mismatch fails loudly.
-- [ ] The Markdown/CLI report contains aggregate counts and coefficient distributions only, labels
+- [x] The Markdown/CLI report contains aggregate counts and coefficient distributions only, labels
   unaliased handles and historical pairing replay honestly, and states production is unchanged.
 
 ## Implementation Order
@@ -691,3 +691,37 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
 - The descriptive stickiness ledger remains useful even if every model status is not-evaluable or
   stop; model failure does not justify expanding identity collection or weakening privacy/support
   gates automatically.
+
+## Implementation summary
+
+- Delivered the provenance-local identity/accessibility and privacy-suppressed pilot-stickiness
+  ledger, including optional effective-dated curated aliases and independent repeat/familiarity
+  eligibility.
+- Delivered the separate deterministic three-estimator sensitivity with chronological
+  strongest-shrinkage selection, antisymmetric deck residuals, pooled player/familiarity terms,
+  neutral and participant-aware frozen forecasts, and no production-registry mutation.
+- Delivered immutable future-only evaluation, heldout/masked/neutral estimands, support and venue
+  strata, conservative proper-score/calibration/regret stop-go gates, aggregate Markdown/JSON, and
+  hermetic `advise benchmark player-effect plan|freeze|evaluate|run` commands.
+- Preserved the designed privacy and authority boundaries: frozen artifacts contain no player keys
+  or coefficient rows; outputs make no identity or causal-skill claim; the maximum status remains
+  `candidate-for-promotion-study`, with Agency, P(best), and headline recommendations unchanged.
+
+## Verification evidence
+
+- Story checkpoints: 5 focused accessibility tests, 10 focused model/freeze tests, and 13 focused
+  end-to-end player-diagnostic tests passed at their respective boundaries.
+- Integrated affected surface: 102 player, benchmark, ranking-measurement, and refresh tests passed.
+- Full repository: 3705 passed, 1 skipped in 199.65 seconds.
+- Owned Ruff, compile, diff, and canonical knowledge-index checks passed; index lint reported zero
+  errors and 11 pre-existing advisory warnings.
+- Implementation commits: `4bd7aa3`, `4de05b5`, and `90999a8`.
+
+## Implementation deviations
+
+- `PlayerEffectOutcome` carries a stable match id because the shared heldout benchmark row does not
+  retain source identity; schedule rows retain subject orientation so the outcome join never uses
+  player identity to infer sides.
+- The pure freeze function receives already-built inner folds explicitly, keeping DuckDB/filesystem
+  recomputation in the workflow adapter. These are boundary-preserving signature clarifications,
+  not changes to the preregistered estimator, fold, privacy, or stop-go contracts.
