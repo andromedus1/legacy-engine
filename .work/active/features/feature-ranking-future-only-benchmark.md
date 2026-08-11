@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-future-only-benchmark
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -612,3 +612,33 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str: ...
 - Review handoff: standard independent feature review remains required. Production ranking remains
   authoritative and unchanged; benchmark output is evaluation evidence only and never tunes or
   promotes an estimator automatically.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-ranking-future-only-benchmark-review-fixes`.
+
+- Make B&R-reset origins freeze a non-empty, cutoff-safe field or censor them explicitly without
+  preventing the required multi-regime evaluation.
+- Freeze and validate retrospective parent taxonomy so post-freeze label changes cannot alter
+  held-out identity.
+- Bind the exact fold schedule and as-of B&R ledger into preregistration identity; freeze/run may not
+  silently recompute a different experiment from mutable state.
+- Measure future-field claim coverage from a classified deck/field-mass ledger, not match-row share.
+- Include structural mirror utility and require a stable, uncertainty-aware oracle for regret;
+  tied/unstable/null regret needs a named censor reason and cannot feed the aggregate claim gate.
+
+**Important**: included in the same checkpoint because each is an accepted evidence-output or
+immutability contract: render the full promised operator evidence; validate external taxonomy and
+missing/common-case coverage; refuse overwrite of a different frozen artifact at a deterministic
+path.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: Independent affected-surface verification passed 325 tests and hermetic probes reproduced
+the five blockers. The review was same-harness fresh-context and did not rerun the recorded full
+suite.
