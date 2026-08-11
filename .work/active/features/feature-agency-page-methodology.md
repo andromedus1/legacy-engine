@@ -1,7 +1,7 @@
 ---
 id: feature-agency-page-methodology
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, advisory]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards]
@@ -541,3 +541,17 @@ findings because they are explicit integrated feature contracts with bounded fix
 **Notes**: Focused review verification passed 65 tests; direct Node probes reproduced default
 P(best) suppression and the equal-share canonical/planner disagreement. No real-browser
 accessibility runtime was available.
+
+## Review closure (2026-08-11)
+
+- Completed the named standard-review fix set in
+  `feature-agency-page-methodology-review-fixes`; no second independent review pass was required.
+- Initial report state now agrees with the generated gate, equal-share top-k membership is
+  deterministic across Python and browser paths, diagnostic disclosures are keyboard-operable with
+  synchronized ARIA state, and the runbook contains the exact posterior equation and replay knobs.
+- Executed behavioral regressions cover the actual tracked template JavaScript as well as the Python
+  measurement contract. Focused verification passed 67 tests; the full repository suite passed
+  3,670 tests with 1 skip in 193.65s.
+- The canonical knowledge-index workflow completed with 0 errors and 11 existing warnings.
+- Gated agency and candidacy remain authoritative; P(best), posterior math, evidence strata, and
+  estimator thresholds were not changed. No findings were deferred and no adjacent bugs were found.
