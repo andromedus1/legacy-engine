@@ -1,7 +1,7 @@
 ---
 id: feature-agency-page-methodology
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards]
@@ -482,3 +482,37 @@ def methodology_payload(
   builder, learned temperature, automatic calibration, or winner claim belongs before the benchmark.
 - Store methodology only in the generated page blob; the generated HTML remains disposable and no
   database migration or persistent schema is required.
+
+## Implementation summary
+
+- Completed child checkpoints: `feature-agency-page-methodology-kernel` (`8a34e91`),
+  `feature-agency-page-methodology-grounding-path` (`af87ae4`), and
+  `feature-agency-page-methodology-report-surface` (`1db30cd`).
+- The package-owned measurement module now supplies the four fixed source/rate projections, seeded
+  posterior smooth floor, complete-only competition-rank spans, and rate-free grounding planner.
+  The canonical gated row shares its projection arithmetic and remains protected by exact generator
+  parity assertions.
+- The generator serializes diagnostics additively for archetype/camp rows and grounding paths for
+  plan rows. The established page defaults to gated agency, preserves P(best)/candidacy/evidence
+  strata, and offers an accessible opt-in posterior view, rank stability, complete shortfall totals,
+  and generated-gate staleness labels.
+- The runbook owns the exact current methodology. The update-documentation workflow aligned its
+  frontmatter and prose, and the current knowledge-index regenerator completed with zero errors.
+- Design deviations: `VariantRowMeasurement` adds `valid/reason` for pair-window honest nulls, and
+  `GroundingCellState` preserves fallback kind for projected provenance. Both are additive honesty
+  fields. Strategic-plan adapter tests landed with the report story where the adapter exists.
+- Adjacent issues parked: none. The repository-local `scripts/gen_knowledge_index.py` is behind the
+  installed knowledge-index contract (it drops current ARD/substrate entries); this implementation
+  used the owning skill's current linted regenerator and did not modify the unrelated tool.
+
+## Integrated verification
+
+- `tests/test_ranking_measurement.py tests/test_refresh_best_call_ranking.py` — 65 passed.
+- `tests/test_refresh_best_call_ranking.py tests/test_positioning.py` regression pass during the
+  kernel checkpoint — 124 passed.
+- Python compile and template JavaScript parse checks passed.
+- Current knowledge-index workflow — 0 errors, 11 pre-existing warnings; navigator retained 48 docs
+  and the `.work/` substrate summary.
+- Full repository suite via `uv run --no-sync python -m pytest -q` — 3,668 passed, 1 skipped in
+  190.75s. Direct `.venv/bin/pytest` is not authoritative because it omits the repository root from
+  the import path; dependency syncing remained disabled and the unrelated `uv.lock` was untouched.
