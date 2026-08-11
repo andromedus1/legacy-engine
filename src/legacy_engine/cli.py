@@ -452,6 +452,37 @@ def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: b
         click.echo("No new cards (diff is empty — card universe is current).")
 
 
+@refresh.command("card-coverage")
+@click.option("--db", type=click.Path(dir_okay=False), default=None,
+              help="DuckDB path (defaults to the configured analytical cache).")
+@_verbose
+def refresh_card_coverage(db: str | None, verbose: bool) -> None:
+    """Reconcile exact card names and print one compact coverage audit."""
+    from datetime import datetime, timezone
+
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.card_coverage import (
+        card_coverage_audit_lines,
+        reconcile_card_dimension,
+    )
+
+    _setup_logging(verbose)
+    con = store.connect(db) if db else store.connect()
+    try:
+        diff = store.load_ingest_diff()
+        report = reconcile_card_dimension(
+            con,
+            new_card_names=frozenset(diff.new_names if diff else ()),
+            alias_manifest=store.load_card_alias_manifest(con),
+            alias_snapshot_reason=None,
+            resolved_at=datetime.now(timezone.utc),
+        )
+    finally:
+        con.close()
+    for line in card_coverage_audit_lines(report, verbose=verbose):
+        click.echo(line)
+
+
 # ── label: archetype classification ──
 @main.command()
 @_verbose

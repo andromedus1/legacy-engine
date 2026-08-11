@@ -47,6 +47,9 @@ BAN_EVENTS_PATH = BAN_EVENTS_DIR / "events.json"        # shipped dated B&R even
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"
 SCRYFALL_BULK_TYPE = "oracle_cards"
+SCRYFALL_ALL_CARDS_BULK_TYPE = "all_cards"
+SCRYFALL_ALL_CARDS_PATH = SCRYFALL_DIR / "all_cards.json.gz"
+SCRYFALL_ALL_CARDS_META_PATH = SCRYFALL_DIR / "all_cards_metadata.json"
 SCRYFALL_API_DELAY = 0.1  # seconds between REST requests (bulk has no limit)
 USER_AGENT = "LegacyEngine/0.1.0"
 SCRYFALL_SETS_URL = f"{SCRYFALL_API_BASE}/sets"   # GET /sets — the release calendar

@@ -12,6 +12,7 @@ import logging
 import time
 import unicodedata
 import urllib.parse
+import gzip
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
 
 from legacy_engine.config import (
     SCRYFALL_API_BASE,
+    SCRYFALL_ALL_CARDS_BULK_TYPE,
+    SCRYFALL_ALL_CARDS_META_PATH,
+    SCRYFALL_ALL_CARDS_PATH,
     SCRYFALL_API_DELAY,
     SCRYFALL_BULK_TYPE,
     SCRYFALL_DIR,
@@ -31,7 +35,7 @@ from legacy_engine.config import (
     SCRYFALL_PRICES_PATH,
     USER_AGENT,
 )
-from legacy_engine.models.card import Card
+from legacy_engine.models.card import Card, PrintedCardAlias
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +77,14 @@ def normalize_name(name: str) -> str:
     Curly-apostrophe replacement runs before normalization so smart-quote variants collapse too.
     """
     return unicodedata.normalize("NFC", name.replace("’", "'").replace("‘", "'")).strip()
+
+
+def normalize_alias_key(name: str) -> str:
+    """Build an exact-comparison key for localized aliases, never a fuzzy-search key."""
+    normalized = name.replace("’", "'").replace("‘", "'").casefold()
+    decomposed = unicodedata.normalize("NFKD", normalized)
+    without_marks = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(without_marks.split())
 
 
 class ScryfallClient:
@@ -128,6 +140,85 @@ class ScryfallClient:
             if item.get("type") == SCRYFALL_BULK_TYPE:
                 return item
         raise RuntimeError(f"Scryfall bulk type not found: {SCRYFALL_BULK_TYPE}")
+
+    def _fetch_all_cards_metadata(self) -> dict:
+        resp = self.client.get(BULK_DATA_URL)
+        resp.raise_for_status()
+        for item in resp.json().get("data", []):
+            if item.get("type") == SCRYFALL_ALL_CARDS_BULK_TYPE:
+                return item
+        raise RuntimeError(f"Scryfall bulk type not found: {SCRYFALL_ALL_CARDS_BULK_TYPE}")
+
+    def download_all_cards_bulk(self, *, force: bool = False) -> Path:
+        """Stream the every-printing/every-language bulk into the local raw mirror."""
+        SCRYFALL_DIR.mkdir(parents=True, exist_ok=True)
+        if not force and SCRYFALL_ALL_CARDS_PATH.exists() and SCRYFALL_ALL_CARDS_META_PATH.exists():
+            return SCRYFALL_ALL_CARDS_PATH
+
+        meta = self._fetch_all_cards_metadata()
+        _validate_scryfall_uri(meta["download_uri"])
+        tmp_path = SCRYFALL_ALL_CARDS_PATH.with_suffix(".gz.tmp")
+        try:
+            with self.client.stream("GET", meta["download_uri"], follow_redirects=True) as resp:
+                resp.raise_for_status()
+                encoding = (resp.headers.get("content-encoding") or "").lower()
+                with tmp_path.open("wb") as fh:
+                    if "gzip" in encoding or meta["download_uri"].endswith(".gz"):
+                        for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                            fh.write(chunk)
+                    else:
+                        with gzip.GzipFile(fileobj=fh, mode="wb") as zipped:
+                            for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                                zipped.write(chunk)
+            # Validate the stream before replacing last-good raw data.
+            next(self.iter_printed_aliases(tmp_path), None)
+            tmp_path.replace(SCRYFALL_ALL_CARDS_PATH)
+            SCRYFALL_ALL_CARDS_META_PATH.write_text(json.dumps({
+                "updated_at": meta.get("updated_at"),
+                "bulk_type": SCRYFALL_ALL_CARDS_BULK_TYPE,
+            }, indent=2))
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        return SCRYFALL_ALL_CARDS_PATH
+
+    def iter_printed_aliases(self, path: Path | None = None) -> Iterator[PrintedCardAlias]:
+        """Stream localized printed names from all-cards JSON array or JSONL gzip."""
+        src = path or SCRYFALL_ALL_CARDS_PATH
+        if not src.exists():
+            raise FileNotFoundError(f"Scryfall all-cards bulk not found at {src}")
+        with gzip.open(src, "rt", encoding="utf-8") as fh:
+            first = fh.read(1)
+            fh.seek(0)
+            if first == "[":
+                import ijson
+                rows = ijson.items(fh, "item")
+            else:
+                rows = (json.loads(line) for line in fh if line.strip())
+            for raw in rows:
+                language = str(raw.get("lang") or "")
+                scryfall_id = str(raw.get("id") or "")
+                printed = raw.get("printed_name")
+                canonical = raw.get("name")
+                if printed and canonical and printed != canonical:
+                    yield PrintedCardAlias(
+                        printed_name=printed,
+                        normalized_alias=normalize_alias_key(printed),
+                        canonical_name=canonical,
+                        language=language,
+                        scryfall_id=scryfall_id,
+                    )
+                for face in raw.get("card_faces") or []:
+                    face_printed = face.get("printed_name")
+                    face_canonical = face.get("name")
+                    if face_printed and face_canonical and face_printed != face_canonical:
+                        yield PrintedCardAlias(
+                            printed_name=face_printed,
+                            normalized_alias=normalize_alias_key(face_printed),
+                            canonical_name=face_canonical,
+                            language=language,
+                            scryfall_id=scryfall_id,
+                        )
 
     # ── index + resolution ──
     def load_card_index(self) -> dict[str, dict]:
