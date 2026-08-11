@@ -24,10 +24,12 @@ from legacy_engine.ingestion.banlist import BAN_EVENTS
 _DEFAULT_AFFECT_THRESHOLD: float = 0.25  # banned-card inclusion in pre-ban decks → "affected"
 
 
-def _cards_by_ban_date() -> list[tuple[date, list[str]]]:
-    """Group ``BAN_EVENTS`` into ``[(date, [cards])]`` ordered by date."""
+def _cards_by_ban_date(
+    ban_events: tuple[tuple[date, str, str], ...] | None = None,
+) -> list[tuple[date, list[str]]]:
+    """Group a ban ledger into ``[(date, [cards])]`` ordered by date."""
     grouped: dict[date, list[str]] = {}
-    for event_date, card, _reason in BAN_EVENTS:
+    for event_date, card, _reason in BAN_EVENTS if ban_events is None else ban_events:
         grouped.setdefault(event_date, []).append(card)
     return [(d, grouped[d]) for d in sorted(grouped)]
 
@@ -38,6 +40,7 @@ def archetype_valid_since(
     *,
     provenance: str | None = None,
     affect_threshold: float = _DEFAULT_AFFECT_THRESHOLD,
+    ban_events: tuple[tuple[date, str, str], ...] | None = None,
 ) -> dict[str, str | None]:
     """Map each archetype to the ISO date of the latest ban that materially affected it (else None).
 
@@ -52,7 +55,7 @@ def archetype_valid_since(
 
     arch_ph = ",".join("?" for _ in archetypes)
     prev_d: date | None = None
-    for d, cards in _cards_by_ban_date():
+    for d, cards in _cards_by_ban_date(ban_events):
         since = prev_d.isoformat() if prev_d else None
         until = d.isoformat()
         card_ph = ",".join("?" for _ in cards)
