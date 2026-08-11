@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-measurement-integrity
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, honesty]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -412,3 +412,28 @@ reintroducing one scan per row.
 - **Least sure -- whether adaptive/common divergence alone predicts future error.** This feature
   makes it measurable but does not claim it does. The future-only benchmark is the gate for that
   conclusion.
+
+## Implementation summary
+
+- Execution capability: inherited frontier model at high effort, selected by the autopilot caller
+  for statistically consequential cross-module ranking work.
+- Review weight: standard (caller); feature intentionally stops at `stage: review` for an
+  independent pass.
+- Delivered all three child checkpoints: outcome-blind pair windows and concentration evidence;
+  the package-owned selected-cell ledger with serialized replay and strict-common diagnostics; and
+  the ranking-page/runbook honesty surface.
+- Integrated files: shared matchup extraction/model contracts, era window consumption, the new
+  `advisory/ranking_measurement.py` boundary, refresh generator/template, focused tests, and the Best
+  Call runbook.
+- Simplification: adaptive pair-window logic and row measurement now each have one owner; duplicate
+  report formulas were removed, and strict-common matrices are cached per distinct common start.
+- Design deviations: serialized reconciliation re-validates the full typed JSON projection instead
+  of maintaining a second hand-built report dictionary; concentration warnings render inline beside
+  the exact selected cell rather than in a separate panel. Both preserve the designed contracts.
+- Adjacent issues parked: none.
+
+## Integrated verification
+
+- Child-focused measurement/refresh/matchup suite: 227 passed.
+- Full repository suite: `PYTHONPATH=. .venv/bin/pytest -q` — 3591 passed, 1 skipped in 192.60s.
+- All children are `stage: done`; implementation commits: `e8ac67f`, `60cebbf`, `34cfce0`.
