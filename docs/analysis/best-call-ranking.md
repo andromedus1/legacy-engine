@@ -171,10 +171,16 @@ ranking value; the posterior lean is opt-in and diagnostic. Its seeded smooth-fl
 era candidate whenever one exists, regardless of its `n`; only an absent era candidate permits the
 ban-scoped fallback (or full-corpus fallback where applicable). Resolved cells draw from Jeffreys
 (`wins + 0.5`, `losses + 0.5`) posteriors. Unresolved cells use a weak prior centred on the row's
-resolved-rate mean (0.5 when no cells resolve). Each cell's continuous weight is
-`field_share × strength / (strength + precision_scale)`, then normalized. The row reports Q25 as
-the lean, alongside its median and 95% interval. This path remains gate-independent when the
-interactive matchup `n` changes. Stability compares raw, CI-gated, ban-scoped, and era-only
+resolved-rate mean μ (0.5 when no cells resolve): `Beta(2μ, 2(1−μ))`, with the implementation's
+`1e-6` positivity guard at the endpoints. For resolved cell `i`, strength is `n_i + 1`; for an
+unresolved cell it is exactly `2`. Each cell's continuous weight is
+`v_i = field_share_i × strength_i / (strength_i + 30)`, then normalized as
+`w_i = v_i / Σ_j v_j`. On posterior draw `d`, the smooth floor is exactly
+`A_d = −0.05 × log(Σ_i w_i × exp(−p_i,d / 0.05))`. Replay uses **20,000 draws**, RNG seed
+**730021**, temperature **0.05**, precision scale **30**, Jeffreys pseudo-count **0.5**, and
+unresolved-prior strength **2**. The row reports Q25 of `{A_d}` as the lean, alongside its median
+and 95% interval. This path remains gate-independent when the interactive matchup `n` changes.
+Stability compares raw, CI-gated, ban-scoped, and era-only
 agency variants within the row's peer table; a rank span is shown only for rows ranked by all four,
 otherwise the missing variants explain the n/a. Plan rows can show a grounding path, but have no
 posterior lean or rank-stability payload.
@@ -185,7 +191,9 @@ additional match until `--cover-min` is projected. The page displays three actio
 the number of undisplayed actions and the total additional matches and projected coverage. Paths
 are generated at the default `--ground-n`; changing the interactive gate marks the path stale
 rather than presenting a path for the wrong evidence state. The same path behavior applies to plan
-rows, without adding lean or stability diagnostics.
+rows, without adding lean or stability diagnostics. Canonical grounding, path planning, and browser
+replay all resolve equal field shares by stable opponent id ascending before taking top-k; input or
+database row order never decides which tied opponent crosses the cutoff.
 
 **Observable floors.** The interactive `--ground-n` still determines which cells can set the page
 floor. Alongside it, the page reports how many opponents reach n>=10 and the engine display gate

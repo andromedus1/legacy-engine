@@ -269,6 +269,27 @@ class TestRankStability:
 
 
 class TestPathToGrounding:
+    def test_equal_share_top_k_uses_opponent_id_for_canonical_and_path(self):
+        cells = tuple(
+            select_ranking_cell(
+                "Deck", opponent, 0.5,
+                era=source("era", 3, n, opponent=opponent),
+                fallback=None,
+                ground_n=8,
+            )
+            for opponent, n in (("Zulu", 8), ("Alpha", 7))
+        )
+        row = measure_ranking_row(
+            "Deck", cells, top_k=1, cover_min=0.5, strict_common_sources={},
+        )
+        assert row.top_k_measured is False
+
+        path = plan_path_to_grounding(
+            grounding_cell_states(cells), ground_n=8, top_k=1, cover_min=0.5,
+        )
+        assert [action.opponent for action in path.actions] == ["Alpha"]
+        assert path.actions[0].mandatory_top_k is True
+
     def test_mandatory_top_k_precedes_efficient_coverage_actions(self):
         cells = (
             GroundingCellState(

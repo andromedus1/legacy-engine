@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -57,6 +59,45 @@ _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "refresh_best_c
 _spec = importlib.util.spec_from_file_location("refresh_best_call_ranking", _SCRIPT_PATH)
 rbcr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rbcr)
+
+
+def _run_template_javascript(blob: dict, probe: str) -> dict:
+    """Execute the tracked report script with a minimal DOM and return a JSON probe."""
+    template = rbcr.TEMPLATE_PATH.read_text()
+    script = template.split("<script>", 1)[1].split("</script>", 1)[0]
+    script = script.replace("__D_BLOB__", json.dumps(blob), 1)
+    harness = r"""
+const fs = require("fs");
+const vm = require("vm");
+class Element {
+  constructor() {
+    this.attrs = {}; this.listeners = {}; this.textContent = ""; this.innerHTML = "";
+    this.value = ""; this.disabled = false; this.title = ""; this.style = {};
+  }
+  addEventListener(name, callback) { this.listeners[name] = callback; }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  getAttribute(name) { return this.attrs[name] ?? null; }
+  querySelectorAll() { return []; }
+  querySelector() { return null; }
+  focus() {}
+}
+const elements = new Map();
+const document = {
+  getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
+  createElement() { return new Element(); },
+  querySelectorAll() { return []; },
+  querySelector() { return null; },
+};
+const context = vm.createContext({document, CSS: {escape: value => String(value)}});
+vm.runInContext(fs.readFileSync(0, "utf8"), context);
+const result = vm.runInContext(process.argv[1], context);
+process.stdout.write(JSON.stringify(result));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness, probe], input=script, text=True,
+        capture_output=True, check=True,
+    )
+    return json.loads(completed.stdout)
 
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
 _ADDITIVE_FIELDS = {
@@ -832,6 +873,68 @@ class TestMainEndToEnd:
         assert "control.disabled = stale" in template
         assert "groupByRankingEvidence = false" in template
         assert "camp && groupByRankingEvidence && generatedEvidenceCurrent" in template
+
+    def test_executed_browser_defaults_ties_and_disclosure_state(self):
+        cell = {
+            "opp": "Opponent", "share": 1.0, "p": 0.55, "raw": 0.55,
+            "ci_low": 0.4, "ci_high": 0.7, "n": 8, "tier": "speculative",
+            "measured": True, "window": "era", "concentration_warning": None,
+        }
+        camp = {
+            "_idx": 0, "parent": "Parent", "camp": "Camp", "subject": "Parent [Camp]",
+            "grounded": True, "recent_4wk": 10, "agency": 0.55, "adj": 0.55,
+            "floor": 0.55, "floor_opp": "Opponent", "coverage": 1.0,
+            "field_share": 0.1, "since": None, "cells": [cell], "p_best": 0.2,
+            "s_cov": 1.0, "s_q": 0.55, "s_caveated": False,
+            "ranking_evidence": {
+                "stratum": "grounded", "measured_share": 1.0,
+                "imputed_share": 0.0, "eligible": True, "reason": None,
+            },
+            "reconciliation": None, "floor_observability": None, "methodology": {},
+        }
+        blob = {
+            "meta": {
+                "ground_n": 8, "top_k": 1, "cover_min": 0.5, "rank": {"quantile": 0.25},
+                "field_since": "2026-01-01", "field_decks": 100, "corpus_max": "2026-01-31",
+                "regime_card": None, "audit": [],
+            },
+            "arch": [], "camps": [camp], "plans": [],
+        }
+        result = _run_template_javascript(blob, r"""
+(() => {
+  const initial = {
+    interactiveN: D.camps[0]._interactiveN,
+    pbest: pbestHtml(D.camps[0]),
+    sortValue: CAMP_COLS[5].get(D.camps[0]),
+    row: rowHtml(D.camps[0], 0, true),
+  };
+  const tied = {
+    subject: "Deck", cells: [
+      {opp:"Zulu",share:.5,p:.55,raw:.55,n:8,measured:true},
+      {opp:"Alpha",share:.5,p:.55,raw:.55,n:7,measured:false},
+    ], plan_cells: [],
+  };
+  recalcRow(tied, 8);
+  const toggle = {attrs:{}, setAttribute(k,v){this.attrs[k]=String(v);}};
+  setRowDisclosureState(toggle, true);
+  const expanded = toggle.attrs["aria-expanded"];
+  setRowDisclosureState(toggle, false);
+  recalcRow(D.camps[0], 9);
+  return {
+    initial, tiedGrounded: tied.grounded, expanded,
+    collapsed: toggle.attrs["aria-expanded"], stalePbest: pbestHtml(D.camps[0]),
+  };
+})()
+""")
+        assert result["initial"]["interactiveN"] == 8
+        assert result["initial"]["sortValue"] == pytest.approx(0.2)
+        assert result["initial"]["pbest"].startswith("20.0%")
+        assert 'aria-expanded="false"' in result["initial"]["row"]
+        assert 'aria-controls="row-detail-c-0"' in result["initial"]["row"]
+        assert result["tiedGrounded"] is False
+        assert result["expanded"] == "true"
+        assert result["collapsed"] == "false"
+        assert result["stalePbest"].startswith("n/a")
 
     def test_evidence_column_and_opt_in_grouping_are_accessible_and_value_preserving(self):
         template = rbcr.TEMPLATE_PATH.read_text()

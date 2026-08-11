@@ -558,6 +558,7 @@ function rowHtml(r, i, camp) {
   const cls = (r.grounded ? "" : "thin") + stale;
   const baseName = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
   const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
+  const detailId = `row-detail-${camp ? "c" : "a"}-${r._idx}`;
   const methodAgency = agencyValue(r);
   const w = Math.max(2, Math.round((methodAgency || 0) * 220));
   const agencyTxt = agencyCellHtml(r);
@@ -569,7 +570,8 @@ function rowHtml(r, i, camp) {
   const metaTxt = `${(100 * b.metaShare).toFixed(1)}%`;
   return `<tr class="expander ${cls}" data-i="${r._idx}" data-v="${camp?'c':'a'}">
     <td>${i + 1}</td>
-    <td class="name">${name}</td>
+    <td class="name"><button type="button" class="plan-toggle row-toggle" aria-expanded="false"
+      aria-controls="${detailId}">${name}</button></td>
     <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
     <td>${stabilityHtml(r)}</td>
     <td>${reconciliationHtml(r)}</td>
@@ -629,6 +631,9 @@ function selectCell(c, minN) {
   return {...c, ...(use || {p:null,raw:null,ci_low:null,ci_high:null,n:0,window:"era",tier:"speculative"}),
     measured: !!use && use.n >= minN};
 }
+function compareOpponentId(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
 function recalcRow(r, minN) {
   r.cells = r.cells.map(c => selectCell(c, minN));
   (r.plan_cells || []).forEach(c => {
@@ -644,7 +649,9 @@ function recalcRow(r, minN) {
   r.agency = [r.adj,r.floor].filter(v => v != null).reduce((a,v) => a == null ? v : Math.min(a,v), null);
   const den = r.cells.reduce((s,c) => s + c.share, 0);
   r.coverage = den ? measured.reduce((s,c) => s + c.share, 0) / den : 0;
-  const top = [...r.cells].sort((a,b) => b.share-a.share).slice(0,D.meta.top_k);
+  // Canonical top-k order matches Python: share descending, then opponent id ascending.
+  const top = [...r.cells].sort((a,b) => b.share-a.share || compareOpponentId(a.opp,b.opp))
+    .slice(0,D.meta.top_k);
   r.grounded = top.length > 0 && top.every(c => c.measured) && r.coverage >= D.meta.cover_min;
   r._interactiveN = minN;
   r._b = blowouts(r);
@@ -661,13 +668,23 @@ function recalcPlan(r, minN) {
   r.agency = r.adj != null && r.floor != null ? Math.min(r.adj,r.floor) : null;
   const den = external.reduce((s,c) => s+c.share,0);
   r.coverage = den ? measured.reduce((s,c) => s+c.share,0)/den : 0;
-  const top = [...external].sort((a,b) => b.share-a.share).slice(0,Math.min(D.meta.top_k,external.length));
+  const top = [...external]
+    .sort((a,b) => b.share-a.share || compareOpponentId(a.opponent_id,b.opponent_id))
+    .slice(0,Math.min(D.meta.top_k,external.length));
   r.grounded = top.length > 0 && top.every(c => c.measured) && r.coverage >= D.meta.cover_min;
   r._interactiveN = minN;
   r._b = blowouts({subject:r.id,cells:r.cells.map(c=>({...c,opp:c.opponent_id}))});
 }
-[...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
-(D.plans || []).forEach(r => { r._b = blowouts({subject:r.id, cells:r.cells.map(c => ({...c, opp:c.opponent_id}))}); });
+[...D.arch, ...D.camps].forEach(r => {
+  // The embedded rows were generated at this gate. Initialize the browser replay marker before
+  // first render so generated P(best), evidence grouping, and sorting are current on load.
+  r._interactiveN = D.meta.ground_n;
+  r._b = blowouts(r);
+});
+(D.plans || []).forEach(r => {
+  r._interactiveN = D.meta.ground_n;
+  r._b = blowouts({subject:r.id, cells:r.cells.map(c => ({...c, opp:c.opponent_id}))});
+});
 function cmpBy(col, dir, cols) {
   const get = cols[col].get;
   return (a, b) => {
@@ -796,6 +813,10 @@ function subsectionHtml(key, title, chip, body) {
     `<summary>${title} ${chip}</summary><div class="subsection-body">${body}</div></details>`;
 }
 
+function setRowDisclosureState(toggle, expanded) {
+  toggle.setAttribute("aria-expanded", String(expanded));
+}
+
 function renderTable(id, rows, camp) {
   const el = document.getElementById(id);
   const st = tableState[id];
@@ -831,8 +852,13 @@ function renderTable(id, rows, camp) {
   });
   el.querySelectorAll("tr.expander").forEach(tr => {
     tr.addEventListener("click", () => {
+      const toggle = tr.querySelector(".row-toggle");
       const next = tr.nextElementSibling;
-      if (next && next.classList.contains("detail")) { next.remove(); return; }
+      if (next && next.classList.contains("detail")) {
+        next.remove();
+        setRowDisclosureState(toggle, false);
+        return;
+      }
       const src = tr.dataset.v === "c" ? D.camps : D.arch;
       const r = src[Number(tr.dataset.i)];
       const cells = r.cells.map(c => {
@@ -865,11 +891,13 @@ function renderTable(id, rows, camp) {
             `<span class="chip">${measured} of ${r.cells.length} measured</span>`, exactBody);
       const d = document.createElement("tr");
       d.className = "detail";
+      d.id = toggle.getAttribute("aria-controls");
       d.innerHTML = `<td colspan="${cols.length}">${body}</td>`;
       d.querySelectorAll("details.subsection").forEach(el => el.addEventListener("toggle", () => {
         subsectionOpen[el.dataset.sub] = el.open;
       }));
       tr.after(d);
+      setRowDisclosureState(toggle, true);
     });
   });
 }

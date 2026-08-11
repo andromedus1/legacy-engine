@@ -336,7 +336,12 @@ def _summarize_projection(
         if is_measured
     )
     measured_coverage = measured_mass / total_share if total_share else 0.0
-    top = sorted(range(len(cells)), key=lambda index: cells[index].field_share, reverse=True)[:top_k]
+    # Canonical top-k order everywhere: field share descending, then opponent id
+    # ascending. The second key is load-bearing when equal shares straddle the cutoff.
+    top = sorted(
+        range(len(cells)),
+        key=lambda index: (-cells[index].field_share, cells[index].opponent),
+    )[:top_k]
     top_k_measured = bool(top) and all(measured[index] for index in top)
     return adjusted, floor, measured_coverage, top_k_measured, len(usable)
 
