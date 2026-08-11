@@ -59,7 +59,9 @@ rbcr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rbcr)
 
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
-_ADDITIVE_FIELDS = {"p_best", "s_q", "s_cov", "s_caveated"}
+_ADDITIVE_FIELDS = {
+    "p_best", "s_q", "s_cov", "s_caveated", "floor_observability", "reconciliation",
+}
 
 # Field window covering both fixture tournaments but neither pre-ban load.
 _FIELD_SINCE = "2026-01-01"
@@ -292,7 +294,7 @@ def _old_path_camp_rows(con, *, field_since, ground_n, top_k, cover_min, min_row
         for lbl in (r for r in adp.matrix.archetypes if r.startswith(prefix)):
             camp = lbl[len(prefix):-1]
             cells = rbcr.make_cells(lbl, field_opps, sh, adp.matrix.cells, fbp, ban_since,
-                                    ground_n, subj_ban=p_ban)
+                                    ground_n, subj_ban=p_ban, ad_windows=adp.cell_windows)
             frac = camp_frac.get((parent, camp), 0.0)
             camps_out.append({
                 "subject": lbl, **rbcr.row_stats(cells, top_k, cover_min),
@@ -362,7 +364,8 @@ class TestScriptParity:
                 f"additive ranking fields missing on {new_row['subject']!r}"
             )
             stripped = {k: v for k, v in new_row.items() if k not in _ADDITIVE_FIELDS}
-            assert stripped == old_row, f"camp row parity broken for {new_row['subject']!r}"
+            old_stripped = {k: v for k, v in old_row.items() if k not in _ADDITIVE_FIELDS}
+            assert stripped == old_stripped, f"camp row parity broken for {new_row['subject']!r}"
 
     def test_nadu_rule_fallback_excludes_pre_ban_matches(self):
         """The exact protection the per-pair max(subj_ban, opp_ban) selection provides:

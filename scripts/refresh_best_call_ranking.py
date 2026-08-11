@@ -88,6 +88,13 @@ from legacy_engine.analytics.superarchetype.registry import read_superarchetype_
 from legacy_engine.archetype.discovered import staged_split_parents
 from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.ingestion.banlist import BAN_EVENTS
+from legacy_engine.advisory.ranking_measurement import (
+    RankingCellMeasurement,
+    RankingCellSource,
+    measure_ranking_row,
+    select_ranking_cell,
+)
+from legacy_engine.models.matchup import MatchupCell
 
 TEMPLATE_PATH = Path(__file__).parent / "best_call_ranking_template.html"
 DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
@@ -108,8 +115,29 @@ def horizon_text(h) -> str:
     return f"{h.source}: {h.trigger}" if h.trigger else h.source
 
 
+def _typed_cell(cell, subject: str, opponent: str) -> MatchupCell:
+    """Normalize legacy test doubles at the report boundary; production cells pass through."""
+    if isinstance(cell, MatchupCell):
+        return cell
+    n = int(cell.n)
+    raw = getattr(cell, "p_raw", None)
+    return MatchupCell(
+        archetype_a=subject,
+        archetype_b=opponent,
+        wins=round((raw or 0.0) * n),
+        n=n,
+        p_raw=raw,
+        p_shrunk=getattr(cell, "p_shrunk", None),
+        ci_low=getattr(cell, "ci_low", None),
+        ci_high=getattr(cell, "ci_high", None),
+        tier=getattr(cell, "tier", "speculative"),
+        display=n >= DISPLAY_GATE_N,
+        concentration=getattr(cell, "concentration", None),
+    )
+
+
 def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground_n,
-               subj_ban=None, out_used=None):
+               subj_ban=None, out_used=None, ad_windows=None):
     """One row's cells vs every current-field opponent (mirror excluded).
 
     ``fb_by_date`` maps a window-start ISO date (or ``None`` = full corpus) to that
@@ -128,13 +156,28 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
         ec = ad_cells.get((subj, opp))
         fb_date = max((d for d in (subj_ban, ban_since.get(opp)) if d), default=None)
         fc = fb_by_date[fb_date].get((subj, opp)) if fb_date in fb_by_date else None
+        ec = _typed_cell(ec, subj, opp) if ec is not None else None
+        fc = _typed_cell(fc, subj, opp) if fc is not None else None
         fb_label = f"BA {fb_date}" if fb_date else "FC"
-        if ec is not None and ec.n >= ground_n:
-            use, win = ec, "era"
-        elif fc is not None and fc.n >= ground_n:
-            use, win = fc, fb_label
-        else:
-            use, win = (ec if ec is not None else fc), "era"
+        era_source = (
+            RankingCellSource(
+                kind="era", since=(ad_windows or {}).get((subj, opp)), cell=ec,
+            ) if ec is not None else None
+        )
+        fallback_source = None
+        if fc is not None:
+            fallback_source = RankingCellSource(
+                kind="ban-fallback" if fb_date else "full-corpus",
+                since=fb_date,
+                cell=fc,
+            )
+        measurement = select_ranking_cell(
+            subj, opp, shares[opp], era=era_source, fallback=fallback_source, ground_n=ground_n,
+        )
+        use = measurement.selected.cell if measurement.selected is not None else None
+        win = (
+            "era" if measurement.selected_kind == "era" else fb_label
+        )
         def source_payload(cell, window):
             if cell is None:
                 return None
@@ -153,7 +196,7 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
         if use is None:  # pair absent from the matrix (e.g. camp vs its own parent)
             cells.append({"opp": opp, "share": r4(shares[opp]), "p": None, "raw": None,
                           "n": 0, "window": "era", "tier": "speculative", "measured": False,
-                          "sources": sources})
+                          "sources": sources, "ledger": measurement.model_dump(mode="json")})
             continue
         if out_used is not None:
             out_used[opp] = use
@@ -163,6 +206,8 @@ def make_cells(subj, field_opps, shares, ad_cells, fb_by_date, ban_since, ground
             "n": use.n, "window": win, "tier": str(use.tier),
             "measured": use.n >= ground_n,
             "sources": sources,
+            "concentration_warning": measurement.concentration_warning,
+            "ledger": measurement.model_dump(mode="json"),
         })
     return cells
 
@@ -290,26 +335,45 @@ def _floor_eligible(c) -> bool:
     return c["measured"]
 
 
-def row_stats(cells, top_k, cover_min):
-    den_all = sum(c["share"] for c in cells)
-    n1 = [c for c in cells if c["n"] >= 1 and c["p"] is not None]
-    n1_mass = sum(c["share"] for c in n1)
-    adj = (sum(c["share"] * c["p"] for c in n1) / n1_mass) if n1 and n1_mass else None
-    meas = [c for c in cells if c["measured"]]
-    eligible = [c for c in meas if _floor_eligible(c)]
-    floor_c = min(eligible, key=lambda c: c["p"]) if eligible else None
-    coverage = (sum(c["share"] for c in meas) / den_all) if den_all else 0.0
-    topk = sorted(cells, key=lambda c: c["share"], reverse=True)[:top_k]
-    topk_ok = bool(topk) and all(c["measured"] for c in topk)
-    floor = floor_c["p"] if floor_c else None
-    vals = [v for v in (adj, floor) if v is not None]
+def row_stats(cells, top_k, cover_min, *, strict_common_sources=None):
+    measurements = []
+    for cell in cells:
+        if "ledger" in cell:
+            measurements.append(RankingCellMeasurement.model_validate(cell["ledger"]))
+            continue
+        source = RankingCellSource(
+            kind="era",
+            since=None,
+            cell=MatchupCell(
+                archetype_a="row", archetype_b=cell["opp"],
+                wins=round(cell["p"] * cell["n"]), n=cell["n"],
+                p_raw=cell["p"], p_shrunk=cell["p"], ci_low=None, ci_high=None,
+                tier="speculative", display=cell["measured"],
+            ),
+        )
+        measurements.append(RankingCellMeasurement(
+            subject="row", opponent=cell["opp"], field_share=cell["share"],
+            era=source, fallback=None, selected_kind="era", selected=source,
+            selection_reason="legacy payload", measured=cell["measured"],
+            concentration_warning=None,
+        ))
+    subject = measurements[0].subject if measurements else ""
+    row = measure_ranking_row(
+        subject,
+        measurements,
+        top_k=top_k,
+        cover_min=cover_min,
+        strict_common_sources=strict_common_sources or {},
+    )
     return {
-        "adj": r4(adj), "floor": r4(floor),
-        "floor_opp": floor_c["opp"] if floor_c else None,
-        "agency": r4(min(vals)) if vals else None,
-        "coverage": r4(coverage),
-        "grounded": topk_ok and coverage >= cover_min,
-        "topk_ok": topk_ok,
+        "adj": r4(row.adjusted_field_wr), "floor": r4(row.floor),
+        "floor_opp": row.floor_opponent,
+        "agency": r4(row.agency),
+        "coverage": r4(row.measured_coverage),
+        "grounded": row.grounded,
+        "topk_ok": row.top_k_measured,
+        "floor_observability": row.floor_observability.model_dump(mode="json"),
+        "reconciliation": row.reconciliation.model_dump(mode="json"),
     }
 
 
@@ -611,12 +675,32 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         fb_by_date[d] = build_matrix(con, min_row_share=min_row_share, since=d).cells
     arch_out = []
     arch_used: dict[str, dict] = {}
+    strict_arch_cache: dict[str | None, dict] = {}
     for i, subj in enumerate(rows):
         arch_used[subj] = {}
         cells = make_cells(subj, field_opps, sh, ad.matrix.cells, fb_by_date, ban_since,
-                           ground_n, subj_ban=ban_since.get(subj), out_used=arch_used[subj])
+                           ground_n, subj_ban=ban_since.get(subj), out_used=arch_used[subj],
+                           ad_windows=ad.cell_windows)
+        strict_since = max(
+            (ad.valid_since.get(name) for name in [subj, *field_opps]
+             if ad.valid_since.get(name) is not None),
+            default=None,
+        )
+        if strict_since not in strict_arch_cache:
+            strict_arch_cache[strict_since] = build_matrix(
+                con, min_row_share=min_row_share, since=strict_since,
+            ).cells
+        strict_sources = {
+            opp: RankingCellSource(
+                kind="strict-common-era", since=strict_since,
+                cell=strict_arch_cache[strict_since][(subj, opp)],
+            )
+            for opp in field_opps if (subj, opp) in strict_arch_cache[strict_since]
+        }
         arch_out.append({
-            "subject": subj, **row_stats(cells, top_k, cover_min),
+            "subject": subj, **row_stats(
+                cells, top_k, cover_min, strict_common_sources=strict_sources,
+            ),
             "since": ad.valid_since.get(subj),
             "horizon": horizon_text(ad.horizon_meta.get(subj)),
             "cells": cells,
@@ -656,6 +740,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
 
     camps_out = []
     camp_used: dict[str, dict] = {}
+    strict_camp_cache: dict[str | None, dict] = {}
     for parent in parents:
         p_ban = ban_since.get(parent)
         prefix = f"{parent} ["
@@ -663,10 +748,29 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             camp = lbl[len(prefix):-1]
             camp_used[lbl] = {}
             cells = make_cells(lbl, field_opps, sh, msa.multi.cells, camp_fb, ban_since,
-                               ground_n, subj_ban=p_ban, out_used=camp_used[lbl])
+                               ground_n, subj_ban=p_ban, out_used=camp_used[lbl],
+                               ad_windows=msa.cell_windows)
+            strict_since = max(
+                (msa.valid_since.get(name) for name in [lbl, *field_opps]
+                 if msa.valid_since.get(name) is not None),
+                default=None,
+            )
+            if strict_since not in strict_camp_cache:
+                strict_camp_cache[strict_since] = build_multi_split_matrix(
+                    con, parents=parents, min_row_share=min_row_share, since=strict_since,
+                ).cells
+            strict_sources = {
+                opp: RankingCellSource(
+                    kind="strict-common-era", since=strict_since,
+                    cell=strict_camp_cache[strict_since][(lbl, opp)],
+                )
+                for opp in field_opps if (lbl, opp) in strict_camp_cache[strict_since]
+            }
             frac = camp_frac.get((parent, camp), 0.0)
             camps_out.append({
-                "subject": lbl, **row_stats(cells, top_k, cover_min),
+                "subject": lbl, **row_stats(
+                    cells, top_k, cover_min, strict_common_sources=strict_sources,
+                ),
                 "since": msa.valid_since.get(lbl),
                 "horizon": horizon_text(msa.horizon_meta.get(lbl)),
                 "cells": cells,
@@ -813,6 +917,40 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     }
 
 
+def generate_ranking(
+    *,
+    db_path: Path,
+    out_path: Path,
+    field_since: str | None = None,
+    ground_n: int = 8,
+    top_k: int = 8,
+    cover_min: float = 0.8,
+    min_row_share: float = 0.001,
+    include_superarchetypes: bool = True,
+) -> dict:
+    """Compute and write the ranking page; the CLI is only argument presentation."""
+    latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
+    effective_since = field_since or latest_ban[0].isoformat()
+    regime_card = latest_ban[1] if effective_since == latest_ban[0].isoformat() else None
+    parents = staged_split_parents()
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        superarchetypes = None if not include_superarchetypes else read_superarchetype_members(con)
+        blob = compute_blob(
+            con, field_since=effective_since, ground_n=ground_n, top_k=top_k,
+            cover_min=cover_min, min_row_share=min_row_share,
+            regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
+        )
+    finally:
+        con.close()
+
+    template = TEMPLATE_PATH.read_text()
+    assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(template.replace("__D_BLOB__", json.dumps(blob, ensure_ascii=False), 1))
+    return blob
+
+
 def main() -> None:
     latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -828,26 +966,13 @@ def main() -> None:
                     help="omit the optional internal superarchetype registry input")
     args = ap.parse_args()
 
-    regime_card = latest_ban[1] if args.field_since == latest_ban[0].isoformat() else None
-    parents = staged_split_parents()
-    con = duckdb.connect(args.db, read_only=True)
-    try:
-        # The registry rides the SAME DB (`superarchetype run`'s derived cache); absent
-        # tables -> None -> the builder's byte-identical off path (gated-additive).
-        superarchetypes = None if args.no_superarchetypes else read_superarchetype_members(con)
-        blob = compute_blob(
-            con, field_since=args.field_since, ground_n=args.ground_n, top_k=args.top_k,
-            cover_min=args.cover_min, min_row_share=args.min_row_share,
-            regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
-        )
-    finally:
-        con.close()
-
-    template = TEMPLATE_PATH.read_text()
-    assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
     out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(template.replace("__D_BLOB__", json.dumps(blob, ensure_ascii=False), 1))
+    blob = generate_ranking(
+        db_path=Path(args.db), out_path=out, field_since=args.field_since,
+        ground_n=args.ground_n, top_k=args.top_k, cover_min=args.cover_min,
+        min_row_share=args.min_row_share,
+        include_superarchetypes=not args.no_superarchetypes,
+    )
     print(f"wrote {out}: field={blob['meta']['field_decks']} decks since "
           f"{blob['meta']['field_since']}, corpus_max={blob['meta']['corpus_max']}, "
           f"{len(blob['arch'])} arch + {len(blob['camps'])} camp rows")
