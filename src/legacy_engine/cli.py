@@ -86,6 +86,14 @@ def _echo_window(res: "WindowResolution") -> None:
         click.echo(f"// {res.banner}")
 
 
+def _echo_field_regime_currency(field) -> None:
+    """Echo typed field-currency evidence before advisory result data."""
+    from legacy_engine.advisory.report import field_regime_currency_lines
+
+    for line in field_regime_currency_lines(field):
+        click.echo(line)
+
+
 _STALE_DAYS = 30  # newest event older than this (vs wall clock) → staleness advisory
 
 
@@ -2756,6 +2764,7 @@ def advise_compare(
         matrix = inputs.matrix
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         lifts_a = _parse_lift_spec(a_lift)
         lifts_b = _parse_lift_spec(b_lift)
@@ -2900,6 +2909,7 @@ def advise_positioning(
         # the matchup matrix above. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -3229,6 +3239,7 @@ def advise_sideboard(
         # the window's thinness check above. When --field is absent, provenance narrows the field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -3486,6 +3497,7 @@ def advise_backtest(
     con = store.connect(db) if db else store.connect()
     try:
         field = _load_field(con, field_text=field_text)
+        _echo_field_regime_currency(field)
         result = backtest_board(con, archetype, field, since=since, until=until, field_scope=field_scope)
 
         click.echo(f"// backtest: {result.archetype}")
@@ -3668,6 +3680,7 @@ def advise_sweep(
             field = _load_field(con, field_text=Path(field_file).read_text())
         else:
             field = build_global_field(con, since=eff_since, until=eff_until)
+        _echo_field_regime_currency(field)
 
         click.echo("// sweep: archetype-sweep backtest (batch divergence mining)")
         click.echo(
@@ -3907,6 +3920,7 @@ def advise_whattoplay(
             click.echo(line)
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -4040,6 +4054,7 @@ def advise_field(
             since=win.since,
             until=win.until,
         )
+        _echo_field_regime_currency(field)
 
         # Warn on field warnings (thin-data banners, normalization, etc.)
         for w in field.warnings:
@@ -4206,6 +4221,7 @@ def advise_report(
                     since=inputs.field_since,
                     until=inputs.field_until,
                 )
+                _echo_field_regime_currency(v_field)
                 v_report = build_field_read_report(
                     con,
                     mainboard,
@@ -4230,6 +4246,7 @@ def advise_report(
         # the matchup matrix. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
         report = build_field_read_report(
             con,
             mainboard,
@@ -4753,6 +4770,7 @@ def advise_acquire(
         # the window thinness check. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance)
+        _echo_field_regime_currency(field)
 
         plan = acquire_plan(
             con,
@@ -5257,6 +5275,7 @@ def generate_tune(
     discovery = None
     try:
         field = _load_field(con, field_text=field_text)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:

@@ -21,6 +21,7 @@ from typing import Literal
 import duckdb
 
 from legacy_engine.analytics.metashare import _is_never_other, compute_metashare
+from legacy_engine.analytics.trends import regime_windows
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,106 @@ def _normalize_shares(raw: dict[str, float]) -> tuple[dict[str, float], list[str
 FieldSource = Literal["global", "custom", "local"]
 
 
+@dataclass(frozen=True)
+class RegimeCurrency:
+    """Count-backed evidence for how much of a field belongs to the current ban regime."""
+
+    current_regime_since: str
+    current_regime_label: str
+    current_n: int | None
+    total_n: int | None
+    share: float | None
+    reason: str | None
+
+
+def _current_regime_identity() -> tuple[str, str]:
+    current = regime_windows()[-1]
+    if current.since is None:  # pragma: no cover - BAN_EVENTS always defines a current regime
+        raise RuntimeError("current ban regime has no opening date")
+    return current.since.isoformat(), current.label
+
+
+def custom_regime_currency(
+    *,
+    current_n: int | None,
+    total_n: int | None,
+) -> RegimeCurrency:
+    """Build exact custom-field currency, or an honest unavailable result."""
+    regime_since, regime_label = _current_regime_identity()
+    if current_n is not None and (not isinstance(current_n, int) or current_n < 0):
+        raise ValueError("current_regime_n must be a non-negative integer")
+    if total_n is not None and (not isinstance(total_n, int) or total_n < 0):
+        raise ValueError("total_n must be a non-negative integer")
+    if current_n is None:
+        return RegimeCurrency(
+            regime_since, regime_label, None, total_n, None,
+            "unavailable for undated aggregate",
+        )
+    if total_n is None or total_n == 0:
+        raise ValueError("current_regime_n requires a positive count basis")
+    if current_n > total_n:
+        raise ValueError(
+            f"current_regime_n ({current_n}) cannot exceed total field count ({total_n})"
+        )
+    return RegimeCurrency(
+        regime_since, regime_label, current_n, total_n, current_n / total_n, None
+    )
+
+
+def compute_regime_currency(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> RegimeCurrency:
+    """Measure current-regime share over the same dated, positionable global-field population."""
+    return _compute_regime_currency(
+        con,
+        provenance=provenance,
+        since=since,
+        until=until,
+        definition="raw",
+    )
+
+
+def _compute_regime_currency(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    since: str | None,
+    until: str | None,
+    definition: str,
+) -> RegimeCurrency:
+    regime_since, regime_label = _current_regime_identity()
+
+    def positionable_n(window_since: str | None, window_until: str | None) -> int:
+        report = compute_metashare(
+            con,
+            definition=definition,
+            provenance=provenance,
+            group_other=False,
+            since=window_since,
+            until=window_until,
+        )
+        return sum(entry.n for entry in report.entries if not _is_never_other(entry.archetype))
+
+    total_n = positionable_n(since, until)
+    if total_n == 0:
+        return RegimeCurrency(
+            regime_since, regime_label, 0, 0, None,
+            "no positionable decks in selected field window",
+        )
+
+    current_since = max(filter(None, (since, regime_since)), default=regime_since)
+    current_n = 0 if until is not None and until <= current_since else positionable_n(
+        current_since, until
+    )
+    return RegimeCurrency(
+        regime_since, regime_label, current_n, total_n, current_n / total_n, None
+    )
+
+
 @dataclass
 class FieldDistribution:
     """The expected field a deck is positioned against — the advisory SSOT for 'what is the field'.
@@ -90,6 +191,7 @@ class FieldDistribution:
     counts: dict[str, int] | None
     no_data: frozenset[str]
     warnings: tuple[str, ...]
+    regime_currency: RegimeCurrency | None = None
 
     def restrict_to(self, keep: Collection[str]) -> tuple["FieldDistribution", float]:
         """Return a copy restricted to ``keep`` (renormalized to sum 1.0) + the excluded share mass.
@@ -130,6 +232,7 @@ class FieldDistribution:
                 counts=restricted_counts,
                 no_data=self.no_data & frozenset(keep_set),
                 warnings=self.warnings,
+                regime_currency=self.regime_currency,
             ),
             excluded_share,
         )
@@ -169,6 +272,13 @@ def build_global_field(
         since=since,
         until=until,
     )
+    regime_currency = _compute_regime_currency(
+        con,
+        provenance=provenance,
+        since=since,
+        until=until,
+        definition=definition,
+    )
 
     kept_entries = []
     excluded_share = 0.0
@@ -193,6 +303,7 @@ def build_global_field(
             counts={},
             no_data=frozenset(),
             warnings=tuple(warnings),
+            regime_currency=regime_currency,
         )
 
     raw_shares = {entry.archetype: entry.share for entry in kept_entries}
@@ -207,6 +318,7 @@ def build_global_field(
         counts=counts,
         no_data=frozenset(),
         warnings=tuple(warnings),
+        regime_currency=regime_currency,
     )
 
 
@@ -220,6 +332,7 @@ def build_custom_field(
     *,
     known_archetypes: frozenset[str] | None = None,
     counts: dict[str, int] | None = None,
+    regime_currency: RegimeCurrency | None = None,
 ) -> FieldDistribution:
     """Build a user-supplied custom field (the 'best call for MY room' headline).
 
@@ -291,4 +404,5 @@ def build_custom_field(
         counts=resolved_counts,
         no_data=no_data,
         warnings=tuple(warnings),
+        regime_currency=regime_currency,
     )

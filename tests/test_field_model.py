@@ -12,7 +12,10 @@ from legacy_engine.advisory import (
     FieldDistribution,
     build_custom_field,
     build_global_field,
+    compute_regime_currency,
+    custom_regime_currency,
 )
+from legacy_engine.analytics.trends import regime_windows
 from legacy_engine.advisory.field import _normalize_shares
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.cache import parse_cache_item
@@ -209,6 +212,54 @@ class TestBuildGlobalField:
         assert pytest.approx(sum(fd.shares.values()), abs=1e-9) == 1.0
         con.close()
 
+    def test_regime_currency_uses_positionable_decks_in_same_window(self):
+        con = _con()
+        old_tid = _load_labeled_corpus(con)
+        current_since = regime_windows()[-1].since
+        assert current_since is not None
+        con.execute("UPDATE tournaments SET date = ? WHERE id = ?", ["2026-06-01", old_tid])
+
+        current_tid = store.load_tournament(
+            con, parse_cache_item(_PAPER_CHALLENGE, "mtgmelee")
+        )
+        con.execute("UPDATE tournaments SET date = ? WHERE id = ?", [current_since.isoformat(), current_tid])
+        con.execute(
+            "UPDATE decks SET archetype = 'Tempo' WHERE tournament_id = ?", [current_tid]
+        )
+
+        currency = compute_regime_currency(con)
+        assert currency.current_n == 2
+        assert currency.total_n == 5  # three positionable old decks; Unknown is excluded
+        assert currency.share == pytest.approx(0.4)
+        assert currency.current_regime_since == current_since.isoformat()
+
+    def test_current_only_global_window_is_fully_current(self):
+        con = _con()
+        tid = _load_labeled_corpus(con)
+        current_since = regime_windows()[-1].since
+        assert current_since is not None
+        con.execute("UPDATE tournaments SET date = ? WHERE id = ?", [current_since.isoformat(), tid])
+
+        fd = build_global_field(con, since=current_since.isoformat())
+        assert fd.regime_currency is not None
+        assert fd.regime_currency.share == 1.0
+
+
+class TestCustomRegimeCurrency:
+    def test_exact_count_backed_share(self):
+        currency = custom_regime_currency(current_n=29, total_n=100)
+        assert currency.share == 0.29
+        assert currency.reason is None
+
+    def test_undated_aggregate_is_explicitly_unavailable(self):
+        currency = custom_regime_currency(current_n=None, total_n=100)
+        assert currency.share is None
+        assert currency.reason == "unavailable for undated aggregate"
+
+    def test_numerator_cannot_exceed_total(self):
+        with pytest.raises(ValueError, match="cannot exceed"):
+            custom_regime_currency(current_n=11, total_n=10)
+
     def test_counts_match_entry_n(self):
         """counts[archetype] equals the deck count in the corpus for each archetype."""
         con = _con()
@@ -339,6 +390,29 @@ class TestBuildGlobalField:
         assert "Stompy" not in fd_online.shares
         assert "Show" not in fd_online.shares
         con.close()
+
+    def test_regime_currency_honors_provenance_filter(self):
+        con = _con()
+        online_tid = _load_labeled_corpus(con)
+        current_since = regime_windows()[-1].since
+        assert current_since is not None
+        con.execute(
+            "UPDATE tournaments SET date = ? WHERE id = ?",
+            [current_since.isoformat(), online_tid],
+        )
+        paper_tid = store.load_tournament(
+            con, parse_cache_item(_PAPER_CHALLENGE, "mtgmelee")
+        )
+        con.execute("UPDATE tournaments SET date = '2026-06-01' WHERE id = ?", [paper_tid])
+        con.execute("UPDATE decks SET archetype = 'Stompy' WHERE tournament_id = ?", [paper_tid])
+
+        online = compute_regime_currency(con, provenance="online")
+        paper = compute_regime_currency(con, provenance="paper")
+        assert online.share == 1.0
+        assert online.current_n == online.total_n == 3
+        assert paper.share == 0.0
+        assert paper.current_n == 0
+        assert paper.total_n == 2
 
     def test_renormalized_shares_after_unknown_exclusion(self):
         """After excluding Unknown, remaining shares sum to 1.0 (renormalized)."""

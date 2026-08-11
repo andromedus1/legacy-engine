@@ -349,6 +349,44 @@ class TestAdviseFieldCustomFile:
         assert result.exit_code == 0
         assert "custom" in result.output
 
+    def test_low_regime_currency_emits_measurement_and_warning(self, runner, tmp_path):
+        db_path = _build_mixed_db(tmp_path)
+        field_path = _write_field(
+            tmp_path,
+            "# current_regime_n: 2\n0.6 Control 6\n0.4 Combo 4",
+        )
+        result = runner.invoke(
+            main, ["advise", "field", "--field", field_path, "--db", db_path]
+        )
+        assert result.exit_code == 0, result.output
+        assert "// field regime currency: 20% current" in result.output
+        assert "// [warn] field is 20% current-regime" in result.output
+
+    def test_majority_current_currency_has_no_staleness_warning(self, runner, tmp_path):
+        db_path = _build_mixed_db(tmp_path)
+        field_path = _write_field(
+            tmp_path,
+            "# current_regime_n: 8\n0.6 Control 6\n0.4 Combo 4",
+        )
+        result = runner.invoke(
+            main, ["advise", "field", "--field", field_path, "--db", db_path]
+        )
+        assert result.exit_code == 0, result.output
+        assert "// field regime currency: 80% current" in result.output
+        assert "// [warn] field is" not in result.output
+
+    def test_undated_custom_field_warns_currency_unavailable(self, runner, tmp_path):
+        db_path = _build_mixed_db(tmp_path)
+        field_path = _write_field(tmp_path, "0.6 Control\n0.4 Combo")
+        result = runner.invoke(
+            main, ["advise", "field", "--field", field_path, "--db", db_path]
+        )
+        assert result.exit_code == 0, result.output
+        assert (
+            "// [warn] regime currency unavailable: unavailable for undated aggregate"
+            in result.output
+        )
+
     def test_custom_field_shows_custom_archetypes(self, runner, tmp_path):
         db_path = _build_mixed_db(tmp_path)
         field_path = _write_field(tmp_path, "0.7 Tempo\n0.3 Elves")

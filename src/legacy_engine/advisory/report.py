@@ -15,7 +15,12 @@ from pathlib import Path
 
 import duckdb
 
-from legacy_engine.advisory.field import FieldDistribution, build_custom_field, build_global_field
+from legacy_engine.advisory.field import (
+    FieldDistribution,
+    build_custom_field,
+    build_global_field,
+    custom_regime_currency,
+)
 from legacy_engine.archetype.matcher import ArchetypeResult, classify
 from legacy_engine.archetype.rules import load_ruleset
 from legacy_engine.colors import compute_deck_colors
@@ -137,6 +142,8 @@ def _load_field(
     shares: dict[str, float] = {}
     raw_counts: dict[str, int] = {}
     effective_n: int | None = None
+    current_regime_n: int | None = None
+    has_current_regime_header = False
     has_per_line_counts = False
 
     for raw_line in field_text.splitlines():
@@ -158,6 +165,18 @@ def _load_field(
                     raise ValueError(
                         f"_load_field: # effective_n value must be a positive integer, got {val_str!r}"
                     )
+            elif rest.lower().startswith("current_regime_n:"):
+                val_str = rest[len("current_regime_n:"):].strip()
+                try:
+                    current_regime_n = int(val_str)
+                    if current_regime_n < 0:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError(
+                        "_load_field: # current_regime_n value must be a non-negative "
+                        f"integer, got {val_str!r}"
+                    )
+                has_current_regime_header = True
             continue
 
         head_parts = line.split(None, 1)
@@ -227,7 +246,42 @@ def _load_field(
             resolved_counts[a] = n_a
             allocated += n_a
 
-    return build_custom_field(shares, counts=resolved_counts)
+    total_n = sum(resolved_counts.values()) if resolved_counts is not None else None
+    if has_current_regime_header and total_n is None:
+        raise ValueError(
+            "_load_field: # current_regime_n requires per-line counts or # effective_n"
+        )
+    regime_currency = custom_regime_currency(
+        current_n=current_regime_n if has_current_regime_header else None,
+        total_n=total_n,
+    )
+    return build_custom_field(
+        shares,
+        counts=resolved_counts,
+        regime_currency=regime_currency,
+    )
+
+
+def field_regime_currency_lines(field: FieldDistribution) -> tuple[str, ...]:
+    """Render the field-currency audit contract for CLI/report adapters."""
+    currency = field.regime_currency
+    if currency is None:
+        return ()
+    if currency.share is None:
+        return (f"// [warn] regime currency unavailable: {currency.reason}",)
+
+    percent = f"{currency.share:.0%}"
+    lines = [
+        f"// field regime currency: {percent} current "
+        f"({currency.current_n}/{currency.total_n}; since {currency.current_regime_since})"
+    ]
+    if currency.share < 0.5:
+        lines.append(
+            f"// [warn] field is {percent} current-regime "
+            f"({1.0 - currency.share:.0%} prior regime); composition may not reflect "
+            "current meta — consider windowing the field to the current regime"
+        )
+    return tuple(lines)
 
 
 # ---------------------------------------------------------------------------

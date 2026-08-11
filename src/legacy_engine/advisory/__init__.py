@@ -3,8 +3,11 @@
 from legacy_engine.advisory.field import (
     FieldDistribution,
     FieldSource,
+    RegimeCurrency,
     build_custom_field,
     build_global_field,
+    compute_regime_currency,
+    custom_regime_currency,
 )
 from legacy_engine.advisory.positioning import (
     DeckRanking,
@@ -42,8 +45,11 @@ from legacy_engine.advisory.report import (
 __all__ = [
     "FieldDistribution",
     "FieldSource",
+    "RegimeCurrency",
     "build_custom_field",
     "build_global_field",
+    "compute_regime_currency",
+    "custom_regime_currency",
     "DeckRanking",
     "PositioningResult",
     "delta_var_S",
