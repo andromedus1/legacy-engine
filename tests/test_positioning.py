@@ -705,6 +705,56 @@ class TestRankDecks:
         ranking = rank_decks(matrix, field, [], n_draws=_TEST_DRAWS, seed=SEED)
         assert ranking.decks == []
         assert ranking.p_best == {}
+        assert ranking.imputation_share == {}
+
+    def test_explicit_coverage_gate_and_imputation_complement(self):
+        matrix = _simple_matrix(
+            ["Camp [A]", "Opp1", "Opp2"],
+            {
+                ("Camp [A]", "Opp1"): (5, 8),
+                ("Camp [A]", "Opp2"): (15, 29),
+            },
+        )
+        field = _custom_field({"Opp1": 0.3, "Opp2": 0.7})
+        default = rank_decks(
+            matrix, field, ["Camp [A]"], n_draws=500, seed=SEED,
+        )
+        page_gate = rank_decks(
+            matrix, field, ["Camp [A]"], coverage_min_n=8, n_draws=500, seed=SEED,
+        )
+        assert default.data_coverage["Camp [A]"] == 0.0
+        assert page_gate.data_coverage["Camp [A]"] == pytest.approx(1.0)
+        assert page_gate.imputation_share["Camp [A]"] == pytest.approx(0.0)
+        assert page_gate.data_coverage["Camp [A]"] + page_gate.imputation_share["Camp [A]"] == pytest.approx(1.0)
+        assert page_gate.p_best["Camp [A]"] == 1.0
+
+    def test_explicit_coverage_gate_is_deterministic_and_shared_budget_is_one(self):
+        matrix = _simple_matrix(
+            ["Camp [A]", "Other", "Opp"],
+            {
+                ("Camp [A]", "Opp"): (5, 8),
+                ("Other", "Opp"): (4, 8),
+            },
+        )
+        field = _custom_field({"Opp": 1.0})
+        first = rank_decks(
+            matrix, field, ["Camp [A]", "Other"], coverage_min_n=8,
+            n_draws=1000, seed=SEED,
+        )
+        second = rank_decks(
+            matrix, field, ["Camp [A]", "Other"], coverage_min_n=8,
+            n_draws=1000, seed=SEED,
+        )
+        assert first == second
+        assert sum(first.p_best.values()) == pytest.approx(1.0)
+        assert first.data_coverage["Camp [A]"] > 0.0
+
+    def test_invalid_coverage_gate_fails_before_sampling(self):
+        with pytest.raises(ValueError, match="coverage_min_n must be >= 1"):
+            rank_decks(
+                _worked_matrix(), _worked_field(), ["X"],
+                coverage_min_n=0, n_draws=10, seed=SEED,
+            )
 
     def test_single_candidate_p_best_is_one(self):
         """With one candidate, p_best should be 1.0."""
@@ -1157,6 +1207,16 @@ class TestCoveredPredicate:
     def test_thin_cell_not_covered(self):
         m = _simple_matrix(["X", "A"], {("X", "A"): (5, 10)})  # n<30 → not display
         assert _is_covered_cell(m, "X", "A") is False
+
+    @pytest.mark.parametrize(("n", "covered"), [(7, False), (8, True), (29, True), (30, True)])
+    def test_explicit_sample_gate(self, n, covered):
+        m = _simple_matrix(["X", "A"], {("X", "A"): (n // 2, n)})
+        assert _is_covered_cell(m, "X", "A", min_n=8) is covered
+
+    def test_invalid_explicit_sample_gate_fails(self):
+        m = _simple_matrix(["X", "A"], {("X", "A"): (4, 8)})
+        with pytest.raises(ValueError, match="min_n must be >= 1"):
+            _is_covered_cell(m, "X", "A", min_n=0)
 
     def test_absent_cell_not_covered(self):
         m = _simple_matrix(["X", "A", "B"], {("X", "A"): (50, 100)})  # X vs B absent (n=0)

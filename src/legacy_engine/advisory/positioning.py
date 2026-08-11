@@ -40,7 +40,7 @@ Units:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 
 import numpy as np
 
@@ -228,17 +228,27 @@ def _sample_S(
 # ---------------------------------------------------------------------------
 
 
-def _is_covered_cell(matrix: MatchupMatrix, deck_archetype: str, opp: str) -> bool:
+def _is_covered_cell(
+    matrix: MatchupMatrix,
+    deck_archetype: str,
+    opp: str,
+    *,
+    min_n: int | None = None,
+) -> bool:
     """Whether ``deck`` has trustworthy matchup data against ``opp``.
 
     Single source of truth for "covered": the self-mirror (a fixed-0.5 cell that is never
     imputed) counts as covered, as does any *displayed* (n ≥ DISPLAY_GATE_N), non-mirror
     cell.  An absent or thin (n < gate) cell is NOT covered.
     """
+    if min_n is not None and min_n < 1:
+        raise ValueError("coverage min_n must be >= 1")
     if opp == deck_archetype:
         return True  # mirror: fixed 0.5, never imputed
     cell = matrix.cells.get((deck_archetype, opp))
-    return cell is not None and cell.display and not cell.is_mirror
+    if cell is None or cell.is_mirror:
+        return False
+    return cell.display if min_n is None else cell.n >= min_n
 
 
 def covered_field_archetypes(
@@ -258,6 +268,8 @@ def _compute_data_coverage(
     matrix: MatchupMatrix,
     field: FieldDistribution,
     deck_archetype: str,
+    *,
+    min_n: int | None = None,
 ) -> float:
     """Fraction of *non-mirror* field share-mass the deck has a measured cell against.
 
@@ -269,6 +281,8 @@ def _compute_data_coverage(
 
     Returns 1.0 when the field is empty (degenerate; no coverage needed).
     """
+    if min_n is not None and min_n < 1:
+        raise ValueError("coverage min_n must be >= 1")
     field_archetypes = list(field.shares)
     if not field_archetypes:
         return 1.0
@@ -281,7 +295,7 @@ def _compute_data_coverage(
             continue  # skip mirror — not part of the coverage-ratio denominator
         share = field.shares[opp]
         total_non_mirror_mass += share
-        if _is_covered_cell(matrix, deck_archetype, opp):
+        if _is_covered_cell(matrix, deck_archetype, opp, min_n=min_n):
             covered_mass += share
 
     if total_non_mirror_mass <= 0.0:
@@ -606,6 +620,7 @@ class DeckRanking:
     coverage_caveated: set[str]
     pairwise: dict[tuple[str, str], float]
     field_source: str
+    imputation_share: dict[str, float] = dataclass_field(default_factory=dict)
 
 
 def rank_decks(
@@ -619,6 +634,7 @@ def rank_decks(
     risk_averse: bool = False,
     risk_quantile: float = _DEFAULT_RISK_QUANTILE,
     min_coverage: float = 0.0,
+    coverage_min_n: int | None = None,
     seed: int | None = None,
 ) -> DeckRanking:
     """Rank candidate decks under shared-field MC.
@@ -649,6 +665,9 @@ def rank_decks(
         ``DeckRanking.low_coverage`` and flagged — they are NOT dropped
         from ``decks``.  Default 0.0 (no flagging).
     """
+    if coverage_min_n is not None and coverage_min_n < 1:
+        raise ValueError("coverage_min_n must be >= 1")
+
     # Reconcile risk_averse / risk_quantile: risk_averse=True → use 0.05
     effective_q = _RISK_AVERSE_QUANTILE if risk_averse else risk_quantile
 
@@ -665,6 +684,7 @@ def rank_decks(
             coverage_caveated=set(),
             pairwise={},
             field_source=field.field_source,
+            imputation_share={},
         )
 
     rng = np.random.default_rng(seed)
@@ -727,7 +747,13 @@ def rank_decks(
 
     # ── data_coverage per deck ────────────────────────────────────────────
     coverage_dict: dict[str, float] = {
-        deck: _compute_data_coverage(matrix, field, deck) for deck in candidates
+        deck: _compute_data_coverage(
+            matrix, field, deck, min_n=coverage_min_n,
+        ) for deck in candidates
+    }
+    imputation_dict = {
+        deck: min(1.0, max(0.0, 1.0 - coverage))
+        for deck, coverage in coverage_dict.items()
     }
 
     # ── low_coverage flag set ─────────────────────────────────────────────
@@ -787,6 +813,7 @@ def rank_decks(
         coverage_caveated=coverage_caveated,
         pairwise=pairwise,
         field_source=field.field_source,
+        imputation_share=imputation_dict,
     )
 
 
