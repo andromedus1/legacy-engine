@@ -123,14 +123,19 @@ paper sources is not treated as one person. Cross-handle/source merging requires
 dated curated alias snapshot effective no later than the fold cutoff; alias suggestions are never
 consumed. Reports expose only aggregate accessibility, repeat/familiarity counts, coefficient
 quantiles, and grouped scores. They never render handles, ids, individual coefficients, or player
-rankings, and groups below the privacy floor are suppressed.
+rankings, and every identity count below the privacy floor is suppressed. Ambiguous match sides
+remain in the identity-coverage denominator, while repeat and familiarity eligibility are
+recomputed independently within online and paper rather than inherited from the combined corpus.
 
 The diagnostic first measures online/paper identity accessibility and descriptive pilot stickiness
 for existing parent/variant configurations. Stickiness is an input to later taxonomy research, not
 a one-deck/two-deck verdict. The model then fits deterministic L2-pooled deck-pair residuals, repeat-
 player intercepts, and separately gated player-by-parent familiarity on pre-cutoff matches only.
-Penalty selection uses earlier chronological origins whose production base grid is independently
-recomputed at each cutoff. Player-neutral deck forecasts set identity terms to zero; player-aware
+The player and per-player familiarity coefficients are frequency-weight centered inside the fitted
+penalized objective. Penalty selection uses distinct earlier chronological origins whose full
+production artifact and base grid are independently hash-bound at each cutoff. Rows outside that
+frozen action universe are excluded with named training/validation counts rather than crashing or
+silently borrowing a later grid. Player-neutral deck forecasts set identity terms to zero; player-aware
 forecasts use an outcome-free participant schedule hashed before result strings are opened.
 Historical participant replay does not prove the source exposed pairings before an event.
 
@@ -138,7 +143,9 @@ Evaluation keeps player-aware, player-masked, and player-neutral estimands separ
 known-known, known-cold, cold-cold, below-repeat-floor, online, and paper strata. The strongest
 possible status is `candidate-for-promotion-study`, requiring the full preregistered conjunction:
 fold/regime and identity support; event-block log-loss advantage plus Brier/calibration nonharm;
-player-neutral regret improvement; and cold-start/venue nonharm. Missing support is
+the benchmark's common-match/event/date/action/field-mass support verdict; player-neutral regret
+improvement from paired event-block draws; and declared match/event/date floors plus nonharm in
+each cold-start and venue stratum. Missing support is
 `not-evaluable`; adverse evidence is `stop`; incomplete improvement is `diagnostic-only`. Even a
 candidate requires a new reviewed promotion feature. This command never tunes, selects, deploys,
 or changes the production ranking or threshold-only strong-player surface.

@@ -154,23 +154,33 @@ def load_player_diagnostic_rows(
         if not normalize_player(p2):
             raw_key = (str(event_id), str(p2 or ""))
             a2 = parent_by_raw.get(raw_key) if raw_counts.get(raw_key) == 1 else None
-        if outcome is None or outcome.winner is None or a1 is None or a2 is None or a1 == a2:
-            continue
-        key1, _basis1, _reason1 = identity(str(event_id), p1, str(provenance))
-        key2, _basis2, _reason2 = identity(str(event_id), p2, str(provenance))
-        if str(a2) < str(a1):
+        key1, _basis1, reason1 = identity(str(event_id), p1, str(provenance))
+        key2, _basis2, reason2 = identity(str(event_id), p2, str(provenance))
+        reason = None
+        if outcome is None or outcome.winner is None or not str(p2 or "").strip():
+            reason = "bye-draw-invalid"
+        elif reason1 == "ambiguous-within-event-handle" or reason2 == "ambiguous-within-event-handle":
+            reason = "ambiguous-player"
+        elif a1 is None or a2 is None:
+            reason = "unclassified"
+        elif a1 == a2:
+            reason = "mirror"
+        left = str(a1) if a1 is not None else "<unclassified:p1>"
+        right = str(a2) if a2 is not None else "<unclassified:p2>"
+        if a1 is not None and a2 is not None and right < left:
             subject, opponent = str(a2), str(a1)
             subject_key, opponent_key = key2, key1
-            won = outcome.winner == "p2"
+            won = outcome is not None and outcome.winner == "p2"
         else:
-            subject, opponent = str(a1), str(a2)
+            subject, opponent = left, right
             subject_key, opponent_key = key1, key2
-            won = outcome.winner == "p1"
+            won = outcome is not None and outcome.winner == "p1"
         matches.append(PlayerTrainingMatch(
             match_id=f"{event_id}:{match_idx}", event_id=str(event_id),
             event_date=str(event_date), provenance=str(provenance), subject=subject,
             opponent=opponent, subject_player_key=subject_key,
             opponent_player_key=opponent_key, subject_won=won,
+            exclusion_reason=reason,
         ))
     return tuple(registrations), tuple(matches), identity_sha
 
@@ -314,6 +324,9 @@ def build_player_inner_folds(
         freeze_origin_predictions,
     )
 
+    if player_protocol.benchmark_protocol_hash != protocol_sha256(benchmark_protocol):
+        raise ValueError("player protocol does not bind the loaded benchmark protocol")
+
     con = duckdb.connect(str(source_db), read_only=True)
     try:
         dates = [row[0] for row in con.execute(
@@ -370,8 +383,10 @@ def build_player_inner_folds(
                 subject=item.subject, opponent=item.opponent, probability=item.probability,
             ) for item in frozen.matchup_predictions if item.estimator == "production-ci-gated")
             output.append(PlayerInnerFold(
-                cutoff=cutoff, training_rows=training, validation_rows=validation,
-                base_predictions_sha256=content_sha256([
+                cutoff=cutoff, evaluation_until=until,
+                training_rows=training, validation_rows=validation,
+                base_predictions_sha256=content_sha256(frozen),
+                base_deck_grid_sha256=content_sha256([
                     item.model_dump(mode="json") for item in grid
                 ]), base_deck_predictions=grid,
             ))

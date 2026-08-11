@@ -2926,12 +2926,14 @@ def _load_player_effect_inputs(
     from pathlib import Path
 
     from legacy_engine.advisory.ranking_benchmark import (
-        BenchmarkProtocol, FrozenOriginPredictions, load_hashed_model,
+        BenchmarkProtocol, FrozenOriginPredictions, load_hashed_model, protocol_sha256,
     )
     from legacy_engine.analytics.players.diagnostic import PlayerDiagnosticProtocol
 
     benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol_path).read_bytes())
     player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol_path).read_bytes())
+    if player.benchmark_protocol_hash != protocol_sha256(benchmark):
+        raise click.ClickException("player protocol does not bind the loaded benchmark protocol")
     expected = json.loads(Path(base_checksum_path).read_text())["sha256"]
     base, _digest = load_hashed_model(Path(base_path), FrozenOriginPredictions, expected)
     return benchmark, player, base
@@ -2986,7 +2988,7 @@ def advise_benchmark_player_effect_freeze(
         identity_snapshot=identity, taxonomy_snapshot=taxonomy,
     )
     frozen = freeze_player_effect_predictions(
-        base, training, schedule, accessibility, player, inner_folds=inner,
+        base, benchmark, training, schedule, accessibility, player, inner_folds=inner,
         identity_snapshot_sha256=identity_sha,
     )
     digest = atomic_write_canonical(Path(out), frozen)
@@ -3027,9 +3029,12 @@ def advise_benchmark_player_effect_evaluate(
         evaluate_player_effect_fold, render_player_effect_markdown,
     )
     from legacy_engine.workflows.player_effect_diagnostic import (
-        load_player_effect_outcomes, load_scheduled_player_matches,
+        load_player_effect_outcomes, load_player_identity_snapshot,
+        load_scheduled_player_matches,
     )
-    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_outcomes, validate_frozen_taxonomy,
+    )
 
     benchmark, player, base = _load_player_effect_inputs(
         benchmark_protocol, player_protocol, base_predictions, base_checksum,
@@ -3045,8 +3050,18 @@ def advise_benchmark_player_effect_evaluate(
     )
     if content_sha256([row.model_dump(mode="json") for row in schedule]) != frozen.schedule_sha256:
         raise click.ClickException("current outcome-free schedule does not match frozen predictions")
+    _aliases, identity_sha = load_player_identity_snapshot(
+        identity, mode=player.identity_mode, cutoff=base.fold.cutoff,
+    )
     outcomes = load_player_effect_outcomes(Path(db), schedule)
-    evaluation = evaluate_player_effect_fold(frozen, outcomes, base, benchmark, player)
+    benchmark_outcomes = load_heldout_outcomes(
+        Path(db), base.fold, taxonomy_mode=base.taxonomy_mode,
+        expected_rules_sha256=base.rules_sha256, taxonomy_snapshot=taxonomy,
+    )
+    evaluation = evaluate_player_effect_fold(
+        frozen, outcomes, base, benchmark, player, benchmark_outcomes,
+        identity_snapshot_sha256=identity_sha,
+    )
     summary = aggregate_player_effect_evaluations(
         (evaluation,), benchmark_protocol=benchmark, player_protocol=player,
     )
@@ -3077,7 +3092,7 @@ def advise_benchmark_player_effect_run(
 
     from legacy_engine.advisory.ranking_benchmark import (
         BenchmarkProtocol, FrozenOriginPredictions, atomic_write_canonical, atomic_write_text,
-        load_hashed_model,
+        load_hashed_model, protocol_sha256,
     )
     from legacy_engine.analytics.players.diagnostic import (
         PlayerDiagnosticProtocol, measure_player_accessibility,
@@ -3090,10 +3105,14 @@ def advise_benchmark_player_effect_run(
         build_player_inner_folds, load_player_diagnostic_rows, load_player_effect_outcomes,
         load_scheduled_player_matches,
     )
-    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_outcomes, validate_frozen_taxonomy,
+    )
 
     benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol).read_bytes())
     player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol).read_bytes())
+    if player.benchmark_protocol_hash != protocol_sha256(benchmark):
+        raise click.ClickException("player protocol does not bind the loaded benchmark protocol")
     benchmark_root, root = Path(benchmark_artifact_dir), Path(artifact_dir)
     identity = Path(identity_snapshot) if identity_snapshot else None
     taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
@@ -3119,7 +3138,7 @@ def advise_benchmark_player_effect_run(
             identity_snapshot=identity, taxonomy_snapshot=taxonomy,
         )
         frozen = freeze_player_effect_predictions(
-            base, training, schedule, accessibility, player, inner_folds=inner,
+            base, benchmark, training, schedule, accessibility, player, inner_folds=inner,
             identity_snapshot_sha256=identity_sha,
         )
         predictions_path = root / f"{fold.fold_id}.player-effect.predictions.json"
@@ -3129,6 +3148,10 @@ def advise_benchmark_player_effect_run(
         )
         evaluation = evaluate_player_effect_fold(
             frozen, load_player_effect_outcomes(Path(db), schedule), base, benchmark, player,
+            load_heldout_outcomes(
+                Path(db), fold, taxonomy_mode=base.taxonomy_mode,
+                expected_rules_sha256=base.rules_sha256, taxonomy_snapshot=taxonomy,
+            ), identity_snapshot_sha256=identity_sha,
         )
         atomic_write_canonical(root / f"{fold.fold_id}.player-effect.evaluation.json", evaluation)
         evaluations.append(evaluation)

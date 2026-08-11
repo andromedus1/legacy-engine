@@ -8,6 +8,7 @@ import math
 from typing import Literal
 
 import numpy as np
+from pydantic import Field
 from scipy.optimize import minimize
 
 from legacy_engine.advisory.ranking_benchmark import (
@@ -15,9 +16,15 @@ from legacy_engine.advisory.ranking_benchmark import (
     BenchmarkProtocol,
     FrozenOriginPredictions,
     HeldoutMatch,
+    HeldoutOutcomes,
+    SupportVerdict,
     _calibration,
     _decision_metrics,
+    _field_coverage_ledger,
+    _realized_utilities,
+    _support_verdict,
     content_sha256,
+    protocol_sha256,
 )
 from legacy_engine.analytics.players.diagnostic import (
     PLAYER_EFFECT_ESTIMATOR_REGISTRY,
@@ -39,6 +46,7 @@ class PlayerTrainingMatch(LegacyEngineModel):
     subject_player_key: str | None
     opponent_player_key: str | None
     subject_won: bool
+    exclusion_reason: str | None = None
 
 
 class ScheduledPlayerMatch(LegacyEngineModel):
@@ -63,6 +71,7 @@ class PenaltySelection(LegacyEngineModel):
     mean_log_loss: float | None
     status: Literal["selected", "not-evaluable", "fit-failed"]
     reason: str | None
+    inner_exclusions: dict[str, int] = Field(default_factory=dict)
 
 
 class PlayerEffectFitSummary(LegacyEngineModel):
@@ -70,6 +79,7 @@ class PlayerEffectFitSummary(LegacyEngineModel):
     converged: bool
     penalty: PenaltySelection
     training_matches: int
+    training_exclusions: dict[str, int]
     repeat_players: int
     familiarity_pairs: int
     effect_supported_rate: float
@@ -112,9 +122,11 @@ class ExperimentalDeckRecommendation(LegacyEngineModel):
 
 class PlayerInnerFold(LegacyEngineModel):
     cutoff: str
+    evaluation_until: str
     training_rows: tuple[PlayerTrainingMatch, ...]
     validation_rows: tuple[PlayerTrainingMatch, ...]
     base_predictions_sha256: str
+    base_deck_grid_sha256: str
     base_deck_predictions: tuple[BaseDeckProbability, ...]
 
 
@@ -182,9 +194,12 @@ class PlayerEffectFoldEvaluation(LegacyEngineModel):
     fold: BenchmarkFold
     accessibility: tuple[IdentityAccessibility, ...]
     fit_summaries: tuple[PlayerEffectFitSummary, ...]
+    benchmark_support: SupportVerdict
     by_estimator: tuple[PlayerEstimatorEvaluation, ...]
     by_support_stratum: dict[PlayerSupportStratum, tuple[PlayerEstimatorEvaluation, ...]]
     by_provenance: dict[str, tuple[PlayerEstimatorEvaluation, ...]]
+    support_strata: dict[PlayerSupportStratum, SupportVerdict]
+    provenance_support: dict[str, SupportVerdict]
     status: PlayerDiagnosticStatus
     reasons: tuple[str, ...]
 
@@ -229,6 +244,8 @@ def _eligible_effects(
     pair_matches: dict[tuple[str, str], int] = defaultdict(int)
     observed: set[str] = set()
     for row in rows:
+        if row.exclusion_reason is not None:
+            continue
         for key, parent in (
             (row.subject_player_key, row.subject), (row.opponent_player_key, row.opponent),
         ):
@@ -250,6 +267,31 @@ def _eligible_effects(
         and pair_matches[pair] >= protocol.min_familiarity_matches
     }
     return repeat, familiarity, observed
+
+
+def _reconcile_training_rows(
+    rows: tuple[PlayerTrainingMatch, ...],
+    base_probabilities: dict[tuple[str, str], float],
+    *,
+    cutoff: str | None = None,
+) -> tuple[tuple[PlayerTrainingMatch, ...], dict[str, int]]:
+    """Keep only rows represented by the frozen base grid and name every exclusion."""
+    kept: list[PlayerTrainingMatch] = []
+    exclusions: dict[str, int] = defaultdict(int)
+    actions = {action for pair in base_probabilities for action in pair}
+    for row in rows:
+        reason = row.exclusion_reason
+        if reason is None and cutoff is not None and row.event_date >= cutoff:
+            reason = "at-or-after-training-cutoff"
+        if reason is None and (row.subject not in actions or row.opponent not in actions):
+            reason = "outside-frozen-action-universe"
+        if reason is None and (row.subject, row.opponent) not in base_probabilities:
+            reason = "missing-frozen-base-probability"
+        if reason is not None:
+            exclusions[reason] += 1
+        else:
+            kept.append(row)
+    return tuple(kept), dict(sorted(exclusions.items()))
 
 
 @dataclass
@@ -308,6 +350,7 @@ def fit_player_effect_model(
     selection: PenaltySelection,
 ) -> _PlayerEffectFit:
     """Fit the preregistered penalized-logistic sensitivity deterministically."""
+    rows, _exclusions = _reconcile_training_rows(rows, base_probabilities)
     if selection.status != "selected" or not rows:
         return _PlayerEffectFit(
             estimator=selection.estimator, converged=False, deck={}, player={}, familiarity={},
@@ -329,7 +372,42 @@ def fit_player_effect_model(
     }
     size = len(deck_keys) + len(player_keys) + len(familiarity_keys)
 
+    player_weights = np.asarray([
+        sum(
+            row.subject_player_key == key or row.opponent_player_key == key
+            for row in rows
+        ) for key in player_keys
+    ], dtype=float)
+    familiarity_weights = {
+        player: np.asarray([
+            sum(
+                (row.subject_player_key, row.subject) == key
+                or (row.opponent_player_key, row.opponent) == key
+                for row in rows
+            ) for key in familiarity_keys if key[0] == player
+        ], dtype=float)
+        for player in sorted({key[0] for key in familiarity_keys})
+    }
+
+    def centered(coefficients: np.ndarray) -> np.ndarray:
+        """Project raw parameters into the declared weighted-identifiable objective."""
+        effective = coefficients.copy()
+        player_start = len(deck_keys)
+        familiarity_start = player_start + len(player_keys)
+        if len(player_keys):
+            values = effective[player_start:familiarity_start]
+            values -= float(np.average(values, weights=player_weights))
+        for player, weights in familiarity_weights.items():
+            positions = [
+                familiarity_start + index for index, key in enumerate(familiarity_keys)
+                if key[0] == player
+            ]
+            values = effective[positions]
+            effective[positions] = values - float(np.average(values, weights=weights))
+        return effective
+
     def objective(coefficients: np.ndarray) -> float:
+        coefficients = centered(coefficients)
         loss = 0.0
         for row in rows:
             base = base_probabilities[(row.subject, row.opponent)]
@@ -371,21 +449,12 @@ def fit_player_effect_model(
             eligible_players=repeat, eligible_familiarity=familiarity,
             observed_players=observed, reason=f"fit failed: {result.message}",
         )
-    deck = {key: float(result.x[indexes["deck"][key]]) for key in deck_keys}
-    player = {key: float(result.x[indexes["player"][key]]) for key in player_keys}
-    if player:
-        center = float(np.mean(list(player.values())))
-        player = {key: value - center for key, value in player.items()}
+    fitted = centered(result.x)
+    deck = {key: float(fitted[indexes["deck"][key]]) for key in deck_keys}
+    player = {key: float(fitted[indexes["player"][key]]) for key in player_keys}
     familiarity_values = {
-        key: float(result.x[indexes["familiarity"][key]]) for key in familiarity_keys
+        key: float(fitted[indexes["familiarity"][key]]) for key in familiarity_keys
     }
-    by_player: dict[str, list[tuple[tuple[str, str], float]]] = defaultdict(list)
-    for key, value in familiarity_values.items():
-        by_player[key[0]].append((key, value))
-    for values in by_player.values():
-        center = float(np.mean([value for _key, value in values]))
-        for key, value in values:
-            familiarity_values[key] = value - center
     return _PlayerEffectFit(
         estimator=selection.estimator, converged=True, deck=deck, player=player,
         familiarity=familiarity_values, eligible_players=repeat,
@@ -414,24 +483,75 @@ def select_penalties(
     *,
     estimator: PlayerEffectEstimatorId,
 ) -> PenaltySelection:
-    valid = tuple(fold for fold in inner_folds if fold.training_rows and fold.validation_rows)
+    valid: list[PlayerInnerFold] = []
+    seen_cutoffs: set[str] = set()
+    seen_base_ids: set[str] = set()
+    previous_cutoff: str | None = None
+    previous_until: str | None = None
+    inner_exclusions: dict[str, int] = defaultdict(int)
+    for fold in inner_folds:
+        grid_hash = content_sha256([
+            item.model_dump(mode="json") for item in fold.base_deck_predictions
+        ])
+        if fold.base_deck_grid_sha256 != grid_hash:
+            raise ValueError(f"inner origin {fold.cutoff} base deck grid hash mismatch")
+        if fold.cutoff in seen_cutoffs or (
+            previous_cutoff is not None and fold.cutoff <= previous_cutoff
+        ):
+            raise ValueError("inner origins must be distinct and strictly chronological")
+        if fold.evaluation_until <= fold.cutoff:
+            raise ValueError(f"inner origin {fold.cutoff} has a non-forward evaluation window")
+        if previous_until is not None and previous_until > fold.cutoff:
+            raise ValueError("inner validation windows must not overlap later origins")
+        if not fold.base_predictions_sha256 or fold.base_predictions_sha256 in seen_base_ids:
+            raise ValueError("inner origins must bind distinct frozen base prediction identities")
+        if any(row.event_date >= fold.cutoff for row in fold.training_rows):
+            raise ValueError(f"inner origin {fold.cutoff} training row reaches its cutoff")
+        if any(
+            row.event_date < fold.cutoff or row.event_date >= fold.evaluation_until
+            for row in fold.validation_rows
+        ):
+            raise ValueError(f"inner origin {fold.cutoff} validation row is outside its window")
+        seen_cutoffs.add(fold.cutoff)
+        seen_base_ids.add(fold.base_predictions_sha256)
+        previous_cutoff = fold.cutoff
+        previous_until = fold.evaluation_until
+        base = {
+            (item.subject, item.opponent): item.probability
+            for item in fold.base_deck_predictions
+        }
+        training, _training_exclusions = _reconcile_training_rows(
+            fold.training_rows, base, cutoff=fold.cutoff,
+        )
+        validation, _validation_exclusions = _reconcile_training_rows(fold.validation_rows, base)
+        for reason, count in _training_exclusions.items():
+            inner_exclusions[f"training:{reason}"] += count
+        for reason, count in _validation_exclusions.items():
+            inner_exclusions[f"validation:{reason}"] += count
+        if training and validation:
+            valid.append(fold.model_copy(update={
+                "training_rows": training, "validation_rows": validation,
+            }))
+    valid_folds = tuple(valid)
     strongest = max(_selection_grid(protocol, estimator))
-    if len(valid) < protocol.min_inner_origins:
+    if len(valid_folds) < protocol.min_inner_origins:
         return PenaltySelection(
             estimator=estimator, deck_penalty=strongest[0], player_penalty=strongest[1],
-            familiarity_penalty=strongest[2], inner_origins=len(valid), mean_log_loss=None,
+            familiarity_penalty=strongest[2], inner_origins=len(valid_folds), mean_log_loss=None,
             status="not-evaluable",
-            reason=f"valid inner origins {len(valid)} < {protocol.min_inner_origins}",
+            reason=f"valid inner origins {len(valid_folds)} < {protocol.min_inner_origins}",
+            inner_exclusions=dict(sorted(inner_exclusions.items())),
         )
     results: list[tuple[tuple[float, float | None, float | None], float]] = []
     for parameters in _selection_grid(protocol, estimator):
         losses: list[float] = []
         selection = PenaltySelection(
             estimator=estimator, deck_penalty=parameters[0], player_penalty=parameters[1],
-            familiarity_penalty=parameters[2], inner_origins=len(valid), mean_log_loss=None,
+            familiarity_penalty=parameters[2], inner_origins=len(valid_folds), mean_log_loss=None,
             status="selected", reason=None,
+            inner_exclusions=dict(sorted(inner_exclusions.items())),
         )
-        for fold in valid:
+        for fold in valid_folds:
             base = {(item.subject, item.opponent): item.probability for item in fold.base_deck_predictions}
             fit = fit_player_effect_model(fold.training_rows, base, protocol, selection)
             if not fit.converged:
@@ -453,8 +573,9 @@ def select_penalties(
     if not results:
         return PenaltySelection(
             estimator=estimator, deck_penalty=strongest[0], player_penalty=strongest[1],
-            familiarity_penalty=strongest[2], inner_origins=len(valid), mean_log_loss=None,
+            familiarity_penalty=strongest[2], inner_origins=len(valid_folds), mean_log_loss=None,
             status="fit-failed", reason="every preregistered penalty fit failed",
+            inner_exclusions=dict(sorted(inner_exclusions.items())),
         )
     best_loss = min(loss for _parameters, loss in results)
     tied = [item for item in results if item[1] <= best_loss + 1e-4]
@@ -463,8 +584,9 @@ def select_penalties(
     ))
     return PenaltySelection(
         estimator=estimator, deck_penalty=parameters[0], player_penalty=parameters[1],
-        familiarity_penalty=parameters[2], inner_origins=len(valid), mean_log_loss=loss,
+        familiarity_penalty=parameters[2], inner_origins=len(valid_folds), mean_log_loss=loss,
         status="selected", reason=None,
+        inner_exclusions=dict(sorted(inner_exclusions.items())),
     )
 
 
@@ -476,6 +598,7 @@ def _quantiles(values: dict[object, float]) -> tuple[float, float, float] | None
 
 def freeze_player_effect_predictions(
     base: FrozenOriginPredictions,
+    benchmark_protocol: BenchmarkProtocol,
     training_rows: tuple[PlayerTrainingMatch, ...],
     scheduled_rows: tuple[ScheduledPlayerMatch, ...],
     accessibility: tuple[IdentityAccessibility, ...],
@@ -485,12 +608,25 @@ def freeze_player_effect_predictions(
     identity_snapshot_sha256: str | None = None,
 ) -> FrozenPlayerEffectPredictions:
     """Fit and freeze all three experimental estimators without serializing identity keys."""
-    if protocol.benchmark_protocol_hash != base.protocol_hash:
+    benchmark_hash = protocol_sha256(benchmark_protocol)
+    if benchmark_hash != base.protocol_hash or protocol.benchmark_protocol_hash != benchmark_hash:
         raise ValueError("player protocol benchmark hash does not match frozen base predictions")
+    if protocol.identity_mode == "dated-curated-alias" and identity_snapshot_sha256 is None:
+        raise ValueError("dated-curated-alias protocol requires an identity snapshot digest")
+    if protocol.identity_mode == "provenance-local-handle" and identity_snapshot_sha256 is not None:
+        raise ValueError("provenance-local protocol cannot bind an identity snapshot digest")
     base_grid = {
         (item.subject, item.opponent): item.probability
         for item in base.matchup_predictions if item.estimator == "production-ci-gated"
     }
+    if any(
+        fold.cutoff >= base.fold.cutoff or fold.evaluation_until > base.fold.cutoff
+        for fold in inner_folds
+    ):
+        raise ValueError("inner origins must end before the outer cutoff")
+    training_rows, training_exclusions = _reconcile_training_rows(
+        training_rows, base_grid, cutoff=base.fold.cutoff,
+    )
     selections = {
         estimator: select_penalties(inner_folds, protocol, estimator=estimator)
         for estimator in PLAYER_EFFECT_ESTIMATOR_REGISTRY
@@ -514,7 +650,8 @@ def freeze_player_effect_predictions(
         )
         summaries.append(PlayerEffectFitSummary(
             estimator=estimator, converged=fit.converged, penalty=selections[estimator],
-            training_matches=len(training_rows), repeat_players=len(fit.eligible_players),
+            training_matches=len(training_rows), training_exclusions=training_exclusions,
+            repeat_players=len(fit.eligible_players),
             familiarity_pairs=len(fit.eligible_familiarity),
             effect_supported_rate=supported / len(training_rows) if training_rows else 0.0,
             deck_residual_quantiles=_quantiles(fit.deck),
@@ -529,6 +666,8 @@ def freeze_player_effect_predictions(
             continue
         for row in scheduled_rows:
             if row.exclusion_reason is not None or row.subject is None or row.opponent is None:
+                continue
+            if (row.subject, row.opponent) not in base_grid:
                 continue
             match_predictions.append(ExperimentalMatchPrediction(
                 match_id=row.match_id, estimator=estimator,
@@ -583,6 +722,7 @@ def freeze_player_effect_predictions(
         limitations=(
             "experimental sensitivity only; production ranking and P(best) are unchanged",
             "participant forecasts are outcome-blind historical replay, not proof of pre-event availability",
+            f"training exclusions outside the frozen base contract: {training_exclusions}",
         ),
     )
 
@@ -695,6 +835,73 @@ def _score_player_rows(
     )
 
 
+def _paired_event_regret_difference(
+    candidate: ExperimentalDeckRecommendation,
+    production,
+    rows: tuple[HeldoutMatch, ...],
+    benchmark_protocol: BenchmarkProtocol,
+    field_counts: dict[str, int],
+) -> dict[str, float | None]:
+    """Compare recommendation regret on identical event-block bootstrap samples."""
+    candidate_action = candidate.chosen_action
+    production_action = production.chosen_action
+    if not candidate.served or candidate_action is None or production_action is None:
+        return {"mean": None, "ci_low": None, "ci_high": None}
+    blocks: dict[str, list[HeldoutMatch]] = defaultdict(list)
+    for row in rows:
+        if row.exclusion_reason is None:
+            blocks[row.event_id].append(row)
+
+    def difference(sample: list[HeldoutMatch] | tuple[HeldoutMatch, ...]) -> float | None:
+        utilities, totals = _realized_utilities(sample, field_counts)
+        supported = {
+            action: utility for action, utility in utilities.items()
+            if totals[action] >= benchmark_protocol.support.min_action_matches
+        }
+        if candidate_action not in supported or production_action not in supported:
+            return None
+        # The common realized oracle cancels: candidate regret - production regret.
+        return supported[production_action] - supported[candidate_action]
+
+    mean = difference(rows)
+    if mean is None or not blocks:
+        return {"mean": None, "ci_low": None, "ci_high": None}
+    event_ids = sorted(blocks)
+    rng = np.random.default_rng(benchmark_protocol.seed)
+    samples: list[float] = []
+    for _ in range(benchmark_protocol.bootstrap_draws):
+        sampled_ids = rng.choice(event_ids, size=len(event_ids), replace=True)
+        sampled_rows = [
+            row for event_id in sampled_ids for row in blocks[str(event_id)]
+        ]
+        value = difference(sampled_rows)
+        if value is not None:
+            samples.append(value)
+    if not samples:
+        return {"mean": mean, "ci_low": None, "ci_high": None}
+    low, high = np.quantile(samples, [0.025, 0.975])
+    return {"mean": mean, "ci_low": float(low), "ci_high": float(high)}
+
+
+def _stratum_support(
+    rows: tuple[PlayerEffectOutcome, ...], protocol: PlayerDiagnosticProtocol,
+) -> SupportVerdict:
+    events = {row.event_id for row in rows}
+    dates = {row.event_date for row in rows}
+    actions = {action for row in rows for action in (row.subject, row.opponent) if action is not None}
+    reasons: list[str] = []
+    if len(rows) < protocol.min_stratum_matches:
+        reasons.append(f"stratum matches {len(rows)} < {protocol.min_stratum_matches}")
+    if len(events) < protocol.min_stratum_events:
+        reasons.append(f"stratum events {len(events)} < {protocol.min_stratum_events}")
+    if len(dates) < protocol.min_stratum_event_dates:
+        reasons.append(f"stratum dates {len(dates)} < {protocol.min_stratum_event_dates}")
+    return SupportVerdict(
+        evaluable=not reasons, reasons=tuple(reasons), matches=len(rows), events=len(events),
+        event_dates=len(dates), supported_actions=len(actions), future_field_coverage=1.0,
+    )
+
+
 def _support_stratum(prediction: ExperimentalMatchPrediction) -> PlayerSupportStratum:
     values = {prediction.subject_support, prediction.opponent_support}
     if "below-repeat-floor" in values:
@@ -711,12 +918,18 @@ def evaluate_player_effect_fold(
     base: FrozenOriginPredictions,
     benchmark_protocol: BenchmarkProtocol,
     player_protocol: PlayerDiagnosticProtocol,
+    benchmark_outcomes: HeldoutOutcomes,
+    *,
+    identity_snapshot_sha256: str | None = None,
 ) -> PlayerEffectFoldEvaluation:
     """Score experimental forecasts on the benchmark's identical decisive common cases."""
     if frozen.player_protocol_hash != content_sha256(player_protocol):
         raise ValueError("frozen player protocol hash mismatch")
-    if frozen.benchmark_protocol_hash != base.protocol_hash:
+    benchmark_hash = protocol_sha256(benchmark_protocol)
+    if frozen.benchmark_protocol_hash != benchmark_hash or base.protocol_hash != benchmark_hash:
         raise ValueError("frozen player benchmark hash mismatch")
+    if frozen.identity_snapshot_sha256 != identity_snapshot_sha256:
+        raise ValueError("frozen player identity snapshot hash mismatch")
     if frozen.base_predictions_sha256 != content_sha256(base):
         raise ValueError("frozen player base prediction hash mismatch")
     if frozen.fold != base.fold:
@@ -728,6 +941,12 @@ def evaluate_player_effect_fold(
         row for row in outcomes
         if row.exclusion_reason is None and row.match_id in scheduled_ids
         and row.subject in base.action_universe and row.opponent in base.action_universe
+    )
+    field_coverage = _field_coverage_ledger(
+        benchmark_outcomes.decks, set(base.action_universe),
+    )
+    benchmark_support = _support_verdict(
+        benchmark_outcomes.matches, benchmark_protocol, field_coverage,
     )
     production_grid = {
         (item.subject, item.opponent): item.probability
@@ -807,17 +1026,17 @@ def evaluate_player_effect_fold(
         )
         revised = []
         for item in all_scores:
-            if (
-                item.estimand == "player-neutral-deck" and item.regret is not None
-                and item.regret_ci is not None and production_regret is not None
-                and production_ci is not None
-            ):
+            if item.estimand == "player-neutral-deck":
                 paired = dict(item.paired_vs)
-                paired["production-regret"] = {
-                    "mean": item.regret - production_regret,
-                    "ci_low": item.regret_ci[0] - production_ci[1],
-                    "ci_high": item.regret_ci[1] - production_ci[0],
-                }
+                recommendation = recommendations.get(item.estimator)
+                paired["production-regret"] = (
+                    _paired_event_regret_difference(
+                        recommendation, production_recommendation, heldout_for_regret,
+                        benchmark_protocol, counts,
+                    ) if recommendation is not None and production_regret is not None
+                    and production_ci is not None else
+                    {"mean": None, "ci_low": None, "ci_high": None}
+                )
                 item = item.model_copy(update={"paired_vs": paired})
             revised.append(item)
         all_scores = tuple(revised)
@@ -839,6 +1058,17 @@ def evaluate_player_effect_fold(
         provenance: score_subset(tuple(row for row in rows if row.provenance == provenance))
         for provenance in sorted({row.provenance for row in rows} | {"online", "paper"})
     }
+    support_strata = {
+        stratum: _stratum_support(tuple(
+            row for row in rows if primary_predictions[row.match_id] is not None
+            and _support_stratum(primary_predictions[row.match_id]) == stratum
+        ), player_protocol) for stratum in by_stratum
+    }
+    provenance_support = {
+        provenance: _stratum_support(
+            tuple(row for row in rows if row.provenance == provenance), player_protocol,
+        ) for provenance in by_provenance
+    }
     reasons: list[str] = []
     all_access = next(
         (item for item in frozen.accessibility if item.provenance == "all"), None,
@@ -847,6 +1077,12 @@ def evaluate_player_effect_fold(
         reasons.append("aggregate identity/repeat support is not evaluable")
     if any(not summary.converged for summary in frozen.fit_summaries):
         reasons.append("one or more experimental fits are not evaluable")
+    if not benchmark_support.evaluable:
+        reasons.extend(f"benchmark support: {reason}" for reason in benchmark_support.reasons)
+    if len(rows) != benchmark_support.matches:
+        reasons.append(
+            f"player common cases {len(rows)} != benchmark common cases {benchmark_support.matches}"
+        )
     if not rows:
         reasons.append("no identical decisive scheduled cases are available")
     status: PlayerDiagnosticStatus = "not-evaluable" if reasons else "diagnostic-only"
@@ -855,8 +1091,9 @@ def evaluate_player_effect_fold(
         predictions_sha256=content_sha256(frozen),
         outcomes_sha256=content_sha256([row.model_dump(mode="json") for row in outcomes]),
         fold=frozen.fold, accessibility=frozen.accessibility, by_estimator=all_scores,
-        fit_summaries=frozen.fit_summaries,
+        fit_summaries=frozen.fit_summaries, benchmark_support=benchmark_support,
         by_support_stratum=by_stratum, by_provenance=by_provenance,
+        support_strata=support_strata, provenance_support=provenance_support,
         status=status, reasons=tuple(reasons),
     )
 
@@ -891,6 +1128,7 @@ def aggregate_player_effect_evaluations(
     support_gate = bool(evaluable) and all(
         item is not None and item.unambiguous_match_rate >= player_protocol.min_identity_match_coverage
         and item.effect_supported_match_rate >= player_protocol.min_effect_supported_match_coverage
+        and item.repeat_players is not None
         and item.repeat_players >= player_protocol.min_repeat_players
         for item in all_access
     )
@@ -920,7 +1158,8 @@ def aggregate_player_effect_evaluations(
         "player-intercept", ("production-ci-gated", "deck-residual-control"),
     )
     familiarity_gate = proper_gate("player-familiarity", ("player-intercept",)) and all(
-        item is not None and item.familiarity_pairs >= player_protocol.min_familiarity_pairs
+        item is not None and item.familiarity_pairs is not None
+        and item.familiarity_pairs >= player_protocol.min_familiarity_pairs
         for item in all_access
     )
     regret_differences = [
@@ -942,7 +1181,11 @@ def aggregate_player_effect_evaluations(
             and sum(value < 0 for value in valid_regret) / len(valid_regret) >= 0.60
         )
 
-    def subset_nonharm(items: tuple[PlayerEstimatorEvaluation, ...]) -> bool:
+    def subset_nonharm(
+        items: tuple[PlayerEstimatorEvaluation, ...], support: SupportVerdict | None,
+    ) -> bool:
+        if support is None or not support.evaluable:
+            return False
         metric = next((item for item in items if (
             item.estimator == "player-intercept"
             and item.estimand == "heldout-event-player-aware"
@@ -957,10 +1200,14 @@ def aggregate_player_effect_evaluations(
         )
 
     venue_gate = bool(evaluable) and all(
-        subset_nonharm(fold.by_provenance.get(provenance, ()))
+        subset_nonharm(
+            fold.by_provenance.get(provenance, ()), fold.provenance_support.get(provenance),
+        )
         for fold in evaluable for provenance in ("online", "paper")
     ) and all(
-        subset_nonharm(fold.by_support_stratum.get(stratum, ()))
+        subset_nonharm(
+            fold.by_support_stratum.get(stratum, ()), fold.support_strata.get(stratum),
+        )
         for fold in evaluable for stratum in ("known-cold", "cold-cold")
     )
     fold_gate = (
@@ -977,19 +1224,59 @@ def aggregate_player_effect_evaluations(
     ):
         if not passed:
             reasons.append(reason)
+    def comparison_harm(comparison: dict[str, float | None]) -> bool:
+        return any(
+            comparison.get(key) is not None and float(comparison[key]) > 0
+            for key in (
+                "mean", "brier_difference", "calibration_intercept_abs_difference",
+                "calibration_slope_distance_difference",
+            )
+        )
+
+    measured_harm = False
+    for fold in evaluable:
+        player_metric = _metric(fold, "player-intercept", "heldout-event-player-aware")
+        measured_harm = measured_harm or any(
+            comparison_harm(player_metric.paired_vs.get(reference, {}))
+            for reference in ("production-ci-gated", "deck-residual-control")
+        )
+        regret = _metric(fold, "player-intercept", "player-neutral-deck").paired_vs.get(
+            "production-regret", {},
+        )
+        measured_harm = measured_harm or (
+            regret.get("mean") is not None and float(regret["mean"]) > 0
+        )
+        for provenance in ("online", "paper"):
+            support = fold.provenance_support.get(provenance)
+            if support is not None and support.evaluable:
+                metric = next((item for item in fold.by_provenance.get(provenance, ()) if (
+                    item.estimator == "player-intercept"
+                    and item.estimand == "heldout-event-player-aware"
+                )), None)
+                measured_harm = measured_harm or (
+                    metric is not None
+                    and comparison_harm(metric.paired_vs.get("production-ci-gated", {}))
+                )
+        for stratum in ("known-cold", "cold-cold"):
+            support = fold.support_strata.get(stratum)
+            if support is not None and support.evaluable:
+                metric = next((item for item in fold.by_support_stratum.get(stratum, ()) if (
+                    item.estimator == "player-intercept"
+                    and item.estimand == "heldout-event-player-aware"
+                )), None)
+                measured_harm = measured_harm or (
+                    metric is not None
+                    and comparison_harm(metric.paired_vs.get("production-ci-gated", {}))
+                )
+
     if not evaluable or not fold_gate or not support_gate:
         status: PlayerDiagnosticStatus = "not-evaluable"
+    elif measured_harm:
+        status = "stop"
     elif all((player_predictive_gate, neutral_deck_gate, venue_gate)):
         status = "candidate-for-promotion-study"
     else:
-        comparisons = [
-            _metric(fold, "player-intercept", "heldout-event-player-aware").paired_vs.get(
-                "production-ci-gated", {},
-            ).get("mean") for fold in evaluable
-        ]
-        status = "stop" if comparisons and all(
-            value is not None and value >= 0 for value in comparisons
-        ) else "diagnostic-only"
+        status = "diagnostic-only"
     return PlayerEffectEvaluationSummary(
         player_protocol_hash=protocol_hash, folds=folds, evaluable_folds=len(evaluable),
         represented_regimes=len(regimes), support_gate=support_gate,
@@ -1037,10 +1324,16 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
             )
         lines.extend(["", f"### {fold.fold.fold_id} support and fit", ""])
         for access in fold.accessibility:
+            repeat_players = (
+                "suppressed" if access.repeat_players is None else str(access.repeat_players)
+            )
+            familiarity_pairs = (
+                "suppressed" if access.familiarity_pairs is None else str(access.familiarity_pairs)
+            )
             lines.append(
                 f"- `{access.provenance}`: registrations={access.registrations}, "
                 f"match sides={access.match_sides}, identity={access.unambiguous_match_rate:.1%}, "
-                f"repeat players={access.repeat_players}, familiarity pairs={access.familiarity_pairs}, "
+                f"repeat players={repeat_players}, familiarity pairs={familiarity_pairs}, "
                 f"effect-supported={access.effect_supported_match_rate:.1%}; "
                 f"reasons={list(access.reasons)}."
             )
@@ -1050,7 +1343,8 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
                 f"training matches={fit.training_matches}, repeat players={fit.repeat_players}, "
                 f"familiarity pairs={fit.familiarity_pairs}, deck q05/q50/q95="
                 f"{fit.deck_residual_quantiles}, player={fit.player_effect_quantiles}, "
-                f"familiarity={fit.familiarity_quantiles}; reason={fit.reason}."
+                f"familiarity={fit.familiarity_quantiles}; exclusions={fit.training_exclusions}; "
+                f"inner exclusions={fit.penalty.inner_exclusions}; reason={fit.reason}."
             )
         for label, items in (
             *[(f"support:{key}", value) for key, value in fold.by_support_stratum.items()],
@@ -1061,9 +1355,15 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
                 and item.estimand == "heldout-event-player-aware"
             )), None)
             if metric is not None:
+                support = (
+                    fold.support_strata[label.removeprefix("support:")]
+                    if label.startswith("support:") else
+                    fold.provenance_support[label.removeprefix("venue:")]
+                )
                 lines.append(
                     f"- `{label}`: n={metric.common_matches}, supported={metric.supported_matches}, "
-                    f"log loss={metric.log_loss}, Brier={metric.brier}."
+                    f"log loss={metric.log_loss}, Brier={metric.brier}; "
+                    f"support={support.evaluable}, reasons={list(support.reasons)}."
                 )
         if fold.reasons:
             lines.append(f"- Fold limitations: {list(fold.reasons)}.")

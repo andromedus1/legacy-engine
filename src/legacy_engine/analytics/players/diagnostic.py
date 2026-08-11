@@ -50,6 +50,9 @@ class PlayerDiagnosticProtocol(LegacyEngineModel):
     player_penalties: tuple[float, ...] = (10.0, 30.0, 100.0)
     familiarity_penalties: tuple[float, ...] = (30.0, 100.0, 300.0)
     min_inner_origins: int = 3
+    min_stratum_matches: int = 50
+    min_stratum_events: int = 3
+    min_stratum_event_dates: int = 2
     seed: int = 730_021
 
     @model_validator(mode="after")
@@ -64,6 +67,7 @@ class PlayerDiagnosticProtocol(LegacyEngineModel):
             self.min_familiarity_matches, self.min_repeat_players, self.min_familiarity_pairs,
             self.stickiness_min_events, self.stickiness_min_identities_per_configuration,
             self.stickiness_min_repeat_identities, self.privacy_min_group, self.min_inner_origins,
+            self.min_stratum_matches, self.min_stratum_events, self.min_stratum_event_dates,
         )
         if any(value < 1 for value in integer_floors):
             raise ValueError("diagnostic support floors must be positive")
@@ -92,8 +96,8 @@ class IdentityAccessibility(LegacyEngineModel):
     nonempty_handle_rate: float
     unambiguous_match_rate: float
     dated_alias_rate: float
-    repeat_players: int
-    familiarity_pairs: int
+    repeat_players: int | None
+    familiarity_pairs: int | None
     effect_supported_match_rate: float
     evaluable: bool
     reasons: tuple[str, ...]
@@ -103,10 +107,10 @@ class PilotStickinessCell(LegacyEngineModel):
     parent: str
     configuration_a: str
     configuration_b: str
-    identities_a: int
-    identities_b: int
+    identities_a: int | None
+    identities_b: int | None
     shared_identities: int | None
-    repeat_identities: int
+    repeat_identities: int | None
     jaccard: float | None
     overlap_coefficient: float | None
     switching_rate: float | None
@@ -145,6 +149,8 @@ def _eligibility(
     pair_events: dict[tuple[str, str], set[str]] = defaultdict(set)
     pair_matches: dict[tuple[str, str], int] = defaultdict(int)
     for row in rows:
+        if getattr(row, "exclusion_reason", None) is not None:
+            continue
         for key, parent in (
             (getattr(row, "subject_player_key"), getattr(row, "subject")),
             (getattr(row, "opponent_player_key"), getattr(row, "opponent")),
@@ -174,8 +180,11 @@ def measure_player_accessibility(
     match_rows: tuple[object, ...],
     protocol: PlayerDiagnosticProtocol,
 ) -> tuple[IdentityAccessibility, ...]:
-    repeat, familiarity = _eligibility(match_rows, protocol)
-    provenances = tuple(sorted({row.provenance for row in registrations} | {"all"}))
+    provenances = tuple(sorted(
+        {row.provenance for row in registrations}
+        | {row.provenance for row in match_rows}
+        | {"all"}
+    ))
     output: list[IdentityAccessibility] = []
     for provenance in provenances:
         regs = tuple(
@@ -184,6 +193,7 @@ def measure_player_accessibility(
         matches = tuple(
             row for row in match_rows if provenance == "all" or row.provenance == provenance
         )
+        repeat, familiarity = _eligibility(matches, protocol)
         nonempty = sum(row.player_key is not None for row in regs)
         alias_n = sum(row.identity_basis == "curated-alias" for row in regs)
         sides = [
@@ -193,9 +203,12 @@ def measure_player_accessibility(
         unambiguous = sum(key is not None for key in sides)
         supported = sum(
             row.subject_player_key in repeat and row.opponent_player_key in repeat
-            for row in matches
+            for row in matches if getattr(row, "exclusion_reason", None) is None
         )
-        supported_rate = supported / len(matches) if matches else 0.0
+        eligible_matches = sum(
+            getattr(row, "exclusion_reason", None) is None for row in matches
+        )
+        supported_rate = supported / eligible_matches if eligible_matches else 0.0
         repeat_here = {
             key for row in matches for key in (row.subject_player_key, row.opponent_player_key)
             if key in repeat
@@ -218,14 +231,21 @@ def measure_player_accessibility(
                 f"effect-supported match coverage {supported_rate:.1%} < "
                 f"{protocol.min_effect_supported_match_coverage:.1%}"
             )
-        if len(repeat_here) < protocol.min_repeat_players:
+        repeat_count = len(repeat_here)
+        familiarity_count = len(familiarity_here)
+        if repeat_count < protocol.min_repeat_players:
             reasons.append(f"repeat players {len(repeat_here)} < {protocol.min_repeat_players}")
         output.append(IdentityAccessibility(
             provenance=provenance, registrations=len(regs), match_sides=len(sides),
             nonempty_handle_rate=nonempty / len(regs) if regs else 0.0,
             unambiguous_match_rate=identity_rate,
             dated_alias_rate=alias_n / nonempty if nonempty else 0.0,
-            repeat_players=len(repeat_here), familiarity_pairs=len(familiarity_here),
+            repeat_players=(
+                repeat_count if repeat_count >= protocol.privacy_min_group else None
+            ),
+            familiarity_pairs=(
+                familiarity_count if familiarity_count >= protocol.privacy_min_group else None
+            ),
             effect_supported_match_rate=supported_rate, evaluable=not reasons,
             reasons=tuple(reasons),
         ))
@@ -283,9 +303,14 @@ def measure_pilot_stickiness(
             if reason is None and events:
                 draws: list[float] = []
                 for _ in range(500):
-                    sampled = set(str(value) for value in rng.choice(events, len(events), replace=True))
+                    sampled = rng.choice(events, len(events), replace=True)
+                    sampled_rows = tuple(
+                        row.model_copy(update={"event_id": f"bootstrap:{position}:{event_id}"})
+                        for position, event_id in enumerate(sampled)
+                        for row in registrations if row.event_id == str(event_id)
+                    )
                     sample_sets = _repeat_sets(
-                        tuple(row for row in registrations if row.event_id in sampled),
+                        sampled_rows,
                         protocol.stickiness_min_events,
                     )
                     a, b = sample_sets[(parent, left)], sample_sets[(parent, right)]
@@ -297,9 +322,10 @@ def measure_pilot_stickiness(
             denominator = min(len(left_repeat), len(right_repeat))
             output.append(PilotStickinessCell(
                 parent=parent, configuration_a=left, configuration_b=right,
-                identities_a=len(left_all), identities_b=len(right_all),
+                identities_a=len(left_all) if reason is None else None,
+                identities_b=len(right_all) if reason is None else None,
                 shared_identities=len(shared) if reason is None else None,
-                repeat_identities=len(union),
+                repeat_identities=len(union) if reason is None else None,
                 jaccard=len(shared) / len(union) if reason is None and union else None,
                 overlap_coefficient=len(shared) / denominator if reason is None and denominator else None,
                 switching_rate=len(shared) / len(union) if reason is None and union else None,

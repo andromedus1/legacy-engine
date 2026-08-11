@@ -82,8 +82,11 @@ def test_workflow_reconciles_blank_duplicate_alias_and_provenance(tmp_path):
     online = next(row for row in local_regs if row.player_key == "handle:online:online name")
     paper = next(row for row in local_regs if row.player_key == "handle:paper:paper name")
     assert online.player_key != paper.player_key
-    assert len(local_matches) == 1
+    assert len(local_matches) == 2
     assert all(row.opponent_player_key is None for row in local_matches)
+    assert {row.exclusion_reason for row in local_matches} == {
+        "ambiguous-player", "bye-draw-invalid",
+    }
 
     aliased_regs, _, digest = load_player_diagnostic_rows(
         db, until="2026-01-01", identity_mode="dated-curated-alias",
@@ -117,3 +120,28 @@ def test_scheduled_rows_are_outcome_blind(tmp_path):
     )
     assert first == second
     assert content_sha256([row.model_dump(mode="json") for row in second]) == first_hash
+
+
+def test_representative_corpus_loader_retains_outside_parent_for_named_reconciliation(tmp_path):
+    db = _db(tmp_path / "players.duckdb")
+    con = store.connect(db)
+    con.execute(
+        "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ["historical", "Historical", "2025-11-01", "u", "Legacy", "fixture", "paper"],
+    )
+    con.executemany("INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)", [
+        ("historical", 0, "Old Pilot", "1", "Historical Parent", None),
+        ("historical", 1, "Current Pilot", "2", "A", None),
+    ])
+    con.execute(
+        "INSERT INTO rounds VALUES (?, ?, ?, ?, ?)",
+        ["historical", 0, "Old Pilot", "Current Pilot", "2-0"],
+    )
+    con.close()
+    _registrations, matches, _identity_hash = load_player_diagnostic_rows(
+        db, until="2026-01-01", identity_mode="provenance-local-handle",
+        identity_snapshot=None,
+    )
+    historical = next(row for row in matches if row.match_id == "historical:0")
+    assert {historical.subject, historical.opponent} == {"A", "Historical Parent"}
+    assert historical.exclusion_reason is None
