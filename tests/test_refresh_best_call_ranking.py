@@ -61,6 +61,7 @@ _spec.loader.exec_module(rbcr)
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
 _ADDITIVE_FIELDS = {
     "p_best", "s_q", "s_cov", "s_caveated", "floor_observability", "reconciliation",
+    "ranking_evidence",
 }
 
 # Field window covering both fixture tournaments but neither pre-ban load.
@@ -132,6 +133,7 @@ def _load_pre_ban_painter_matches(con) -> None:
         "pp1": ("Painter", "Grindstone"),
         "pp2": ("Painter", "Welder"),
         "pp3": ("Painter", None),
+        "pp4": ("Painter", "Relic"),
         "cc1": ("Control", None),
     }
     raw = {
@@ -150,6 +152,8 @@ def _load_pre_ban_painter_matches(con) -> None:
         "Rounds": [
             *({"Player1": "pp1", "Player2": "cc1", "Result": "2-1"} for _ in range(10)),
             *({"Player1": "cc1", "Player2": "pp1", "Result": "2-0"} for _ in range(5)),
+            *({"Player1": "pp4", "Player2": "cc1", "Result": "2-1"} for _ in range(2)),
+            {"Player1": "cc1", "Player2": "pp4", "Result": "2-0"},
         ],
         "Standings": [],
     }
@@ -426,7 +430,7 @@ class TestCrossCampRanking:
         for r in blob["camps"]:
             assert _ADDITIVE_FIELDS <= r.keys()
             assert r["s_cov"] is not None
-            if r["s_cov"] < suppress:
+            if not r["ranking_evidence"]["eligible"]:
                 assert r["p_best"] is None and r["s_q"] is None
             else:
                 ranked += 1
@@ -434,7 +438,12 @@ class TestCrossCampRanking:
                 assert r["s_q"] is not None
                 assert r["s_caveated"] == (r["s_cov"] < caveat)
         assert ranked >= 1  # the gate is not vacuous on this fixture
-        assert ranked < len(blob["camps"])  # ...and neither is the suppression
+        assert any(
+            not item["eligible"]
+            for item in [
+                *(row["ranking_evidence"] for row in blob["camps"]),
+            ]
+        ) or blob["meta"]["rank"]["candidates"] < blob["meta"]["rank"]["potential"]
 
     def test_p_best_mass_is_a_shared_budget(self):
         """Camp p_best values live in ONE argmax budget with the unsplit candidates —
@@ -444,6 +453,29 @@ class TestCrossCampRanking:
         con.close()
         mass = sum(r["p_best"] for r in blob["camps"] if r["p_best"] is not None)
         assert 0.0 <= mass <= 1.0 + 1e-9
+        assert blob["meta"]["rank"]["camp_pbest_total"] == pytest.approx(mass, abs=1e-3)
+        assert blob["meta"]["rank"]["pbest_total"] == pytest.approx(1.0)
+
+    def test_inactive_zero_cell_camp_is_visible_but_excluded_with_warning(self):
+        con = script_con()
+        blob = _blob(con)
+        con.close()
+        row = next(r for r in blob["camps"] if r["subject"] == "Painter [Relic]")
+        assert row["field_share"] == 0.0
+        assert row["ranking_evidence"]["stratum"] == "inactive"
+        assert row["ranking_evidence"]["reason"] == "no current-field presence"
+        assert row["p_best"] is None and row["s_q"] is None
+        assert any(
+            line.startswith("// [warn] ranking subject Painter [Relic]: no resolved")
+            for line in blob["meta"]["audit"]
+        )
+
+    def test_ranker_and_page_coverage_are_identical_at_generated_gate(self):
+        con = script_con()
+        blob = _blob(con, ground_n=8)
+        con.close()
+        for row in blob["camps"]:
+            assert row["s_cov"] == pytest.approx(row["coverage"], abs=5e-5)
 
     def test_whole_blob_is_deterministic_under_the_fixed_seed(self):
         con = script_con()
@@ -463,6 +495,7 @@ class TestCrossCampRanking:
         audit = blob["meta"]["audit"]
         assert any(line.startswith("// multi-split: one pass over") for line in audit)
         assert any(line.startswith("// cross-camp P(best):") for line in audit)
+        assert any(line.startswith("// ranking evidence:") for line in audit)
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +640,15 @@ class TestMainEndToEnd:
         assert "display-grade floor" in template
         assert "floorObservabilityHtml" in template
         assert "c.concentration_warning" in template
+
+    def test_evidence_column_and_opt_in_grouping_are_accessible_and_value_preserving(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert 'id="ranking-strata"' in template
+        assert 'aria-pressed="false"' in template
+        assert "function evidenceHtml(r)" in template
+        assert "groupByRankingEvidence" in template
+        assert "visibleRows.filter(r => (r.ranking_evidence || {}).stratum === label)" in template
+        assert "renderTable(\"t-camp\", D.camps, true)" in template
 
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"

@@ -2807,6 +2807,12 @@ def advise_compare(
     help="Path to a file listing candidate archetypes (one per line) for ranking.",
 )
 @click.option(
+    "--ranking-strata",
+    is_flag=True,
+    default=False,
+    help="Group --candidates output by evidence stratum without changing scores.",
+)
+@click.option(
     "--reserved",
     type=int,
     default=0,
@@ -2846,6 +2852,7 @@ def advise_positioning(
     archetype: str | None,
     field_file: str | None,
     candidates_file: str | None,
+    ranking_strata: bool,
     reserved: int,
     seed: int | None,
     list_granular: bool,
@@ -2862,8 +2869,9 @@ def advise_positioning(
     from pathlib import Path
 
     from legacy_engine.advisory.positioning import (
-        _PBEST_SUPPRESS_COVERAGE,
+        _compute_data_coverage,
         positioning_score,
+        ranking_evidence_payload,
         rank_decks,
     )
     from legacy_engine.advisory.report import _classify_deck, _load_field
@@ -2871,6 +2879,8 @@ def advise_positioning(
     from legacy_engine.ingestion import store
 
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise positioning")
+    if ranking_strata and not candidates_file:
+        raise click.ClickException("--ranking-strata requires --candidates")
     field_text = Path(field_file).read_text() if field_file else None
 
     if provenance is not None:
@@ -2902,26 +2912,66 @@ def advise_positioning(
                 ln.strip() for ln in Path(candidates_file).read_text().splitlines()
                 if ln.strip() and not ln.startswith("#")
             ]
-            ranking = rank_decks(matrix, field, candidates, seed=seed)
+            coverage = {
+                candidate: _compute_data_coverage(matrix, field, candidate)
+                for candidate in candidates
+            }
+            evidence = {}
+            for candidate in candidates:
+                resolved = sum(
+                    1 for opponent in field.shares
+                    if opponent != candidate
+                    and (cell := matrix.cells.get((candidate, opponent))) is not None
+                    and cell.n >= 1
+                )
+                evidence[candidate] = ranking_evidence_payload(
+                    field_share=field.shares.get(candidate, 0.0),
+                    measured_share=coverage[candidate],
+                    resolved_cells=resolved,
+                    grounded=coverage[candidate] >= 0.8,
+                )
+            eligible = [candidate for candidate in candidates if evidence[candidate]["eligible"]]
+            ranking = rank_decks(matrix, field, eligible, seed=seed)
             q_label = f"Q{ranking.quantile_level:.2f}"
             click.echo(f"\n=== Deck Ranking (field_source={ranking.field_source}, sort={q_label}) ===")
-            for d in ranking.decks:
+            ordered = [*ranking.decks, *(d for d in candidates if d not in ranking.decks)]
+            if ranking_strata:
+                order = ["grounded", "lean", "imputation-dominated", "inactive", "unscorable"]
+                ordered = [
+                    deck for stratum in order for deck in ordered
+                    if evidence[deck]["stratum"] == stratum
+                ]
+            last_stratum = None
+            for d in ordered:
+                item = evidence[d]
+                if ranking_strata and item["stratum"] != last_stratum:
+                    click.echo(f"\n  [{item['stratum']}]")
+                    last_stratum = item["stratum"]
+                cov = coverage[d]
+                imputed = item["imputed_share"]
+                stratum_flag = (
+                    " [imputation-dominated]"
+                    if item["stratum"] == "imputation-dominated" else ""
+                )
+                if not item["eligible"]:
+                    click.echo(
+                        f"  {d:<35}  S=n/a  P(best)=n/a  cov={cov:.2f}  "
+                        f"imputed={imputed:.0%} [{item['stratum']}: {item['reason']}]"
+                    )
+                    continue
                 lo, hi = ranking.s_ci[d]
-                cov = ranking.data_coverage[d]
                 low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
                 # Label S as full-field when the deck would be restricted in the single-deck
                 # view — keeps the ranking path consistent with advise positioning output.
                 s_label = "S*" if d in ranking.coverage_caveated else "S"
                 # Suppress P(best) when coverage ≈ 0 — the value is imputation noise that
                 # otherwise reads as a spuriously confident ranking signal.
-                if cov < _PBEST_SUPPRESS_COVERAGE:
-                    pbest_str = "P(best)=n/a [cov≈0]"
-                else:
-                    pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
+                pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
                 click.echo(
                     f"  {d:<35}  {s_label}={ranking.s_mean[d]:.3f}  "
                     f"CI=[{lo:.3f},{hi:.3f}]  {pbest_str}  "
-                    f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
+                    f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}  "
+                    f"imputed={imputed:.0%}{stratum_flag}{low_flag}"
                 )
         else:
             pos = positioning_score(matrix, field, resolved_archetype, seed=seed)

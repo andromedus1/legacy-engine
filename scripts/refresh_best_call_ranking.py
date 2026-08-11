@@ -65,6 +65,7 @@ from legacy_engine.advisory.positioning import (
     _DEFAULT_DRAWS,
     _PBEST_SUPPRESS_COVERAGE,
     _compute_data_coverage,
+    ranking_evidence_payload,
     rank_decks,
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
@@ -787,6 +788,13 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "_idx": len(camps_out),
             })
 
+    if set(camp_used) != set(camp_labels):
+        missing = sorted(set(camp_labels) - set(camp_used))
+        unexpected = sorted(set(camp_used) - set(camp_labels))
+        raise AssertionError(
+            f"camp page-used ledger key mismatch: missing={missing!r}, unexpected={unexpected!r}"
+        )
+
     # ── Cross-camp P(best): ONE shared-field MC over all camps + unsplit archetypes ──
     # Every candidate is scored against the same sampled parent-level Dirichlet field, so
     # P(best) is comparable across camps of DIFFERENT parents (the per-parent matrices
@@ -808,6 +816,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     split_set = set(msa.multi.parents)
     potential = [*camp_labels, *(o for o in field_opps if o not in split_set)]
     used_by_subject = {**arch_used, **camp_used}  # label sets are disjoint by construction
+    if not set(potential) <= set(used_by_subject):
+        raise AssertionError(
+            f"ranking subjects missing page-used ledgers: {sorted(set(potential) - set(used_by_subject))!r}"
+        )
     rank_cells = {
         (subj, opp): cell
         for subj in potential
@@ -817,9 +829,43 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         cells=rank_cells, provenance=None, total_matches=ad.matrix.total_matches,
         archetypes=sorted({*potential, *field_opps}), caveat=ad.matrix.caveat,
     )
-    coverage = {d: _compute_data_coverage(rank_matrix, rank_field, d) for d in potential}
-    candidates = [d for d in potential if coverage[d] >= _PBEST_SUPPRESS_COVERAGE]
-    ranking = rank_decks(rank_matrix, rank_field, candidates, seed=RANK_SEED)
+    coverage = {
+        d: _compute_data_coverage(rank_matrix, rank_field, d, min_n=ground_n)
+        for d in potential
+    }
+    row_by_subject = {row["subject"]: row for row in [*arch_out, *camps_out]}
+    evidence = {}
+    audit_warnings: list[str] = []
+    for subject in potential:
+        row = row_by_subject[subject]
+        resolved = sum(cell.n >= 1 for cell in used_by_subject[subject].values())
+        evidence[subject] = ranking_evidence_payload(
+            field_share=row["field_share"],
+            measured_share=coverage[subject],
+            resolved_cells=resolved,
+            grounded=row["grounded"],
+        )
+        if resolved == 0:
+            warning = (
+                f"// [warn] ranking subject {subject}: no resolved page-used matchup cells; "
+                "P(best)=n/a"
+            )
+            audit_warnings.append(warning)
+            print(warning, flush=True)
+    candidates = [d for d in potential if evidence[d]["eligible"]]
+    ranking = rank_decks(
+        rank_matrix,
+        rank_field,
+        candidates,
+        coverage_min_n=ground_n,
+        seed=RANK_SEED,
+    )
+    for subject in candidates:
+        if abs(ranking.data_coverage[subject] - coverage[subject]) > 1e-12:
+            raise AssertionError(
+                f"ranking/page coverage mismatch for {subject!r}: "
+                f"ranking={ranking.data_coverage[subject]:.12f}, page={coverage[subject]:.12f}"
+            )
     for r in camps_out:
         lbl = r["subject"]
         ranked = lbl in ranking.p_best
@@ -828,6 +874,14 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         r["s_q"] = r4(ranking.s_quantile[lbl]) if ranked else None
         r["s_cov"] = r4(coverage[lbl])
         r["s_caveated"] = coverage[lbl] < _COVERAGE_RESTRICT_THRESHOLD
+        r["ranking_evidence"] = evidence[lbl]
+    inactive_count = sum(item["stratum"] == "inactive" for item in evidence.values())
+    quarantined_count = sum(not item["eligible"] for item in evidence.values()) - inactive_count
+    ranking_summary = (
+        f"// ranking evidence: {len(candidates)} eligible, {inactive_count} inactive, "
+        f"{quarantined_count} quarantined"
+    )
+    print(ranking_summary, flush=True)
     print(f"  shared-field ranking: {time.perf_counter() - t_rank:.1f}s "
           f"({len(candidates)} candidates, {_DEFAULT_DRAWS:,} draws)", flush=True)
     print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
@@ -898,6 +952,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "suppress_cov": _PBEST_SUPPRESS_COVERAGE,
                 "caveat_cov": _COVERAGE_RESTRICT_THRESHOLD,
                 "candidates": len(candidates), "potential": len(potential),
+                "pbest_total": sum(ranking.p_best.values()),
+                "camp_pbest_total": sum(
+                    ranking.p_best.get(label, 0.0) for label in camp_labels
+                ),
                 "basis": "page-used cells (era preferred, ban-scoped fallback)",
             },
             "audit": [
@@ -907,6 +965,8 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"{len(potential)} candidates (camps + unsplit archetypes with >= "
                 f"{_PBEST_SUPPRESS_COVERAGE:.0%} measured coverage) on the page-used "
                 f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
+                ranking_summary,
+                *audit_warnings,
                 f"// strategic plans: registry v{plan_registry.schema_version}, "
                 f"{len(plan_registry.assignments)} assignments; "
                 f"{plan_result.decisive_matches} decisive matches "

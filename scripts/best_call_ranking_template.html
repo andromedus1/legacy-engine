@@ -359,6 +359,7 @@ fall as more matchups become measured.</div></div>
 <input id="coverage-camp" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
 <label for="sample-camp">Minimum matchup n</label>
 <input id="sample-camp" type="number" min="1" step="1" value="8" inputmode="numeric">
+<button id="ranking-strata" type="button" aria-pressed="false">Group by evidence strata</button>
 <span class="table-count" id="count-camp"></span></div>
 <div class="table-scroll"><table id="t-camp"></table></div>
 <div class="footnote">Same columns, ledger, and markers as the archetype table above, plus
@@ -374,6 +375,9 @@ WR (Q25); <b>S*</b> marks coverage &lt; 85% — a full-field estimate leaning on
 for the unmeasured share, including each camp's own parent (that cell is absent by
 construction). <br>Camp % of meta = parent share × camp fraction among the parent's
 field-window decks.
+The evidence column reports measured/imputed field share and the typed stratum. Historical-only
+camps stay visible as inactive; unsupported rows show P(best)=n/a. The grouping control reorganizes
+these same rows under evidence headings without changing scores or hiding inactive evidence.
 <b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
 builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
 Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
@@ -442,11 +446,18 @@ function pbestHtml(r) {
   if (r._interactiveN !== D.meta.ground_n)
     return `n/a <span class="chip">generated at n=${D.meta.ground_n}</span>`;
   const covTxt = r.s_cov == null ? "—" : (100 * r.s_cov).toFixed(0) + "%";
-  if (r.p_best == null) return `n/a <span class="chip">cov ${covTxt}</span>`;
+  if (r.p_best == null) return `n/a <span class="chip">${escT((r.ranking_evidence || {}).reason || `cov ${covTxt}`)}</span>`;
   const q = Math.round(((D.meta.rank || {}).quantile ?? 0.25) * 100);
   const s = r.s_caveated ? "S*" : "S";
   return `${(100 * r.p_best).toFixed(1)}%` +
     ` <span class="chip">Q${q} ${s} ${fmtP(r.s_q)}</span>`;
+}
+function evidenceHtml(r) {
+  const evidence = r.ranking_evidence;
+  if (!evidence) return "—";
+  return `<span class="chip">${escT(evidence.stratum)}</span> `+
+    `${(100*evidence.measured_share).toFixed(0)}% measured / `+
+    `${(100*evidence.imputed_share).toFixed(0)}% imputed`;
 }
 function reconciliationHtml(r) {
   const x = r.reconciliation;
@@ -486,6 +497,7 @@ function rowHtml(r, i, camp) {
     <td>${bTxt}</td>
     <td>${metaTxt}</td>
     <td>${(100*r.coverage).toFixed(0)}%</td>
+    ${camp ? `<td>${evidenceHtml(r)}</td>` : ""}
     <td>${(100*r.field_share).toFixed(1)}%</td>
     <td>${r.recent_4wk}</td>
     <td>${windowChip(r)}</td>
@@ -507,7 +519,9 @@ const COLS = [
 // Camp table adds the cross-camp P(best) column (nulls — candidacy-gated rows — sort last).
 const CAMP_COLS = [...COLS.slice(0, 4),
   {label:"P(best)", get:r => r._interactiveN === D.meta.ground_n ? r.p_best : null, dir:-1},
-  ...COLS.slice(4)];
+  ...COLS.slice(4, 8),
+  {label:"evidence", get:r => (r.ranking_evidence || {}).stratum || "", dir:1},
+  ...COLS.slice(8)];
 const colsFor = camp => camp ? CAMP_COLS : COLS;
 // Default sort: agency %, descending. Click a header to sort by that column;
 // click again to flip direction. Sorting happens WITHIN each honesty stratum —
@@ -685,6 +699,7 @@ function archetypePlanHtml(r) {
 // Open/closed state of the two nested disclosures, remembered across row expansions so a
 // reader who only wants one of them stops re-collapsing the other on every row.
 const subsectionOpen = { plans: true, exact: false };
+let groupByRankingEvidence = false;
 function subsectionHtml(key, title, chip, body) {
   return `<details class="subsection" data-sub="${key}"${subsectionOpen[key] ? " open" : ""}>`+
     `<summary>${title} ${chip}</summary><div class="subsection-body">${body}</div></details>`;
@@ -697,13 +712,15 @@ function renderTable(id, rows, camp) {
   const visibleRows = rows.filter(r => r.coverage >= st.minCoverage);
   document.getElementById(st.count).textContent =
     `${visibleRows.length} of ${rows.length} rows`;
-  const strata = [
-    ["", visibleRows.filter(r => r.grounded && r.recent_4wk >= 5)],
-    ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
-      visibleRows.filter(r => r.grounded && r.recent_4wk < 5)],
-    ["ungrounded (INCOMPLETE FLOOR — every ≤ agency value is an UPPER BOUND and can fall as more matchups become measured)",
-      visibleRows.filter(r => !r.grounded)],
-  ];
+  const strata = camp && groupByRankingEvidence ?
+    ["grounded", "lean", "imputation-dominated", "inactive", "unscorable"].map(label =>
+      [label, visibleRows.filter(r => (r.ranking_evidence || {}).stratum === label)]) : [
+      ["", visibleRows.filter(r => r.grounded && r.recent_4wk >= 5)],
+      ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
+        visibleRows.filter(r => r.grounded && r.recent_4wk < 5)],
+      ["ungrounded (INCOMPLETE FLOOR — every ≤ agency value is an UPPER BOUND and can fall as more matchups become measured)",
+        visibleRows.filter(r => !r.grounded)],
+    ];
   let html = headHtml(id, cols) + "<tbody>", i = 0;
   for (const [label, set] of strata) {
     if (!set.length) continue;
@@ -799,6 +816,11 @@ document.getElementById("coverage-plan").addEventListener("input", event => {
 renderPlanTable();
 renderTable("t-arch", D.arch, false);
 renderTable("t-camp", D.camps, true);
+document.getElementById("ranking-strata").addEventListener("click", event => {
+  groupByRankingEvidence = !groupByRankingEvidence;
+  event.currentTarget.setAttribute("aria-pressed", String(groupByRankingEvidence));
+  renderTable("t-camp", D.camps, true);
+});
 
 // ---- scatter: adj WR (x) vs floor (y); agency = distance to the lower-left ----
 (function scatter() {

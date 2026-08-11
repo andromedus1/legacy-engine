@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field as dataclass_field
+from typing import Literal, TypedDict
 
 import numpy as np
 
@@ -62,6 +63,54 @@ _COVERAGE_RESTRICT_THRESHOLD: float = 0.85   # below this data_coverage, restric
 _PBEST_SUPPRESS_COVERAGE: float = 0.05       # below this data_coverage, P(best) is imputation noise → suppress in display
 _DEFAULT_RISK_QUANTILE: float = 0.25   # default lower-quantile for risk-adjusted ranking
 _RISK_AVERSE_QUANTILE: float = 0.05   # quantile used when risk_averse=True
+
+RankingEvidenceStratum = Literal[
+    "grounded", "lean", "imputation-dominated", "inactive", "unscorable"
+]
+
+
+class RankingEvidencePayload(TypedDict):
+    stratum: RankingEvidenceStratum
+    measured_share: float
+    imputed_share: float
+    eligible: bool
+    reason: str | None
+
+
+def ranking_evidence_payload(
+    *,
+    field_share: float,
+    measured_share: float,
+    resolved_cells: int,
+    grounded: bool,
+    suppress_coverage: float = _PBEST_SUPPRESS_COVERAGE,
+) -> RankingEvidencePayload:
+    """Classify a row's evidence without changing its score or display presence."""
+    measured = min(1.0, max(0.0, measured_share))
+    imputed = min(1.0, max(0.0, 1.0 - measured))
+    reason: str | None = None
+    if field_share <= 0.0:
+        stratum: RankingEvidenceStratum = "inactive"
+        reason = "no current-field presence"
+    elif resolved_cells == 0:
+        stratum = "unscorable"
+        reason = "no resolved matchup cells against the selected field"
+    elif measured < suppress_coverage:
+        stratum = "unscorable"
+        reason = f"measured field coverage {measured:.1%} is below {suppress_coverage:.0%}"
+    elif imputed > 0.5:
+        stratum = "imputation-dominated"
+    elif grounded:
+        stratum = "grounded"
+    else:
+        stratum = "lean"
+    return {
+        "stratum": stratum,
+        "measured_share": measured,
+        "imputed_share": imputed,
+        "eligible": stratum not in ("inactive", "unscorable"),
+        "reason": reason,
+    }
 
 
 # ---------------------------------------------------------------------------

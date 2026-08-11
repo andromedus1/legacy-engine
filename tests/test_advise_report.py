@@ -640,6 +640,32 @@ class TestAdviseCLI:
         assert "cov=" in result.output, (
             f"Expected coverage column 'cov=...' in output; got:\n{result.output}"
         )
+        assert "imputed=" in result.output
+        assert "P(best)=n/a" in result.output
+
+    def test_positioning_candidates_can_group_same_rows_by_evidence(self, runner, tmp_path):
+        deck_path = _write_deck(tmp_path, _BRAINSTORM_DECKLIST)
+        candidates_path = tmp_path / "candidates.txt"
+        candidates_path.write_text("Control\nCombo\n")
+        db_path = _setup_db(tmp_path)
+        result = runner.invoke(main, [
+            "advise", "positioning", "--deck", deck_path,
+            "--candidates", str(candidates_path), "--ranking-strata",
+            "--db", db_path, "--seed", "42",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "[inactive]" in result.output or "[unscorable]" in result.output
+        assert result.output.count("Control") == 1
+        assert result.output.count("Combo") == 1
+
+    def test_ranking_strata_requires_candidates(self, runner, tmp_path):
+        deck_path = _write_deck(tmp_path, _BRAINSTORM_DECKLIST)
+        db_path = _setup_db(tmp_path)
+        result = runner.invoke(main, [
+            "advise", "positioning", "--deck", deck_path, "--ranking-strata", "--db", db_path,
+        ])
+        assert result.exit_code != 0
+        assert "requires --candidates" in result.output
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ from legacy_engine.advisory.positioning import (
     _DEFAULT_DRAWS,
     _row_winrate_inputs,
     _sample_S,
+    ranking_evidence_payload,
 )
 from legacy_engine.analytics import build_matrix
 from legacy_engine.analytics.matchup import MatchupMatrix
@@ -1227,6 +1228,26 @@ class TestCoveredPredicate:
         field = _custom_field({"X": 0.2, "A": 0.5, "B": 0.3})
         covered = covered_field_archetypes(m, field, "X")
         assert covered == frozenset({"X", "A"})  # mirror X + displayed A; B uncovered
+
+
+class TestRankingEvidencePayload:
+    @pytest.mark.parametrize(
+        ("kwargs", "stratum", "eligible"),
+        [
+            ({"field_share": 0.0, "measured_share": 1.0, "resolved_cells": 4, "grounded": True}, "inactive", False),
+            ({"field_share": 0.1, "measured_share": 0.0, "resolved_cells": 0, "grounded": False}, "unscorable", False),
+            ({"field_share": 0.1, "measured_share": 0.04, "resolved_cells": 2, "grounded": False}, "unscorable", False),
+            ({"field_share": 0.1, "measured_share": 0.4, "resolved_cells": 2, "grounded": False}, "imputation-dominated", True),
+            ({"field_share": 0.1, "measured_share": 0.8, "resolved_cells": 2, "grounded": True}, "grounded", True),
+            ({"field_share": 0.1, "measured_share": 0.8, "resolved_cells": 2, "grounded": False}, "lean", True),
+        ],
+    )
+    def test_precedence_and_complement(self, kwargs, stratum, eligible):
+        result = ranking_evidence_payload(**kwargs)
+        assert result["stratum"] == stratum
+        assert result["eligible"] is eligible
+        assert result["measured_share"] + result["imputed_share"] == pytest.approx(1.0)
+        assert (result["reason"] is not None) is (not eligible)
 
 
 class TestPositioningCoverageRestrict:
