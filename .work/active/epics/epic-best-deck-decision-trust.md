@@ -1,7 +1,7 @@
 ---
 id: epic-best-deck-decision-trust
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics, advisory, ingestion, infra]
 parent: null
 depends_on: []
@@ -72,3 +72,19 @@ Consolidate ranking recomputation and coverage definitions so the page, Monte Ca
 validation harness cannot maintain subtly different versions of “measured coverage” or adjusted
 field win rate. Prefer one refresh pipeline and one frozen prediction artifact over session
 scratchpads. Do not retain a second ranking implementation solely for benchmark use.
+
+## Child features reviewed and complete (2026-08-11)
+
+All six direct child features completed implementation, independent standard review, receiver
+adjudication, named fix verification, and closure:
+
+- `feature-ranking-measurement-integrity`
+- `feature-ranking-honesty-guards`
+- `feature-agency-page-methodology`
+- `feature-decision-data-currency`
+- `feature-ranking-future-only-benchmark`
+- `feature-player-effect-diagnostic`
+
+The epic is ready for its deeper aggregate review. The latest repository verification recorded by
+the final child closure is 3,710 passed and 1 expected optional-stack skip; the canonical knowledge
+index reports 0 errors and 11 pre-existing advisory warnings.
