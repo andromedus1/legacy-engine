@@ -1,7 +1,7 @@
 ---
 id: epic-best-deck-decision-trust
 kind: epic
-stage: drafting
+stage: implementing
 tags: [analytics, advisory, ingestion, infra]
 parent: null
 depends_on: []
@@ -57,6 +57,14 @@ goldfish/rules engine are deferred and outside this autopilot scope.
   optional dated external snapshots.
 - `feature-player-effect-diagnostic` — pilot stickiness plus experimental strictly pre-match
   player effects evaluated inside the benchmark.
+
+## Decomposition
+
+Decomposition pre-existed at epic-design entry: six coherent child features cover measurement
+integrity, ranking honesty, methodology, data currency, future-only validation, and the dependent
+player-effect experiment. The graph has two independent foundation lanes (measurement/honesty and
+currency), joins at methodology and the future-only benchmark, then gates the experimental player
+effect. No additional feature is required.
 
 ## Simplification opportunity
 
