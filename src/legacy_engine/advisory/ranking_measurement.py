@@ -62,6 +62,7 @@ class RowReconciliation(LegacyEngineModel):
     parity_delta: float | None
     strict_common_since: str | None
     strict_common: float | None
+    strict_common_reason: str | None
     strict_common_contributing_coverage: float
     strict_common_coverage: float
     estimator_delta: float | None
@@ -152,6 +153,26 @@ class GroundingPath(LegacyEngineModel):
     projected_coverage: float
     would_ground: bool
     reason: str | None
+
+
+def production_recommendation_order(
+    rows: Mapping[str, tuple[bool, int, float | None]],
+    *,
+    current_min_decks: int = 5,
+) -> tuple[str, ...]:
+    """Shared grounded/current/Agency ordering for the page and frozen benchmark."""
+    if current_min_decks < 1:
+        raise ValueError("current_min_decks must be positive")
+    eligible = {
+        action: (grounded, recent_count, agency)
+        for action, (grounded, recent_count, agency) in rows.items()
+        if agency is not None
+    }
+    return tuple(sorted(eligible, key=lambda action: (
+        0 if eligible[action][0] and eligible[action][1] >= current_min_decks
+        else 1 if eligible[action][0] else 2,
+        -float(eligible[action][2]), action,
+    )))
 
 
 def methodology_variant_specs(ground_n: int) -> tuple[MethodologyVariantSpec, ...]:
@@ -762,6 +783,10 @@ def measure_ranking_row(
         parity_delta=parity_delta,
         strict_common_since=common_since,
         strict_common=common,
+        strict_common_reason=(
+            None if common is not None else
+            "strict-common unavailable: no resolved cells at the uniform horizon"
+        ),
         strict_common_contributing_coverage=(
             common_contributing_mass / total_share if total_share else 0.0
         ),

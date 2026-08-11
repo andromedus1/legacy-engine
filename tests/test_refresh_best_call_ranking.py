@@ -33,6 +33,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
+
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
 from legacy_engine.analytics.eras.store import write_entity_eras
@@ -59,6 +61,27 @@ _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "refresh_best_c
 _spec = importlib.util.spec_from_file_location("refresh_best_call_ranking", _SCRIPT_PATH)
 rbcr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(rbcr)
+
+
+def test_benchmark_validation_payload_has_honest_default_and_artifact_identity(tmp_path):
+    assert rbcr.benchmark_validation_payload(None) == {
+        "status": "not-run", "artifact_id": None, "protocol_hash": None,
+        "reason": "no benchmark summary artifact supplied to page generation",
+    }
+    summary = BenchmarkEvaluationSummary(
+        protocol_hash="protocol", folds=(), evaluable_folds=0, represented_regimes=0,
+        paired_differences={}, status="not-evaluable", reasons=("support unavailable",),
+    )
+    path = tmp_path / "summary.json"
+    path.write_text(summary.model_dump_json())
+    payload = rbcr.benchmark_validation_payload(path)
+    assert payload == {
+        "status": "not-evaluable", "artifact_id": content_sha256(summary),
+        "protocol_hash": "protocol", "reason": "support unavailable",
+    }
+    template = rbcr.TEMPLATE_PATH.read_text()
+    assert "future-only validation: ${validation.status}" in template
+    assert "artifact ${validation.artifact_id || \"none\"}" in template
 
 
 def _run_template_javascript(blob: dict, probe: str) -> dict:

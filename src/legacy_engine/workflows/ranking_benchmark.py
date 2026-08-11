@@ -35,6 +35,7 @@ from legacy_engine.advisory.ranking_measurement import (
     measure_ranking_row,
     measure_variant_row,
     methodology_variant_specs,
+    production_recommendation_order,
     select_ranking_cell,
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
@@ -231,11 +232,12 @@ def build_origin_snapshot(
     try:
         store.init_schema(destination)
         facts = _copy_training_facts(source, destination, cutoff)
-        if taxonomy_mode == "contemporaneous":
-            if not rules_path.is_dir():
-                raise ValueError("contemporaneous taxonomy rules payload must be a rules directory")
-            ruleset = load_ruleset(rules_path)
-            label_decks(destination, ruleset, lambda name: store.load_card(destination, name))
+        if not rules_path.is_dir():
+            raise ValueError("benchmark taxonomy rules payload must be a rules directory")
+        # Both modes replay their pinned parent rules. Stored archetype/variant columns are
+        # mutable derived labels and may never define the frozen training experiment.
+        ruleset = load_ruleset(rules_path)
+        label_decks(destination, ruleset, lambda name: store.load_card(destination, name))
         destination.execute("UPDATE decks SET variant = NULL")
         _validate_closure(destination)
         registered_bans = (
@@ -261,11 +263,15 @@ def build_origin_snapshot(
             for row in facts["rounds"]
         )
         serialized_bans = tuple((d.isoformat(), card, reason) for d, card, reason in events_as_of)
+        fingerprint_facts = dict(facts)
+        fingerprint_facts["decks"] = [
+            (*row[:4], None, None) for row in facts["decks"]
+        ]
         manifest = SnapshotManifest(
             protocol_hash=protocol_hash,
             fold=fold,
-            training_source_fingerprint=content_sha256({"tables": facts}),
-            training_facts_sha256=content_sha256(facts),
+            training_source_fingerprint=content_sha256({"tables": fingerprint_facts}),
+            training_facts_sha256=content_sha256(fingerprint_facts),
             training_event_ids_sha256=content_sha256(event_ids),
             training_events=len(facts["tournaments"]),
             training_decks=len(facts["decks"]),
@@ -338,10 +344,22 @@ def _benchmark_rows(con: duckdb.DuckDBPyConnection, protocol: BenchmarkProtocol,
         for since in sorted(fallback_dates, key=lambda value: value or "")
     }
     rows: dict[str, tuple[tuple[RankingCellMeasurement, ...], object]] = {}
+    strict_cache: dict[str | None, dict] = {}
     top_k = min(8, len(actions))
     for subject in actions:
         cells: list[RankingCellMeasurement] = []
         strict: dict[str, RankingCellSource] = {}
+        strict_since = max((
+            window.effective_since for opponent in actions
+            if (window := clamp_pair_window(
+                subject, opponent, subject_since=adaptive.valid_since.get(subject),
+                opponent_since=adaptive.valid_since.get(opponent),
+            )).effective_since is not None
+        ), default=None)
+        if strict_since not in strict_cache:
+            strict_cache[strict_since] = build_matrix(
+                con, min_row_share=protocol.action_min_share, since=strict_since,
+            ).cells
         for opponent in actions:
             window_since = adaptive.cell_windows.get((subject, opponent))
             window = clamp_pair_window(
@@ -373,11 +391,20 @@ def _benchmark_rows(con: duckdb.DuckDBPyConnection, protocol: BenchmarkProtocol,
                 ground_n=8,
             )
             cells.append(measurement)
-            if measurement.selected is not None:
-                strict[opponent] = measurement.selected
+            strict_cell = strict_cache[strict_since].get((subject, opponent))
+            if strict_cell is not None:
+                strict[opponent] = RankingCellSource(
+                    kind="strict-common-era", since=strict_since, cell=strict_cell,
+                    pair_window=clamp_pair_window(
+                        subject, opponent, subject_since=adaptive.valid_since.get(subject),
+                        opponent_since=adaptive.valid_since.get(opponent),
+                        requested_since=strict_since,
+                    ),
+                )
         typed_cells = tuple(cells)
         row = measure_ranking_row(
-            subject, typed_cells, top_k=top_k, cover_min=0.8, strict_common_sources=strict,
+            subject, typed_cells, top_k=top_k, cover_min=0.8,
+            strict_common_sources=strict, strict_common_since=strict_since,
         )
         rows[subject] = (typed_cells, row)
     return actions, shares, rows
@@ -450,6 +477,13 @@ def freeze_origin_predictions(
     try:
         actions, shares, rows = _benchmark_rows(con, protocol, manifest)
         recent, full, conversion = _baseline_inputs(con, protocol, manifest)
+        recent_since = (date.fromisoformat(manifest.fold.cutoff) - timedelta(days=28)).isoformat()
+        recent_counts = dict(con.execute(
+            "SELECT archetype, count(*) FROM decks d JOIN tournaments t ON t.id=d.tournament_id "
+            "WHERE d.archetype IS NOT NULL AND substr(t.date,1,10)>=? "
+            "AND substr(t.date,1,10)<? GROUP BY archetype ORDER BY archetype",
+            [recent_since, manifest.fold.cutoff],
+        ).fetchall())
     finally:
         con.close()
 
@@ -525,12 +559,12 @@ def freeze_origin_predictions(
         _ranked_recommendation(estimator, scores)
         for estimator, scores in {**baseline_scores, **variant_scores}.items()
     ]
-    # Preserve the deployed primary ordering: evidence stratum first, then Agency and stable id.
+    # Call the same grounded/current/Agency policy used by the generated production page.
     canonical = {action: rows[action][1] for action in actions}
-    primary_ranked = tuple(sorted(actions, key=lambda action: (
-        0 if canonical[action].grounded else 2,
-        -(canonical[action].agency if canonical[action].agency is not None else -1.0), action,
-    )))
+    primary_ranked = production_recommendation_order({
+        action: (canonical[action].grounded, int(recent_counts.get(action, 0)), canonical[action].agency)
+        for action in actions
+    })
     primary = next(item for item in recommendations if item.estimator == "production-ci-gated")
     recommendations[recommendations.index(primary)] = primary.model_copy(update={
         "chosen_action": primary_ranked[0] if primary_ranked else None,

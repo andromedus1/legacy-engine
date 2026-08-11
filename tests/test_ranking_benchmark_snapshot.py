@@ -27,8 +27,12 @@ def _source_db(path: Path, *, future_result: str = "2-0") -> Path:
     con = store.connect(path)
     store.init_schema(con)
     con.executemany(
-        "INSERT INTO cards (name) VALUES (?)",
-        [("Brainstorm",), ("Future Card",)],
+        "INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            ("Brainstorm", "{U}", 1.0, "Instant", "U", "", "", "normal", False, None, None),
+            ("Ponder", "{U}", 1.0, "Sorcery", "U", "", "", "normal", False, None, None),
+            ("Future Card", "{1}", 1.0, "Artifact", "", "", "", "normal", False, None, None),
+        ],
     )
     con.executemany(
         "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -50,7 +54,7 @@ def _source_db(path: Path, *, future_result: str = "2-0") -> Path:
         "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
         [
             ("past", 0, "main", "Brainstorm", 4),
-            ("past", 1, "main", "Brainstorm", 4),
+            ("past", 1, "main", "Ponder", 4),
             ("future", 0, "main", "Future Card", 4),
         ],
     )
@@ -86,6 +90,14 @@ def _protocol() -> BenchmarkProtocol:
     )
 
 
+@pytest.fixture(autouse=True)
+def _pinned_retrospective_rules(tmp_path, monkeypatch):
+    import legacy_engine.workflows.ranking_benchmark as workflow
+
+    snapshot = _taxonomy_snapshot(tmp_path / "retrospective-taxonomy")
+    monkeypatch.setattr(workflow, "RULES_DIR", snapshot / "rules")
+
+
 def test_snapshot_excludes_every_future_or_derived_surface(tmp_path):
     source = _source_db(tmp_path / "source.duckdb")
     output = tmp_path / "snapshot.duckdb"
@@ -99,7 +111,9 @@ def test_snapshot_excludes_every_future_or_derived_surface(tmp_path):
     con = duckdb.connect(str(output), read_only=True)
     assert con.execute("SELECT id FROM tournaments").fetchall() == [("past",)]
     assert con.execute("SELECT DISTINCT variant FROM decks").fetchall() == [(None,)]
-    assert con.execute("SELECT name FROM cards").fetchall() == [("Brainstorm",)]
+    assert con.execute("SELECT name FROM cards ORDER BY name").fetchall() == [
+        ("Brainstorm",), ("Ponder",),
+    ]
     assert con.execute("SELECT count(*) FROM player_aliases").fetchone()[0] == 0
     assert not con.execute(
         "SELECT count(*) FROM information_schema.tables WHERE table_name='superarchetype_members'"
@@ -112,6 +126,34 @@ def test_post_cutoff_changes_leave_manifest_identical(tmp_path):
     two = _source_db(tmp_path / "two.duckdb", future_result="0-2")
     first = build_origin_snapshot(one, tmp_path / "one-snapshot.duckdb", fold=_fold(), protocol_hash="p")
     second = build_origin_snapshot(two, tmp_path / "two-snapshot.duckdb", fold=_fold(), protocol_hash="p")
+    assert first == second
+
+
+def test_retrospective_training_replays_rules_and_ignores_stored_label_mutation(tmp_path):
+    first_source = _source_db(tmp_path / "first.duckdb")
+    second_source = _source_db(tmp_path / "second.duckdb")
+    con = store.connect(second_source)
+    con.execute(
+        "UPDATE decks SET archetype='Mutable Stored Label', variant='Mutable Variant' "
+        "WHERE tournament_id='past'"
+    )
+    con.close()
+    protocol = _protocol()
+    first_manifest = build_origin_snapshot(
+        first_source, tmp_path / "first-snapshot.duckdb", fold=_fold(),
+        protocol_hash=protocol_sha256(protocol),
+    )
+    second_manifest = build_origin_snapshot(
+        second_source, tmp_path / "second-snapshot.duckdb", fold=_fold(),
+        protocol_hash=protocol_sha256(protocol),
+    )
+    assert first_manifest == second_manifest
+    first = freeze_origin_predictions(
+        tmp_path / "first-snapshot.duckdb", protocol=protocol, manifest=first_manifest,
+    )
+    second = freeze_origin_predictions(
+        tmp_path / "second-snapshot.duckdb", protocol=protocol, manifest=second_manifest,
+    )
     assert first == second
 
 
@@ -158,7 +200,6 @@ def _taxonomy_snapshot(path: Path) -> Path:
 def test_contemporaneous_rules_classify_training_and_holdout_with_same_payload(tmp_path):
     source = _source_db(tmp_path / "source.duckdb")
     con = store.connect(source)
-    con.execute("INSERT INTO cards (name) VALUES ('Ponder')")
     con.execute(
         "UPDATE cards SET cmc=1, type_line='Instant', colors='U', produced_mana='', "
         "oracle_text='', layout='normal', is_land=false"

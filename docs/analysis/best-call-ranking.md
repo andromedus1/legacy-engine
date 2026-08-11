@@ -32,6 +32,7 @@ decisions:
   - "Every ranking row is derived from a typed selected-cell ledger. Its serialized replay must reproduce adjusted field WR exactly; a mismatch suppresses the headline. A strict-common-era estimate is shown separately as a divergence diagnostic and is never averaged into the adaptive headline."
   - "Every row reports floor observability at n>=10 and display-grade n>=30 independently of the interactive page gate. Zero display-grade cells means floor unobserved; missing bad matchups are not evidence of none. Event/month concentration >=40% is labeled on measured selected cells, never automatically corrected away."
   - "The benchmark protocol freezes the exact fold schedule and as-of B&R ledger. Claim coverage uses classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay and refuse different content."
+  - "The generated page names its future-only validation status and summary artifact id. No supplied summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive, or predictive-claim-supported."
 ---
 
 # Best Deck / Best Call agency ranking — refresh runbook
@@ -109,6 +110,21 @@ scores, calibration, support/coverage, rank/top-three/regret uncertainty, exclus
 external evidence, and censor reasons. These artifacts are evidence, not a tuning
 loop, and a predictive claim requires the preregistered fold, regime, calibration, and primary
 vs baseline gates.
+
+The generated Best Call page does not infer validation from the presence of benchmark code. Pass
+the canonical aggregate summary explicitly when refreshing it:
+
+```bash
+.venv/bin/python scripts/refresh_best_call_ranking.py \
+  --db data/legacy.duckdb \
+  --benchmark-summary data/benchmarks/<protocol-id>/summary.json
+```
+
+Its audit header then prints the summary's content-derived artifact id and one of
+`not-evaluable`, `descriptive`, or `predictive-claim-supported`. Omitting
+`--benchmark-summary` prints `not-run` with no artifact id. A failed or malformed summary is an
+error; the page never silently upgrades or substitutes validation evidence. The current production
+call printed beside it comes from the same grounded/current/Agency ordering used by the benchmark.
 
 ### Experimental player-effect diagnostic
 

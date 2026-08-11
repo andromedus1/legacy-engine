@@ -12,11 +12,25 @@ from legacy_engine.advisory.ranking_measurement import (
     measure_variant_row,
     methodology_variant_specs,
     plan_path_to_grounding,
+    production_recommendation_order,
     rank_variant_rows,
     select_ranking_cell,
 )
 from legacy_engine.analytics.matchup import build_cell
 from legacy_engine.analytics.eras.consume import PairWindow, clamp_pair_window
+
+
+def test_production_recommendation_orders_grounded_then_current_then_agency():
+    rows = {
+        "stale-high": (True, 4, 0.90),
+        "current-lower": (True, 5, 0.60),
+        "thin-highest": (False, 100, 0.99),
+        "current-tie-z": (True, 5, 0.55),
+        "current-tie-a": (True, 5, 0.55),
+    }
+    assert production_recommendation_order(rows) == (
+        "current-lower", "current-tie-a", "current-tie-z", "stale-high", "thin-highest",
+    )
 
 
 def source(kind, wins, n, *, since=None, concentration=None, opponent="Opp"):
@@ -103,6 +117,10 @@ class TestMeasureRankingRow:
         )
         assert row.floor_observability.floor_observed is False
         assert "absence of bad cells" in row.floor_observability.reason
+        assert row.reconciliation.strict_common is None
+        assert row.reconciliation.strict_common_reason == (
+            "strict-common unavailable: no resolved cells at the uniform horizon"
+        )
 
     def test_invalid_selected_pair_window_suppresses_headline(self):
         invalid = source("era", 6, 10, since="2026-04-01").model_copy(update={

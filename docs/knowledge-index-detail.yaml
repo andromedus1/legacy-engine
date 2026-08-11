@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND.
 # On-demand layer — load when surfacing a specific doc's full context.
-generated_at: '2026-08-11T21:38:49Z'
+generated_at: '2026-08-11T21:57:31Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -341,6 +341,9 @@ documents:
       classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility
       and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay
       and refuse different content.
+    - The generated page names its future-only validation status and summary artifact id. No supplied
+      summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive,
+      or predictive-claim-supported.
   docs/analysis/copy-count-distribution-study.md:
     summary: 'Distribution-first study of per-card sideboard copy-count distributions among top-finisher
 

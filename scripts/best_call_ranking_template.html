@@ -423,6 +423,9 @@ let measCells = 0, totCells = 0;
 for (const r of [...D.arch, ...D.camps])
   for (const c of r.cells) { totCells += 1; if (c.measured) measCells += 1; }
 const nParents = new Set(D.camps.map(r => r.parent)).size;
+const validation = M.benchmark_validation || {status:"not-run", artifact_id:null,
+  reason:"no benchmark summary artifact supplied to page generation"};
+const productionCall = M.production_recommendation || {chosen_action:null};
 const audit = [
   `// corpus through ${M.corpus_max}`
     + (M.corpus_decks ? ` · ${nf(M.corpus_decks)} decks / ${nf(M.corpus_events)} events` : "")
@@ -431,6 +434,9 @@ const audit = [
     + (M.field_events ? ` · ${nf(M.field_events)} events` : "")
     + (M.field_archetypes ? ` · ${M.field_archetypes} archetypes` : ""),
   `// tables: ${D.arch.length} archetypes (${groundedCur} grounded + current) · ${D.camps.length} camps across ${nParents} parents · ${nf(measCells)}/${nf(totCells)} matchup cells measured`,
+  `// current production call: ${productionCall.chosen_action || "unavailable"} · shared grounded/current/Agency ordering`,
+  `// future-only validation: ${validation.status} · artifact ${validation.artifact_id || "none"}`
+    + (validation.reason ? ` · ${validation.reason}` : ""),
   ...(M.audit || []),
 ].join("\n");
 document.getElementById("audit").textContent = audit;

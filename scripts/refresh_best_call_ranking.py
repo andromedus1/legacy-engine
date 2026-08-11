@@ -65,6 +65,7 @@ from pathlib import Path
 import duckdb
 
 from legacy_engine.advisory.field import build_custom_field
+from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
 from legacy_engine.advisory.positioning import (
     _COVERAGE_RESTRICT_THRESHOLD,
     _DEFAULT_DRAWS,
@@ -109,6 +110,7 @@ from legacy_engine.advisory.ranking_measurement import (
     measure_variant_row,
     methodology_variant_specs,
     plan_path_to_grounding,
+    production_recommendation_order,
     rank_variant_rows,
     select_ranking_cell,
 )
@@ -121,6 +123,21 @@ DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-rank
 # corpus (rank_decks is deterministic under a fixed seed; a refresh changes numbers only
 # because the DATA changed, never because the sampler did).
 RANK_SEED = 20260731
+
+
+def benchmark_validation_payload(summary_path: Path | None) -> dict[str, str | None]:
+    """Load reviewed benchmark evidence or expose the honest not-run default."""
+    if summary_path is None:
+        return {
+            "status": "not-run", "artifact_id": None, "protocol_hash": None,
+            "reason": "no benchmark summary artifact supplied to page generation",
+        }
+    summary = BenchmarkEvaluationSummary.model_validate_json(summary_path.read_bytes())
+    return {
+        "status": summary.status, "artifact_id": content_sha256(summary),
+        "protocol_hash": summary.protocol_hash,
+        "reason": "; ".join(summary.reasons) if summary.reasons else None,
+    }
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -826,7 +843,7 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
 
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
-                 regime_card, parents, superarchetypes=None):
+                 regime_card, parents, superarchetypes=None, benchmark_validation=None):
     corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
     corpus_decks, corpus_events = con.execute(
@@ -1166,6 +1183,11 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             )
         }
 
+    production_order = production_recommendation_order({
+        row["subject"]: (row["grounded"], row["recent_4wk"], row["agency"])
+        for row in arch_out
+    })
+
     return {
         "meta": {
             "field_since": field_since, "field_decks": field_decks,
@@ -1173,6 +1195,12 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             "ground_n": ground_n, "top_k": top_k, "cover_min": cover_min,
             "min_row_share": min_row_share, "current_4wk": current_4wk,
             "corpus_max": corpus_max,
+            "production_recommendation": {
+                "chosen_action": production_order[0] if production_order else None,
+                "ranked_actions": list(production_order),
+                "basis": "shared grounded/current/Agency ordering",
+            },
+            "benchmark_validation": benchmark_validation or benchmark_validation_payload(None),
             # data-shape stats for the page's audit header (all counts, no method prose)
             "corpus_decks": corpus_decks, "corpus_events": corpus_events,
             "field_events": field_events, "field_archetypes": len(shares),
@@ -1240,6 +1268,7 @@ def generate_ranking(
     cover_min: float = 0.8,
     min_row_share: float = 0.001,
     include_superarchetypes: bool = True,
+    benchmark_summary_path: Path | None = None,
 ) -> dict:
     """Compute and write the ranking page; the CLI is only argument presentation."""
     latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
@@ -1253,6 +1282,7 @@ def generate_ranking(
             con, field_since=effective_since, ground_n=ground_n, top_k=top_k,
             cover_min=cover_min, min_row_share=min_row_share,
             regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
+            benchmark_validation=benchmark_validation_payload(benchmark_summary_path),
         )
     finally:
         con.close()
@@ -1277,6 +1307,8 @@ def main() -> None:
     ap.add_argument("--min-row-share", type=float, default=0.001)
     ap.add_argument("--no-superarchetypes", action="store_true",
                     help="omit the optional internal superarchetype registry input")
+    ap.add_argument("--benchmark-summary", default=None,
+                    help="reviewed benchmark summary JSON exposed on the page")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -1285,6 +1317,7 @@ def main() -> None:
         ground_n=args.ground_n, top_k=args.top_k, cover_min=args.cover_min,
         min_row_share=args.min_row_share,
         include_superarchetypes=not args.no_superarchetypes,
+        benchmark_summary_path=Path(args.benchmark_summary) if args.benchmark_summary else None,
     )
     print(f"wrote {out}: field={blob['meta']['field_decks']} decks since "
           f"{blob['meta']['field_since']}, corpus_max={blob['meta']['corpus_max']}, "

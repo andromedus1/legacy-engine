@@ -13,7 +13,10 @@ def _build_benchmark_db(tmp_path: Path) -> str:
     path = tmp_path / "benchmark.duckdb"
     con = store.connect(path)
     store.init_schema(con)
-    con.execute("INSERT INTO cards (name) VALUES ('Brainstorm')")
+    con.executemany("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        ("Alpha Signal", "{1}", 1.0, "Artifact", "", "", "", "normal", False, None, None),
+        ("Beta Signal", "{1}", 1.0, "Artifact", "", "", "", "normal", False, None, None),
+    ])
     con.executemany(
         "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
         [
@@ -31,7 +34,10 @@ def _build_benchmark_db(tmp_path: Path) -> str:
         )
         con.executemany(
             "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
-            [(event, 0, "main", "Brainstorm", 4), (event, 1, "main", "Brainstorm", 4)],
+            [
+                (event, 0, "main", "Alpha Signal", 4),
+                (event, 1, "main", "Beta Signal", 4),
+            ],
         )
         con.execute(
             "INSERT INTO rounds VALUES (?, 0, ?, ?, '2-0')",
@@ -41,7 +47,18 @@ def _build_benchmark_db(tmp_path: Path) -> str:
     return str(path)
 
 
-def test_benchmark_cli_two_phase_run_parity_and_tamper_guard(tmp_path):
+def test_benchmark_cli_two_phase_run_parity_and_tamper_guard(tmp_path, monkeypatch):
+    import legacy_engine.workflows.ranking_benchmark as benchmark_workflow
+
+    rules = tmp_path / "rules" / "Formats" / "Legacy" / "Archetypes"
+    rules.mkdir(parents=True)
+    (rules / "Alpha.json").write_text(json.dumps({
+        "Name": "Alpha", "Conditions": [{"Type": "InMainboard", "Cards": ["Alpha Signal"]}],
+    }))
+    (rules / "Beta.json").write_text(json.dumps({
+        "Name": "Beta", "Conditions": [{"Type": "InMainboard", "Cards": ["Beta Signal"]}],
+    }))
+    monkeypatch.setattr(benchmark_workflow, "RULES_DIR", tmp_path / "rules")
     db = _build_benchmark_db(tmp_path)
     protocol = tmp_path / "protocol.json"
     artifacts = tmp_path / "artifacts"

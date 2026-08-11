@@ -296,6 +296,18 @@ def test_frozen_artifact_is_deterministic_hashed_and_contains_no_identity_keys()
         summary.training_exclusions == {"outside-frozen-action-universe": 1}
         for summary in first.fit_summaries
     )
+    assert all(summary.repeat_players is None for summary in first.fit_summaries)
+    assert all(summary.familiarity_pairs is None for summary in first.fit_summaries)
+    visible = freeze_player_effect_predictions(
+        base, benchmark, rows, scheduled, (),
+        _protocol(
+            benchmark_protocol_hash=protocol_sha256(benchmark), privacy_min_group=2,
+        ), inner_folds=inner,
+    )
+    player_summary = next(
+        item for item in visible.fit_summaries if item.estimator == "player-intercept"
+    )
+    assert player_summary.repeat_players == 2
     mutated_benchmark = benchmark.model_copy(update={"seed": benchmark.seed + 1})
     with pytest.raises(ValueError, match="benchmark hash"):
         freeze_player_effect_predictions(
@@ -385,6 +397,8 @@ def test_future_evaluation_changes_only_after_outcomes_open_and_keeps_all_strata
     assert "deck q05/q50/q95" in rendered
     assert "repeat-player" not in rendered
     assert "Production ranking" in rendered
+    assert "repeat players=suppressed" in rendered
+    assert "familiarity pairs=suppressed" in rendered
     one_fold_benchmark = benchmark.model_copy(update={
         "support": benchmark.support.model_copy(update={"min_claim_folds": 1}),
     })

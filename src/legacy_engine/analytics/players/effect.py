@@ -80,8 +80,8 @@ class PlayerEffectFitSummary(LegacyEngineModel):
     penalty: PenaltySelection
     training_matches: int
     training_exclusions: dict[str, int]
-    repeat_players: int
-    familiarity_pairs: int
+    repeat_players: int | None
+    familiarity_pairs: int | None
     effect_supported_rate: float
     deck_residual_quantiles: tuple[float, float, float] | None
     player_effect_quantiles: tuple[float, float, float] | None
@@ -651,8 +651,14 @@ def freeze_player_effect_predictions(
         summaries.append(PlayerEffectFitSummary(
             estimator=estimator, converged=fit.converged, penalty=selections[estimator],
             training_matches=len(training_rows), training_exclusions=training_exclusions,
-            repeat_players=len(fit.eligible_players),
-            familiarity_pairs=len(fit.eligible_familiarity),
+            repeat_players=(
+                len(fit.eligible_players)
+                if len(fit.eligible_players) >= protocol.privacy_min_group else None
+            ),
+            familiarity_pairs=(
+                len(fit.eligible_familiarity)
+                if len(fit.eligible_familiarity) >= protocol.privacy_min_group else None
+            ),
             effect_supported_rate=supported / len(training_rows) if training_rows else 0.0,
             deck_residual_quantiles=_quantiles(fit.deck),
             player_effect_quantiles=_quantiles(fit.player),
@@ -1338,10 +1344,14 @@ def render_player_effect_markdown(summary: PlayerEffectEvaluationSummary) -> str
                 f"reasons={list(access.reasons)}."
             )
         for fit in fold.fit_summaries:
+            fit_repeat = "suppressed" if fit.repeat_players is None else str(fit.repeat_players)
+            fit_familiarity = (
+                "suppressed" if fit.familiarity_pairs is None else str(fit.familiarity_pairs)
+            )
             lines.append(
                 f"- `{fit.estimator}` fit: converged={fit.converged}, "
-                f"training matches={fit.training_matches}, repeat players={fit.repeat_players}, "
-                f"familiarity pairs={fit.familiarity_pairs}, deck q05/q50/q95="
+                f"training matches={fit.training_matches}, repeat players={fit_repeat}, "
+                f"familiarity pairs={fit_familiarity}, deck q05/q50/q95="
                 f"{fit.deck_residual_quantiles}, player={fit.player_effect_quantiles}, "
                 f"familiarity={fit.familiarity_quantiles}; exclusions={fit.training_exclusions}; "
                 f"inner exclusions={fit.penalty.inner_exclusions}; reason={fit.reason}."
