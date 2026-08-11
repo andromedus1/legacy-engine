@@ -1,7 +1,7 @@
 ---
 id: feature-player-effect-diagnostic-coverage-stickiness
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, players, experimental]
 parent: feature-player-effect-diagnostic
 depends_on: []
@@ -24,3 +24,20 @@ decides the taxonomy.
 
 Implement Unit 1 in the parent feature's `## Implementation Units`. Establish the identity,
 accessibility, minimum-repeat, privacy, and pilot-overlap contracts before any player effect is fit.
+
+## Implementation notes
+
+- Execution capability: inherited frontier worker at high effort; identity scoping and denominators
+  are consequential inputs to the later statistical model.
+- Review weight: standard (autopilot/default feature review).
+- Files changed: `analytics/players/diagnostic.py`, the player-effect DuckDB workflow adapter, and
+  focused analytics/workflow tests.
+- Tests added: provenance-local versus curated identity, dated/hash/mode snapshot failures,
+  independent repeat/familiarity gates, deterministic privacy-safe stickiness, and a hermetic
+  online/paper corpus with blank and duplicate within-event handles plus variants.
+- Simplification: identity eligibility and stickiness are pure typed functions; the adapter emits
+  structural rows and never calls alias suggestion or writes a registry.
+- Discrepancies from design: none. The workflow uses a private structural training-row model until
+  Unit 2 installs the public `PlayerTrainingMatch` contract.
+- Verification: 5 focused tests passed; focused Ruff and diff checks passed.
+- Adjacent issues parked: none.
