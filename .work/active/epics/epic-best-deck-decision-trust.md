@@ -1,7 +1,7 @@
 ---
 id: epic-best-deck-decision-trust
 kind: epic
-stage: implementing
+stage: done
 tags: [analytics, advisory, ingestion, infra]
 parent: null
 depends_on: []
@@ -114,3 +114,21 @@ claim status (`not-evaluable`, `descriptive`, or `predictive-claim-supported`); 
 result is valid evidence and must not be tuned away.
 
 **Nits**: none. **Rejected**: none.
+
+## Aggregate review closure (2026-08-11)
+
+The named fix story `epic-best-deck-decision-trust-review-fixes` is complete. Retrospective replay,
+shared recommendation ordering, fit-summary privacy, strict-common methodology evidence, and page
+validation provenance all have behavioral regressions. Focused verification is 101 passed; the full
+repository suite is 3,713 passed with 1 expected optional-stack skip; knowledge-index lint reports 0
+errors and 11 pre-existing advisory warnings. Per the completed standard review contract, no second
+independent epic review was run.
+
+The fixed real-corpus protocol hash is
+`6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`; its canonical summary artifact
+is `42e0e6f643b7f32df1e19760c30ad0fb28a19bb11c3871c27b3f52fc7e202083` with status
+**not-evaluable**. The 24-fold replay stopped before fold 1 predictions because 615 pre-cutoff
+`_____ Goblin` deck-card rows lack observed card metadata. That honest prerequisite failure is
+parked as `idea-missing-goblin-card-metadata`; the source DB, fixed protocol, estimators, thresholds,
+and production ranking were not changed. The generated page displays the not-evaluable artifact id
+beside—but does not conflate it with—the descriptive current production call (`White Beanstalk`).

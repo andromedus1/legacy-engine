@@ -122,6 +122,22 @@ def test_benchmark_cli_two_phase_run_parity_and_tamper_guard(tmp_path, monkeypat
     assert rejected.exit_code != 0
     assert "artifact hash mismatch" in str(rejected.exception)
 
+    con = store.connect(Path(db))
+    con.execute("DELETE FROM cards WHERE name = 'Beta Signal'")
+    con.close()
+    failed_artifacts = tmp_path / "failed-artifacts"
+    failed = runner.invoke(main, [
+        "advise", "benchmark", "run", "--db", db, "--protocol", str(protocol),
+        "--artifact-dir", str(failed_artifacts),
+    ])
+    assert failed.exit_code != 0
+    failed_summary = json.loads((failed_artifacts / "summary.json").read_text())
+    assert failed_summary["status"] == "not-evaluable"
+    assert "deck-card rows without observed card metadata" in failed_summary["reasons"][0]
+    assert "deck-card rows without observed card metadata" in (
+        failed_artifacts / "summary.md"
+    ).read_text()
+
 
 def test_benchmark_cli_requires_explicit_db(tmp_path):
     result = CliRunner().invoke(main, [

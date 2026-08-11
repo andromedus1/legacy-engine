@@ -1,7 +1,7 @@
 ---
 id: epic-best-deck-decision-trust-review-fixes
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, honesty, testing, players, privacy, docs]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -28,10 +28,10 @@ review, then execute the real-corpus future-only benchmark without retrospective
       or emits a named unavailable reason; it never relabels adaptive sources as strict-common.
 - [x] Page and runbook display benchmark validation state and artifact identity, with honest defaults
       for not-run/not-evaluable/descriptive/predictive-claim-supported.
-- [ ] The preregistered benchmark is executed against the current repository corpus after fixes;
+- [x] The preregistered benchmark is executed against the current repository corpus after fixes;
       artifacts are local/immutable, their ids and claim status are recorded in durable story/epic
       evidence, and no estimator/threshold is changed in response to outcomes.
-- [ ] Cross-feature focused tests and the full repository suite are green; knowledge/docs checks pass.
+- [x] Cross-feature focused tests and the full repository suite are green; knowledge/docs checks pass.
 
 ## Review closure contract
 
@@ -57,3 +57,40 @@ empirical execution return the epic directly to `done`; do not run a second inde
 - The real-corpus protocol/run follows after this checkpoint so each prediction records the repaired
   code commit. The registered schedule is fixed before observing results: cutoff 2024-12-16 through
   exclusive bound 2026-08-06, retrospective fixed-parent replay, default estimators/support/seed.
+
+## Empirical execution and closure (2026-08-11)
+
+Commands (source DB opened read-only; outputs under the ignored benchmark directory):
+
+```bash
+uv run --no-sync legacy-engine advise benchmark plan \
+  --db /Users/andrewclark/dev/legacy-engine/data/legacy.duckdb \
+  --protocol-id best-deck-decision-trust-current-corpus-v1 \
+  --created-at 2024-12-16T00:00:00Z --first-cutoff 2024-12-16 \
+  --until 2026-08-06 --taxonomy-mode retrospective-fixed-parent \
+  --out /Users/andrewclark/dev/legacy-engine/data/benchmarks/best-deck-decision-trust-current-corpus-v1/protocol.json
+uv run --no-sync legacy-engine advise benchmark run \
+  --db /Users/andrewclark/dev/legacy-engine/data/legacy.duckdb \
+  --protocol /Users/andrewclark/dev/legacy-engine/data/benchmarks/best-deck-decision-trust-current-corpus-v1/protocol.json \
+  --artifact-dir /Users/andrewclark/dev/legacy-engine/data/benchmarks/best-deck-decision-trust-current-corpus-v1
+uv run --no-sync python scripts/refresh_best_call_ranking.py \
+  --db /Users/andrewclark/dev/legacy-engine/data/legacy.duckdb \
+  --out /Users/andrewclark/dev/legacy-engine/data/benchmarks/best-deck-decision-trust-current-corpus-v1/best-call-ranking.html \
+  --benchmark-summary /Users/andrewclark/dev/legacy-engine/data/benchmarks/best-deck-decision-trust-current-corpus-v1/summary.json
+```
+
+- Protocol/artifact id: `6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`;
+  24 folds planned across the fixed schedule.
+- Summary artifact id: `42e0e6f643b7f32df1e19760c30ad0fb28a19bb11c3871c27b3f52fc7e202083`;
+  status **not-evaluable**, 0 completed/evaluable folds and 0 represented regimes.
+- Execution stopped before the first frozen prediction because snapshot closure found 615 rows (one
+  unique name, `_____ Goblin`, across 615 decks) without observed card metadata. This is preserved as
+  the primary summary reason; no source data, rules, thresholds, estimators, or protocol fields were
+  changed. Backlog capture: `idea-missing-goblin-card-metadata`.
+- The generated evidence page embeds that exact not-evaluable summary id and separately reports the
+  shared-policy current call (`White Beanstalk`). Current-call output is therefore descriptive, not
+  a supported predictive claim. Historical replay execution occurred after the outcomes; the frozen
+  origin timestamp is reproducibility metadata, not a claim of contemporaneous preregistration.
+- Verification: focused cross-feature suite `101 passed`; full repository suite `3713 passed, 1
+  skipped`; changed production lint and diff checks pass. Knowledge index: 0 errors, 11 existing
+  advisory warnings after regeneration.

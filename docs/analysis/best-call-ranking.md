@@ -126,6 +126,21 @@ Its audit header then prints the summary's content-derived artifact id and one o
 error; the page never silently upgrades or substitutes validation evidence. The current production
 call printed beside it comes from the same grounded/current/Agency ordering used by the benchmark.
 
+### Current validation evidence (2026-08-11)
+
+The fixed current-corpus historical replay is **not evaluable**. Protocol
+`best-deck-decision-trust-current-corpus-v1` planned 24 whole-date folds from 2024-12-16 through
+the exclusive 2026-08-06 bound under protocol hash
+`6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`. Snapshot closure stopped
+before the first prediction artifact because 615 pre-cutoff deck-card rows for `_____ Goblin` have
+no observed card-dimension metadata. The canonical not-evaluable summary artifact is
+`42e0e6f643b7f32df1e19760c30ad0fb28a19bb11c3871c27b3f52fc7e202083` under the protocol's ignored
+`data/benchmarks/` directory. No estimator, threshold, source row, or production recommendation was
+changed in response. This was a retrospectively executed historical replay with its origin metadata
+frozen for reproducibility; it is not evidence that predictions were registered before those real
+events occurred. The generated evidence page still reports the current production call separately,
+but it must not be described as predictively validated until a future-only run clears all gates.
+
 ### Experimental player-effect diagnostic
 
 `advise benchmark player-effect plan|freeze|evaluate|run` asks whether repeat pilot identity adds

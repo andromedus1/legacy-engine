@@ -2824,31 +2824,42 @@ def advise_benchmark_run(
     root = Path(artifact_dir)
     evaluations = []
     for fold in folds:
-        snapshot_path = root / f"{fold.fold_id}.duckdb"
-        manifest = build_origin_snapshot(
-            Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
-            taxonomy_mode=protocol.taxonomy_mode,
-            taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
-            ban_events=protocol.ban_events_as_of,
-        )
-        atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
-        predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
-        validate_frozen_taxonomy(
-            predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
-        )
-        digest = write_frozen_predictions(root / f"{fold.fold_id}.predictions.json", predictions)
-        atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
-        evaluation = evaluate_origin(
-            predictions, load_heldout_outcomes(
-                Path(db), fold,
-                taxonomy_mode=predictions.taxonomy_mode,
-                expected_rules_sha256=predictions.rules_sha256,
+        try:
+            snapshot_path = root / f"{fold.fold_id}.duckdb"
+            manifest = build_origin_snapshot(
+                Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
+                taxonomy_mode=protocol.taxonomy_mode,
                 taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
-            ), protocol=protocol,
-        )
-        atomic_write_canonical(root / f"{fold.fold_id}.evaluation.json", evaluation)
-        evaluations.append(evaluation)
-        click.echo(f"// fold {fold.fold_id}: {evaluation.status}; predictions={digest}")
+                ban_events=protocol.ban_events_as_of,
+            )
+            atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
+            predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
+            validate_frozen_taxonomy(
+                predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            )
+            digest = write_frozen_predictions(root / f"{fold.fold_id}.predictions.json", predictions)
+            atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
+            evaluation = evaluate_origin(
+                predictions, load_heldout_outcomes(
+                    Path(db), fold,
+                    taxonomy_mode=predictions.taxonomy_mode,
+                    expected_rules_sha256=predictions.rules_sha256,
+                    taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+                ), protocol=protocol,
+            )
+            atomic_write_canonical(root / f"{fold.fold_id}.evaluation.json", evaluation)
+            evaluations.append(evaluation)
+            click.echo(f"// fold {fold.fold_id}: {evaluation.status}; predictions={digest}")
+        except ValueError as exc:
+            reason = f"benchmark execution stopped at fold {fold.fold_id}: {exc}"
+            partial = aggregate_benchmark(protocol, evaluations)
+            failed = partial.model_copy(update={
+                "status": "not-evaluable",
+                "reasons": (reason, *partial.reasons),
+            })
+            atomic_write_canonical(root / "summary.json", failed)
+            atomic_write_text(root / "summary.md", render_benchmark_markdown(failed))
+            raise click.ClickException(reason) from exc
     summary = aggregate_benchmark(protocol, evaluations)
     atomic_write_canonical(root / "summary.json", summary)
     atomic_write_text(root / "summary.md", render_benchmark_markdown(summary))
