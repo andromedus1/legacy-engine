@@ -2806,7 +2806,7 @@ def advise_compare(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--candidates",
@@ -2819,7 +2819,11 @@ def advise_compare(
     "--ranking-strata",
     is_flag=True,
     default=False,
-    help="Group --candidates output by evidence stratum without changing scores.",
+    help=(
+        "Group --candidates by grounded/lean/imputation-dominated/inactive/unscorable "
+        "evidence; inactive means zero current presence, while unscorable names missing cells "
+        "or <5% measured coverage. Excluded rows show S/P(best)=n/a."
+    ),
 )
 @click.option(
     "--reserved",
@@ -3113,7 +3117,7 @@ def _render_list_granular(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--reserved",
@@ -3868,7 +3872,7 @@ def advise_sweep(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--db",
@@ -3977,7 +3981,7 @@ def advise_whattoplay(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines). "
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts. "
          "Absent → global corpus field (optionally filtered by --provenance/window opts).",
 )
 @click.option(
@@ -4108,7 +4112,7 @@ def advise_field(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--venues",
@@ -4667,7 +4671,7 @@ def identify_track(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--colors",
@@ -5112,7 +5116,7 @@ def generate_consensus(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--since",

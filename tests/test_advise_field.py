@@ -198,6 +198,12 @@ class TestAdviseFieldHelp:
         result = runner.invoke(main, ["advise", "field", "--help"])
         assert "--field" in result.output
 
+    def test_positioning_help_documents_currency_count_completeness(self, runner):
+        result = runner.invoke(main, ["advise", "positioning", "--help"])
+        assert result.exit_code == 0
+        assert "current_regime_n requires complete counts" in result.output
+        assert "inactive means zero current presence" in " ".join(result.output.split())
+
     def test_help_shows_window_opts(self, runner):
         result = runner.invoke(main, ["advise", "field", "--help"])
         assert "--since" in result.output

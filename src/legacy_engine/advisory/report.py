@@ -145,6 +145,7 @@ def _load_field(
     current_regime_n: int | None = None
     has_current_regime_header = False
     has_per_line_counts = False
+    has_missing_row_count = False
 
     for raw_line in field_text.splitlines():
         line = raw_line.strip()
@@ -214,6 +215,8 @@ def _load_field(
         shares[archetype] = shares.get(archetype, 0.0) + share
         if count > 0:
             raw_counts[archetype] = raw_counts.get(archetype, 0) + count
+        else:
+            has_missing_row_count = True
 
     if not shares:
         raise ValueError("_load_field: no field entries parsed from field_text")
@@ -250,6 +253,11 @@ def _load_field(
     if has_current_regime_header and total_n is None:
         raise ValueError(
             "_load_field: # current_regime_n requires per-line counts or # effective_n"
+        )
+    if has_current_regime_header and has_per_line_counts and has_missing_row_count:
+        raise ValueError(
+            "_load_field: # current_regime_n requires a real count on every field row; "
+            "synthetic count=1 fallback is not an exact currency denominator"
         )
     regime_currency = custom_regime_currency(
         current_n=current_regime_n if has_current_regime_header else None,

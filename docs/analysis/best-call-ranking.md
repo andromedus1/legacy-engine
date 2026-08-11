@@ -173,6 +173,15 @@ unchanged for inspection.
 
 ## Interpretation guardrails
 
+- **Custom-field currency is exact or unavailable.** A field file uses
+  `<share> <archetype> [count]`; `# current_regime_n: N` is accepted only when every row has a
+  real count, or when `# effective_n` supplies the complete allocated denominator. Partial row
+  counts still retain the historical synthetic-one Dirichlet fallback, but never claim an exact
+  currency percentage. Share-only and undated aggregates say why currency is unavailable.
+- **Field and matchup windows are independent.** Window field composition to the current regime;
+  keep matchup cells adaptive unless explicitly diagnosing another window. A current-only matchup
+  matrix can starve coverage even when the current field composition is trustworthy.
+
 - **Strata are honesty walls**: grounded+current, grounded-but-not-current
   (<5 decks in the last 4 corpus weeks), ungrounded (thin floor = upper bound).
   Column sorting reorders *within* a stratum only.
@@ -218,3 +227,9 @@ unchanged for inspection.
   field WR is a full-field estimate leaning on imputation for unmeasured share,
   which always includes the camp's own parent (that cell is absent by
   construction).
+- **Evidence exclusions name the reason.** `inactive` means raw current-field presence is exactly
+  zero (a positive share below display rounding remains active); `unscorable` means no resolved
+  matchup cells or measured coverage below 5%. Both show `S=n/a` and `P(best)=n/a`. Grounded,
+  lean, and imputation-dominated rows remain eligible. When the interactive matchup-n differs from
+  the generated gate, evidence percentages are labeled `generated n=<gate>` and evidence grouping
+  is disabled so generated strata cannot masquerade as interactive state.

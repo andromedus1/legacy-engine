@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-honesty-guards-review-fixes
 kind: story
-stage: implementing
+stage: done
 tags: [advisory, analytics, honesty, bug, tests, docs]
 parent: feature-ranking-honesty-guards
 depends_on: []
@@ -36,3 +36,19 @@ changing score policy or widening the feature scope.
 
 This story is the named fix set for a `standard`-weight review. Green implementation verification
 returns the parent feature directly to `done`; do not run a second independent review pass.
+
+## Implementation notes
+
+- Custom currency rejects partial per-row counts while preserving synthetic-one counts solely for
+  the pre-existing non-currency Dirichlet fallback. Complete per-row counts and `# effective_n`
+  remain exact bases.
+- Ranking candidacy now consumes unrounded current presence. Interactive sample-gate changes label
+  evidence as generated-gate state and disable generated-stratum grouping until the gate returns.
+- CLI help, SPEC, ARCHITECTURE, and the Best Call runbook now state custom syntax/completeness,
+  independent field/matchup windows, all evidence strata, and `n/a` exclusion reasons.
+- The knowledge-index skill initially found four pre-existing schema errors. Minimal body-grounded
+  metadata repair (`70f6c59`) allowed normal linted regeneration with 0 errors and 11 existing
+  warnings; `--no-lint` was not used.
+- Verification: focused review suite 238 passed; full repository suite 3644 passed, 1 skipped.
+- Design deviations: none. Ranking scores, thresholds, source ordering, and Monte Carlo policy are
+  unchanged.

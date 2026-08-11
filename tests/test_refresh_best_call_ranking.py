@@ -61,7 +61,7 @@ _spec.loader.exec_module(rbcr)
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
 _ADDITIVE_FIELDS = {
     "p_best", "s_q", "s_cov", "s_caveated", "floor_observability", "reconciliation",
-    "ranking_evidence",
+    "ranking_evidence", "field_share_raw",
 }
 
 # Field window covering both fixture tournaments but neither pre-ban load.
@@ -93,6 +93,24 @@ def test_ranking_row_payload_carries_reconciliation_and_floor_observability():
     assert payload["reconciliation"]["parity_delta"] == 0.0
     assert payload["floor_observability"]["floor_observed"] is False
     assert "absence of bad cells" in payload["floor_observability"]["reason"]
+
+
+def test_positive_raw_presence_below_display_rounding_is_not_inactive():
+    row = {"field_share": 0.0, "field_share_raw": 0.000049, "grounded": False}
+    evidence = rbcr.ranking_evidence_for_row(
+        row, measured_share=0.10, resolved_cells=1,
+    )
+    assert evidence["stratum"] != "inactive"
+    assert evidence["eligible"] is True
+
+
+def test_exact_zero_raw_presence_is_inactive():
+    row = {"field_share": 0.0, "field_share_raw": 0.0, "grounded": True}
+    evidence = rbcr.ranking_evidence_for_row(
+        row, measured_share=1.0, resolved_cells=10,
+    )
+    assert evidence["stratum"] == "inactive"
+    assert evidence["reason"] == "no current-field presence"
 
 
 def test_make_cells_embeds_both_sources_for_interactive_sample_gate():
@@ -709,6 +727,15 @@ class TestMainEndToEnd:
         assert "display-grade floor" in template
         assert "floorObservabilityHtml" in template
         assert "c.concentration_warning" in template
+
+    def test_interactive_gate_labels_generated_evidence_and_disables_grouping(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "function rankingEvidenceIsCurrent(r)" in template
+        assert "function canGroupRankingEvidence(rows)" in template
+        assert "generated n=${D.meta.ground_n}" in template
+        assert "control.disabled = stale" in template
+        assert "groupByRankingEvidence = false" in template
+        assert "camp && groupByRankingEvidence && generatedEvidenceCurrent" in template
 
     def test_evidence_column_and_opt_in_grouping_are_accessible_and_value_preserving(self):
         template = rbcr.TEMPLATE_PATH.read_text()

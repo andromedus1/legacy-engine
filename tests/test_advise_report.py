@@ -817,6 +817,20 @@ class TestLoadFieldCounts:
                 field_text="# current_regime_n: 3\n0.6 Delver\n0.4 Lands",
             )
 
+    def test_current_regime_header_rejects_partial_row_counts(self):
+        con = _con()
+        with pytest.raises(ValueError, match="real count on every field row"):
+            _load_field(
+                con,
+                field_text="# current_regime_n: 3\n0.6 Delver 6\n0.4 Lands",
+            )
+
+    def test_partial_counts_without_currency_keep_dirichlet_fallback(self):
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver 6\n0.4 Lands")
+        assert field.counts == {"Delver": 6, "Lands": 1}
+        assert field.regime_currency.share is None
+
     def test_undated_custom_field_carries_unavailable_currency(self):
         con = _con()
         field = _load_field(con, field_text="0.6 Delver\n0.4 Lands")

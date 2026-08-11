@@ -455,9 +455,17 @@ function pbestHtml(r) {
 function evidenceHtml(r) {
   const evidence = r.ranking_evidence;
   if (!evidence) return "—";
-  return `<span class="chip">${escT(evidence.stratum)}</span> `+
+  const gate = r._interactiveN !== D.meta.ground_n ?
+    `<span class="chip">generated n=${D.meta.ground_n}</span> ` : "";
+  return gate + `<span class="chip">${escT(evidence.stratum)}</span> `+
     `${(100*evidence.measured_share).toFixed(0)}% measured / `+
     `${(100*evidence.imputed_share).toFixed(0)}% imputed`;
+}
+function rankingEvidenceIsCurrent(r) {
+  return r._interactiveN == null || r._interactiveN === D.meta.ground_n;
+}
+function canGroupRankingEvidence(rows) {
+  return rows.every(rankingEvidenceIsCurrent);
 }
 function reconciliationHtml(r) {
   const x = r.reconciliation;
@@ -722,7 +730,8 @@ function renderTable(id, rows, camp) {
   const visibleRows = rows.filter(r => r.coverage >= st.minCoverage);
   document.getElementById(st.count).textContent =
     `${visibleRows.length} of ${rows.length} rows`;
-  const strata = camp && groupByRankingEvidence ?
+  const generatedEvidenceCurrent = canGroupRankingEvidence(rows);
+  const strata = camp && groupByRankingEvidence && generatedEvidenceCurrent ?
     ["grounded", "lean", "imputation-dominated", "inactive", "unscorable"].map(label =>
       [label, visibleRows.filter(r => (r.ranking_evidence || {}).stratum === label)]) : [
       ["", visibleRows.filter(r => r.grounded && r.recent_4wk >= 5)],
@@ -806,6 +815,16 @@ function bindSampleFilter(id, rows, camp) {
     const value = Number(event.target.value);
     st.minN = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : D.meta.ground_n;
     rows.forEach(r => camp === null ? recalcPlan(r, st.minN) : recalcRow(r, st.minN));
+    if (id === "t-camp") {
+      const control = document.getElementById("ranking-strata");
+      const stale = st.minN !== D.meta.ground_n;
+      control.disabled = stale;
+      control.title = stale ? `Evidence strata are generated at n=${D.meta.ground_n}` : "";
+      if (stale) {
+        groupByRankingEvidence = false;
+        control.setAttribute("aria-pressed", "false");
+      }
+    }
     if (camp === null) renderPlanTable(); else renderTable(id, rows, camp);
   });
 }

@@ -415,6 +415,16 @@ def ranking_row_payload(row):
     }
 
 
+def ranking_evidence_for_row(row, *, measured_share, resolved_cells):
+    """Classify presence from the unrounded field share, never its display projection."""
+    return ranking_evidence_payload(
+        field_share=row["field_share_raw"],
+        measured_share=measured_share,
+        resolved_cells=resolved_cells,
+        grounded=row["grounded"],
+    )
+
+
 def row_stats(
     cells, top_k, cover_min, *, strict_common_sources=None, strict_common_since=None,
 ):
@@ -790,6 +800,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             "horizon": horizon_text(ad.horizon_meta.get(subj)),
             "cells": cells,
             "field_share": r4(shares.get(subj, 0.0)),
+            "field_share_raw": shares.get(subj, 0.0),
             "recent_4wk": recent.get(subj, 0),
             "_idx": i,
         })
@@ -872,6 +883,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "cells": cells,
                 "parent": parent, "camp": camp,
                 "field_share": r4(shares.get(parent, 0.0) * frac),
+                "field_share_raw": shares.get(parent, 0.0) * frac,
                 "camp_fraction_current": r4(frac),
                 "recent_4wk": camp_recent.get((parent, camp), 0),
                 "_idx": len(camps_out),
@@ -928,11 +940,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     for subject in potential:
         row = row_by_subject[subject]
         resolved = sum(cell.n >= 1 for cell in used_by_subject[subject].values())
-        evidence[subject] = ranking_evidence_payload(
-            field_share=row["field_share"],
+        evidence[subject] = ranking_evidence_for_row(
+            row,
             measured_share=coverage[subject],
             resolved_cells=resolved,
-            grounded=row["grounded"],
         )
         if resolved == 0:
             warning = (
