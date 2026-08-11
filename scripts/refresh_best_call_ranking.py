@@ -54,6 +54,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -104,6 +106,30 @@ DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-rank
 # corpus (rank_decks is deterministic under a fixed seed; a refresh changes numbers only
 # because the DATA changed, never because the sampler did).
 RANK_SEED = 20260731
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write a complete sibling temporary file before atomically replacing *path*."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(path)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
 
 
 def r4(x: float | None) -> float | None:
@@ -1012,8 +1038,8 @@ def generate_ranking(
 
     template = TEMPLATE_PATH.read_text()
     assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(template.replace("__D_BLOB__", json.dumps(blob, ensure_ascii=False), 1))
+    rendered = template.replace("__D_BLOB__", json.dumps(blob, ensure_ascii=False), 1)
+    _atomic_write_text(out_path, rendered)
     return blob
 
 

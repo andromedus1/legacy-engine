@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
+from legacy_engine.models.card import CardAliasManifest
 from legacy_engine.workflows.decision_refresh import (
     CampApplyResult,
     EraRunResult,
@@ -31,13 +32,27 @@ class RecordingPorts:
             upcoming_releases=("up: Upcoming",),
             recent_releases=("new: Recent",),
             release_scan_reason="scan offline" if self.degrade_sources else None,
+            alias_manifest=(
+                CardAliasManifest(
+                    source_updated_at="2026-08-10T00:00:00Z",
+                    built_at="2026-08-10T01:00:00Z",
+                    release_codes=("eoe",),
+                    alias_count=10,
+                    ambiguous_key_count=0,
+                ) if self.degrade_sources else None
+            ),
             summary="sources current",
         )
 
     def reconcile_cards(self, db_path: Path, source_result: SourceRefreshResult):
         self._record("card_coverage")
         assert source_result.new_card_names == frozenset({"New Card"})
-        return CardCoverageReport(distinct_names=2, affected_decks=1)
+        return CardCoverageReport(
+            distinct_names=2,
+            affected_decks=1,
+            alias_snapshot_degraded=source_result.alias_snapshot_reason is not None,
+            alias_snapshot_reason=source_result.alias_snapshot_reason,
+        )
 
     def label(self, db_path: Path):
         self._record("label")
@@ -100,4 +115,20 @@ class TestDecisionRefresh:
             ports, db_path=tmp_path / "db.duckdb", out_path=tmp_path / "ranking.html",
         )
         assert result.steps[0].status is RefreshStepStatus.DEGRADED
+        assert result.card_coverage.alias_snapshot_degraded
+        assert "currency uncertain" in result.card_coverage.alias_snapshot_reason
+        assert "retained last-good aliases" in result.card_coverage.alias_snapshot_reason
         assert result.steps[-1].status is RefreshStepStatus.COMPLETED
+
+    def test_source_failure_still_emits_real_operator_confirmed_ban_ledger(self, tmp_path):
+        ports = RecordingPorts(fail_at="sources")
+
+        result = run_decision_refresh(
+            ports, db_path=tmp_path / "db.duckdb", out_path=tmp_path / "ranking.html",
+        )
+
+        line = next(line for line in decision_refresh_audit_lines(result) if "B&R ledger" in line)
+        assert "unknown" not in line
+        assert "operator-confirmed" in line
+        assert result.format_awareness.latest_registered_ban_date is not None
+        assert result.format_awareness.latest_registered_ban_card is not None

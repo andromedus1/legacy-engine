@@ -28,8 +28,8 @@ class RefreshStepResult(LegacyEngineModel):
 
 
 class FormatAwareness(LegacyEngineModel):
-    latest_registered_ban_date: str
-    latest_registered_ban_card: str
+    latest_registered_ban_date: str | None
+    latest_registered_ban_card: str | None
     upcoming_releases: tuple[str, ...] = ()
     recent_releases: tuple[str, ...] = ()
     era_alarms: tuple[str, ...] = ()
@@ -87,6 +87,34 @@ def _empty_coverage(reason: str) -> CardCoverageReport:
     )
 
 
+def _format_awareness() -> FormatAwareness:
+    """Read the curated B&R ledger independently of every external refresh source."""
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    if not BAN_EVENTS:
+        return FormatAwareness(
+            latest_registered_ban_date=None,
+            latest_registered_ban_card=None,
+        )
+    latest = max(BAN_EVENTS, key=lambda event: event[0])
+    return FormatAwareness(
+        latest_registered_ban_date=latest[0].isoformat(),
+        latest_registered_ban_card=latest[1],
+    )
+
+
+def _propagate_alias_currency_uncertainty(source: SourceRefreshResult) -> SourceRefreshResult:
+    if source.release_scan_reason is None or source.alias_manifest is None:
+        return source
+    uncertainty = (
+        "alias snapshot currency uncertain because the release scan was unavailable; "
+        f"retained last-good aliases: {source.release_scan_reason}"
+    )
+    if source.alias_snapshot_reason:
+        uncertainty = f"{source.alias_snapshot_reason}; {uncertainty}"
+    return source.model_copy(update={"alias_snapshot_reason": uncertainty})
+
+
 def run_decision_refresh(
     ports: DecisionRefreshPorts,
     *,
@@ -97,7 +125,7 @@ def run_decision_refresh(
     steps: list[RefreshStepResult] = []
     source: SourceRefreshResult | None = None
     coverage = _empty_coverage("card reconciliation not run")
-    awareness = FormatAwareness(latest_registered_ban_date="unknown", latest_registered_ban_card="unknown")
+    awareness = _format_awareness()
     era_result = EraRunResult()
 
     actions = (
@@ -122,7 +150,7 @@ def run_decision_refresh(
             reason = None
             summary = "completed"
             if name == "sources":
-                source = value
+                source = _propagate_alias_currency_uncertainty(value)
                 assert isinstance(source, SourceRefreshResult)
                 reasons = tuple(filter(None, (source.release_scan_reason, source.alias_snapshot_reason)))
                 if reasons:
@@ -159,16 +187,11 @@ def run_decision_refresh(
             ))
 
     if source is not None:
-        from legacy_engine.ingestion.banlist import BAN_EVENTS
-
-        latest = max(BAN_EVENTS, key=lambda event: event[0])
-        awareness = FormatAwareness(
-            latest_registered_ban_date=latest[0].isoformat(),
-            latest_registered_ban_card=latest[1],
-            upcoming_releases=source.upcoming_releases,
-            recent_releases=source.recent_releases,
-            era_alarms=era_result.alarms,
-        )
+        awareness = awareness.model_copy(update={
+            "upcoming_releases": source.upcoming_releases,
+            "recent_releases": source.recent_releases,
+            "era_alarms": era_result.alarms,
+        })
     ranking_output = str(out_path) if steps[-1].status is RefreshStepStatus.COMPLETED else None
     return DecisionRefreshResult(
         steps=tuple(steps), card_coverage=coverage,
@@ -183,10 +206,13 @@ def decision_refresh_audit_lines(result: DecisionRefreshResult) -> tuple[str, ..
         for step in result.steps
     ]
     fmt = result.format_awareness
-    lines.append(
-        f"// B&R ledger: {fmt.latest_registered_ban_card} registered {fmt.latest_registered_ban_date} "
-        "(operator-confirmed; no announcement scrape)"
-    )
+    if fmt.latest_registered_ban_date and fmt.latest_registered_ban_card:
+        lines.append(
+            f"// B&R ledger: {fmt.latest_registered_ban_card} registered "
+            f"{fmt.latest_registered_ban_date} (operator-confirmed; no announcement scrape)"
+        )
+    else:
+        lines.append("// B&R ledger: unavailable — no operator-confirmed event loaded")
     lines.append(f"// releases: recent={len(fmt.recent_releases)}, upcoming={len(fmt.upcoming_releases)}")
     lines.extend(f"// era alarm: {alarm}" for alarm in fmt.era_alarms)
     if result.ranking_output:

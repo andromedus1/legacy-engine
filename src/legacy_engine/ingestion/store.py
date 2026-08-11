@@ -176,6 +176,15 @@ def rebuild_card_aliases(
     """Atomically replace the derived alias snapshot, preserving every canonical collision."""
     deduped: dict[tuple[str, str, str], PrintedCardAlias] = {}
     for alias in aliases:
+        missing = [
+            field for field in (
+                "printed_name", "normalized_alias", "canonical_name", "language", "scryfall_id"
+            ) if not getattr(alias, field)
+        ]
+        if missing:
+            raise ValueError(
+                "card alias candidate missing required provenance: " + ", ".join(missing)
+            )
         key = (alias.normalized_alias, alias.canonical_name, alias.language)
         current = deduped.get(key)
         if current is None or (alias.scryfall_id, alias.printed_name) < (
@@ -183,6 +192,14 @@ def rebuild_card_aliases(
             current.printed_name,
         ):
             deduped[key] = alias
+    if not deduped:
+        raise ValueError("refusing to replace card aliases with an empty candidate snapshot")
+    previous = load_card_alias_manifest(con)
+    if previous is not None and len(deduped) * 2 < previous.alias_count:
+        raise ValueError(
+            "refusing implausibly incomplete card-alias snapshot: "
+            f"{len(deduped)} candidates vs {previous.alias_count} last-good aliases"
+        )
     canonical_by_key: dict[str, set[str]] = {}
     for alias in deduped.values():
         canonical_by_key.setdefault(alias.normalized_alias, set()).add(alias.canonical_name)

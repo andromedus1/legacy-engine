@@ -597,6 +597,29 @@ class TestStrategicPlanPresentation:
 
 
 class TestMainEndToEnd:
+    def test_atomic_write_failure_preserves_last_good_ranking(self, tmp_path, monkeypatch):
+        out_path = tmp_path / "ranking.html"
+        out_path.write_bytes(b"last-good-ranking")
+        temp_path = tmp_path / ".ranking.html.injected.tmp"
+
+        class FailingTemp:
+            name = str(temp_path)
+            def __enter__(self):
+                temp_path.write_bytes(b"partial")
+                return self
+            def write(self, text):
+                raise OSError("disk full")
+            def __exit__(self, *args):
+                return None
+
+        monkeypatch.setattr(rbcr.tempfile, "NamedTemporaryFile", lambda **kwargs: FailingTemp())
+
+        with pytest.raises(OSError, match="disk full"):
+            rbcr._atomic_write_text(out_path, "replacement")
+
+        assert out_path.read_bytes() == b"last-good-ranking"
+        assert not temp_path.exists()
+
     def test_generate_ranking_callable_matches_cli_defaults(self, tmp_path, monkeypatch):
         db_path = tmp_path / "callable.duckdb"
         con = store.connect(str(db_path))

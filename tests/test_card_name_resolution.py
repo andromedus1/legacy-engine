@@ -4,6 +4,8 @@ import gzip
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.card_coverage import reconcile_card_dimension
 from legacy_engine.ingestion import scryfall
@@ -93,6 +95,8 @@ class TestPrintedAliasStream:
         monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
         monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_PATH", tmp_path / "all.json.gz")
         monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_META_PATH", tmp_path / "meta.json")
+        monkeypatch.setattr(scryfall, "_ALL_CARDS_MIN_ROWS", 1)
+        monkeypatch.setattr(scryfall, "_ALL_CARDS_MIN_ALIASES", 1)
         client = ScryfallClient()
         client.client.close()
         client.client = Http()
@@ -104,6 +108,67 @@ class TestPrintedAliasStream:
 
         assert gzip.decompress(path.read_bytes()) == raw
         assert [item.canonical_name for item in client.iter_printed_aliases(path)] == ["Counterspell"]
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            b"[]",
+            b'{"object":"error","details":"provider failure"}\n',
+            b'{"lang":"pt","name":"Counterspell","printed_name":"Contramagica"}\n',
+            (
+                json.dumps({
+                    "id": "pt-1", "lang": "pt", "name": "Counterspell",
+                    "printed_name": "Contramagica",
+                }) + "\n"
+            ).encode(),
+        ],
+        ids=("empty-array", "error-object", "missing-provenance", "implausibly-incomplete"),
+    )
+    def test_invalid_download_candidate_preserves_last_good_snapshot(
+        self, tmp_path, monkeypatch, payload,
+    ):
+        old_raw = gzip.compress(b'{"id":"old","lang":"pt","name":"Old","printed_name":"Velho"}\n')
+        raw_path = tmp_path / "all.json.gz"
+        meta_path = tmp_path / "meta.json"
+        raw_path.write_bytes(old_raw)
+        meta_path.write_text('{"updated_at":"old"}')
+        candidate = gzip.compress(payload)
+
+        class Response:
+            headers = {"content-encoding": "gzip"}
+            def raise_for_status(self):
+                return None
+            def iter_raw(self, chunk_size):
+                yield candidate
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return None
+
+        class Http:
+            def stream(self, *args, **kwargs):
+                return Response()
+            def close(self):
+                return None
+
+        monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+        monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_PATH", raw_path)
+        monkeypatch.setattr(scryfall, "SCRYFALL_ALL_CARDS_META_PATH", meta_path)
+        monkeypatch.setattr(scryfall, "_ALL_CARDS_MIN_ROWS", 2)
+        monkeypatch.setattr(scryfall, "_ALL_CARDS_MIN_ALIASES", 1)
+        client = ScryfallClient()
+        client.client.close()
+        client.client = Http()
+        monkeypatch.setattr(client, "_fetch_all_cards_metadata", lambda: {
+            "download_uri": "https://data.scryfall.io/all.json",
+            "updated_at": "2026-08-11T00:00:00Z",
+        })
+
+        with pytest.raises(ValueError):
+            client.download_all_cards_bulk(force=True)
+
+        assert raw_path.read_bytes() == old_raw
+        assert meta_path.read_text() == '{"updated_at":"old"}'
 
 
 class TestAliasStore:
@@ -133,6 +198,31 @@ class TestAliasStore:
         assert not store.alias_snapshot_needs_refresh(_manifest(), ["eoe"])
         assert store.alias_snapshot_needs_refresh(_manifest(), ["eoe", "new"])
         assert store.alias_snapshot_needs_refresh(None, [])
+
+    def test_invalid_candidate_preserves_last_good_alias_state(self):
+        from legacy_engine.models.card import PrintedCardAlias
+
+        con = store.connect(":memory:")
+        old = [
+            PrintedCardAlias(
+                printed_name=f"Alias {index}", normalized_alias=f"alias {index}",
+                canonical_name=f"Card {index}", language="pt", scryfall_id=str(index),
+            )
+            for index in range(4)
+        ]
+        last_good = store.rebuild_card_aliases(
+            con, old, manifest=_manifest(alias_count=4),
+        )
+        incomplete = [old[0]]
+
+        with pytest.raises(ValueError, match="implausibly incomplete"):
+            store.rebuild_card_aliases(
+                con, incomplete, manifest=_manifest(source_updated_at="new"),
+            )
+
+        assert store.load_card_alias_manifest(con) == last_good
+        assert len(store.fetch_card_alias_candidates(con, "Alias 3")) == 1
+        con.close()
 
 
 class TestCardDimensionReconciliation:

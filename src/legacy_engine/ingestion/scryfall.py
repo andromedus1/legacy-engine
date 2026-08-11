@@ -47,6 +47,8 @@ METADATA_PATH = SCRYFALL_DIR / "metadata.json"
 
 _SCRYFALL_ALLOWED_HOSTS = frozenset({"scryfall.com", "api.scryfall.com", "c2.scryfall.com"})
 _SCRYFALL_ALLOWED_SUFFIXES = (".scryfall.com", ".scryfall.io")
+_ALL_CARDS_MIN_ROWS = 100_000
+_ALL_CARDS_MIN_ALIASES = 1_000
 
 
 def _validate_scryfall_uri(uri: str) -> None:
@@ -156,6 +158,10 @@ class ScryfallClient:
             return SCRYFALL_ALL_CARDS_PATH
 
         meta = self._fetch_all_cards_metadata()
+        if not isinstance(meta.get("updated_at"), str) or not meta["updated_at"].strip():
+            raise ValueError("Scryfall all-cards metadata is missing required updated_at provenance")
+        if not isinstance(meta.get("download_uri"), str) or not meta["download_uri"].strip():
+            raise ValueError("Scryfall all-cards metadata is missing required download_uri")
         _validate_scryfall_uri(meta["download_uri"])
         tmp_path = SCRYFALL_ALL_CARDS_PATH.with_suffix(".gz.tmp")
         try:
@@ -172,10 +178,7 @@ class ScryfallClient:
                         with gzip.GzipFile(fileobj=fh, mode="wb") as zipped:
                             for chunk in resp.iter_bytes(chunk_size=64 * 1024):
                                 zipped.write(chunk)
-            # Consume the full stream before replacing last-good raw data; corruption after the
-            # first valid row must not become the persisted mirror.
-            for _alias in self.iter_printed_aliases(tmp_path):
-                pass
+            self._validate_all_cards_bulk(tmp_path)
             tmp_path.replace(SCRYFALL_ALL_CARDS_PATH)
             SCRYFALL_ALL_CARDS_META_PATH.write_text(json.dumps({
                 "updated_at": meta.get("updated_at"),
@@ -186,43 +189,78 @@ class ScryfallClient:
             raise
         return SCRYFALL_ALL_CARDS_PATH
 
+    def _iter_all_card_rows(self, path: Path) -> Iterator[dict]:
+        with gzip.open(path, "rb") as fh:
+            first = fh.read(1)
+            while first and first.isspace():
+                first = fh.read(1)
+            fh.seek(0)
+            if first == b"[":
+                import ijson
+                rows = ijson.items(fh, "item")
+            elif first == b"{":
+                rows = (json.loads(line) for line in fh if line.strip())
+            else:
+                raise ValueError("Scryfall all-cards payload must be a JSON array or JSONL objects")
+            for index, raw in enumerate(rows):
+                if not isinstance(raw, dict):
+                    raise ValueError(f"Scryfall all-cards row {index} is not an object")
+                missing = [field for field in ("id", "lang", "name") if not raw.get(field)]
+                if missing:
+                    raise ValueError(
+                        f"Scryfall all-cards row {index} missing required provenance: "
+                        + ", ".join(missing)
+                    )
+                yield raw
+
+    def _validate_all_cards_bulk(self, path: Path) -> None:
+        row_count = 0
+        alias_count = 0
+        for raw in self._iter_all_card_rows(path):
+            row_count += 1
+            if raw.get("printed_name") and raw["printed_name"] != raw["name"]:
+                alias_count += 1
+            alias_count += sum(
+                bool(face.get("printed_name") and face.get("name")
+                     and face["printed_name"] != face["name"])
+                for face in raw.get("card_faces") or []
+            )
+        if row_count < _ALL_CARDS_MIN_ROWS or alias_count < _ALL_CARDS_MIN_ALIASES:
+            raise ValueError(
+                "Scryfall all-cards candidate is implausibly incomplete: "
+                f"{row_count} rows / {alias_count} localized aliases; expected at least "
+                f"{_ALL_CARDS_MIN_ROWS} / {_ALL_CARDS_MIN_ALIASES}"
+            )
+
     def iter_printed_aliases(self, path: Path | None = None) -> Iterator[PrintedCardAlias]:
         """Stream localized printed names from all-cards JSON array or JSONL gzip."""
         src = path or SCRYFALL_ALL_CARDS_PATH
         if not src.exists():
             raise FileNotFoundError(f"Scryfall all-cards bulk not found at {src}")
-        with gzip.open(src, "rt", encoding="utf-8") as fh:
-            first = fh.read(1)
-            fh.seek(0)
-            if first == "[":
-                import ijson
-                rows = ijson.items(fh, "item")
-            else:
-                rows = (json.loads(line) for line in fh if line.strip())
-            for raw in rows:
-                language = str(raw.get("lang") or "")
-                scryfall_id = str(raw.get("id") or "")
-                printed = raw.get("printed_name")
-                canonical = raw.get("name")
-                if printed and canonical and printed != canonical:
+        for raw in self._iter_all_card_rows(src):
+            language = str(raw["lang"])
+            scryfall_id = str(raw["id"])
+            printed = raw.get("printed_name")
+            canonical = raw["name"]
+            if printed and printed != canonical:
+                yield PrintedCardAlias(
+                    printed_name=printed,
+                    normalized_alias=normalize_alias_key(printed),
+                    canonical_name=canonical,
+                    language=language,
+                    scryfall_id=scryfall_id,
+                )
+            for face in raw.get("card_faces") or []:
+                face_printed = face.get("printed_name")
+                face_canonical = face.get("name")
+                if face_printed and face_canonical and face_printed != face_canonical:
                     yield PrintedCardAlias(
-                        printed_name=printed,
-                        normalized_alias=normalize_alias_key(printed),
-                        canonical_name=canonical,
+                        printed_name=face_printed,
+                        normalized_alias=normalize_alias_key(face_printed),
+                        canonical_name=face_canonical,
                         language=language,
                         scryfall_id=scryfall_id,
                     )
-                for face in raw.get("card_faces") or []:
-                    face_printed = face.get("printed_name")
-                    face_canonical = face.get("name")
-                    if face_printed and face_canonical and face_printed != face_canonical:
-                        yield PrintedCardAlias(
-                            printed_name=face_printed,
-                            normalized_alias=normalize_alias_key(face_printed),
-                            canonical_name=face_canonical,
-                            language=language,
-                            scryfall_id=scryfall_id,
-                        )
 
     # ── index + resolution ──
     def load_card_index(self) -> dict[str, dict]:
