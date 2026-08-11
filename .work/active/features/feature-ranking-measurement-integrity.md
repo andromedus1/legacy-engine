@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-measurement-integrity
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, honesty]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -437,3 +437,32 @@ reintroducing one scan per row.
 - Child-focused measurement/refresh/matchup suite: 227 passed.
 - Full repository suite: `PYTHONPATH=. .venv/bin/pytest -q` — 3591 passed, 1 skipped in 192.60s.
 - All children are `stage: done`; implementation commits: `e8ac67f`, `60cebbf`, `34cfce0`.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-ranking-measurement-integrity-review-fixes`.
+
+- Reconcile against the canonical serialized projection consumed by browser row math, including
+  awkward rounding and same-threshold idempotence evidence.
+- Bind concentration evidence to each candidate source so interactive era/fallback changes select
+  or clear the matching warning.
+- Render both `n>=10` and display-grade floor observability for every row.
+- Carry and validate pair-window provenance through selected ranking candidates and suppress an
+  invalid window from headline eligibility.
+
+**Important**: the strict-common diagnostic must distinguish contributing coverage from
+display-grade coverage and render its exact start even when the estimate is null. This is included
+in the same checkpoint because it corrects an accepted feature contract rather than creating a
+separate roadmap item.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: The receiver reproduced the review's code-path evidence and accepts the findings as
+current-cycle measurement-integrity defects. Security, concurrency, and migration lenses were not
+applicable. Browser behavior was reviewed through deterministic payload/JavaScript flow because a
+headless browser runtime was unavailable.

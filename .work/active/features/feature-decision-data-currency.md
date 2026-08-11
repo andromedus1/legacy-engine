@@ -1,7 +1,7 @@
 ---
 id: feature-decision-data-currency
 kind: feature
-stage: review
+stage: implementing
 tags: [ingestion, infra, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -490,3 +490,30 @@ def generate_ranking(
 - Focused ingestion/runtime/workflow/ranking suite — 168 passed.
 - Python bytecode compilation of the new workflow, coverage, and script surfaces — passed.
 - All three child stories are `stage: done`; the feature is ready for standard independent review.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-decision-data-currency-review-fixes`.
+
+- A failed/unavailable release scan must mark alias-snapshot currency uncertain in the coverage
+  report while retaining the last-good aliases.
+- Ranking output must render completely to a sibling temporary file and atomically replace the
+  destination, preserving a prior page byte-for-byte on write failure.
+- B&R awareness must be read independently of source refresh, or render honestly unavailable; an
+  unknown value may never be described as operator-confirmed.
+- Provider all-cards input must pass shape, provenance, and plausible-completeness validation before
+  it can replace the last-good download or DuckDB alias snapshot.
+
+**Important**: none deferred. The review labeled the B&R audit and provider semantic validation as
+important; the receiver elevated them because they are current-cycle evidence-honesty and
+derived-data-integrity risks inside the accepted feature contract.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: The focused review suite passed 89 tests. No live all-cards download or Python 3.11 CI
+runner was exercised; those limitations do not weaken the hermetic failure-path findings.
