@@ -10,7 +10,12 @@ written via `write_entity_eras` (mirrors `tests/analytics/eras/test_store.py`'s 
 from __future__ import annotations
 
 from legacy_engine.analytics.eras.attribution import Attribution
-from legacy_engine.analytics.eras.consume import EraHorizon, era_horizons, resolve_field_era
+from legacy_engine.analytics.eras.consume import (
+    EraHorizon,
+    clamp_pair_window,
+    era_horizons,
+    resolve_field_era,
+)
 from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
 from legacy_engine.analytics.eras.store import write_entity_eras
 from legacy_engine.ingestion import store
@@ -50,6 +55,38 @@ def _load_decks(con, *, archetype: str, n: int, dt: str, name_prefix: str) -> No
     decks = [_deck(f"{name_prefix}{i}", []) for i in range(n)]
     tid = store.load_tournament(con, parse_cache_item(_tournament(f"{name_prefix}-{dt}", dt, decks), "MTGO"))
     con.execute("UPDATE decks SET archetype = ? WHERE tournament_id = ?", [archetype, tid])
+
+
+# ---------------------------------------------------------------------------
+# Pair windows
+# ---------------------------------------------------------------------------
+
+
+class TestPairWindow:
+    def test_later_entity_horizon_clamps_requested_bound(self):
+        window = clamp_pair_window(
+            "Subject", "Opponent", requested_since="2026-01-01",
+            subject_since="2026-03-01", opponent_since="2026-04-01",
+        )
+        assert window.effective_since == "2026-04-01"
+        assert window.clamped is True
+        assert "opponent horizon (Opponent)" in window.reason
+
+    def test_later_requested_bound_never_widens(self):
+        window = clamp_pair_window(
+            "Subject", "Opponent", requested_since="2026-05-01",
+            subject_since="2026-03-01", opponent_since="2026-04-01",
+        )
+        assert window.effective_since == "2026-05-01"
+        assert window.clamped is False
+        assert "requested lower bound" in window.reason
+
+    def test_no_bounds_names_full_corpus(self):
+        window = clamp_pair_window(
+            "Subject", "Opponent", subject_since=None, opponent_since=None,
+        )
+        assert window.effective_since is None
+        assert window.reason == "full corpus: no requested or entity horizon"
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ from dataclasses import dataclass
 import duckdb
 
 from legacy_engine.analytics.eras.store import StoredEntityEras, read_entity_eras
+from legacy_engine.models.base import LegacyEngineModel
 
 # Field-era self-heal gate (epic design decision): below this many decks in the candidate
 # [field_since, now) window, the detection-derived field era is too thin to trust — degrade back
@@ -39,6 +40,52 @@ from legacy_engine.analytics.eras.store import StoredEntityEras, read_entity_era
 _FIELD_THIN_DECKS_FLOOR: int = 500
 
 _FIELD_MIN_SHARE_DEFAULT: float = 0.02
+
+
+class PairWindow(LegacyEngineModel):
+    """Outcome-blind lower bound for a current subject/opponent comparison."""
+
+    subject: str
+    opponent: str
+    requested_since: str | None
+    subject_since: str | None
+    opponent_since: str | None
+    effective_since: str | None
+    clamped: bool
+    reason: str
+
+
+def clamp_pair_window(
+    subject: str,
+    opponent: str,
+    *,
+    subject_since: str | None,
+    opponent_since: str | None,
+    requested_since: str | None = None,
+) -> PairWindow:
+    """Clamp a comparison to the latest requested or entity-specific horizon."""
+    bounds = {
+        "requested lower bound": requested_since,
+        f"subject horizon ({subject})": subject_since,
+        f"opponent horizon ({opponent})": opponent_since,
+    }
+    effective = max((value for value in bounds.values() if value is not None), default=None)
+    winners = [name for name, value in bounds.items() if value is not None and value == effective]
+    reason = (
+        "full corpus: no requested or entity horizon"
+        if effective is None
+        else f"clamped by {', '.join(winners)} at {effective}"
+    )
+    return PairWindow(
+        subject=subject,
+        opponent=opponent,
+        requested_since=requested_since,
+        subject_since=subject_since,
+        opponent_since=opponent_since,
+        effective_since=effective,
+        clamped=effective != requested_since,
+        reason=reason,
+    )
 
 
 def _parent_label(label: str, split_variant: str | None) -> str:

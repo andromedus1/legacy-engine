@@ -10,6 +10,17 @@ from legacy_engine.confidence import ConfidenceLevel
 from legacy_engine.models.base import LegacyEngineModel
 
 
+class CellConcentration(LegacyEngineModel):
+    """Dominant event/month shares for the observations behind one cell."""
+
+    event_id: str | None
+    event_n: int
+    event_share: float
+    month: str | None
+    month_n: int
+    month_share: float
+
+
 class MatchupCell(LegacyEngineModel):
     """One directed matchup estimate: archetype_a vs archetype_b.
 
@@ -70,3 +81,4 @@ class MatchupCell(LegacyEngineModel):
     display: bool = True  # False when n<30 (speculative gate): hide rate, show "n=X, insufficient"
     prior_mean: float | None = None  # what p_shrunk was shrunk toward (additive)
     prior_source: str | None = None  # "marginal" | "parent cell (leave-camp-out)" | cross-era label
+    concentration: CellConcentration | None = None

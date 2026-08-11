@@ -28,7 +28,7 @@ from statsmodels.stats.proportion import proportion_confint
 
 from legacy_engine.analytics.match_results import compute_match_results
 from legacy_engine.confidence import tier_for_sample
-from legacy_engine.models.matchup import MatchupCell
+from legacy_engine.models.matchup import CellConcentration, MatchupCell
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
@@ -133,6 +133,7 @@ def build_cell(
     prior_mean: float = 0.5,
     prior_source: str | None = None,
     prior_strength: float = SHRINK_STRENGTH,
+    concentration: CellConcentration | None = None,
 ) -> MatchupCell:
     """Build a directed ``MatchupCell`` for ``archetype_a`` vs ``archetype_b``.
 
@@ -188,6 +189,37 @@ def build_cell(
         display=display,
         prior_mean=prior_mean,
         prior_source=prior_source,
+        concentration=concentration,
+    )
+
+
+def concentration_for_tallies(
+    event_counts: "Mapping[str, int]",
+    month_counts: "Mapping[str, int]",
+    *,
+    n: int,
+) -> CellConcentration | None:
+    """Return deterministic dominant event/month evidence for a non-empty tally."""
+    if n == 0:
+        return None
+    if sum(event_counts.values()) != n or sum(month_counts.values()) != n:
+        raise ValueError("concentration bucket counts must sum to cell n")
+
+    def dominant(counts: "Mapping[str, int]") -> tuple[str | None, int]:
+        if not counts:
+            return None, 0
+        key, count = min(counts.items(), key=lambda item: (-item[1], item[0]))
+        return key, count
+
+    event_id, event_n = dominant(event_counts)
+    month, month_n = dominant(month_counts)
+    return CellConcentration(
+        event_id=event_id,
+        event_n=event_n,
+        event_share=event_n / n,
+        month=month,
+        month_n=month_n,
+        month_share=month_n / n,
     )
 
 
@@ -441,6 +473,9 @@ def build_matrix(
             if tally is not None:
                 cells[(a, b)] = build_cell(
                     a, b, tally.wins, tally.n, prior_mean=prior_mean, prior_source=prior_source,
+                    concentration=_cell_concentration(
+                        mr.matchup_event_counts, mr.matchup_month_counts, (a, b), tally.n,
+                    ),
                 )
             else:
                 # Unobserved pair — emit n=0 cell to keep matrix rectangular
@@ -491,6 +526,33 @@ def _pool_opponent_tallies(
         wins, n = pooled.get((a, parent_b), (0, 0))
         pooled[(a, parent_b)] = (wins + tally.wins, n + tally.n)
     return pooled
+
+
+def _pool_opponent_counts(
+    counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    camp_parent: "Mapping[str, str]",
+) -> dict[tuple[str, str], dict[str, int]]:
+    """Pool event/month buckets with the same opponent mapping as numeric tallies."""
+    pooled: dict[tuple[str, str], dict[str, int]] = {}
+    for (subject, opponent), buckets in counts.items():
+        parent_opponent = camp_parent.get(opponent, opponent)
+        if camp_parent.get(subject) == parent_opponent:
+            continue
+        target = pooled.setdefault((subject, parent_opponent), {})
+        for bucket, count in buckets.items():
+            target[bucket] = target.get(bucket, 0) + count
+    return pooled
+
+
+def _cell_concentration(
+    event_counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    month_counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    key: tuple[str, str],
+    n: int,
+) -> CellConcentration | None:
+    return concentration_for_tallies(
+        event_counts.get(key, {}), month_counts.get(key, {}), n=n,
+    )
 
 
 def _multi_split_inclusion(
@@ -684,6 +746,8 @@ def build_multi_split_matrix(
     )
     subjects, opponents, observed_parents = _multi_split_inclusion(mr, min_row_share)
     pooled = _pool_opponent_tallies(mr, mr.camp_parent)
+    pooled_events = _pool_opponent_counts(mr.matchup_event_counts, mr.camp_parent)
+    pooled_months = _pool_opponent_counts(mr.matchup_month_counts, mr.camp_parent)
     marginals, parent_cells_lco, camp_of = _multi_hierarchy_inputs(
         mr, subjects, opponents, mr.camp_parent, pooled,
     )
@@ -702,6 +766,9 @@ def build_multi_split_matrix(
             wins, n = pooled.get((subject, opponent), (0, 0))
             cells[(subject, opponent)] = build_cell(
                 subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+                concentration=_cell_concentration(
+                    pooled_events, pooled_months, (subject, opponent), n,
+                ),
             )
 
     return MultiSplitMatrix(
@@ -922,7 +989,11 @@ def build_adaptive_matrix(
         for b in included:
             if a == b:
                 continue
-            s_ab = max(valid_since[a] or "", valid_since[b] or "") or None
+            from legacy_engine.analytics.eras.consume import clamp_pair_window
+
+            s_ab = clamp_pair_window(
+                a, b, subject_since=valid_since[a], opponent_since=valid_since[b],
+            ).effective_since
             mr_ab = mr_by_since[s_ab]
             marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
             tally = mr_ab.matchups.get((a, b))
@@ -939,6 +1010,9 @@ def build_adaptive_matrix(
                 prior_mean, prior_source = _cross_era_prior(a, b, s_ab)
             cells[(a, b)] = build_cell(
                 a, b, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+                concentration=_cell_concentration(
+                    mr_ab.matchup_event_counts, mr_ab.matchup_month_counts, (a, b), n,
+                ),
             )
             cell_windows[(a, b)] = s_ab
 
@@ -1095,6 +1169,14 @@ def build_multi_split_adaptive(
     pooled_by_since = {
         s: _pool_opponent_tallies(mr, mr.camp_parent) for s, mr in mr_by_since.items()
     }
+    pooled_events_by_since = {
+        s: _pool_opponent_counts(mr.matchup_event_counts, mr.camp_parent)
+        for s, mr in mr_by_since.items()
+    }
+    pooled_months_by_since = {
+        s: _pool_opponent_counts(mr.matchup_month_counts, mr.camp_parent)
+        for s, mr in mr_by_since.items()
+    }
     hierarchy_by_since = {
         s: _multi_hierarchy_inputs(mr, subjects, opponents, mr.camp_parent, pooled_by_since[s])
         for s, mr in mr_by_since.items()
@@ -1221,7 +1303,14 @@ def build_multi_split_adaptive(
         for opponent in opponents:
             if opponent == subject or opponent == own_parent:
                 continue
-            s_ab = max(valid_since[subject] or "", valid_since[opponent] or "") or None
+            from legacy_engine.analytics.eras.consume import clamp_pair_window
+
+            s_ab = clamp_pair_window(
+                subject,
+                opponent,
+                subject_since=valid_since[subject],
+                opponent_since=valid_since[opponent],
+            ).effective_since
             marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
             wins, n = pooled_by_since[s_ab].get((subject, opponent), (0, 0))
             prior_mean, prior_source = _cell_prior(
@@ -1267,6 +1356,10 @@ def build_multi_split_adaptive(
             cells[(subject, opponent)] = build_cell(
                 subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
                 prior_strength=prior_strength_value,
+                concentration=_cell_concentration(
+                    pooled_events_by_since[s_ab], pooled_months_by_since[s_ab],
+                    (subject, opponent), n,
+                ),
             )
             cell_windows[(subject, opponent)] = s_ab
 

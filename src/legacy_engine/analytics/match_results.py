@@ -13,6 +13,7 @@ downstream consumers.
 from __future__ import annotations
 
 from collections.abc import Collection
+from collections import Counter
 from dataclasses import dataclass, field
 
 import duckdb
@@ -187,6 +188,8 @@ class MatchResults:
     provenance: str | None  # "online" | "paper" | None
     mirror_n: dict[str, int] = field(default_factory=dict)  # per-archetype mirror count
     camp_parent: dict[str, str] = field(default_factory=dict)  # camp label -> parent archetype
+    matchup_event_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    matchup_month_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +334,7 @@ uniq_decks AS (
 _JOIN_SQL = f"""
 WITH
 {_DUP_UNIQ_CTE}
-SELECT t.provenance, r.player1, r.player2, r.result,
+SELECT t.provenance, t.id, CAST(t.date AS VARCHAR), r.player1, r.player2, r.result,
        d1.archetype AS arch1, d2.archetype AS arch2,
        d1.variant AS var1, d2.variant AS var2,
        (du1.norm IS NOT NULL) AS amb1,
@@ -401,12 +404,14 @@ def compute_match_results(
     archetypes: dict[str, ArchetypeRecord] = {}
     mirror_n: dict[str, int] = {}
     camp_parent: dict[str, str] = {}
+    matchup_event_counts: dict[tuple[str, str], Counter[str]] = {}
+    matchup_month_counts: dict[tuple[str, str], Counter[str]] = {}
 
     rows = con.execute(
         _JOIN_SQL, [provenance, provenance, since, since, until, until]
     ).fetchall()
 
-    for _prov, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
+    for _prov, event_id, event_date, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
         cov.total_pairings += 1
         orig1, orig2 = arch1, arch2
         arch1 = _split_set_label(arch1, var1, split_set)
@@ -469,6 +474,10 @@ def compute_match_results(
             matchups[l_key] = MatchupTally(archetype_a=loser_arch, archetype_b=winner_arch)
         matchups[w_key].wins += 1
         matchups[l_key].losses += 1
+        month = event_date[:7]
+        for key in (w_key, l_key):
+            matchup_event_counts.setdefault(key, Counter())[str(event_id)] += 1
+            matchup_month_counts.setdefault(key, Counter())[month] += 1
 
         # Per-archetype marginals
         w_rec = archetypes.setdefault(winner_arch, ArchetypeRecord(archetype=winner_arch))
@@ -485,6 +494,8 @@ def compute_match_results(
         provenance=provenance,
         mirror_n=mirror_n,
         camp_parent=camp_parent,
+        matchup_event_counts={k: dict(v) for k, v in matchup_event_counts.items()},
+        matchup_month_counts={k: dict(v) for k, v in matchup_month_counts.items()},
     )
 
 

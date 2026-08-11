@@ -30,6 +30,7 @@ from legacy_engine.analytics.matchup import (
     build_cell,
     build_matrix,
     build_mirror_cell,
+    concentration_for_tallies,
     wilson_or_jeffreys_ci,
 )
 from legacy_engine.analytics.metashare import (
@@ -83,6 +84,7 @@ __all__ = [
     "build_cell",
     "build_matrix",
     "build_mirror_cell",
+    "concentration_for_tallies",
     "lookup_head_to_head",
     "wilson_or_jeffreys_ci",
     # metashare
