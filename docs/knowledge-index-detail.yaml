@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND.
 # On-demand layer — load when surfacing a specific doc's full context.
-generated_at: '2026-08-11T18:55:48Z'
+generated_at: '2026-08-11T19:17:05Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -248,11 +248,13 @@ documents:
 
       tracked HTML template: scripts/refresh_best_call_ranking.py +
 
-      scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
+      scripts/best_call_ranking_template.html. Defines gated Agency % as the default
 
-      strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
+      authority, the opt-in seeded posterior lean, grounded/current strata, rank stability
 
-      including exact archetype-versus-plan evidence in every archetype dropdown;
+      and paths to grounding, the cross-camp P(best) column, and the five-plan strategic
+
+      taxonomy, including exact archetype-versus-plan evidence in every archetype dropdown;
 
       the page itself carries the authoritative definitional prose.
 
@@ -270,6 +272,18 @@ documents:
       on the raw observed rate after the same measured-cell gate.
     - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded
       rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata.
+    - 'Gated Agency remains the default and authoritative ranking number. The opt-in seeded posterior
+      lean is diagnostic only: it uses the era candidate regardless of n, falls back only when the era
+      candidate is absent, uses Jeffreys cells for resolved evidence, a weak row-centred prior for unresolved
+      cells, and continuous field-share × precision weighting; it reports Q25, median, and 95% CI.'
+    - Rank stability compares raw, CI-gated, ban-scoped, and era-only variants within each peer table;
+      rank spans are shown only when all four variants rank the row. Interactive n changes mark generated
+      stability and grounding paths stale, while the posterior lean remains independent of the interactive
+      gate.
+    - Grounding paths collect every shortfall among the top-k opponents first, then prioritize remaining
+      cells by share gained per additional match until the coverage target; the page displays the first
+      three actions plus a remainder count and total projected matches/coverage. Plan rows expose grounding
+      paths but do not expose lean or stability.
     - Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban
       event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded.
     - Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per

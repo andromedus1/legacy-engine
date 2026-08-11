@@ -140,6 +140,12 @@ svg text { font-family: inherit; }
 .subsection > summary:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
 .subsection > summary .chip { font-weight:500; }
 .subsection > .subsection-body { padding:9px 11px 11px; }
+.methodology-control { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.methodology-control button[aria-pressed="true"] { border-color:var(--s1); color:var(--ink); }
+.methodology-status { color:var(--muted); font-size:13px; }
+.grounding-path { margin:8px 0; padding:9px 11px; border-left:3px solid var(--amber);
+  background:var(--surface-1); font-size:13px; }
+.grounding-path ol { margin:6px 0; padding-left:22px; }
 @media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -152,6 +158,11 @@ in the Strategic Plans, Archetypes, or Subarchetypes tables
 to expand it. Plans show their member decks and direct plan-vs-plan ledger; archetypes and
 subarchetypes show every current-field opponent with shrunk + raw win rate, sample size, window,
 and blowout highlights.</div>
+
+<div class="card methodology-control" role="group" aria-label="Ranking methodology view">
+  <button id="methodology-view" type="button" aria-pressed="false">Posterior lean (diagnostic)</button>
+  <span id="methodology-status" class="methodology-status" aria-live="polite">Gated headline active</span>
+</div>
 
 <div class="card def">
   <details class="method">
@@ -201,6 +212,12 @@ and blowout highlights.</div>
         gate and at least <code>--cover-min</code> of field share-mass (normally 80%) to be
         measured. Rows failing either test are listed separately in gray: their agency number is
         an upper-bound lean, not a floor claim.</li>
+    <li><b>Posterior lean is diagnostic</b> — the opt-in view removes the hard sample cliff: every
+        field opponent contributes to a seeded smooth-floor posterior in proportion to field share
+        and evidence precision. Era evidence is preferred without an n threshold, fallback is used
+        only when era evidence is absent, and unresolved opponents retain a weak explicit prior.
+        The displayed lean is Q25 with median and 95% interval in the row detail. It does not change
+        P(best), evidence strata, or the gated recommendation.</li>
     <li id="field-basis"></li>
   </ul>
   </details>
@@ -351,7 +368,9 @@ boundary); <b>% of meta</b> = share of all decks in the field window (audit head
 <b>grounded</b> row = the configured top field opponents each clear the selected matchup-n gate and
 the generated minimum field-share coverage is met — its floor is broadly measured; <b>≤</b> plus the
 <span class="chip">upper bound</span> marker means grounding failed and the agency value can
-fall as more matchups become measured.</div></div>
+fall as more matchups become measured. <b>Rank stability</b> is the row's complete rank range across
+raw, CI-gated, ban-scoped, and era-only projections; n/a names any projection that could not rank it.
+Expanded ungrounded rows turn the same top-k/coverage rule into a match-collection agenda.</div></div>
 
 <h2>Subarchetypes (camps)</h2>
 <div class="card tablewrap">
@@ -378,6 +397,8 @@ field-window decks.
 The evidence column reports measured/imputed field share and the typed stratum. Historical-only
 camps stay visible as inactive; unsupported rows show P(best)=n/a. The grouping control reorganizes
 these same rows under evidence headings without changing scores or hiding inactive evidence.
+The posterior-lean control may re-sort within these existing honesty strata, but never changes
+candidacy, P(best), or which rows are called grounded.
 <b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
 builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
 Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
@@ -467,6 +488,54 @@ function rankingEvidenceIsCurrent(r) {
 function canGroupRankingEvidence(rows) {
   return rows.every(rankingEvidenceIsCurrent);
 }
+let usePosteriorLean = false;
+function agencyValue(r) {
+  return usePosteriorLean && r.methodology && r.methodology.lean
+    ? r.methodology.lean.q25 : r.agency;
+}
+function agencyCellHtml(r) {
+  const value = agencyValue(r);
+  if (usePosteriorLean && r.methodology && r.methodology.lean)
+    return `${fmtP(value)} <span class="chip">Q25 diagnostic posterior</span>`;
+  return (r.grounded ? "" : "≤ ") + fmtP(value);
+}
+function stabilityHtml(r) {
+  const stability = r.methodology && r.methodology.stability;
+  if (!stability) return "n/a";
+  if (!rankingEvidenceIsCurrent(r))
+    return `n/a <span class="chip">generated n=${D.meta.ground_n}</span>`;
+  if (stability.rank_span == null)
+    return `n/a <span class="chip">${escT(stability.reason || "incomplete variants")}</span>`;
+  return `#${stability.rank_min}–#${stability.rank_max} `+
+    `<span class="chip">span ${stability.rank_span}</span>`;
+}
+function groundingPathHtml(r) {
+  const path = r.methodology && r.methodology.grounding;
+  if (!path || path.grounded) return "";
+  if (!rankingEvidenceIsCurrent(r))
+    return `<div class="grounding-path"><b>Path to grounding:</b> stale — generated at n=${D.meta.ground_n}</div>`;
+  if (path.reason)
+    return `<div class="grounding-path"><b>Path to grounding:</b> ${escT(path.reason)}</div>`;
+  const actions = path.display_actions.map(action =>
+    `<li><b>${escT(action.opponent)}</b>: ${action.additional_matches} more matches`+
+    `${action.mandatory_top_k ? ` <span class="chip">top-${D.meta.top_k} required</span>` : ""}</li>`
+  ).join("");
+  const remainder = path.undisplayed_actions
+    ? ` · ${path.undisplayed_actions} additional cells not shown` : "";
+  return `<div class="grounding-path"><b>Path to grounding</b> `+
+    `<span class="chip">generated n=${D.meta.ground_n}</span><ol>${actions}</ol>`+
+    `${path.total_additional_matches} total additional matches · `+
+    `${(100*path.projected_coverage).toFixed(0)}% projected coverage${remainder}</div>`;
+}
+function leanDetailHtml(r) {
+  const lean = r.methodology && r.methodology.lean;
+  if (!lean) return "";
+  const delta = r.agency == null ? "" : ` · gated−lean ${fmtP(r.agency-lean.q25)}`;
+  return `<div class="grounding-path"><b>Posterior lean:</b> Q25 ${fmtP(lean.q25)} · `+
+    `median ${fmtP(lean.median)} · 95% ${fmtP(lean.ci_low)}–${fmtP(lean.ci_high)} · `+
+    `${(100*lean.resolved_share).toFixed(0)}% resolved / `+
+    `${(100*lean.imputed_share).toFixed(0)}% prior${delta}</div>`;
+}
 function reconciliationHtml(r) {
   const x = r.reconciliation;
   if (!x || !x.headline_eligible)
@@ -489,8 +558,9 @@ function rowHtml(r, i, camp) {
   const cls = (r.grounded ? "" : "thin") + stale;
   const baseName = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
   const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
-  const w = Math.max(2, Math.round((r.agency || 0) * 220));
-  const agencyTxt = (r.grounded ? "" : "≤ ") + fmtP(r.agency);
+  const methodAgency = agencyValue(r);
+  const w = Math.max(2, Math.round((methodAgency || 0) * 220));
+  const agencyTxt = agencyCellHtml(r);
   const floorTxt = (r.floor == null ? "—" :
     `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`) + floorObservabilityHtml(r);
   const b = blowouts(r);
@@ -501,6 +571,7 @@ function rowHtml(r, i, camp) {
     <td>${i + 1}</td>
     <td class="name">${name}</td>
     <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
+    <td>${stabilityHtml(r)}</td>
     <td>${reconciliationHtml(r)}</td>
     ${camp ? `<td>${pbestHtml(r)}</td>` : ""}
     <td>${floorTxt}</td>
@@ -516,7 +587,8 @@ function rowHtml(r, i, camp) {
 const COLS = [
   {label:"#", sort:false},
   {label:"deck", get:r => (r.parent ? r.parent+" ["+r.camp+"]" : r.subject).toLowerCase(), dir:1},
-  {label:"agency % (≤ = upper bound)", get:r => r.agency, dir:-1},
+  {label:"agency % / posterior lean", get:r => agencyValue(r), dir:-1},
+  {label:"rank stability", get:r => (r.methodology || {}).stability?.rank_span, dir:1},
   {label:"adj field WR %", get:r => r.adj, dir:-1},
   {label:"worst measured matchup %", get:r => r.floor, dir:-1},
   {label:"blowouts", get:r => r._b.score, dir:1},
@@ -527,11 +599,11 @@ const COLS = [
   {label:"window", get:r => r.since || "", dir:1},
 ];
 // Camp table adds the cross-camp P(best) column (nulls — candidacy-gated rows — sort last).
-const CAMP_COLS = [...COLS.slice(0, 4),
+const CAMP_COLS = [...COLS.slice(0, 5),
   {label:"P(best)", get:r => r._interactiveN === D.meta.ground_n ? r.p_best : null, dir:-1},
-  ...COLS.slice(4, 8),
+  ...COLS.slice(5, 9),
   {label:"evidence", get:r => (r.ranking_evidence || {}).stratum || "", dir:1},
-  ...COLS.slice(8)];
+  ...COLS.slice(9)];
 const colsFor = camp => camp ? CAMP_COLS : COLS;
 // Default sort: agency %, descending. Click a header to sort by that column;
 // click again to flip direction. Sorting happens WITHIN each honesty stratum —
@@ -591,6 +663,7 @@ function recalcPlan(r, minN) {
   r.coverage = den ? measured.reduce((s,c) => s+c.share,0)/den : 0;
   const top = [...external].sort((a,b) => b.share-a.share).slice(0,Math.min(D.meta.top_k,external.length));
   r.grounded = top.length > 0 && top.every(c => c.measured) && r.coverage >= D.meta.cover_min;
+  r._interactiveN = minN;
   r._b = blowouts({subject:r.id,cells:r.cells.map(c=>({...c,opp:c.opponent_id}))});
 }
 [...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
@@ -661,7 +734,7 @@ function planDetailHtml(plan, detailId) {
     `<span class="plan-stat"><b>${(100*plan.field_share).toFixed(1)}%</b> of field</span>`+
     `<span class="plan-stat"><b>${plan.decisive_matches}</b> decisive matches</span>`+
     `<span class="plan-stat"><b>${fmtP(plan.agency)}%</b> ${plan.grounded ? "grounded agency" : "agency upper bound"}</span>`+
-    `<div class="plan-members">${members}</div></section>`+
+    `<div class="plan-members">${members}</div>${groundingPathHtml(plan)}</section>`+
     `<section><table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Field</th><th>Result</th><th>n</th></tr></thead><tbody>${ledger}</tbody></table></section>`+
     `</div></td></tr>`;
 }
@@ -783,7 +856,7 @@ function renderTable(id, rows, camp) {
         `<span class="sw" style="background:var(--edge)"></span>edge (55–60%)` +
         `<span class="sw" style="background:var(--edge-dominant)"></span>dominant (&gt;60%)</div>`;
       const measured = r.cells.filter(c => c.measured).length;
-      const exactBody = `${key}<div class="cells">${cells}</div>`;
+      const exactBody = `${groundingPathHtml(r)}${leanDetailHtml(r)}${key}<div class="cells">${cells}</div>`;
       // Camp rows carry no plan block, so there is nothing to scroll past — they keep the
       // plain always-open section rather than a disclosure that only ever hides its own content.
       const body = camp
@@ -848,6 +921,17 @@ renderTable("t-camp", D.camps, true);
 document.getElementById("ranking-strata").addEventListener("click", event => {
   groupByRankingEvidence = !groupByRankingEvidence;
   event.currentTarget.setAttribute("aria-pressed", String(groupByRankingEvidence));
+  renderTable("t-camp", D.camps, true);
+});
+document.getElementById("methodology-view").addEventListener("click", event => {
+  usePosteriorLean = !usePosteriorLean;
+  event.currentTarget.setAttribute("aria-pressed", String(usePosteriorLean));
+  document.getElementById("methodology-status").textContent = usePosteriorLean
+    ? "Posterior lean diagnostic active; gated candidacy and P(best) unchanged"
+    : "Gated headline active";
+  tableState["t-arch"].col = 2; tableState["t-arch"].dir = -1;
+  tableState["t-camp"].col = 2; tableState["t-camp"].dir = -1;
+  renderTable("t-arch", D.arch, false);
   renderTable("t-camp", D.camps, true);
 });
 

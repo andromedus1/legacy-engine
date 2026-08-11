@@ -23,6 +23,9 @@ Method (the page's definitional card is the authoritative prose):
     min(adj, floor). Coverage + the upper-bound label carry incomplete-floor uncertainty.
   - coverage = measured share-mass / total opponent share-mass; grounded = the
     top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
+  - Methodology diagnostics: a seeded precision-weighted posterior smooth floor with no
+    sample cliff, complete-only rank spans across four predeclared projections, and a
+    rate-free path-to-grounding agenda. Gated agency and P(best) remain authoritative.
   - Camps: ONE multi-split adaptive matrix over every staged parent in the discovery
     registry (``build_multi_split_adaptive`` — camp cells field-for-field identical to
     the per-parent split builds, parity-tested), plus one multi-split fallback matrix
@@ -93,9 +96,20 @@ from legacy_engine.archetype.discovered import staged_split_parents
 from legacy_engine.config import DUCKDB_PATH
 from legacy_engine.ingestion.banlist import BAN_EVENTS
 from legacy_engine.advisory.ranking_measurement import (
+    LEAN_DRAWS,
+    LEAN_PRECISION_SCALE,
+    LEAN_SEED,
+    LEAN_TEMPERATURE,
+    GroundingCellState,
     RankingCellMeasurement,
     RankingCellSource,
+    grounding_cell_states,
+    measure_lean_agency,
     measure_ranking_row,
+    measure_variant_row,
+    methodology_variant_specs,
+    plan_path_to_grounding,
+    rank_variant_rows,
     select_ranking_cell,
 )
 from legacy_engine.models.matchup import MatchupCell
@@ -462,6 +476,105 @@ def row_stats(
         strict_common_since=strict_common_since,
     )
     return ranking_row_payload(row)
+
+
+def _row_measurements(row) -> tuple[RankingCellMeasurement, ...]:
+    return tuple(
+        RankingCellMeasurement.model_validate(cell["ledger"])
+        for cell in row["cells"]
+    )
+
+
+def methodology_payload(
+    rows,
+    *,
+    peer_key: str,
+    ground_n: int,
+    top_k: int,
+    cover_min: float,
+    lean_draws: int = LEAN_DRAWS,
+    lean_seed: int = LEAN_SEED,
+):
+    """Build immutable methodology diagnostics from canonical typed row ledgers."""
+    specs = methodology_variant_specs(ground_n)
+    variants_by_row = {}
+    eligible_by_row = {}
+    payload = {}
+    for row in rows:
+        label = row["subject"]
+        measurements = _row_measurements(row)
+        variants = {
+            spec.id: measure_variant_row(
+                measurements, spec=spec, top_k=top_k, cover_min=cover_min,
+            )
+            for spec in specs
+        }
+        canonical = variants["ci-gated"]
+        expected = {
+            "adj": r4(canonical.adjusted_field_wr),
+            "floor": r4(canonical.floor),
+            "agency": r4(canonical.agency),
+            "coverage": r4(canonical.measured_coverage),
+            "topk_ok": canonical.top_k_measured,
+            "grounded": (
+                canonical.top_k_measured and canonical.measured_coverage >= cover_min
+            ),
+        }
+        actual = {key: row[key] for key in expected}
+        if actual != expected:
+            raise AssertionError(
+                f"{peer_key} canonical methodology mismatch for {label!r}: "
+                f"row={actual!r}, projection={expected!r}"
+            )
+        variants_by_row[label] = variants
+        eligible_by_row[label] = {
+            variant_id: ranking_evidence_payload(
+                field_share=row["field_share_raw"],
+                measured_share=variant.measured_coverage,
+                resolved_cells=variant.resolved_cells,
+                grounded=(
+                    variant.top_k_measured
+                    and variant.measured_coverage >= cover_min
+                ),
+            )["eligible"]
+            for variant_id, variant in variants.items()
+        }
+        payload[label] = {
+            "lean": measure_lean_agency(
+                measurements, draws=lean_draws, seed=lean_seed,
+            ).model_dump(mode="json"),
+            "variants": {
+                variant_id: variant.model_dump(mode="json")
+                for variant_id, variant in variants.items()
+            },
+            "grounding": plan_path_to_grounding(
+                grounding_cell_states(measurements),
+                ground_n=ground_n, top_k=top_k, cover_min=cover_min,
+            ).model_dump(mode="json"),
+        }
+
+    stability = rank_variant_rows(variants_by_row, eligible=eligible_by_row)
+    for label, result in stability.items():
+        payload[label]["stability"] = result.model_dump(mode="json")
+    return payload
+
+
+def plan_grounding_payload(plan, *, ground_n: int, top_k: int, cover_min: float):
+    """Adapt direct external plan evidence to the shared rate-free planner."""
+    states = tuple(
+        GroundingCellState(
+            opponent=cell["opponent"],
+            field_share=cell["share"],
+            era_n=cell["n"],
+            fallback_n=cell["n"],
+            measured=cell["measured"],
+        )
+        for cell in plan["cells"]
+        if not cell["structural_same_plan"]
+    )
+    return plan_path_to_grounding(
+        states, ground_n=ground_n, top_k=min(top_k, len(states)), cover_min=cover_min,
+    ).model_dump(mode="json")
 
 
 def build_strategic_plan_payload(
@@ -896,6 +1009,19 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             f"camp page-used ledger key mismatch: missing={missing!r}, unexpected={unexpected!r}"
         )
 
+    arch_methodology = methodology_payload(
+        arch_out, peer_key="archetype", ground_n=ground_n, top_k=top_k,
+        cover_min=cover_min,
+    )
+    camp_methodology = methodology_payload(
+        camps_out, peer_key="camp", ground_n=ground_n, top_k=top_k,
+        cover_min=cover_min,
+    )
+    for row in arch_out:
+        row["methodology"] = arch_methodology[row["subject"]]
+    for row in camps_out:
+        row["methodology"] = camp_methodology[row["subject"]]
+
     # ── Cross-camp P(best): ONE shared-field MC over all camps + unsplit archetypes ──
     # Every candidate is scored against the same sampled parent-level Dirichlet field, so
     # P(best) is comparable across camps of DIFFERENT parents (the per-parent matrices
@@ -1033,6 +1159,12 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     plans = build_strategic_plan_payload(
         plan_result, arch_out, top_k=top_k, cover_min=cover_min,
     )
+    for plan in plans:
+        plan["methodology"] = {
+            "grounding": plan_grounding_payload(
+                plan, ground_n=ground_n, top_k=top_k, cover_min=cover_min,
+            )
+        }
 
     return {
         "meta": {
@@ -1058,6 +1190,17 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 ),
                 "basis": "page-used cells (era preferred, ban-scoped fallback)",
             },
+            "methodology": {
+                "lean": {
+                    "seed": LEAN_SEED,
+                    "draws": LEAN_DRAWS,
+                    "temperature": LEAN_TEMPERATURE,
+                    "precision_scale": LEAN_PRECISION_SCALE,
+                    "basis": "era preferred without n cliff; absent-era fallback; weak unresolved prior",
+                    "authority": "diagnostic only; gated agency remains headline",
+                },
+                "variants": [spec.model_dump(mode="json") for spec in methodology_variant_specs(ground_n)],
+            },
             "audit": [
                 f"// multi-split: one pass over {len(parents)} staged parents — "
                 f"{len(camp_labels)} camp rows, {len(camp_fb)} ban-scoped fallback windows",
@@ -1067,6 +1210,10 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"cells, {_DEFAULT_DRAWS:,} draws, seed {RANK_SEED}",
                 ranking_summary,
                 *audit_warnings,
+                f"// methodology diagnostics: posterior smooth floor, {LEAN_DRAWS:,} draws, "
+                f"seed {LEAN_SEED}, temperature {LEAN_TEMPERATURE:.2f}, precision scale "
+                f"{LEAN_PRECISION_SCALE:.0f}; raw / CI-gated / ban-scoped / era-only "
+                "rank stability; gated agency remains authoritative",
                 f"// strategic plans: registry v{plan_registry.schema_version}, "
                 f"{len(plan_registry.assignments)} assignments; "
                 f"{plan_result.decisive_matches} decisive matches "

@@ -61,7 +61,7 @@ _spec.loader.exec_module(rbcr)
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
 _ADDITIVE_FIELDS = {
     "p_best", "s_q", "s_cov", "s_caveated", "floor_observability", "reconciliation",
-    "ranking_evidence", "field_share_raw",
+    "ranking_evidence", "field_share_raw", "methodology",
 }
 
 # Field window covering both fixture tournaments but neither pre-ban load.
@@ -562,6 +562,102 @@ class TestCrossCampRanking:
         assert any(line.startswith("// ranking evidence:") for line in audit)
 
 
+class TestMethodologyDiagnostics:
+    def test_rows_carry_deterministic_lean_variants_stability_and_grounding(self):
+        con = script_con()
+        first = _blob(con)
+        second = _blob(con)
+        con.close()
+        assert first["meta"]["methodology"] == second["meta"]["methodology"]
+        assert first["meta"]["methodology"]["lean"] == {
+            "seed": rbcr.LEAN_SEED,
+            "draws": rbcr.LEAN_DRAWS,
+            "temperature": rbcr.LEAN_TEMPERATURE,
+            "precision_scale": rbcr.LEAN_PRECISION_SCALE,
+            "basis": "era preferred without n cliff; absent-era fallback; weak unresolved prior",
+            "authority": "diagnostic only; gated agency remains headline",
+        }
+        for left, right in zip(
+            [*first["arch"], *first["camps"]],
+            [*second["arch"], *second["camps"]],
+        ):
+            assert left["methodology"] == right["methodology"]
+            method = left["methodology"]
+            assert set(method["variants"]) == {
+                "raw", "ci-gated", "ban-scoped", "era-only",
+            }
+            assert method["variants"]["ci-gated"]["agency"] == pytest.approx(
+                left["agency"], abs=5e-5,
+            )
+            assert 0.0 <= method["lean"]["q25"] <= 1.0
+            assert "stability" in method and "grounding" in method
+
+    def test_stability_uses_exact_positive_presence_not_display_rounding(self):
+        class Cell:
+            n = 12
+            p_raw = 0.5
+            p_shrunk = 0.5
+            ci_low = 0.3
+            ci_high = 0.7
+            tier = "speculative"
+            concentration = None
+
+        cells = rbcr.make_cells(
+            "Tiny", ["Opp"], {"Opp": 1.0}, {("Tiny", "Opp"): Cell()},
+            {None: {("Tiny", "Opp"): Cell()}}, {"Opp": None}, 8,
+        )
+        stats = rbcr.row_stats(cells, top_k=1, cover_min=0.8)
+        base = {
+            "subject": "Tiny", **stats, "cells": cells, "field_share": 0.0,
+            "field_share_raw": 0.000049, "recent_4wk": 1, "_idx": 0,
+        }
+        active = rbcr.methodology_payload(
+            [base], peer_key="test", ground_n=8, top_k=1, cover_min=0.8,
+            lean_draws=100, lean_seed=3,
+        )["Tiny"]["stability"]
+        assert active["rank_span"] == 0
+        assert active["missing_variants"] == []
+
+        inactive = rbcr.methodology_payload(
+            [{**base, "field_share_raw": 0.0}], peer_key="test", ground_n=8,
+            top_k=1, cover_min=0.8, lean_draws=100, lean_seed=3,
+        )["Tiny"]["stability"]
+        assert inactive["rank_span"] is None
+        assert set(inactive["missing_variants"]) == {
+            "raw", "ci-gated", "ban-scoped", "era-only",
+        }
+
+    def test_plan_grounding_adapter_excludes_structural_diagonal(self):
+        plan = {
+            "cells": [
+                {
+                    "opponent": "Self", "share": 0.9, "n": 100,
+                    "measured": False, "structural_same_plan": True,
+                },
+                {
+                    "opponent": "Other", "share": 0.1, "n": 2,
+                    "measured": False, "structural_same_plan": False,
+                },
+            ],
+        }
+        path = rbcr.plan_grounding_payload(
+            plan, ground_n=8, top_k=8, cover_min=0.8,
+        )
+        assert [action["opponent"] for action in path["actions"]] == ["Other"]
+        assert path["actions"][0]["additional_matches"] == 6
+
+    def test_methodology_audit_names_authority_and_variants(self):
+        con = script_con()
+        blob = _blob(con)
+        con.close()
+        line = next(
+            line for line in blob["meta"]["audit"]
+            if line.startswith("// methodology diagnostics:")
+        )
+        assert "raw / CI-gated / ban-scoped / era-only" in line
+        assert "gated agency remains authoritative" in line
+
+
 # ---------------------------------------------------------------------------
 # Strategic-plan dropdown evidence remains independent of the composition overlay.
 # ---------------------------------------------------------------------------
@@ -745,6 +841,33 @@ class TestMainEndToEnd:
         assert "groupByRankingEvidence" in template
         assert "visibleRows.filter(r => (r.ranking_evidence || {}).stratum === label)" in template
         assert "renderTable(\"t-camp\", D.camps, true)" in template
+
+    def test_methodology_control_is_accessible_and_keeps_authority_boundaries(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert 'id="methodology-view"' in template
+        assert 'aria-label="Ranking methodology view"' in template
+        assert 'id="methodology-status" class="methodology-status" aria-live="polite"' in template
+        assert "let usePosteriorLean = false" in template
+        assert "Posterior lean diagnostic active; gated candidacy and P(best) unchanged" in template
+        assert "tableState[\"t-arch\"].col = 2" in template
+        assert "tableState[\"t-camp\"].col = 2" in template
+
+    def test_stability_and_grounding_mark_generated_gate_staleness(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "function stabilityHtml(r)" in template
+        assert "function groundingPathHtml(r)" in template
+        assert "if (!rankingEvidenceIsCurrent(r))" in template
+        assert "stale — generated at n=${D.meta.ground_n}" in template
+        assert "additional cells not shown" in template
+        assert "total additional matches" in template
+
+    def test_lean_diagnostic_exposes_interval_imputation_and_divergence(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "function leanDetailHtml(r)" in template
+        assert "Q25 diagnostic posterior" in template
+        assert "95% ${fmtP(lean.ci_low)}–${fmtP(lean.ci_high)}" in template
+        assert "resolved /" in template
+        assert "gated−lean" in template
 
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"

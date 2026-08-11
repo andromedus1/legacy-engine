@@ -8,15 +8,19 @@ summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
   tracked HTML template: scripts/refresh_best_call_ranking.py +
-  scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-  strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
-  including exact archetype-versus-plan evidence in every archetype dropdown;
+  scripts/best_call_ranking_template.html. Defines gated Agency % as the default
+  authority, the opt-in seeded posterior lean, grounded/current strata, rank stability
+  and paths to grounding, the cross-camp P(best) column, and the five-plan strategic
+  taxonomy, including exact archetype-versus-plan evidence in every archetype dropdown;
   the page itself carries the authoritative definitional prose.
 decisions:
   - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
   - "Every measured cell (n>=8 by default) can set the floor using its shrunk estimate; this exposes apparent holes sooner. Because better-covered decks have more chances to reveal a low matchup, ungrounded agency remains an explicit upper bound and must be read with measured coverage. Blowouts classify on the raw observed rate after the same measured-cell gate."
   - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
+  - "Gated Agency remains the default and authoritative ranking number. The opt-in seeded posterior lean is diagnostic only: it uses the era candidate regardless of n, falls back only when the era candidate is absent, uses Jeffreys cells for resolved evidence, a weak row-centred prior for unresolved cells, and continuous field-share × precision weighting; it reports Q25, median, and 95% CI."
+  - "Rank stability compares raw, CI-gated, ban-scoped, and era-only variants within each peer table; rank spans are shown only when all four variants rank the row. Interactive n changes mark generated stability and grounding paths stale, while the posterior lean remains independent of the interactive gate."
+  - "Grounding paths collect every shortfall among the top-k opponents first, then prioritize remaining cells by share gained per additional match until the coverage target; the page displays the first three actions plus a remainder count and total projected matches/coverage. Plan rows expose grounding paths but do not expose lean or stability."
   - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
@@ -162,6 +166,27 @@ strict-common-era matrix uses one uniform start at the latest subject/opponent h
 shows its exact start, contributing coverage, display-grade coverage, estimate, and delta beside
 the adaptive value as a diagnostic—never as a blend, even when the estimate is unavailable.
 
+**Posterior lean and rank stability.** Gated Agency is the page's default and authoritative
+ranking value; the posterior lean is opt-in and diagnostic. Its seeded smooth-floor draw uses the
+era candidate whenever one exists, regardless of its `n`; only an absent era candidate permits the
+ban-scoped fallback (or full-corpus fallback where applicable). Resolved cells draw from Jeffreys
+(`wins + 0.5`, `losses + 0.5`) posteriors. Unresolved cells use a weak prior centred on the row's
+resolved-rate mean (0.5 when no cells resolve). Each cell's continuous weight is
+`field_share × strength / (strength + precision_scale)`, then normalized. The row reports Q25 as
+the lean, alongside its median and 95% interval. This path remains gate-independent when the
+interactive matchup `n` changes. Stability compares raw, CI-gated, ban-scoped, and era-only
+agency variants within the row's peer table; a rank span is shown only for rows ranked by all four,
+otherwise the missing variants explain the n/a. Plan rows can show a grounding path, but have no
+posterior lean or rank-stability payload.
+
+**Paths to grounding.** For an ungrounded row, the generated path first includes every unmet
+top-`--top-k` opponent shortfall. It then adds non-top-k cells in descending field-share gained per
+additional match until `--cover-min` is projected. The page displays three actions, followed by
+the number of undisplayed actions and the total additional matches and projected coverage. Paths
+are generated at the default `--ground-n`; changing the interactive gate marks the path stale
+rather than presenting a path for the wrong evidence state. The same path behavior applies to plan
+rows, without adding lean or stability diagnostics.
+
 **Observable floors.** The interactive `--ground-n` still determines which cells can set the page
 floor. Alongside it, the page reports how many opponents reach n>=10 and the engine display gate
 (n>=30), plus display-grade field-share coverage. A row with no n>=30 cells says `floor unobserved
@@ -202,7 +227,9 @@ unchanged for inspection.
 - **The measured-cell gate is interactive in each table.** `Minimum matchup n`
   defaults to the generated `--ground-n` value (normally 8) and recomputes the
   era-preferred / ban-scoped-fallback selection, adjusted field WR, floor,
-  agency, blowouts, coverage, grounding strata, labels, and sorting in-browser.
+  agency, blowouts, coverage, grounding strata, labels, and sorting in-browser. Stability and
+  paths remain generated evidence and are marked stale when the selected gate differs; the
+  posterior lean remains available because it is independent of this gate.
   Cross-camp P(best) remains the generated-threshold Monte Carlo and is shown as
   n/a when the interactive gate differs rather than presenting a stale value.
 - **Fallback windows are ban-scoped** — a deck whose engine was banned (Nadu
