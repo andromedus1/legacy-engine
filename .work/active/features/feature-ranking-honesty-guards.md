@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-honesty-guards
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics]
 parent: epic-best-deck-decision-trust
 depends_on: []
@@ -471,3 +471,15 @@ Then run the project-standard broader suite before advancing the feature to revi
   evidence only where a named exclusion reason is currently impossible.
 - Do not implement blended-field reweighting, a second ranking estimator, refresh scheduling, or
   future methodology variants in this feature.
+
+## Implementation summary
+
+- `69a7f99` made the ranking coverage gate explicit and added complementary measured/imputed
+  shares while preserving the existing n>=30 default contract.
+- `7a49191` aligned Best Call coverage with page-used cells, quarantined inactive/unscorable and
+  imputation-dominated rows with typed reasons, and kept default/grouped page values identical.
+- `d431611` added exact global/custom regime-currency evidence and the named informational,
+  below-50%, and unavailable audit paths.
+- No design deviations. In particular, no blended-field reweighting, refresh orchestration,
+  card-dimension work, or second ranking estimator was introduced.
+- Integrated verification: `uv run --no-sync python -m pytest -q` — 3634 passed, 1 skipped.
