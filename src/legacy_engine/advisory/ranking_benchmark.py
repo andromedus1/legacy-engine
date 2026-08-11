@@ -54,6 +54,15 @@ class EvaluationSupport(LegacyEngineModel):
     min_claim_regimes: int = 2
 
 
+class BenchmarkFold(LegacyEngineModel):
+    fold_id: str
+    cutoff: str
+    evaluation_until: str
+    regime_start: str
+    regime_end: str | None
+    event_dates: tuple[str, ...]
+
+
 class BenchmarkProtocol(LegacyEngineModel):
     protocol_id: str
     created_at: str
@@ -69,6 +78,8 @@ class BenchmarkProtocol(LegacyEngineModel):
     bootstrap_draws: int = 2_000
     seed: int = 730_021
     support: EvaluationSupport = Field(default_factory=EvaluationSupport)
+    planned_folds: tuple[BenchmarkFold, ...] = ()
+    ban_events_as_of: tuple[tuple[str, str, str], ...] = ()
 
     @model_validator(mode="after")
     def _validate_protocol(self) -> "BenchmarkProtocol":
@@ -91,16 +102,16 @@ class BenchmarkProtocol(LegacyEngineModel):
             raise ValueError("estimator_ids must equal the preregistered estimator registry")
         if self.primary_estimator != "production-ci-gated":
             raise ValueError("primary_estimator must be production-ci-gated")
+        if self.planned_folds:
+            if tuple(fold.fold_id for fold in self.planned_folds) != tuple(
+                dict.fromkeys(fold.fold_id for fold in self.planned_folds)
+            ):
+                raise ValueError("planned fold ids must be unique")
+            if self.planned_folds[0].cutoff != self.first_cutoff:
+                raise ValueError("planned folds must begin at first_cutoff")
+            if self.planned_folds[-1].evaluation_until != self.final_evaluation_until:
+                raise ValueError("planned folds must end at final_evaluation_until")
         return self
-
-
-class BenchmarkFold(LegacyEngineModel):
-    fold_id: str
-    cutoff: str
-    evaluation_until: str
-    regime_start: str
-    regime_end: str | None
-    event_dates: tuple[str, ...]
 
 
 class TaxonomySnapshotManifest(LegacyEngineModel):
@@ -199,6 +210,28 @@ class HeldoutMatch(LegacyEngineModel):
     exclusion_reason: OutcomeExclusionReason | None
 
 
+class HeldoutDeck(LegacyEngineModel):
+    event_id: str
+    event_date: str
+    provenance: str
+    archetype: str | None
+    exclusion_reason: Literal["unclassified", "emerging-label", "outside-frozen-universe"] | None
+
+
+class HeldoutOutcomes(LegacyEngineModel):
+    matches: tuple[HeldoutMatch, ...]
+    decks: tuple[HeldoutDeck, ...]
+
+
+class FieldCoverageLedger(LegacyEngineModel):
+    eligible_decks: int
+    classified_decks: int
+    covered_decks: int
+    future_field_coverage: float
+    counts_by_action: dict[str, int]
+    exclusions: dict[str, int]
+
+
 class SupportVerdict(LegacyEngineModel):
     evaluable: bool
     reasons: tuple[str, ...]
@@ -222,6 +255,13 @@ class EstimatorEvaluation(LegacyEngineModel):
     top3_hit: bool | None
     regret: float | None
     regret_ci: tuple[float, float] | None
+    regret_censor_reason: Literal[
+        "insufficient-support", "practical-tie", "unstable-oracle", "unavailable-recommendation",
+    ] | None = None
+    oracle_action: str | None = None
+    eligible_matches: int = 0
+    common_case_coverage: float = 0.0
+    missing_actions: tuple[str, ...] = ()
     support: SupportVerdict
 
 
@@ -238,6 +278,7 @@ class BenchmarkEvaluation(LegacyEngineModel):
     player_sensitivity_reason: str | None = None
     player_sensitivity: dict[str, float] | None = None
     paired_log_loss_differences: dict[str, dict[str, float | None]] = Field(default_factory=dict)
+    field_coverage: FieldCoverageLedger | None = None
 
 
 class BenchmarkEvaluationSummary(LegacyEngineModel):
@@ -313,6 +354,11 @@ def write_frozen_predictions(path: Path, predictions: FrozenOriginPredictions) -
 
 
 def atomic_write_text(path: Path, text: str) -> None:
+    payload = text.encode()
+    if path.exists():
+        if path.read_bytes() == payload:
+            return
+        raise FileExistsError(f"refusing to overwrite different artifact: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     with temporary.open("w", encoding="utf-8") as handle:
@@ -323,8 +369,33 @@ def atomic_write_text(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def _field_coverage_ledger(
+    decks: Sequence[HeldoutDeck], universe: set[str],
+) -> FieldCoverageLedger:
+    exclusions = {"unclassified": 0, "emerging-label": 0, "outside-frozen-universe": 0}
+    counts: dict[str, int] = {}
+    classified = covered = 0
+    for deck in decks:
+        if deck.archetype is None:
+            exclusions["unclassified"] += 1
+            continue
+        classified += 1
+        if deck.archetype in universe:
+            covered += 1
+            counts[deck.archetype] = counts.get(deck.archetype, 0) + 1
+        else:
+            reason = deck.exclusion_reason or "outside-frozen-universe"
+            exclusions[reason] += 1
+    return FieldCoverageLedger(
+        eligible_decks=len(decks), classified_decks=classified, covered_decks=covered,
+        future_field_coverage=covered / classified if classified else 0.0,
+        counts_by_action=dict(sorted(counts.items())), exclusions=exclusions,
+    )
+
+
 def _support_verdict(
     matches: Sequence[HeldoutMatch], protocol: BenchmarkProtocol,
+    field_coverage: FieldCoverageLedger | None = None,
 ) -> SupportVerdict:
     common = [match for match in matches if match.exclusion_reason is None]
     events = {match.event_id for match in common}
@@ -335,12 +406,17 @@ def _support_verdict(
             if action is not None:
                 action_n[action] = action_n.get(action, 0) + 1
     supported = sum(value >= protocol.support.min_action_matches for value in action_n.values())
-    classified = [
-        match for match in matches
-        if match.subject is not None and match.opponent is not None
-        and match.exclusion_reason not in {"bye-draw-invalid", "ambiguous-player", "unclassified"}
-    ]
-    future_coverage = len(common) / len(classified) if classified else 0.0
+    if field_coverage is None:
+        # Compatibility for direct pure-function callers. Workflow evaluation always supplies
+        # the deck ledger, whose denominator is independent of match activity.
+        classified = [
+            match for match in matches
+            if match.subject is not None and match.opponent is not None
+            and match.exclusion_reason not in {"bye-draw-invalid", "ambiguous-player", "unclassified"}
+        ]
+        future_coverage = len(common) / len(classified) if classified else 0.0
+    else:
+        future_coverage = field_coverage.future_field_coverage
     reasons: list[str] = []
     if len(common) < protocol.support.min_common_matches:
         reasons.append(f"common decisive matches {len(common)} < {protocol.support.min_common_matches}")
@@ -371,6 +447,8 @@ def _calibration(probabilities: np.ndarray, outcomes: np.ndarray, minimum: int):
         return None, None, tuple(cumulative)
     clipped = np.clip(probabilities, 1e-6, 1.0 - 1e-6)
     logits = np.log(clipped / (1.0 - clipped))
+    if float(np.ptp(logits)) == 0.0:
+        return None, None, tuple(cumulative)
     # A deterministic logistic calibration fit; failures remain honest nulls.
     try:
         import statsmodels.api as sm
@@ -378,44 +456,69 @@ def _calibration(probabilities: np.ndarray, outcomes: np.ndarray, minimum: int):
             outcomes, sm.add_constant(logits), family=sm.families.Binomial(),
         ).fit(disp=0)
         return float(fitted.params[0]), float(fitted.params[1]), tuple(cumulative)
-    except (ValueError, np.linalg.LinAlgError):
+    except (IndexError, ValueError, np.linalg.LinAlgError):
         return None, None, tuple(cumulative)
 
 
-def _realized_utilities(matches: Sequence[HeldoutMatch]) -> tuple[dict[str, float], dict[str, int]]:
-    wins: dict[str, int] = {}
+def _realized_utilities(
+    matches: Sequence[HeldoutMatch], field_counts: Mapping[str, int] | None = None,
+) -> tuple[dict[str, float], dict[str, int]]:
+    pair_wins: dict[tuple[str, str], int] = {}
+    pair_totals: dict[tuple[str, str], int] = {}
     totals: dict[str, int] = {}
     for match in matches:
         if match.exclusion_reason is not None or match.subject is None or match.opponent is None:
             continue
         for action in (match.subject, match.opponent):
             totals[action] = totals.get(action, 0) + 1
-        if match.subject_won:
-            wins[match.subject] = wins.get(match.subject, 0) + 1
-        else:
-            wins[match.opponent] = wins.get(match.opponent, 0) + 1
-    return ({action: wins.get(action, 0) / total for action, total in totals.items()}, totals)
+        for subject, opponent, won in (
+            (match.subject, match.opponent, bool(match.subject_won)),
+            (match.opponent, match.subject, not bool(match.subject_won)),
+        ):
+            key = (subject, opponent)
+            pair_totals[key] = pair_totals.get(key, 0) + 1
+            pair_wins[key] = pair_wins.get(key, 0) + int(won)
+    field = dict(field_counts or {action: count for action, count in totals.items()})
+    field_total = sum(field.values())
+    utilities: dict[str, float] = {}
+    if field_total:
+        for action in totals:
+            weighted = 0.5 * field.get(action, 0)  # structural mirror utility
+            mass = field.get(action, 0)
+            for opponent, count in field.items():
+                if opponent == action:
+                    continue
+                pair_n = pair_totals.get((action, opponent), 0)
+                if pair_n:
+                    weighted += (pair_wins.get((action, opponent), 0) / pair_n) * count
+                    mass += count
+            if mass:
+                utilities[action] = weighted / mass
+    return utilities, totals
 
 
 def _decision_metrics(
     recommendation: FrozenRecommendation,
     matches: Sequence[HeldoutMatch],
     protocol: BenchmarkProtocol,
-) -> tuple[float | None, bool | None, float | None, tuple[float, float] | None]:
-    utilities, totals = _realized_utilities(matches)
+    field_counts: Mapping[str, int] | None = None,
+) -> tuple[
+    float | None, bool | None, float | None, tuple[float, float] | None, str | None, str | None,
+]:
+    utilities, totals = _realized_utilities(matches, field_counts)
     supported = {
         action: utility for action, utility in utilities.items()
         if totals[action] >= protocol.support.min_action_matches
     }
     if len(supported) < protocol.support.min_supported_actions:
-        return None, None, None, None
+        return None, None, None, None, "insufficient-support", None
     ordered_oracle = sorted(supported, key=lambda action: (-supported[action], action))
     if len(ordered_oracle) > 1 and supported[ordered_oracle[0]] - supported[ordered_oracle[1]] <= 0.01:
-        return None, None, None, None
+        return None, None, None, None, "practical-tie", None
     oracle = ordered_oracle[0]
     predicted = [action for action in recommendation.ranked_actions if action in supported]
     if len(predicted) < 2 or recommendation.chosen_action not in supported:
-        return None, None, None, None
+        return None, None, None, None, "unavailable-recommendation", oracle
     predicted_positions = {action: index for index, action in enumerate(predicted)}
     common_actions = sorted(set(predicted) & set(supported))
     tau = kendalltau(
@@ -433,22 +536,30 @@ def _decision_metrics(
     rng = np.random.default_rng(protocol.seed)
     event_ids = sorted(blocks)
     regrets: list[float] = []
+    oracle_winners: list[str] = []
     for _ in range(protocol.bootstrap_draws):
         sampled_ids = rng.choice(event_ids, size=len(event_ids), replace=True)
         sample = [match for event_id in sampled_ids for match in blocks[str(event_id)]]
-        sample_utilities, sample_totals = _realized_utilities(sample)
+        sample_utilities, sample_totals = _realized_utilities(sample, field_counts)
         sample_supported = {
             action: utility for action, utility in sample_utilities.items()
             if sample_totals[action] >= protocol.support.min_action_matches
         }
         chosen = recommendation.chosen_action
         if chosen in sample_supported and sample_supported:
-            regrets.append(max(sample_supported.values()) - sample_supported[chosen])
+            sample_oracle = min(
+                sample_supported, key=lambda action: (-sample_supported[action], action),
+            )
+            oracle_winners.append(sample_oracle)
+            regrets.append(sample_supported[sample_oracle] - sample_supported[chosen])
     interval = None
     if regrets:
         low, high = np.quantile(regrets, [0.025, 0.975])
         interval = (float(low), float(high))
-    return rank_tau, top3, regret, interval
+    stable_share = oracle_winners.count(oracle) / len(oracle_winners) if oracle_winners else 0.0
+    if interval is None or stable_share < 0.80:
+        return rank_tau, top3, None, None, "unstable-oracle", oracle
+    return rank_tau, top3, regret, interval, None, oracle
 
 
 def _evaluate_estimator(
@@ -458,6 +569,7 @@ def _evaluate_estimator(
     matches: Sequence[HeldoutMatch],
     protocol: BenchmarkProtocol,
     support: SupportVerdict,
+    field_counts: Mapping[str, int] | None = None,
 ) -> EstimatorEvaluation:
     common = [match for match in matches if match.exclusion_reason is None]
     probabilities: list[float] = []
@@ -478,12 +590,16 @@ def _evaluate_estimator(
     else:
         log_loss = brier = intercept = slope = None
         cumulative = ()
-    tau, top3, regret, regret_ci = _decision_metrics(recommendation, common, protocol)
+    tau, top3, regret, regret_ci, regret_reason, oracle = _decision_metrics(
+        recommendation, common, protocol, field_counts,
+    )
     return EstimatorEvaluation(
         estimator=estimator, common_matches=len(common), served_matches=served,
         log_loss=log_loss, brier=brier, calibration_intercept=intercept,
         calibration_slope=slope, cumulative_calibration=cumulative, rank_tau=tau,
         top3_hit=top3, regret=regret, regret_ci=regret_ci, support=support,
+        regret_censor_reason=regret_reason, oracle_action=oracle,
+        eligible_matches=len(common), common_case_coverage=1.0 if common else 0.0,
     )
 
 
@@ -600,10 +716,15 @@ def _external_evaluation(
     predictions: FrozenOriginPredictions,
     matches: Sequence[HeldoutMatch],
     protocol: BenchmarkProtocol,
+    field_counts: Mapping[str, int] | None = None,
 ) -> EstimatorEvaluation:
     observed = datetime.fromisoformat(snapshot.observed_at.replace("Z", "+00:00")).date()
     if observed > date.fromisoformat(predictions.fold.cutoff):
         raise ValueError(f"external snapshot {snapshot.source!r} is future-dated")
+    if snapshot.taxonomy != "parent":
+        raise ValueError(
+            f"external snapshot {snapshot.source!r} taxonomy must be 'parent', got {snapshot.taxonomy!r}"
+        )
     known = set(predictions.action_universe)
     supplied = set(snapshot.ranks) | set(snapshot.scores)
     pairs: dict[tuple[str, str], float] = {}
@@ -628,13 +749,34 @@ def _external_evaluation(
         if match.exclusion_reason is None and (match.subject, match.opponent) in pairs
     ]
     support = _support_verdict(supported_matches, protocol)
+    eligible_matches = sum(match.exclusion_reason is None for match in matches)
+    coverage = len(supported_matches) / eligible_matches if eligible_matches else 0.0
+    missing_actions = tuple(sorted(known - supplied))
+    coverage_reasons = tuple(
+        reason for reason in support.reasons
+        if not reason.startswith("future classified field coverage")
+    )
+    if coverage < protocol.support.min_future_field_coverage:
+        coverage_reasons += (
+            f"external common-case coverage {coverage:.1%} < "
+            f"{protocol.support.min_future_field_coverage:.1%}",
+        )
+    support = support.model_copy(update={
+        "evaluable": not coverage_reasons,
+        "reasons": coverage_reasons,
+        "future_field_coverage": coverage,
+    })
     if not pairs:
-        tau, top3, regret, regret_ci = _decision_metrics(recommendation, matches, protocol)
+        tau, top3, regret, regret_ci, regret_reason, oracle = _decision_metrics(
+            recommendation, matches, protocol, field_counts,
+        )
         return EstimatorEvaluation(
             estimator=f"external:{snapshot.source}", common_matches=0, served_matches=0,
             log_loss=None, brier=None, calibration_intercept=None, calibration_slope=None,
             cumulative_calibration=(), rank_tau=tau, top3_hit=top3, regret=regret,
-            regret_ci=regret_ci, support=support,
+            regret_ci=regret_ci, regret_censor_reason=regret_reason, oracle_action=oracle,
+            eligible_matches=eligible_matches, common_case_coverage=coverage,
+            missing_actions=missing_actions, support=support,
         )
     lookup = {
         pair: FrozenMatchupPrediction(
@@ -643,9 +785,15 @@ def _external_evaluation(
             refusal_reason=None,
         ) for pair, probability in pairs.items()
     }
-    return _evaluate_estimator(
+    result = _evaluate_estimator(
         f"external:{snapshot.source}", lookup, recommendation, supported_matches, protocol, support,
+        field_counts,
     )
+    return result.model_copy(update={
+        "eligible_matches": eligible_matches,
+        "common_case_coverage": coverage,
+        "missing_actions": missing_actions,
+    })
 
 
 def _rank_external(source: str, scores: Mapping[str, float]) -> FrozenRecommendation:
@@ -659,7 +807,7 @@ def _rank_external(source: str, scores: Mapping[str, float]) -> FrozenRecommenda
 
 def evaluate_origin(
     predictions: FrozenOriginPredictions,
-    outcome_rows: Sequence[HeldoutMatch],
+    outcome_rows: Sequence[HeldoutMatch] | HeldoutOutcomes,
     *,
     protocol: BenchmarkProtocol,
     external: Sequence[ExternalRankingSnapshot] = (),
@@ -669,9 +817,19 @@ def evaluate_origin(
         raise ValueError("prediction protocol hash does not match evaluation protocol")
     if predictions.estimator_registry != protocol.estimator_ids:
         raise ValueError("prediction estimator registry does not match protocol")
+    if protocol.planned_folds and predictions.fold not in protocol.planned_folds:
+        raise ValueError("prediction fold is not in the preregistered fold schedule")
     cutoff = date.fromisoformat(predictions.fold.cutoff)
     until = date.fromisoformat(predictions.fold.evaluation_until)
     universe = set(predictions.action_universe)
+    if isinstance(outcome_rows, HeldoutOutcomes):
+        raw_matches = outcome_rows.matches
+        field_coverage = _field_coverage_ledger(outcome_rows.decks, universe)
+        heldout_decks = outcome_rows.decks
+    else:
+        raw_matches = outcome_rows
+        field_coverage = None
+        heldout_decks = ()
     normalized: list[HeldoutMatch] = []
     exclusions: dict[OutcomeExclusionReason, int] = {
         reason: 0 for reason in (
@@ -679,7 +837,7 @@ def evaluate_origin(
             "unclassified", "emerging-label", "outside-frozen-universe",
         )
     }
-    for match in outcome_rows:
+    for match in raw_matches:
         reason = match.exclusion_reason
         event_date = date.fromisoformat(match.event_date)
         if not cutoff <= event_date < until:
@@ -697,7 +855,8 @@ def evaluate_origin(
         normalized.append(updated)
         if reason is not None:
             exclusions[reason] += 1
-    support = _support_verdict(normalized, protocol)
+    support = _support_verdict(normalized, protocol, field_coverage)
+    field_counts = field_coverage.counts_by_action if field_coverage is not None else None
     prediction_lookup = {
         (item.estimator, item.subject, item.opponent): item
         for item in predictions.matchup_predictions
@@ -711,9 +870,11 @@ def evaluate_origin(
         }
         evaluations.append(_evaluate_estimator(
             estimator, lookup, recommendations[estimator], normalized, protocol, support,
+            field_counts,
         ))
     external_results = tuple(
-        _external_evaluation(snapshot, predictions, normalized, protocol) for snapshot in external
+        _external_evaluation(snapshot, predictions, normalized, protocol, field_counts)
+        for snapshot in external
     )
     player_keys = [
         key for match in normalized if match.exclusion_reason is None
@@ -731,12 +892,16 @@ def evaluate_origin(
     return BenchmarkEvaluation(
         protocol_hash=predictions.protocol_hash,
         predictions_sha256=content_sha256(predictions),
-        evaluation_data_sha256=content_sha256([match.model_dump(mode="json") for match in normalized]),
+        evaluation_data_sha256=content_sha256({
+            "matches": [match.model_dump(mode="json") for match in normalized],
+            "decks": [deck.model_dump(mode="json") for deck in heldout_decks],
+        }),
         fold=predictions.fold, exclusions=exclusions, estimators=tuple(evaluations),
         external=external_results, status="descriptive" if support.evaluable else "not-evaluable",
         reasons=tuple(reasons), player_sensitivity_reason=player_reason,
         player_sensitivity=player_sensitivity,
         paired_log_loss_differences=_paired_event_log_loss(predictions, normalized, protocol),
+        field_coverage=field_coverage,
     )
 
 
@@ -794,14 +959,18 @@ def aggregate_benchmark(
     if not brier_noninferior:
         reasons.append("primary Brier score is not noninferior to the required baselines")
     regret_better = bool(metrics_by_fold) and all(
-        metrics[protocol.primary_estimator].regret is not None
-        and metrics[baseline].regret is not None
-        and metrics[protocol.primary_estimator].regret < metrics[baseline].regret
+        metrics[protocol.primary_estimator].regret_censor_reason is None
+        and metrics[baseline].regret_censor_reason is None
+        and metrics[protocol.primary_estimator].regret_ci is not None
+        and metrics[baseline].regret_ci is not None
+        and metrics[protocol.primary_estimator].regret_ci[1] < metrics[baseline].regret_ci[0]
         for metrics in metrics_by_fold
         for baseline in ("field-share", "top-finish-conversion")
     )
     if not regret_better:
-        reasons.append("primary regret is not lower than both declared ranking baselines")
+        reasons.append(
+            "stable event-block regret advantage is not established against both ranking baselines"
+        )
     directional = bool(metrics_by_fold) and all(
         sum(
             metrics[protocol.primary_estimator].log_loss < metrics[baseline].log_loss
@@ -844,14 +1013,54 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str:
     ]
     if summary.reasons:
         lines.extend(["## Claim limitations", "", *[f"- {reason}" for reason in summary.reasons], ""])
-    lines.extend(["## Fold results", "", "| Fold | Status | Common matches | Primary log loss | Exclusions |", "|---|---:|---:|---:|---:|"])
+    lines.extend([
+        "## Fold results", "",
+        "| Fold | Status | Common | Log loss | Brier | Cal. int./slope | Coverage | Rank τ | Top 3 | Regret (95% interval) | Exclusions |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ])
     for fold in summary.folds:
         primary = next(item for item in fold.estimators if item.estimator == "production-ci-gated")
         loss = "n/a" if primary.log_loss is None else f"{primary.log_loss:.4f}"
+        brier = "n/a" if primary.brier is None else f"{primary.brier:.4f}"
+        calibration = (
+            "n/a" if primary.calibration_intercept is None else
+            f"{primary.calibration_intercept:.3f}/{primary.calibration_slope:.3f}"
+        )
+        coverage = f"{primary.support.future_field_coverage:.1%}"
+        rank = "n/a" if primary.rank_tau is None else f"{primary.rank_tau:.3f}"
+        top3 = "n/a" if primary.top3_hit is None else str(primary.top3_hit)
+        regret = primary.regret_censor_reason or (
+            "n/a" if primary.regret is None else
+            f"{primary.regret:.4f} [{primary.regret_ci[0]:.4f}, {primary.regret_ci[1]:.4f}]"
+        )
         lines.append(
             f"| {fold.fold.fold_id} | {fold.status} | {primary.common_matches} | {loss} | "
+            f"{brier} | {calibration} | {coverage} | {rank} | {top3} | {regret} | "
             f"{sum(fold.exclusions.values())} |"
         )
+    for fold in summary.folds:
+        primary = next(item for item in fold.estimators if item.estimator == "production-ci-gated")
+        lines.extend([
+            "", f"### {fold.fold.fold_id} evidence", "",
+            f"- Support: {'evaluable' if primary.support.evaluable else 'not evaluable'}; "
+            f"matches={primary.support.matches}, events={primary.support.events}, "
+            f"dates={primary.support.event_dates}, supported actions={primary.support.supported_actions}.",
+            f"- Exclusions: {', '.join(f'{key}={value}' for key, value in fold.exclusions.items())}.",
+            f"- Cumulative calibration residuals: {list(primary.cumulative_calibration)}.",
+            f"- Player sensitivity: {fold.player_sensitivity or fold.player_sensitivity_reason or 'unavailable'}.",
+        ])
+        if fold.field_coverage is not None:
+            lines.append(
+                f"- Classified field ledger: covered={fold.field_coverage.covered_decks}/"
+                f"{fold.field_coverage.classified_decks}; exclusions={fold.field_coverage.exclusions}."
+            )
+        for external in fold.external:
+            lines.append(
+                f"- External `{external.estimator}`: common={external.common_matches}/"
+                f"{external.eligible_matches} ({external.common_case_coverage:.1%}); "
+                f"missing actions={list(external.missing_actions)}; log loss={external.log_loss}; "
+                f"regret censor={external.regret_censor_reason}."
+            )
     lines.extend(["", "## Paired primary-minus-baseline log loss", "", "| Baseline | Mean | 95% interval |", "|---|---:|---:|"])
     for baseline, values in summary.paired_differences.items():
         mean = values["mean_log_loss_difference"]
@@ -918,6 +1127,11 @@ def validate_snapshot_manifest(manifest: SnapshotManifest) -> None:
 def atomic_write_canonical(path: Path, value: object) -> str:
     """Write canonical JSON atomically and return its digest."""
     payload = canonical_json_bytes(value)
+    digest = hashlib.sha256(payload).hexdigest()
+    if path.exists():
+        if path.read_bytes() == payload:
+            return digest
+        raise FileExistsError(f"refusing to overwrite different artifact: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     with temporary.open("wb") as handle:
@@ -926,7 +1140,7 @@ def atomic_write_canonical(path: Path, value: object) -> str:
         import os
         os.fsync(handle.fileno())
     temporary.replace(path)
-    return hashlib.sha256(payload).hexdigest()
+    return digest
 
 
 def load_hashed_model(path: Path, model_type: type[LegacyEngineModel], expected_sha256: str | None = None):

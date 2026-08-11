@@ -31,6 +31,7 @@ decisions:
   - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
   - "Every ranking row is derived from a typed selected-cell ledger. Its serialized replay must reproduce adjusted field WR exactly; a mismatch suppresses the headline. A strict-common-era estimate is shown separately as a divergence diagnostic and is never averaged into the adaptive headline."
   - "Every row reports floor observability at n>=10 and display-grade n>=30 independently of the interactive page gate. Zero display-grade cells means floor unobserved; missing bad matchups are not evidence of none. Event/month concentration >=40% is labeled on measured selected cells, never automatically corrected away."
+  - "The benchmark protocol freezes the exact fold schedule and as-of B&R ledger. Claim coverage uses classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay and refuse different content."
 ---
 
 # Best Deck / Best Call agency ranking — refresh runbook
@@ -72,30 +73,40 @@ variants (`production-raw`, `production-ci-gated`, `production-ban-scoped`,
 `production-era-only`, `production-lean`). `production-ci-gated` is the required primary;
 evaluation cannot tune or promote any production estimator.
 
-There are two taxonomy replay modes. `retrospective-fixed-parent` uses the current parent
-ontology as a fixed, deliberately degraded benchmark surface (no camps or families). The
+There are two taxonomy replay modes. `retrospective-fixed-parent` freezes the current parent
+rules identity and reclassifies held-out decklists through it, rejecting later rule or stored-label
+drift; it remains a deliberately degraded benchmark surface (no camps or families). The
 optional `contemporaneous` mode requires a dated, exact-mapped taxonomy snapshot effective no
 later than the fold cutoff. Both modes build a raw-facts snapshot strictly before the cutoff;
 the prediction artifact is hashed before later outcomes are opened, and evaluation records both
 the prediction and evaluation-data hashes.
 
-Folds are walk-forward, non-overlapping, whole-date windows of 28 days, truncated and reset at
-confirmed B&R boundaries. Held-out outcomes exclude mirrors, byes/draws, ambiguous players,
+The protocol JSON contains the exact walk-forward fold schedule and dated as-of B&R ledger;
+freeze/evaluate/run consume that frozen plan rather than mutable globals or corpus dates. Folds are
+non-overlapping, whole-date windows of 28 days, truncated and reset at confirmed B&R boundaries.
+A boundary origin uses a declared trailing 28-day pre-cutoff field horizon because no same-regime
+deck can precede it; later origins use same-regime field evidence. Held-out outcomes exclude mirrors, byes/draws, ambiguous players,
 unclassified labels, emerging labels, and actions outside the frozen universe. Fold support gates
 are explicit (common matches, events, dates, supported actions, and future
-field coverage); insufficient fold support censors decision claims, while calibration
+field coverage). Coverage is classified held-out deck mass represented by the frozen universe,
+independent of match activity. Insufficient fold support censors decision claims, while calibration
 intercept/slope are independently censored below their registered prediction minimum and must be
 available for any predictive claim. Player identity is evaluation metadata only: player-sensitivity
 analysis is reported only when identity coverage reaches 80%.
 
 Forecast quality uses log loss, Brier score, calibration intercept/slope, and cumulative
-calibration. Decision quality uses Kendall rank tau, top-three hit, and realized regret with
-event-block bootstrap intervals. Optional external estimators are accepted only as dated,
-exact-mapped snapshots and are scored on the same held-out outcomes.
+calibration. Decision quality uses Kendall rank tau, top-three hit, and field-weighted realized
+regret with structural 50% mirror utility. Regret requires a stable event-block bootstrap oracle;
+insufficient support, practical ties, unstable oracles, and unavailable recommendations are named
+censors. Optional external estimators require dated parent-taxonomy, exact-mapped snapshots and
+report missing actions plus common-case coverage against the full eligible held-out set.
 
 Plan and freeze/evaluate/run commands require an explicit `--db`; `plan` writes the protocol,
 `freeze` writes the cutoff-safe snapshot and immutable predictions, `evaluate` verifies hashes
-and scores one fold, and `run` composes every fold. These artifacts are evidence, not a tuning
+and scores one fold, and `run` composes every fold. Byte-identical replay is allowed, but different
+content cannot overwrite an existing deterministic artifact path. JSON and Markdown expose proper
+scores, calibration, support/coverage, rank/top-three/regret uncertainty, exclusions, player and
+external evidence, and censor reasons. These artifacts are evidence, not a tuning
 loop, and a predictive claim requires the preregistered fold, regime, calibration, and primary
 vs baseline gates.
 

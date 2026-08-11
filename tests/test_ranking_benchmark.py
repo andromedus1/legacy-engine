@@ -14,7 +14,9 @@ from legacy_engine.advisory.ranking_benchmark import (
     FrozenMatchupPrediction,
     FrozenOriginPredictions,
     FrozenRecommendation,
+    HeldoutDeck,
     HeldoutMatch,
+    HeldoutOutcomes,
     TaxonomySnapshotManifest,
     aggregate_benchmark,
     content_sha256,
@@ -65,6 +67,12 @@ def test_walk_forward_folds_keep_dates_whole_and_reset_at_ban():
     assert folds[1].event_dates == ("2026-01-15", "2026-01-20", "2026-02-10")
     assert all(left.evaluation_until <= right.cutoff for left, right in zip(folds, folds[1:]))
     assert protocol_sha256(protocol()) == protocol_sha256(protocol())
+    frozen_plan = protocol().model_copy(update={
+        "planned_folds": folds,
+        "ban_events_as_of": (("2026-01-15", "Example", "banned"),),
+    })
+    assert protocol_sha256(frozen_plan) != protocol_sha256(protocol())
+    assert frozen_plan.planned_folds == folds
 
 
 def test_future_dated_taxonomy_manifest_shape_is_typed():
@@ -218,6 +226,59 @@ def test_external_snapshot_is_dated_exact_and_partial():
     ])
     assert result.external[0].estimator == "external:dated"
     assert result.external[0].common_matches == 2
+    assert result.external[0].eligible_matches == 2
+    assert result.external[0].common_case_coverage == 1.0
+    assert result.external[0].missing_actions == ()
+
+    with pytest.raises(ValueError, match="taxonomy must be 'parent'"):
+        evaluate_origin(frozen, _heldout(), protocol=configured, external=[
+            ExternalRankingSnapshot(
+                source="wrong-taxonomy", observed_at="2025-12-31T00:00:00Z",
+                taxonomy="variant", ranks={"A": 1},
+            )
+        ])
+
+
+def test_field_coverage_uses_deck_mass_not_match_activity():
+    configured = _evaluation_protocol()
+    frozen = _predictions(configured)
+    decks = tuple(
+        HeldoutDeck(
+            event_id=f"e{index}", event_date="2026-01-02", provenance="online",
+            archetype="A" if index < 8 else "New", exclusion_reason=None,
+        )
+        for index in range(10)
+    )
+    result = evaluate_origin(
+        frozen, HeldoutOutcomes(matches=tuple(_heldout()), decks=decks), protocol=configured,
+    )
+    assert result.field_coverage.future_field_coverage == 0.8
+    assert result.field_coverage.covered_decks == 8
+    assert result.estimators[0].support.future_field_coverage == 0.8
+    changed = evaluate_origin(
+        frozen,
+        HeldoutOutcomes(
+            matches=tuple(_heldout()),
+            decks=decks[:-1] + (decks[-1].model_copy(update={"archetype": "A"}),),
+        ),
+        protocol=configured,
+    )
+    assert changed.evaluation_data_sha256 != result.evaluation_data_sha256
+
+
+def test_regret_names_tied_oracle_censor_and_report_exposes_full_evidence():
+    configured = _evaluation_protocol()
+    frozen = _predictions(configured)
+    tied = [*_heldout(a_wins=True), *_heldout(a_wins=False)]
+    tied = [match.model_copy(update={"event_id": f"e{index}"}) for index, match in enumerate(tied)]
+    fold = evaluate_origin(frozen, tied, protocol=configured)
+    primary = next(item for item in fold.estimators if item.estimator == configured.primary_estimator)
+    assert primary.regret is None
+    assert primary.regret_censor_reason == "practical-tie"
+    rendered = render_benchmark_markdown(aggregate_benchmark(configured, [fold]))
+    for evidence in ("Brier", "Cal. int./slope", "Coverage", "Rank τ", "Top 3", "Regret"):
+        assert evidence in rendered
+    assert "Cumulative calibration residuals" in rendered
 
 
 def test_aggregate_remains_descriptive_without_claim_support():

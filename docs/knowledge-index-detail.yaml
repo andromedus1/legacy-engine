@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND.
 # On-demand layer — load when surfacing a specific doc's full context.
-generated_at: '2026-08-11T20:09:54Z'
+generated_at: '2026-08-11T20:43:08Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -186,11 +186,13 @@ documents:
       Best Call page keeps them exploratory and ledger/navigation-only until the future-only decision
       benchmark passes.'
     - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters exactly ten estimators
-      with production-ci-gated as the production-CI primary; retrospective-fixed-parent and dated contemporaneous
-      taxonomy replay are separate modes. Raw pre-cutoff snapshots and prediction-before-evaluation hashes,
-      whole-date non-overlapping 28-day folds reset/truncated at B&R, explicit support/censoring gates,
-      player-sensitivity coverage boundaries, proper scores, decision endpoints, and optional dated exact-mapped
-      external snapshots are part of the protocol. Evaluation is read-only and never tunes production.'
+      with production-ci-gated as the production-CI primary; retrospective-fixed-parent (frozen parent-rules
+      identity) and dated contemporaneous taxonomy replay are separate modes. The protocol freezes its
+      exact whole-date fold schedule and as-of B&R ledger. Raw pre-cutoff snapshots and prediction-before-evaluation
+      hashes, deck-mass field coverage, explicit support/censoring gates, stable event-block field-weighted
+      regret with structural mirror utility, player-sensitivity boundaries, proper scores, and dated parent-taxonomy
+      external snapshots are part of the evidence. Deterministic paths allow byte-identical replay and
+      reject different overwrites. Evaluation is read-only and never tunes production.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on
@@ -333,6 +335,10 @@ documents:
       page gate. Zero display-grade cells means floor unobserved; missing bad matchups are not evidence
       of none. Event/month concentration >=40% is labeled on measured selected cells, never automatically
       corrected away.
+    - The benchmark protocol freezes the exact fold schedule and as-of B&R ledger. Claim coverage uses
+      classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility
+      and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay
+      and refuse different content.
   docs/analysis/copy-count-distribution-study.md:
     summary: 'Distribution-first study of per-card sideboard copy-count distributions among top-finisher
 

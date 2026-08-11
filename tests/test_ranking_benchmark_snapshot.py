@@ -17,6 +17,7 @@ from legacy_engine.ingestion import store
 from legacy_engine.workflows.ranking_benchmark import (
     build_origin_snapshot,
     freeze_origin_predictions,
+    load_heldout_outcomes,
     load_heldout_matches,
     validate_frozen_taxonomy,
 )
@@ -237,3 +238,49 @@ def test_freeze_is_deterministic_and_emits_every_preregistered_estimator(tmp_pat
     two_hash = write_frozen_predictions(tmp_path / "two.json", second)
     assert one_hash == two_hash
     assert (tmp_path / "one.json").read_bytes() == (tmp_path / "two.json").read_bytes()
+
+    # Byte-identical replay is allowed; a different artifact may not replace the frozen path.
+    assert write_frozen_predictions(tmp_path / "one.json", first) == one_hash
+    with pytest.raises(FileExistsError, match="refusing to overwrite different artifact"):
+        write_frozen_predictions(
+            tmp_path / "one.json", first.model_copy(update={"code_commit": "different"}),
+        )
+
+
+def test_boundary_origin_uses_declared_trailing_field_and_replays_snapshot_idempotently(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    snapshot = tmp_path / "snapshot.duckdb"
+    boundary = _fold().model_copy(update={"regime_start": _fold().cutoff})
+    configured = _protocol()
+    first = build_origin_snapshot(
+        source, snapshot, fold=boundary, protocol_hash=protocol_sha256(configured),
+    )
+    second = build_origin_snapshot(
+        source, snapshot, fold=boundary, protocol_hash=protocol_sha256(configured),
+    )
+    assert first == second
+    assert any("trailing 28-day" in reason for reason in first.reasons)
+    frozen = freeze_origin_predictions(snapshot, protocol=configured, manifest=first)
+    assert frozen.action_universe == ("Alpha", "Beta")
+
+
+def test_retrospective_holdout_ignores_stored_relabels_and_rejects_rule_drift(tmp_path, monkeypatch):
+    source = _source_db(tmp_path / "source.duckdb")
+    expected = hashlib.sha256(b"frozen-rules").hexdigest()
+    import legacy_engine.workflows.ranking_benchmark as workflow
+
+    monkeypatch.setattr(workflow, "_tree_hash", lambda _path: expected)
+    first = load_heldout_outcomes(
+        source, _fold(), expected_rules_sha256=expected,
+    )
+    con = duckdb.connect(str(source))
+    con.execute("UPDATE decks SET archetype='Post-freeze relabel' WHERE tournament_id='future'")
+    con.close()
+    second = load_heldout_outcomes(
+        source, _fold(), expected_rules_sha256=expected,
+    )
+    assert first == second
+
+    monkeypatch.setattr(workflow, "_tree_hash", lambda _path: "changed")
+    with pytest.raises(ValueError, match="rules changed after prediction freeze"):
+        load_heldout_outcomes(source, _fold(), expected_rules_sha256=expected)

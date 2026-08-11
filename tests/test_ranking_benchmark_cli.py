@@ -55,6 +55,9 @@ def test_benchmark_cli_two_phase_run_parity_and_tamper_guard(tmp_path):
     assert planned.exit_code == 0, planned.output
     assert "// benchmark protocol:" in planned.output
     fold_id = "2026-01-01--2026-01-29"
+    preregistered = json.loads(protocol.read_text())
+    assert [fold["fold_id"] for fold in preregistered["planned_folds"]] == [fold_id]
+    assert "ban_events_as_of" in preregistered
 
     frozen = runner.invoke(main, [
         "advise", "benchmark", "freeze", "--db", db, "--protocol", str(protocol),
@@ -84,6 +87,12 @@ def test_benchmark_cli_two_phase_run_parity_and_tamper_guard(tmp_path):
     assert json.loads((composed / f"{fold_id}.evaluation.json").read_text()) == json.loads(
         evaluated_path.read_text()
     )
+
+    replay = runner.invoke(main, [
+        "advise", "benchmark", "run", "--db", db, "--protocol", str(protocol),
+        "--artifact-dir", str(composed),
+    ])
+    assert replay.exit_code == 0, replay.output
 
     tampered = json.loads(predictions.read_text())
     tampered["field_shares"]["Alpha"] = 0.9

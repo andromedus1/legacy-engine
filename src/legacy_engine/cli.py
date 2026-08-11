@@ -2636,6 +2636,7 @@ def advise_benchmark_plan(
 ) -> None:
     """Preregister the estimator set, support gates, and whole-date folds."""
     _setup_logging(verbose)
+    from datetime import date
     from pathlib import Path
 
     import duckdb
@@ -2656,9 +2657,15 @@ def advise_benchmark_plan(
         ).fetchall()]
     finally:
         con.close()
-    folds = plan_walk_forward_folds(
-        event_dates, [event[0].isoformat() for event in BAN_EVENTS], protocol,
+    ban_ledger = tuple(
+        (effective.isoformat(), card, reason) for effective, card, reason in BAN_EVENTS
+        if effective < date.fromisoformat(final_until)
     )
+    folds = plan_walk_forward_folds(event_dates, [event[0] for event in ban_ledger], protocol)
+    protocol = protocol.model_copy(update={
+        "planned_folds": folds,
+        "ban_events_as_of": ban_ledger,
+    })
     digest = atomic_write_canonical(Path(out), protocol)
     click.echo(f"// benchmark protocol: {protocol.protocol_id} hash={protocol_sha256(protocol)}")
     click.echo(f"// taxonomy: {protocol.taxonomy_mode}; folds={len(folds)}; artifact={digest}")
@@ -2672,23 +2679,14 @@ def advise_benchmark_plan(
 def _benchmark_protocol_and_folds(db: str, protocol_path: str):
     from pathlib import Path
 
-    import duckdb
-
-    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol, plan_walk_forward_folds
-    from legacy_engine.ingestion.banlist import BAN_EVENTS
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
 
     protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
-    con = duckdb.connect(db, read_only=True)
-    try:
-        event_dates = [row[0] for row in con.execute(
-            "SELECT DISTINCT substr(date,1,10) FROM tournaments ORDER BY 1"
-        ).fetchall()]
-    finally:
-        con.close()
-    folds = plan_walk_forward_folds(
-        event_dates, [event[0].isoformat() for event in BAN_EVENTS], protocol,
-    )
-    return protocol, folds
+    if not protocol.planned_folds:
+        raise click.ClickException(
+            "benchmark protocol has no frozen fold schedule; rerun `advise benchmark plan`"
+        )
+    return protocol, protocol.planned_folds
 
 
 @advise_benchmark.command("freeze")
@@ -2723,6 +2721,7 @@ def advise_benchmark_freeze(
         Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
         taxonomy_mode=protocol.taxonomy_mode,
         taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+        ban_events=protocol.ban_events_as_of,
     )
     manifest_path = root / f"{fold.fold_id}.manifest.json"
     atomic_write_canonical(manifest_path, manifest)
@@ -2763,7 +2762,7 @@ def advise_benchmark_evaluate(
         render_benchmark_markdown,
     )
     from legacy_engine.workflows.ranking_benchmark import (
-        load_heldout_matches, validate_frozen_taxonomy,
+        load_heldout_outcomes, validate_frozen_taxonomy,
     )
 
     protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
@@ -2781,8 +2780,10 @@ def advise_benchmark_evaluate(
         for path in external_paths
     )
     evaluation = evaluate_origin(
-        predictions, load_heldout_matches(
+        predictions, load_heldout_outcomes(
             Path(db), predictions.fold,
+            taxonomy_mode=predictions.taxonomy_mode,
+            expected_rules_sha256=predictions.rules_sha256,
             taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
         ),
         protocol=protocol, external=external,
@@ -2815,7 +2816,7 @@ def advise_benchmark_run(
         render_benchmark_markdown, write_frozen_predictions,
     )
     from legacy_engine.workflows.ranking_benchmark import (
-        build_origin_snapshot, freeze_origin_predictions, load_heldout_matches,
+        build_origin_snapshot, freeze_origin_predictions, load_heldout_outcomes,
         validate_frozen_taxonomy,
     )
 
@@ -2828,6 +2829,7 @@ def advise_benchmark_run(
             Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
             taxonomy_mode=protocol.taxonomy_mode,
             taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            ban_events=protocol.ban_events_as_of,
         )
         atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
         predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
@@ -2837,8 +2839,10 @@ def advise_benchmark_run(
         digest = write_frozen_predictions(root / f"{fold.fold_id}.predictions.json", predictions)
         atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
         evaluation = evaluate_origin(
-            predictions, load_heldout_matches(
+            predictions, load_heldout_outcomes(
                 Path(db), fold,
+                taxonomy_mode=predictions.taxonomy_mode,
+                expected_rules_sha256=predictions.rules_sha256,
                 taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
             ), protocol=protocol,
         )

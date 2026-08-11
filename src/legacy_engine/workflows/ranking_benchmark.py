@@ -18,7 +18,9 @@ from legacy_engine.advisory.ranking_benchmark import (
     FrozenMatchupPrediction,
     FrozenOriginPredictions,
     FrozenRecommendation,
+    HeldoutDeck,
     HeldoutMatch,
+    HeldoutOutcomes,
     SnapshotManifest,
     TaxonomySnapshotManifest,
     content_sha256,
@@ -111,6 +113,8 @@ def validate_frozen_taxonomy(
     if predictions.taxonomy_mode == "retrospective-fixed-parent":
         if taxonomy_snapshot is not None:
             raise ValueError("retrospective benchmark does not accept a taxonomy snapshot")
+        if _tree_hash(RULES_DIR) != predictions.rules_sha256:
+            raise ValueError("retrospective parent taxonomy rules changed after prediction freeze")
         return
     if taxonomy_snapshot is None:
         raise ValueError("contemporaneous evaluation requires a taxonomy snapshot")
@@ -169,6 +173,26 @@ def _validate_closure(con: duckdb.DuckDBPyConnection) -> None:
         raise ValueError(f"snapshot has {card_orphans} deck-card rows without observed card metadata")
 
 
+def _snapshot_semantic_hash(path: Path) -> str:
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        tables = {
+            table: con.execute(
+                f"SELECT {', '.join(columns)} FROM {table} ORDER BY "
+                + ", ".join(str(index + 1) for index in range(len(columns)))
+            ).fetchall()
+            for table, columns in _RAW_TABLE_COLUMNS.items()
+        }
+        tables["cards"] = con.execute("SELECT * FROM cards ORDER BY name").fetchall()
+        if con.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name='entity_eras'"
+        ).fetchone()[0]:
+            tables["entity_eras"] = con.execute("SELECT * FROM entity_eras ORDER BY 1").fetchall()
+        return content_sha256(tables)
+    finally:
+        con.close()
+
+
 def build_origin_snapshot(
     source_db: Path,
     destination_db: Path,
@@ -177,6 +201,7 @@ def build_origin_snapshot(
     protocol_hash: str,
     taxonomy_mode: str = "retrospective-fixed-parent",
     taxonomy_snapshot: Path | None = None,
+    ban_events: tuple[tuple[str, str, str], ...] | None = None,
 ) -> SnapshotManifest:
     """Build an atomic, raw-facts-only pre-cutoff corpus and recompute its era ledger."""
     if source_db.resolve() == destination_db.resolve():
@@ -213,7 +238,13 @@ def build_origin_snapshot(
             label_decks(destination, ruleset, lambda name: store.load_card(destination, name))
         destination.execute("UPDATE decks SET variant = NULL")
         _validate_closure(destination)
-        events_as_of = tuple(event for event in BAN_EVENTS if event[0] <= date.fromisoformat(cutoff))
+        registered_bans = (
+            tuple((date.fromisoformat(d), card, reason) for d, card, reason in ban_events)
+            if ban_events is not None else BAN_EVENTS
+        )
+        events_as_of = tuple(
+            event for event in registered_bans if event[0] <= date.fromisoformat(cutoff)
+        )
         run_eras(destination, ban_events=events_as_of)
 
         event_ids = [row[0] for row in facts["tournaments"]]
@@ -248,18 +279,24 @@ def build_origin_snapshot(
             rules_sha256=rules_hash,
             card_availability_sha256=content_sha256(card_names),
             degraded=taxonomy_mode == "retrospective-fixed-parent",
-            reasons=(
-                "retrospective fixed parent ontology; camps and families disabled",
+            reasons=tuple(filter(None, (
+                "retrospective fixed parent ontology; camps and families disabled"
+                if taxonomy_mode == "retrospective-fixed-parent" else None,
+                "B&R-boundary origin uses the preregistered trailing 28-day pre-cutoff field horizon"
+                if fold.regime_start == fold.cutoff else None,
                 "card availability is observed-by-cutoff because release dates are unavailable",
-            ) if taxonomy_mode == "retrospective-fixed-parent" else (
-                "card availability is observed-by-cutoff because release dates are unavailable",
-            ),
+            ))),
         )
         validate_snapshot_manifest(manifest)
         destination.execute("CHECKPOINT")
         destination.close()
         destination = None
-        os.replace(temporary_name, destination_db)
+        if destination_db.exists():
+            if _snapshot_semantic_hash(destination_db) != _snapshot_semantic_hash(Path(temporary_name)):
+                raise FileExistsError(f"refusing to overwrite different snapshot: {destination_db}")
+            Path(temporary_name).unlink()
+        else:
+            os.replace(temporary_name, destination_db)
         return manifest
     finally:
         source.close()
@@ -274,6 +311,10 @@ def _benchmark_rows(con: duckdb.DuckDBPyConnection, protocol: BenchmarkProtocol,
     """Assemble parent-only rows through the production measurement ledger."""
     cutoff = date.fromisoformat(manifest.fold.cutoff)
     field_since = manifest.fold.regime_start
+    if date.fromisoformat(field_since) >= cutoff:
+        # The origin is exactly a B&R boundary: no same-regime decks can precede it. Use a fixed,
+        # declared trailing horizon rather than crashing the entire multi-regime run.
+        field_since = (cutoff - timedelta(days=28)).isoformat()
     field_rows = con.execute(
         "SELECT archetype, count(*) FROM decks d JOIN tournaments t ON t.id=d.tournament_id "
         "WHERE d.archetype IS NOT NULL AND substr(t.date,1,10)>=? AND substr(t.date,1,10)<? "
@@ -398,6 +439,13 @@ def freeze_origin_predictions(
     expected_protocol_hash = protocol_sha256(protocol)
     if manifest.protocol_hash != expected_protocol_hash:
         raise ValueError("snapshot manifest protocol hash does not match protocol")
+    if protocol.planned_folds and manifest.fold not in protocol.planned_folds:
+        raise ValueError("snapshot fold is not in the preregistered fold schedule")
+    planned_bans = tuple(
+        event for event in protocol.ban_events_as_of if event[0] <= manifest.fold.cutoff
+    )
+    if protocol.ban_events_as_of and manifest.ban_events_as_of != planned_bans:
+        raise ValueError("snapshot B&R ledger does not match the preregistered as-of ledger")
     con = duckdb.connect(str(snapshot_db), read_only=True)
     try:
         actions, shares, rows = _benchmark_rows(con, protocol, manifest)
@@ -518,8 +566,14 @@ def _classified_labels(
     con: duckdb.DuckDBPyConnection, taxonomy_snapshot: Path, cutoff: str,
 ) -> dict[tuple[str, int], str]:
     _manifest, rules_path = _load_taxonomy_snapshot(taxonomy_snapshot, cutoff)
+    return _classified_labels_with_rules(con, rules_path)
+
+
+def _classified_labels_with_rules(
+    con: duckdb.DuckDBPyConnection, rules_path: Path,
+) -> dict[tuple[str, int], str]:
     if not rules_path.is_dir():
-        raise ValueError("contemporaneous taxonomy rules payload must be a rules directory")
+        raise ValueError("taxonomy rules payload must be a rules directory")
     ruleset = load_ruleset(rules_path)
     labels: dict[tuple[str, int], str] = {}
     for tournament_id, deck_idx in con.execute(
@@ -534,7 +588,10 @@ def _classified_labels(
         ).fetchall():
             target = main if board == "main" else side
             target[name] = target.get(name, 0) + count
-            card = store.load_card(con, name)
+            try:
+                card = store.load_card(con, name)
+            except (TypeError, ValueError):
+                card = None
             if card is not None:
                 cards.append(card)
         labels[(str(tournament_id), int(deck_idx))] = classify(
@@ -543,16 +600,39 @@ def _classified_labels(
     return labels
 
 
-def load_heldout_matches(
-    source_db: Path, fold: BenchmarkFold, *, taxonomy_snapshot: Path | None = None,
-) -> tuple[HeldoutMatch, ...]:
-    """Read and orient future outcomes; player identity remains evaluation-only metadata."""
+def load_heldout_outcomes(
+    source_db: Path,
+    fold: BenchmarkFold,
+    *,
+    taxonomy_mode: str = "retrospective-fixed-parent",
+    expected_rules_sha256: str | None = None,
+    taxonomy_snapshot: Path | None = None,
+) -> HeldoutOutcomes:
+    """Read future match outcomes and a separate classified field-mass denominator."""
     con = duckdb.connect(str(source_db), read_only=True)
     try:
-        classified = (
-            _classified_labels(con, taxonomy_snapshot, fold.cutoff)
-            if taxonomy_snapshot is not None else None
-        )
+        if taxonomy_mode == "contemporaneous":
+            if taxonomy_snapshot is None:
+                raise ValueError("contemporaneous held-out classification requires a taxonomy snapshot")
+            classified = _classified_labels(con, taxonomy_snapshot, fold.cutoff)
+        elif taxonomy_mode == "retrospective-fixed-parent":
+            if taxonomy_snapshot is not None:
+                raise ValueError("retrospective held-out classification does not accept a snapshot")
+            actual_rules = _tree_hash(RULES_DIR)
+            if expected_rules_sha256 is not None and actual_rules != expected_rules_sha256:
+                raise ValueError("retrospective parent taxonomy rules changed after prediction freeze")
+            classified = _classified_labels_with_rules(con, RULES_DIR)
+        else:
+            raise ValueError(f"unknown taxonomy mode: {taxonomy_mode}")
+        deck_rows = con.execute(
+            """
+            SELECT t.id, substr(t.date,1,10), coalesce(t.provenance,''), d.deck_idx
+            FROM decks d JOIN tournaments t ON t.id=d.tournament_id
+            WHERE substr(t.date,1,10)>=? AND substr(t.date,1,10)<?
+            ORDER BY t.date, t.id, d.deck_idx
+            """,
+            [fold.cutoff, fold.evaluation_until],
+        ).fetchall()
         rows = con.execute(
             """
             WITH dup AS (
@@ -584,9 +664,8 @@ def load_heldout_matches(
         event_id, event_date, provenance, player1, player2, result,
         deck1, deck2, arch1, arch2, amb1, amb2,
     ) in rows:
-        if classified is not None:
-            arch1 = classified.get((str(event_id), int(deck1))) if deck1 is not None else None
-            arch2 = classified.get((str(event_id), int(deck2))) if deck2 is not None else None
+        arch1 = classified.get((str(event_id), int(deck1))) if deck1 is not None else None
+        arch2 = classified.get((str(event_id), int(deck2))) if deck2 is not None else None
         outcome = parse_match_result(result)
         reason = None
         if amb1 or amb2:
@@ -612,4 +691,19 @@ def load_heldout_matches(
             subject_won=subject_won if reason is None else None,
             exclusion_reason=reason,
         ))
-    return tuple(heldout)
+    decks = tuple(HeldoutDeck(
+        event_id=str(event_id), event_date=str(event_date), provenance=str(provenance),
+        archetype=classified.get((str(event_id), int(deck_idx))), exclusion_reason=None,
+    ) for event_id, event_date, provenance, deck_idx in deck_rows)
+    return HeldoutOutcomes(matches=tuple(heldout), decks=decks)
+
+
+def load_heldout_matches(
+    source_db: Path, fold: BenchmarkFold, *, taxonomy_snapshot: Path | None = None,
+) -> tuple[HeldoutMatch, ...]:
+    """Compatibility wrapper for callers that only need classified match rows."""
+    return load_heldout_outcomes(
+        source_db, fold,
+        taxonomy_mode="contemporaneous" if taxonomy_snapshot is not None else "retrospective-fixed-parent",
+        taxonomy_snapshot=taxonomy_snapshot,
+    ).matches
