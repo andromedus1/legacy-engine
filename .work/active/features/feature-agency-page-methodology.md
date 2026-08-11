@@ -1,7 +1,7 @@
 ---
 id: feature-agency-page-methodology
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory]
 parent: epic-best-deck-decision-trust
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-honesty-guards]
@@ -516,3 +516,28 @@ def methodology_payload(
 - Full repository suite via `uv run --no-sync python -m pytest -q` — 3,668 passed, 1 skipped in
   190.75s. Direct `.venv/bin/pytest` is not authoritative because it omits the repository root from
   the import path; dependency syncing remained disabled and the unrelated `uv.lock` was untouched.
+
+## Review findings (2026-08-11)
+
+**Effective weight**: standard — one same-harness fresh-context pass completed. Closure requires
+verification of the named fix set only; no second independent pass.
+
+**Blockers**: tracked by `feature-agency-page-methodology-review-fixes`.
+
+- Initialize default report state at the generated gate so valid camp P(best) is visible and
+  sortable before any input event.
+- Use one deterministic equal-share top-k rule across canonical grounding, path planning, and
+  browser replay.
+- Make archetype/camp diagnostic details keyboard-operable with disclosure semantics and state.
+- Put the exact posterior soft-min equation and replay defaults in the owning runbook.
+
+**Important**: none deferred. The receiver elevated the tie, accessibility, and reproducibility
+findings because they are explicit integrated feature contracts with bounded fixes.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: Focused review verification passed 65 tests; direct Node probes reproduced default
+P(best) suppression and the equal-share canonical/planner disagreement. No real-browser
+accessibility runtime was available.
