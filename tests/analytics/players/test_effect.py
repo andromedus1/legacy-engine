@@ -5,17 +5,24 @@ import json
 from legacy_engine.advisory.ranking_benchmark import (
     ESTIMATOR_REGISTRY,
     BenchmarkFold,
+    BenchmarkProtocol,
+    EvaluationSupport,
     FrozenMatchupPrediction,
     FrozenOriginPredictions,
+    FrozenRecommendation,
     content_sha256,
 )
-from legacy_engine.analytics.players.diagnostic import PlayerDiagnosticProtocol
+from legacy_engine.analytics.players.diagnostic import IdentityAccessibility, PlayerDiagnosticProtocol
 from legacy_engine.analytics.players.effect import (
     BaseDeckProbability,
     PenaltySelection,
     PlayerInnerFold,
     PlayerTrainingMatch,
     ScheduledPlayerMatch,
+    PlayerEffectOutcome,
+    aggregate_player_effect_evaluations,
+    evaluate_player_effect_fold,
+    render_player_effect_markdown,
     fit_player_effect_model,
     freeze_player_effect_predictions,
     select_penalties,
@@ -149,7 +156,10 @@ def _base() -> FrozenOriginPredictions:
         taxonomy_sha256="taxonomy", rules_sha256="rules", generated_at="2026-01-01T00:00:00Z",
         code_commit="commit", estimator_registry=ESTIMATOR_REGISTRY,
         action_universe=("A", "B"), field_shares={"A": 0.5, "B": 0.5},
-        matchup_predictions=predictions, recommendations=(), methodology={}, seeds={"benchmark": 1},
+        matchup_predictions=predictions, recommendations=(FrozenRecommendation(
+            estimator="production-ci-gated", chosen_action="A", ranked_actions=("A", "B"),
+            scores={"A": 0.5, "B": 0.5}, served=True, refusal_reason=None,
+        ),), methodology={}, seeds={"benchmark": 1},
     )
 
 
@@ -185,3 +195,74 @@ def test_frozen_artifact_is_deterministic_hashed_and_contains_no_identity_keys()
         scheduled[0].model_dump(mode="json"),
     ])
     assert set(first.estimator_registry).isdisjoint(set(ESTIMATOR_REGISTRY))
+
+
+def test_future_evaluation_changes_only_after_outcomes_open_and_keeps_all_strata():
+    base = _base()
+    rows = _rows()
+    grid = tuple(BaseDeckProbability(
+        subject=subject, opponent=opponent, probability=0.5,
+    ) for subject in ("A", "B") for opponent in ("A", "B"))
+    inner = tuple(PlayerInnerFold(
+        cutoff=f"2025-0{index + 9}-01", training_rows=rows[:12], validation_rows=rows[12:],
+        base_predictions_sha256=content_sha256([
+            item.model_dump(mode="json") for item in grid
+        ]), base_deck_predictions=grid,
+    ) for index in range(3))
+    scheduled = tuple(ScheduledPlayerMatch(
+        match_id=f"future:{index}", event_id=f"future-{index}", event_date="2026-01-02",
+        provenance="online" if index < 2 else "paper", subject="A", opponent="B",
+        subject_player_key="repeat-player" if index % 2 == 0 else None,
+        opponent_player_key="other-player" if index < 3 else None,
+        exclusion_reason=None,
+    ) for index in range(4))
+    accessibility = (IdentityAccessibility(
+        provenance="all", registrations=100, match_sides=200, nonempty_handle_rate=1.0,
+        unambiguous_match_rate=1.0, dated_alias_rate=0.0, repeat_players=30,
+        familiarity_pairs=30, effect_supported_match_rate=0.8, evaluable=True, reasons=(),
+    ),)
+    frozen = freeze_player_effect_predictions(
+        base, rows, scheduled, accessibility, _protocol(), inner_folds=inner,
+    )
+    frozen_hash = content_sha256(frozen)
+    outcomes = tuple(PlayerEffectOutcome(
+        match_id=row.match_id, event_id=row.event_id, event_date=row.event_date,
+        provenance=row.provenance, subject=row.subject, opponent=row.opponent,
+        subject_player_key=row.subject_player_key, opponent_player_key=row.opponent_player_key,
+        subject_won=index % 2 == 0, exclusion_reason=None,
+    ) for index, row in enumerate(scheduled))
+    benchmark = BenchmarkProtocol(
+        protocol_id="benchmark", created_at="2026-01-01T00:00:00Z",
+        taxonomy_mode="retrospective-fixed-parent", first_cutoff="2026-01-01",
+        final_evaluation_until="2026-01-29", bootstrap_draws=20,
+        support=EvaluationSupport(
+            min_common_matches=2, min_events=2, min_event_dates=1,
+                min_calibration_matches=10, min_supported_actions=2, min_action_matches=1,
+            min_future_field_coverage=0.5, min_claim_folds=2, min_claim_regimes=1,
+        ),
+    )
+    favorable = evaluate_player_effect_fold(frozen, outcomes, base, benchmark, _protocol())
+    adverse = evaluate_player_effect_fold(
+        frozen, tuple(row.model_copy(update={"subject_won": not row.subject_won}) for row in outcomes),
+        base, benchmark, _protocol(),
+    )
+    assert favorable.outcomes_sha256 != adverse.outcomes_sha256
+    assert content_sha256(frozen) == frozen_hash
+    assert set(favorable.by_support_stratum) == {
+        "known-known", "known-cold", "cold-cold", "below-repeat-floor",
+    }
+    assert set(favorable.by_provenance) == {"online", "paper"}
+    summary = aggregate_player_effect_evaluations(
+        (favorable,), benchmark_protocol=benchmark, player_protocol=_protocol(),
+    )
+    assert summary.status == "not-evaluable"
+    assert summary.status != "candidate-for-promotion-study"
+    assert summary.venue_gate is False
+    assert "claim fold/regime support is insufficient" in summary.reasons
+    assert "online/paper nonharm gate failed" in summary.reasons
+    rendered = render_player_effect_markdown(summary)
+    assert "support:known-cold" in rendered
+    assert "venue:online" in rendered and "venue:paper" in rendered
+    assert "deck q05/q50/q95" in rendered
+    assert "repeat-player" not in rendered
+    assert "Production ranking" in rendered

@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND.
 # On-demand layer — load when surfacing a specific doc's full context.
-generated_at: '2026-08-11T20:43:34Z'
+generated_at: '2026-08-11T21:05:51Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -63,9 +63,11 @@ documents:
       no cloud (mirrors the knowledge-graph/board HTML precedent).'
     - 'PRICES: ingestion/prices.py + seed prices + ingestion/releases.py serve the acquisition and new-card
       surface; PriceQuote.all_null is the honest-null signal (never a silent 0).'
-    - 'PLAYER SUBSYSTEM: analytics/players/{identity,strength,history}.py classifies player handles via
-      alias resolution, gates strength scoring on confidence tier, and tracks per-regime archetype history
-      — drives generate consensus --strong and identify suggest|strong|track.'
+    - 'PLAYER SUBSYSTEM: analytics/players/{identity,strength,history,diagnostic,effect}.py classifies
+      player handles via alias resolution, gates strength scoring on confidence tier, tracks per-regime
+      archetype history, and runs a production-neutral future-only player-effect sensitivity. Diagnostic
+      identity is provenance-local unless a dated curated snapshot exists; aggregate-only output can reach
+      candidate-for-promotion-study but never alters the headline automatically.'
     - 'HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag + named reason + suppressed
       magnitude. No silent zeros. Applies in window.py (thin-regime banner), primer/sideboard (degraded=True
       note), the sideboard recommender (returns fewer than 15 with commit/insurance labels + a marginal-coverage

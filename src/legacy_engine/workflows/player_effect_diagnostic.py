@@ -19,7 +19,11 @@ from legacy_engine.analytics.players.diagnostic import (
     PlayerIdentitySnapshotManifest,
     scoped_player_key,
 )
-from legacy_engine.analytics.players.effect import PlayerTrainingMatch, ScheduledPlayerMatch
+from legacy_engine.analytics.players.effect import (
+    PlayerEffectOutcome,
+    PlayerTrainingMatch,
+    ScheduledPlayerMatch,
+)
 from legacy_engine.advisory.ranking_benchmark import BenchmarkFold, BenchmarkProtocol, content_sha256
 
 if TYPE_CHECKING:
@@ -180,18 +184,18 @@ def load_scheduled_player_matches(
     taxonomy_snapshot: Path | None = None,
 ) -> tuple[ScheduledPlayerMatch, ...]:
     """Load participant/deck schedule without projecting or reading ``rounds.result``."""
-    if taxonomy_snapshot is not None:
-        raise ValueError(
-            "player schedule currently supports the frozen retrospective parent labels only"
-        )
     aliases, _identity_sha = load_player_identity_snapshot(
         identity_snapshot, mode=identity_mode, cutoff=fold.cutoff,
     )
     con = duckdb.connect(str(source_db), read_only=True)
     try:
+        classified = None
+        if taxonomy_snapshot is not None:
+            from legacy_engine.workflows.ranking_benchmark import _classified_labels
+            classified = _classified_labels(con, taxonomy_snapshot, fold.cutoff)
         deck_rows = con.execute(
             """
-            SELECT d.tournament_id, d.player, d.archetype
+            SELECT d.tournament_id, d.deck_idx, d.player, d.archetype
             FROM decks d JOIN tournaments t ON t.id=d.tournament_id
             WHERE substr(t.date,1,10)>=? AND substr(t.date,1,10)<?
             ORDER BY d.tournament_id, d.deck_idx
@@ -212,7 +216,9 @@ def load_scheduled_player_matches(
     finally:
         con.close()
     deck_map: dict[tuple[str, str], list[str | None]] = {}
-    for event_id, player, archetype in deck_rows:
+    for event_id, deck_idx, player, archetype in deck_rows:
+        if classified is not None:
+            archetype = classified.get((str(event_id), int(deck_idx)))
         key = (str(event_id), normalize_player(player))
         deck_map.setdefault(key, []).append(str(archetype) if archetype is not None else None)
     scheduled: list[ScheduledPlayerMatch] = []
@@ -231,17 +237,64 @@ def load_scheduled_player_matches(
         if len(left) == 1 and len(right) == 1 and str(right[0]) < str(left[0]):
             subject, opponent = right[0], left[0]
             subject_key, opponent_key = key2, key1
+            subject_side = "p2"
         else:
             subject = left[0] if len(left) == 1 else None
             opponent = right[0] if len(right) == 1 else None
             subject_key, opponent_key = key1, key2
+            subject_side = "p1"
         scheduled.append(ScheduledPlayerMatch(
             match_id=f"{event_id}:{match_idx}", event_id=str(event_id),
             event_date=str(event_date), provenance=str(provenance), subject=subject,
             opponent=opponent, subject_player_key=subject_key,
             opponent_player_key=opponent_key, exclusion_reason=reason,
+            subject_side=subject_side,
         ))
     return tuple(scheduled)
+
+
+def load_player_effect_outcomes(
+    source_db: Path,
+    scheduled_rows: tuple[ScheduledPlayerMatch, ...],
+) -> tuple[PlayerEffectOutcome, ...]:
+    """Open result strings only after the outcome-free schedule/forecast has been frozen."""
+    scheduled = {row.match_id: row for row in scheduled_rows}
+    if not scheduled:
+        return ()
+    con = duckdb.connect(str(source_db), read_only=True)
+    try:
+        rows = con.execute(
+            """
+            SELECT r.tournament_id, r.match_idx, r.result, r.player2
+            FROM rounds r ORDER BY r.tournament_id, r.match_idx
+            """
+        ).fetchall()
+    finally:
+        con.close()
+    output: list[PlayerEffectOutcome] = []
+    for event_id, match_idx, result, player2 in rows:
+        match_id = f"{event_id}:{match_idx}"
+        schedule = scheduled.get(match_id)
+        if schedule is None:
+            continue
+        parsed = parse_match_result(result)
+        reason = schedule.exclusion_reason
+        won = None
+        if parsed is None or parsed.winner is None or not str(player2 or "").strip():
+            reason = reason or "bye-draw-invalid"
+        elif reason is None:
+            # Scheduled rows orient by parent label; identity aliases never determine outcomes.
+            won = parsed.winner == schedule.subject_side
+        output.append(PlayerEffectOutcome(
+            match_id=match_id, event_id=schedule.event_id, event_date=schedule.event_date,
+            provenance=schedule.provenance, subject=schedule.subject, opponent=schedule.opponent,
+            subject_player_key=schedule.subject_player_key,
+            opponent_player_key=schedule.opponent_player_key, subject_won=won,
+            exclusion_reason=reason,
+        ))
+    if {row.match_id for row in output} != set(scheduled):
+        raise ValueError("scheduled/outcome match-id join is incomplete")
+    return tuple(output)
 
 
 def build_player_inner_folds(

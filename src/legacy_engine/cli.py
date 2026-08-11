@@ -2857,6 +2857,290 @@ def advise_benchmark_run(
         click.echo(f"// ⚠ {reason}")
 
 
+@advise_benchmark.group("player-effect")
+def advise_benchmark_player_effect() -> None:
+    """Experimental, production-neutral player identity sensitivity."""
+
+
+@advise_benchmark_player_effect.command("plan")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol-id", required=True)
+@click.option("--created-at", required=True)
+@click.option(
+    "--identity-mode", type=click.Choice(["provenance-local-handle", "dated-curated-alias"]),
+    default="provenance-local-handle", show_default=True,
+)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_plan(
+    db: str, benchmark_protocol: str, protocol_id: str, created_at: str,
+    identity_mode: str, identity_snapshot: str | None, out: str, report: str, verbose: bool,
+) -> None:
+    """Freeze the experimental registry and report identity accessibility/stickiness."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, atomic_write_canonical, content_sha256, protocol_sha256,
+    )
+    from legacy_engine.analytics.players.diagnostic import (
+        PlayerAccessibilityReport, PlayerDiagnosticProtocol,
+        measure_pilot_stickiness, measure_player_accessibility,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import load_player_diagnostic_rows
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol).read_bytes())
+    protocol = PlayerDiagnosticProtocol(
+        protocol_id=protocol_id, created_at=created_at,
+        benchmark_protocol_hash=protocol_sha256(benchmark), identity_mode=identity_mode,
+    )
+    registrations, matches, identity_sha = load_player_diagnostic_rows(
+        Path(db), until=benchmark.first_cutoff, identity_mode=protocol.identity_mode,
+        identity_snapshot=Path(identity_snapshot) if identity_snapshot else None,
+    )
+    accessibility = measure_player_accessibility(registrations, matches, protocol)
+    stickiness = measure_pilot_stickiness(registrations, protocol)
+    limitations = (
+        "unaliased observations are provenance-local handles; no automatic aliasing was performed",
+        "pilot overlap is descriptive and emits no taxonomy verdict",
+    )
+    payload = PlayerAccessibilityReport(
+        protocol_hash=content_sha256(protocol), identity_snapshot_sha256=identity_sha,
+        by_provenance=accessibility, stickiness=stickiness, limitations=limitations,
+    )
+    atomic_write_canonical(Path(out), protocol)
+    atomic_write_canonical(Path(report), payload)
+    click.echo(f"// player-effect protocol: {protocol.protocol_id} hash={content_sha256(protocol)}")
+    click.echo(f"// identity basis: {protocol.identity_mode}; snapshot={identity_sha or 'none'}")
+    click.echo(f"// aggregate-only accessibility: {report}; production unchanged")
+
+
+def _load_player_effect_inputs(
+    benchmark_protocol_path: str, player_protocol_path: str,
+    base_path: str, base_checksum_path: str,
+):
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, FrozenOriginPredictions, load_hashed_model,
+    )
+    from legacy_engine.analytics.players.diagnostic import PlayerDiagnosticProtocol
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol_path).read_bytes())
+    player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol_path).read_bytes())
+    expected = json.loads(Path(base_checksum_path).read_text())["sha256"]
+    base, _digest = load_hashed_model(Path(base_path), FrozenOriginPredictions, expected)
+    return benchmark, player, base
+
+
+@advise_benchmark_player_effect.command("freeze")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--checksum-out", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_freeze(
+    db: str, benchmark_protocol: str, player_protocol: str, base_predictions: str,
+    base_checksum: str, identity_snapshot: str | None, taxonomy_snapshot: str | None,
+    out: str, checksum_out: str, verbose: bool,
+) -> None:
+    """Freeze outcome-blind player-aware and neutral experimental forecasts."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import atomic_write_canonical
+    from legacy_engine.analytics.players.diagnostic import measure_player_accessibility
+    from legacy_engine.analytics.players.effect import freeze_player_effect_predictions
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        build_player_inner_folds, load_player_diagnostic_rows,
+        load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+
+    benchmark, player, base = _load_player_effect_inputs(
+        benchmark_protocol, player_protocol, base_predictions, base_checksum,
+    )
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    validate_frozen_taxonomy(base, taxonomy)
+    registrations, training, identity_sha = load_player_diagnostic_rows(
+        Path(db), until=base.fold.cutoff, identity_mode=player.identity_mode,
+        identity_snapshot=identity,
+    )
+    accessibility = measure_player_accessibility(registrations, training, player)
+    schedule = load_scheduled_player_matches(
+        Path(db), base.fold, identity_mode=player.identity_mode,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    inner = build_player_inner_folds(
+        Path(db), base.fold, benchmark_protocol=benchmark, player_protocol=player,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    frozen = freeze_player_effect_predictions(
+        base, training, schedule, accessibility, player, inner_folds=inner,
+        identity_snapshot_sha256=identity_sha,
+    )
+    digest = atomic_write_canonical(Path(out), frozen)
+    atomic_write_canonical(Path(checksum_out), {"sha256": digest})
+    click.echo(f"// player-effect frozen: {out} sha256={digest}")
+    click.echo(f"// identity basis: {player.identity_mode}; inner origins={len(inner)}")
+    click.echo("// historical participant replay is outcome-blind; production remains unchanged")
+
+
+@advise_benchmark_player_effect.command("evaluate")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_evaluate(
+    db: str, benchmark_protocol: str, player_protocol: str, base_predictions: str,
+    base_checksum: str, predictions: str, checksum: str, identity_snapshot: str | None,
+    taxonomy_snapshot: str | None, out: str, report: str, verbose: bool,
+) -> None:
+    """Verify frozen bytes, open outcomes, and emit aggregate experimental evidence."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        atomic_write_canonical, atomic_write_text, content_sha256, load_hashed_model,
+    )
+    from legacy_engine.analytics.players.effect import (
+        FrozenPlayerEffectPredictions, aggregate_player_effect_evaluations,
+        evaluate_player_effect_fold, render_player_effect_markdown,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        load_player_effect_outcomes, load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+
+    benchmark, player, base = _load_player_effect_inputs(
+        benchmark_protocol, player_protocol, base_predictions, base_checksum,
+    )
+    expected = json.loads(Path(checksum).read_text())["sha256"]
+    frozen, digest = load_hashed_model(Path(predictions), FrozenPlayerEffectPredictions, expected)
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    validate_frozen_taxonomy(base, taxonomy)
+    schedule = load_scheduled_player_matches(
+        Path(db), base.fold, identity_mode=player.identity_mode,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    if content_sha256([row.model_dump(mode="json") for row in schedule]) != frozen.schedule_sha256:
+        raise click.ClickException("current outcome-free schedule does not match frozen predictions")
+    outcomes = load_player_effect_outcomes(Path(db), schedule)
+    evaluation = evaluate_player_effect_fold(frozen, outcomes, base, benchmark, player)
+    summary = aggregate_player_effect_evaluations(
+        (evaluation,), benchmark_protocol=benchmark, player_protocol=player,
+    )
+    atomic_write_canonical(Path(out), evaluation)
+    atomic_write_text(Path(report), render_player_effect_markdown(summary))
+    click.echo(f"// verified player-effect predictions: sha256={digest}")
+    click.echo(f"// status: {summary.status}; production ranking unchanged")
+
+
+@advise_benchmark_player_effect.command("run")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-artifact-dir", type=click.Path(exists=True, file_okay=False), required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_player_effect_run(
+    db: str, benchmark_protocol: str, player_protocol: str, benchmark_artifact_dir: str,
+    artifact_dir: str, identity_snapshot: str | None, taxonomy_snapshot: str | None,
+    verbose: bool,
+) -> None:
+    """Compose freeze/evaluate over every already-frozen benchmark origin."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, FrozenOriginPredictions, atomic_write_canonical, atomic_write_text,
+        load_hashed_model,
+    )
+    from legacy_engine.analytics.players.diagnostic import (
+        PlayerDiagnosticProtocol, measure_player_accessibility,
+    )
+    from legacy_engine.analytics.players.effect import (
+        aggregate_player_effect_evaluations, evaluate_player_effect_fold,
+        freeze_player_effect_predictions, render_player_effect_markdown,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        build_player_inner_folds, load_player_diagnostic_rows, load_player_effect_outcomes,
+        load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol).read_bytes())
+    player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol).read_bytes())
+    benchmark_root, root = Path(benchmark_artifact_dir), Path(artifact_dir)
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    evaluations = []
+    for fold in benchmark.planned_folds:
+        base_path = benchmark_root / f"{fold.fold_id}.predictions.json"
+        checksum_path = benchmark_root / f"{fold.fold_id}.predictions.sha256.json"
+        base, _digest = load_hashed_model(
+            base_path, FrozenOriginPredictions, json.loads(checksum_path.read_text())["sha256"],
+        )
+        validate_frozen_taxonomy(base, taxonomy)
+        registrations, training, identity_sha = load_player_diagnostic_rows(
+            Path(db), until=fold.cutoff, identity_mode=player.identity_mode,
+            identity_snapshot=identity,
+        )
+        accessibility = measure_player_accessibility(registrations, training, player)
+        schedule = load_scheduled_player_matches(
+            Path(db), fold, identity_mode=player.identity_mode,
+            identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+        )
+        inner = build_player_inner_folds(
+            Path(db), fold, benchmark_protocol=benchmark, player_protocol=player,
+            identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+        )
+        frozen = freeze_player_effect_predictions(
+            base, training, schedule, accessibility, player, inner_folds=inner,
+            identity_snapshot_sha256=identity_sha,
+        )
+        predictions_path = root / f"{fold.fold_id}.player-effect.predictions.json"
+        digest = atomic_write_canonical(predictions_path, frozen)
+        atomic_write_canonical(
+            root / f"{fold.fold_id}.player-effect.predictions.sha256.json", {"sha256": digest},
+        )
+        evaluation = evaluate_player_effect_fold(
+            frozen, load_player_effect_outcomes(Path(db), schedule), base, benchmark, player,
+        )
+        atomic_write_canonical(root / f"{fold.fold_id}.player-effect.evaluation.json", evaluation)
+        evaluations.append(evaluation)
+        click.echo(f"// player-effect fold {fold.fold_id}: {evaluation.status}")
+    summary = aggregate_player_effect_evaluations(
+        tuple(evaluations), benchmark_protocol=benchmark, player_protocol=player,
+    )
+    atomic_write_canonical(root / "player-effect.summary.json", summary)
+    atomic_write_text(root / "player-effect.summary.md", render_player_effect_markdown(summary))
+    click.echo(f"// player-effect status: {summary.status}; production ranking unchanged")
+
+
 def _parse_lift_spec(spec: str | None) -> dict[str, float]:
     """Parse `--*-lift` "opp=+0.11,opp2=-0.03" → {opponent: delta}. Opp names may contain spaces."""
     out: dict[str, float] = {}

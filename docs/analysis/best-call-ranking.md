@@ -110,6 +110,39 @@ external evidence, and censor reasons. These artifacts are evidence, not a tunin
 loop, and a predictive claim requires the preregistered fold, regime, calibration, and primary
 vs baseline gates.
 
+### Experimental player-effect diagnostic
+
+`advise benchmark player-effect plan|freeze|evaluate|run` asks whether repeat pilot identity adds
+future-only predictive value beyond both `production-ci-gated` and a deck-residual-only control.
+It is a separate three-estimator experimental registry (`deck-residual-control`,
+`player-intercept`, `player-familiarity`); it does not add an estimator, score, or P(best) value to
+the Best Call page.
+
+Identity defaults to a provenance-local normalized handle. The same unaliased string on online and
+paper sources is not treated as one person. Cross-handle/source merging requires an operator-supplied
+dated curated alias snapshot effective no later than the fold cutoff; alias suggestions are never
+consumed. Reports expose only aggregate accessibility, repeat/familiarity counts, coefficient
+quantiles, and grouped scores. They never render handles, ids, individual coefficients, or player
+rankings, and groups below the privacy floor are suppressed.
+
+The diagnostic first measures online/paper identity accessibility and descriptive pilot stickiness
+for existing parent/variant configurations. Stickiness is an input to later taxonomy research, not
+a one-deck/two-deck verdict. The model then fits deterministic L2-pooled deck-pair residuals, repeat-
+player intercepts, and separately gated player-by-parent familiarity on pre-cutoff matches only.
+Penalty selection uses earlier chronological origins whose production base grid is independently
+recomputed at each cutoff. Player-neutral deck forecasts set identity terms to zero; player-aware
+forecasts use an outcome-free participant schedule hashed before result strings are opened.
+Historical participant replay does not prove the source exposed pairings before an event.
+
+Evaluation keeps player-aware, player-masked, and player-neutral estimands separate, and reports
+known-known, known-cold, cold-cold, below-repeat-floor, online, and paper strata. The strongest
+possible status is `candidate-for-promotion-study`, requiring the full preregistered conjunction:
+fold/regime and identity support; event-block log-loss advantage plus Brier/calibration nonharm;
+player-neutral regret improvement; and cold-start/venue nonharm. Missing support is
+`not-evaluable`; adverse evidence is `stop`; incomplete improvement is `diagnostic-only`. Even a
+candidate requires a new reviewed promotion feature. This command never tunes, selects, deploys,
+or changes the production ranking or threshold-only strong-player surface.
+
 Optionally re-run discovery first (`discover run --archetype <parent> --since 2024-12-16`
 per parent) when the corpus has grown materially — staged splits carry frozen
 membership, so **new decks get camp labels only after a re-staged PASS + apply**.
