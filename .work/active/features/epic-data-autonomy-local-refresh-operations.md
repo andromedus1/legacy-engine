@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-local-refresh-operations
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [feature-decision-data-currency]
@@ -488,3 +488,24 @@ status-filesystem, long-run overlap, and launchd rollback cases explicitly.
 - **Review weight**: `standard`, explicitly requested by the autopilot caller — one independent
   fresh-context feature pass, followed by recipient adjudication and any confirmed fixes without a
   second review pass.
+
+## Review (2026-08-11)
+
+**Verdict**: Approve
+
+**Blockers**: none. The shared-lock and active-run lifecycle findings were fixed by
+`epic-data-autonomy-local-refresh-operations-review-safety` in `3305dcf`.
+**Important**: none. The post-bootout rollback-boundary finding was fixed in the same scoped story.
+**Nits**: none.
+**Rejected**: none.
+
+**Notes**: Standard-weight deep feature review used one same-harness fresh-context Sol pass after
+the different-class Claude endpoint returned no report, Gemini was unavailable, and Z.AI lacked
+credentials. The pass covered correctness, tests, design alignment, command/path safety,
+CLI/config contracts, foundation assertions, durability, concurrency, lifecycle, and operational
+rollback. Recipient adjudication confirmed all three findings; the fix story added the shared
+artifact-derived lock across scheduled/manual production entrypoints, active-lock-safe lifecycle
+controls, best-effort SIGTERM terminalization, and a complete post-bootout rollback boundary.
+Focused verification passed 134 tests; the corrected full suite passed 3,769 tests with 1 skip.
+Standard closure requires no second independent pass. Live LaunchAgent installation, inspection,
+triggering, and removal were intentionally excluded and remain explicit operator actions.
