@@ -1,7 +1,7 @@
 ---
 id: feature-card-name-reconciliation-closure
 kind: feature
-stage: implementing
+stage: done
 tags: [ingestion, data-quality, benchmark]
 parent: null
 depends_on: [story-fix-missing-goblin-card-metadata, story-fix-set-prefixed-wasteland-name]
@@ -371,3 +371,12 @@ fail-fast package-registry loading, duplicate-prefix validation, and their missi
 The reviewer confirmed strict cutoff/tail semantics, authority precedence, and the absence of generic
 bracket, fuzzy, or truncation repair. A comma-delimited human summary was retained as a nit because
 structured per-gap audit output owns machine-readable detail.
+
+### Closure
+
+The named review-fix story closed every accepted blocker/important finding without a second review
+pass. Focused verification is `34 passed`; the final full repository suite is `3823 passed, 1
+skipped in 216.05s`, with owned Ruff/compile/diff checks green and knowledge-index lint at 0 errors.
+The feature is approved under its completed standard review. The unchanged benchmark remains
+not-started because the truthful fresh-copy preflight still reports 60 rows / 53 names entering
+planned cutoffs plus 2 rows / 2 names in the post-last-cutoff tail; earliest blocker is 2025-08-18.
