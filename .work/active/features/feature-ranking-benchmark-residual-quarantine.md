@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-benchmark-residual-quarantine
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing, data-quality]
 parent: null
 depends_on: [feature-ranking-future-only-benchmark, feature-card-name-reconciliation-closure]
@@ -354,3 +354,32 @@ review remains required after implementation.
   completes.
 - Discrepancy: the first child commit includes shared adapter plumbing consumed by the second child;
   behavior and acceptance remain independently verified.
+
+## Review findings (2026-08-12)
+
+**Effective weight**: standard (project default). Exactly one same-harness fresh-context Sol pass
+completed; this was independent context but not a different model lineage. Closure requires
+verification of the named fix story only and no second independent pass.
+
+**Receiver-confirmed blockers**: tracked by
+`feature-ranking-benchmark-residual-quarantine-review-fixes`.
+
+- Quarantine ledger identity must hash only pre-outcome dimensions; neither training results and
+  standings nor held-out classifications and outcomes may change its digest.
+- Blank or ambiguous player identity cannot leave an affected round in the retained corpus or
+  understate the round ceiling. The planner must remove it conservatively or fail with a typed reason.
+- Registration must be strictly before the exact first-cutoff instant for a predictive-capable
+  protocol, and typed summaries must reject any status above their declared claim ceiling.
+- Strict/v1 raw and canonical artifacts must preserve their previous card-inclusive hashes and omit
+  additive default fields where compatibility requires it, including the page-visible summary id.
+- Freeze and evaluation must validate that the manifest/held-out ledger exists, equals the protocol
+  policy, passes ceilings, matches its declared digest, and binds the retained corpus.
+
+**Accepted important finding**: the operator-facing Markdown must render exact quarantined deck,
+identity, unresolved-name, event/provenance, ledger-reason, and digest evidence already available in
+JSON.
+
+**Review action**: the in-flight v2 replay was stopped after fold 1 because its artifacts were built
+under invalid contracts. Partial ignored files are non-authoritative debugging output and will not be
+used for the page. After the fix story is green, create a fresh artifact directory and restart only
+from corrected committed code.
