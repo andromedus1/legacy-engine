@@ -7,6 +7,13 @@
       "provider": "fbettega/MTG_decklistcache",
       "oracle_id": "88222fd2-8316-426c-8218-64f6be5ca0f8",
       "evidence": "https://magic.wizards.com/en/news/announcements/may-13-2024-banned-and-restricted-announcement"
+    },
+    {
+      "observed_name": "[TMP] Wasteland",
+      "canonical_name": "Wasteland",
+      "provider": "MTGmelee via fbettega/MTG_decklistcache",
+      "oracle_id": "09a70ae8-3859-4a09-901d-dce063fa3b5f",
+      "evidence": "https://melee.gg/Tournament/View/212627"
     }
   ]
 }

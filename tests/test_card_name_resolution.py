@@ -326,3 +326,22 @@ class TestCardDimensionReconciliation:
 
         with pytest.raises(ValueError, match=r"alias\[0\] lacks required provenance"):
             load_provider_card_aliases(path)
+
+    def test_resolves_verified_provider_set_prefixed_card_name(self):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name="Wasteland")])
+        con.execute("INSERT INTO deck_cards VALUES ('t', 0, 'side', '[TMP] Wasteland', 4)")
+
+        report = reconcile_card_dimension(
+            con,
+            new_card_names=frozenset(),
+            alias_manifest=None,
+            alias_snapshot_reason=None,
+            resolved_at=NOW,
+        )
+
+        assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == "Wasteland"
+        assert [item.observed_name for item in report.normalized_existing] == ["[TMP] Wasteland"]
+        assert report.unresolved_count == 0
+        con.close()
