@@ -124,6 +124,14 @@ legacy-engine seed prices       # Scryfall default_cards bulk → per-printing p
 legacy-engine refresh all       # tournament cache + rules (+ --prices to include prices bulk)
 legacy-engine refresh cards     # release-aware diff refresh of the card universe
 
+# Local decision-data operations (the scheduler wraps the same composed refresh)
+legacy-engine ops scheduler install   # install/update the 07:30 local user LaunchAgent
+legacy-engine ops scheduler inspect   # loaded state, exact plist, schedule, and log paths
+legacy-engine ops scheduler run-now   # launch now; never kills an already-running refresh
+legacy-engine ops status              # last outcome, phase/reason, artifact identity, pending actions
+legacy-engine ops status --brief      # one local-only session-orientation line
+legacy-engine ops scheduler uninstall # unload, then remove only legacy-engine's plist
+
 # Label every ingested deck with an archetype
 legacy-engine label
 
@@ -219,6 +227,28 @@ legacy-engine deck buildable --name "my Dimir Tempo"           # check what you 
 legacy-engine viz deck "Dimir Tempo" --out dash.html   # per-deck attack-focused dashboard
 legacy-engine viz meta --out meta.html           # also: viz matchups | viz trends | viz tiers (.html or .png)
 ```
+
+### Local scheduled refresh
+
+`legacy-engine ops scheduler install` creates the user agent
+`~/Library/LaunchAgents/com.legacy-engine.refresh.plist`. It runs the existing typed
+decision-data composition daily at **07:30 local time** through the repository's absolute
+`.venv/bin/python`; `RunAtLoad` is deliberately absent. `StartCalendarInterval` means a run missed
+while the Mac sleeps is coalesced and started after wake. The job writes stdout/stderr to
+`data/ops/logs/refresh.out.log` and `refresh.err.log`.
+
+Every attempt uses a non-blocking kernel lock. An overlapping invocation does no refresh work and
+leaves its own immutable evidence without overwriting the active run's canonical status. Canonical
+status lives at `data/ops/status/decision-refresh.json`; missing, malformed, failed, degraded,
+running, and more-than-36-hour-old records are distinct `ops status` results. A successful ranking
+records its exact path and SHA-256. A failed refresh preserves the prior ranking without claiming
+that artifact as newly written.
+
+The lifecycle is reversible: install is an identical-config no-op, safely reloads a changed plist,
+and restores the previous plist if bootstrap fails; uninstall retains the plist when bootout fails.
+Use `ops scheduler inspect`, `ops status`, and the two log files before intervening. This scheduler
+does **not** install the separate B&R monitor, upstream hot spare, vendor-price refresh, or a Modern
+deployment.
 
 ### Deck-prep tooling (`scripts/`)
 

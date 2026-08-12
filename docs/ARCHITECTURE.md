@@ -54,6 +54,7 @@ observed → label → analytics → advisory arc.
 ┌────────────────────────────────────────────────────────────────────────────────┐
 │                                  CLI  (cli.py)                                   │
 │  seed (cards|cache|rules|banlist|prices) · refresh (all|cards)                   │
+│  · ops (scheduled-refresh|status|scheduler install|inspect|run-now|uninstall)     │
 │  · label · report (meta|matchups|tiers|trends|cards|gaps|subgroup|variants|      │
 │    new-cards|speculate|prices|affectedness)                                       │
 │  · advise (positioning|sideboard|whattoplay|field|report|refresh|acquire|compare| │
@@ -140,6 +141,20 @@ observed → label → analytics → advisory arc.
 | `prices.py` | Per-printing price layer: `price_quote(con, name)` → `PriceQuote` (cheapest paper USD across all printings). `PriceQuote.all_null=True` is the honest-null signal — never a silent 0 when every printing lacks a paper price. `deck_cost` accumulates totals and exposes an explicit `unpriced` list. | duckdb | — |
 | `releases.py` | Scryfall `/sets` scan: `fetch_sets` + `upcoming_and_recent` classify sets as upcoming or recently-released in a configurable horizon window. Used by `refresh cards` to decide whether to force a bulk re-pull (release-aware incremental). | api.scryfall.com | — |
 | `store.py` | Normalize parsed raw JSON → Pydantic models → load into DuckDB (`data/legacy.duckdb`). Owns `rebuild` (drop+recreate cards), `rebuild_prices` (drop+recreate card_prices), and `load_cards_diff` (non-destructive incremental). DuckDB is a **rebuildable derived cache**; raw JSON is the source of truth. | duckdb | ingestion-ops-and-metashare |
+
+### `ops/` — local decision-data operations
+
+| File | Responsibility |
+|---|---|
+| `status.py` | Typed canonical and immutable per-attempt JSON status, atomic same-directory replacement, 36-hour freshness classification, and shared `//` audit-line projection. Missing/invalid/failed/degraded/running/stale remain distinct. |
+| `scheduled_refresh.py` | Non-blocking `fcntl` execution lock around `workflows.decision_refresh.run_decision_refresh`; maps the existing workflow result to attributable status and hashes only a ranking written by that attempt. Overlap never mutates decision artifacts or canonical owner status. |
+| `launchd.py` | Generates the 07:30 local user LaunchAgent with `plistlib` and controls it through an injected `launchctl` port. Install/update rolls back on failed bootstrap; uninstall preserves the plist on failed bootout. |
+
+The LaunchAgent uses absolute repository/virtualenv/log paths, `WorkingDirectory`, and
+`StartCalendarInterval`; it omits `RunAtLoad`, `KeepAlive`, and `StartInterval`. Repository tests
+inject both paths and process results, so they never invoke live `launchctl` or touch
+`~/Library/LaunchAgents`. The scheduler automates the existing decision-data composition only; the
+B&R monitor, hot spare, vendor prices, and non-Legacy deployments remain separate scopes.
 
 ### `collection/` — the user's personal layer (local single-user; schema cloud-ready)
 
@@ -314,6 +329,7 @@ All external data fetched once and mirrored; the engine makes **no network calls
 - **CLI:** Click nested groups:
   - `seed cards|cache|rules|banlist|prices`
   - `refresh all|cards`
+  - `ops scheduled-refresh|status` and `ops scheduler install|inspect|run-now|uninstall`
   - `report meta|matchups|tiers|trends|cards|gaps|subgroup|variants|new-cards|speculate|prices|affectedness`
   - `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare|backtest|sweep|benchmark plan|benchmark freeze|benchmark evaluate|benchmark run`
   - `identify suggest|strong|track`

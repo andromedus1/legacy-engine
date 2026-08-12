@@ -589,7 +589,113 @@ def ops_status(status_dir: str | None, brief: bool, verbose: bool) -> None:
 
 @ops.group("scheduler")
 def ops_scheduler() -> None:
-    """Manage the local user LaunchAgent (repo implementation pending)."""
+    """Manage the local user LaunchAgent."""
+
+
+def _scheduler_spec(repo_root: str | None, launch_agents_dir: str | None, uid: int | None):
+    from pathlib import Path
+
+    from legacy_engine.config import PROJECT_ROOT
+    from legacy_engine.ops.launchd import build_refresh_launch_agent_spec
+
+    root = Path(repo_root).resolve() if repo_root else PROJECT_ROOT
+    agents = (
+        Path(launch_agents_dir).resolve()
+        if launch_agents_dir
+        else Path.home() / "Library" / "LaunchAgents"
+    )
+    return build_refresh_launch_agent_spec(
+        repo_root=root,
+        launch_agents_dir=agents,
+        uid=uid if uid is not None else __import__("os").getuid(),
+    )
+
+
+def _echo_scheduler_state(spec, state) -> None:
+    click.echo(f"// scheduler: {state.detail}")
+    click.echo(f"// label: {spec.label} ({spec.domain_target})")
+    click.echo(f"// plist: {state.plist_path}")
+    click.echo(f"// schedule: daily {spec.hour:02d}:{spec.minute:02d} local")
+    click.echo(f"// logs: {spec.stdout_path} | {spec.stderr_path}")
+    click.echo(f"// state: installed={state.installed} loaded={state.loaded}")
+
+
+def _scheduler_options(function):
+    for option in (
+        click.option("--uid", type=int, default=None, hidden=True),
+        click.option("--launch-agents-dir", type=click.Path(file_okay=False), default=None, hidden=True),
+        click.option("--repo-root", type=click.Path(file_okay=False), default=None, hidden=True),
+    ):
+        function = option(function)
+    return function
+
+
+@ops_scheduler.command("install")
+@_scheduler_options
+@_verbose
+def ops_scheduler_install(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Install or safely update the daily refresh LaunchAgent."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, install_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = install_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("inspect")
+@_scheduler_options
+@_verbose
+def ops_scheduler_inspect(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Inspect the configured and loaded LaunchAgent state."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, inspect_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = inspect_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("run-now")
+@_scheduler_options
+@_verbose
+def ops_scheduler_run_now(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Ask launchd to start the agent without killing an active run."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, run_launch_agent_now
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = run_launch_agent_now(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("uninstall")
+@_scheduler_options
+@_verbose
+def ops_scheduler_uninstall(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Unload and remove only legacy-engine's refresh LaunchAgent."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, uninstall_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = uninstall_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
 
 
 # ── label: archetype classification ──

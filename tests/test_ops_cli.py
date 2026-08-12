@@ -15,6 +15,7 @@ from legacy_engine.ops.status import (
     JobStatus,
     write_job_status,
 )
+from legacy_engine.ops.launchd import CommandResult
 
 
 NOW = datetime.now(timezone.utc)
@@ -130,3 +131,51 @@ class TestScheduledRefreshCli:
         ])
         assert result.exit_code == exit_code, result.output
         assert outcome.value in result.output or "healthy" in result.output
+
+
+class TestSchedulerCli:
+    def test_scheduler_help_lists_lifecycle(self, runner):
+        result = runner.invoke(main, ["ops", "scheduler", "--help"])
+        assert result.exit_code == 0
+        for command in ("install", "inspect", "run-now", "uninstall"):
+            assert command in result.output
+
+    @pytest.mark.parametrize("command", ["install", "inspect", "run-now", "uninstall"])
+    def test_scheduler_verbs_use_injected_launchctl_and_temp_paths(
+        self, runner, tmp_path, monkeypatch, command,
+    ):
+        repo = tmp_path / "repo"
+        python = repo / ".venv" / "bin" / "python"
+        python.parent.mkdir(parents=True)
+        python.touch()
+        agents = tmp_path / "LaunchAgents"
+        calls: list[tuple[str, ...]] = []
+
+        class FakeProcess:
+            def run(self, *args):
+                calls.append(args)
+                if args[0] == "print":
+                    return CommandResult(returncode=113, stderr="Could not find service")
+                return CommandResult(returncode=0)
+
+        monkeypatch.setattr(
+            "legacy_engine.ops.launchd.SubprocessLaunchctl",
+            lambda: FakeProcess(),
+        )
+        result = runner.invoke(main, [
+            "ops", "scheduler", command,
+            "--repo-root", str(repo),
+            "--launch-agents-dir", str(agents),
+            "--uid", "501",
+        ])
+        assert result.exit_code == 0, result.output
+        assert str(agents / "com.legacy-engine.refresh.plist") in result.output
+        assert "daily 07:30 local" in result.output
+        if command == "install":
+            assert calls[-1][0] == "bootstrap"
+        elif command == "inspect":
+            assert calls == [("print", "gui/501/com.legacy-engine.refresh")]
+        elif command == "run-now":
+            assert calls == [("kickstart", "gui/501/com.legacy-engine.refresh")]
+        else:
+            assert calls == []  # already absent is idempotent; no real bootout
