@@ -8005,15 +8005,33 @@ def eras_run(db: str | None, provenance: str | None, alpha: float, verbose: bool
     Example: legacy-engine eras run
     """
     _setup_logging(verbose)
-    from legacy_engine.analytics.eras.run import run_eras
-    from legacy_engine.ingestion import store
+    from pathlib import Path
 
-    con = store.connect(db) if db else store.connect()
+    from legacy_engine.analytics.eras.run import run_eras
+    from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR, PROJECT_ROOT
+    from legacy_engine.ingestion import store
+    from legacy_engine.ops.scheduled_refresh import (
+        LockUnavailable,
+        decision_refresh_lock_path,
+        exclusive_file_lock,
+    )
+
+    db_path = Path(db).resolve() if db else DUCKDB_PATH
+    lock_path = decision_refresh_lock_path(
+        db_path,
+        PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html",
+        lock_dir=OPS_LOCK_DIR,
+    )
     try:
-        _echo_data_freshness(con, provenance=provenance)
-        result = run_eras(con, provenance=provenance, alpha=alpha)
-    finally:
-        con.close()
+        with exclusive_file_lock(lock_path):
+            con = store.connect(db_path)
+            try:
+                _echo_data_freshness(con, provenance=provenance)
+                result = run_eras(con, provenance=provenance, alpha=alpha)
+            finally:
+                con.close()
+    except LockUnavailable as exc:
+        raise click.ClickException(str(exc)) from exc
 
     click.echo(f"// eras run: {result.n_entities} entities analyzed (alpha={alpha})")
     if result.n_entities == 0:

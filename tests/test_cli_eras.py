@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import shutil
 from datetime import date, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
@@ -21,6 +23,11 @@ from legacy_engine.cli import main
 from legacy_engine.config import BAN_EVENTS_PATH
 from legacy_engine.ingestion import store as _store
 from legacy_engine.ingestion.cache import parse_cache_item
+from legacy_engine.ops.scheduled_refresh import (
+    LockUnavailable,
+    decision_refresh_lock_path,
+    exclusive_file_lock,
+)
 from tests.conftest import in_current_regime
 
 # Same implanted-cliff shape as tests/analytics/eras/test_run.py's DB corpus (kept independent —
@@ -88,6 +95,50 @@ def runner():
 
 
 class TestErasRun:
+    def test_refuses_when_decision_refresh_owns_same_artifact_lock(
+        self, tmp_path, runner, monkeypatch,
+    ):
+        db_path = _build_eras_db(tmp_path)
+        lock_dir = tmp_path / "locks"
+        ranking_path = tmp_path / "decks" / "best-deck-best-call-ranking.html"
+        monkeypatch.setattr("legacy_engine.config.OPS_LOCK_DIR", lock_dir)
+        monkeypatch.setattr("legacy_engine.config.PROJECT_ROOT", tmp_path)
+        expected = decision_refresh_lock_path(
+            Path(db_path), ranking_path, lock_dir=lock_dir,
+        )
+
+        with exclusive_file_lock(expected):
+            result = runner.invoke(main, ["eras", "run", "--db", db_path])
+
+        assert result.exit_code != 0
+        assert "refresh already running" in result.output
+
+    def test_running_eras_owns_the_scheduled_refresh_artifact_lock(
+        self, tmp_path, runner, monkeypatch,
+    ):
+        db_path = _build_eras_db(tmp_path)
+        lock_dir = tmp_path / "locks"
+        ranking_path = tmp_path / "decks" / "best-deck-best-call-ranking.html"
+        monkeypatch.setattr("legacy_engine.config.OPS_LOCK_DIR", lock_dir)
+        monkeypatch.setattr("legacy_engine.config.PROJECT_ROOT", tmp_path)
+        expected = decision_refresh_lock_path(
+            Path(db_path), ranking_path, lock_dir=lock_dir,
+        )
+        observed = []
+
+        def prove_contention(con, *, provenance, alpha):
+            with pytest.raises(LockUnavailable):
+                with exclusive_file_lock(expected):
+                    pass
+            observed.append("contended")
+            return SimpleNamespace(n_entities=0, summaries={}, alarms={})
+
+        monkeypatch.setattr("legacy_engine.analytics.eras.run.run_eras", prove_contention)
+        result = runner.invoke(main, ["eras", "run", "--db", db_path])
+
+        assert result.exit_code == 0, result.output
+        assert observed == ["contended"]
+
     def test_analyzes_all_entities_and_reports_alarm(self, tmp_path, runner):
         db_path = _build_eras_db(tmp_path)
         result = runner.invoke(main, ["eras", "run", "--db", db_path])
@@ -114,6 +165,15 @@ class TestErasRun:
 
 
 class TestErasList:
+    def test_read_only_list_does_not_acquire_refresh_lock(self, tmp_path, runner, monkeypatch):
+        db_path = _build_eras_db(tmp_path)
+        monkeypatch.setattr(
+            "legacy_engine.ops.scheduled_refresh.exclusive_file_lock",
+            lambda path: (_ for _ in ()).throw(AssertionError("read-only command took lock")),
+        )
+        result = runner.invoke(main, ["eras", "list", "--db", db_path])
+        assert result.exit_code == 0, result.output
+
     def test_no_data_before_a_run(self, tmp_path, runner):
         db_path = _build_eras_db(tmp_path)
         result = runner.invoke(main, ["eras", "list", "--db", db_path])
