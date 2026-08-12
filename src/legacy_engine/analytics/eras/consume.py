@@ -234,16 +234,15 @@ def era_horizons(
             (candidate for candidate in (stored_since, affected_since) if candidate is not None),
             default=None,
         )
+        # A confirmed ban is a clamp even when the era detector explicitly stored
+        # ``stable_since: null`` (an analyzed but not-yet-settled entity).  The
+        # null is not permission to discard the ban candidate or its provenance.
         clamped = (
-            stored_since is not None
+            source != "ban-only"
             and affected_since is not None
-            and affected_since > stored_since
+            and (stored_since is None or affected_since > stored_since)
         )
         if clamped:
-            source = "ban-clamped"
-            trigger = f"ban: valid_since {affected_since}"
-            attribution_kind = None
-        elif stored_since is None and affected_since is not None and source != "ban-only":
             source = "ban-clamped"
             trigger = f"ban: valid_since {affected_since}"
             attribution_kind = None

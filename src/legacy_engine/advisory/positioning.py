@@ -110,10 +110,10 @@ def ranking_evidence_payload(
     elif measured < suppress_coverage:
         stratum = "unscorable"
         reason = f"measured field coverage {measured:.1%} is below {suppress_coverage:.0%}"
-    elif imputed > 0.5:
-        stratum = "imputation-dominated"
     elif transition_prior and observed_field_share <= 0.0:
         stratum = "transition-prior"
+    elif imputed > 0.5:
+        stratum = "imputation-dominated"
     elif grounded:
         stratum = "grounded"
     else:

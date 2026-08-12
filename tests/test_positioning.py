@@ -1263,6 +1263,18 @@ class TestRankingEvidencePayload:
         }
         assert practical_recommendation_order(rows) == ("beta", "alpha", "zeta")
 
+    def test_transition_prior_precedes_imputation_dominated(self):
+        result = ranking_evidence_payload(
+            field_share=0.1,
+            observed_field_share=0.0,
+            decision_field_share=0.1,
+            measured_share=0.4,
+            resolved_cells=2,
+            grounded=False,
+            transition_prior=True,
+        )
+        assert result["stratum"] == "transition-prior"
+
 
 class TestPositioningCoverageRestrict:
     """positioning_score restrict-to-covered behavior across coverage bands."""

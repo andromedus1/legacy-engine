@@ -80,6 +80,48 @@ class RecordingPorts:
 
 
 class TestDecisionRefresh:
+    def test_usefulness_contract_requires_practical_call_inside_rendered_prefix(self):
+        with pytest.raises(ValueError, match="outside the rendered ranked prefix"):
+            validate_ranking_utility(RankingUtilitySummary(
+                observed_field_n=10, effective_field_n=10, prior_strength=0,
+                affected_clamp_count=0, supported_rows=2, transition_prior_rows=0,
+                grounded_rows=0, practical_call="Later", proof_grade_call=None,
+                rendered_shortlist_rows=1, status="degraded",
+                practical_ranked_actions=("First", "Later"),
+            ))
+
+    def test_usefulness_contract_rejects_useful_status_with_ungrounded_support(self):
+        with pytest.raises(ValueError, match="unsupported grounded"):
+            validate_ranking_utility(RankingUtilitySummary(
+                observed_field_n=10, effective_field_n=10, prior_strength=0,
+                affected_clamp_count=0, supported_rows=2, transition_prior_rows=0,
+                grounded_rows=1, practical_call="First", proof_grade_call=None,
+                rendered_shortlist_rows=1, status="useful",
+                practical_ranked_actions=("First",),
+            ))
+
+    def test_unavailable_utility_degrades_but_keeps_written_artifact(self, tmp_path):
+        ports = RecordingPorts()
+        unavailable = RankingUtilitySummary(
+            observed_field_n=0, effective_field_n=0, prior_strength=0,
+            affected_clamp_count=0, supported_rows=0, transition_prior_rows=0,
+            grounded_rows=0, practical_call=None, proof_grade_call=None,
+            rendered_shortlist_rows=0, status="unavailable",
+            reasons=("no supported rows",),
+        )
+
+        def write_ranking(db_path, out_path):
+            ports._record("ranking")
+            out_path.write_text("degraded ranking")
+            return unavailable
+
+        ports.write_ranking = write_ranking
+        result = run_decision_refresh(
+            ports, db_path=tmp_path / "tiny.duckdb", out_path=tmp_path / "ranking.html",
+        )
+        assert result.steps[-1].status is RefreshStepStatus.DEGRADED
+        assert result.ranking_output == str(tmp_path / "ranking.html")
+        assert result.ranking_utility == unavailable
     def test_usefulness_contract_rejects_supported_rows_without_practical_call(self):
         with pytest.raises(ValueError, match="supported rows but no practical call"):
             validate_ranking_utility(RankingUtilitySummary(

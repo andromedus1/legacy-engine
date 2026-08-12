@@ -423,11 +423,14 @@ const D = __D_BLOB__;
 const fmtP = p => p == null ? "—" : (100*p).toFixed(1);
 const fieldTier = n => n >= 100 ? "established" : n >= 30 ? "evolving" : "SPECULATIVE";
 document.getElementById("field-basis").innerHTML =
-  `<b>Field basis</b> — shares come from the current ban-regime window` +
+  `<b>Field basis</b> — observed shares come from the current ban-regime window` +
   ` (since ${D.meta.field_since}${D.meta.regime_card ? ", post-" + D.meta.regime_card + " ban" : ""}):` +
-  ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
-  ` (${fieldTier(D.meta.field_decks)} tier). Shares are raw published-list counts, no win-rate` +
-  ` weighting. Matchup cells are windowed independently.`;
+  ` ${(D.meta.observed_field_n == null ? D.meta.field_decks : D.meta.observed_field_n).toLocaleString()} observed decks through ${D.meta.corpus_max}` +
+  ` (${fieldTier(D.meta.observed_field_n == null ? D.meta.field_decks : D.meta.observed_field_n)} tier).` +
+  ` The decision field is ${(D.meta.effective_field_n == null ? D.meta.field_decks : D.meta.effective_field_n).toLocaleString()} decks` +
+  ` including ${(D.meta.prior_strength == null ? 0 : D.meta.prior_strength).toLocaleString()} bounded preceding-regime pseudo-decks` +
+  ` when the current window is thin; shares are raw published-list counts, no win-rate weighting.` +
+  ` Matchup cells are windowed independently.`;
 // Audit header = data-shape stats only (methodology lives in the explainer sections below).
 const M = D.meta;
 const nf = v => v == null ? null : v.toLocaleString();
@@ -476,7 +479,9 @@ function renderPracticalFirstRead() {
     const observed = row.observed_field_share == null ? row.field_share : row.observed_field_share;
     return `<li><span class="read-name">${escT(row.subject)}</span>`+
       `<span class="read-detail">Q25 ${lean ? fmtP(lean.q25) : "—"} · median ${lean ? fmtP(lean.median) : "—"} · 95% ${interval}</span>`+
-      `<span class="read-detail">${(100*observed).toFixed(1)}% observed field · `+
+      `<span class="read-detail">${row.observed_count == null ? (100*observed).toFixed(1) + "%" : row.observed_count.toLocaleString() + " observed"} · `+
+      `${row.prior_count ? row.prior_count.toLocaleString() + " prior" : "no prior"} · `+
+      `${(100*(row.decision_share == null ? row.field_share : row.decision_share)).toFixed(1)}% decision share · `+
       `${escT(evidence.stratum || "supported")}</span></li>`;
   }).join("") : `<li><span class="read-name">No practical call</span>`+
     `<span class="read-detail">${escT((M.utility || {}).reason || "evidence is unavailable")}</span></li>`;

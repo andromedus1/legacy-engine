@@ -15,6 +15,7 @@ from legacy_engine.advisory import (
     compute_regime_currency,
     custom_regime_currency,
 )
+from legacy_engine.advisory.field import build_transition_field
 from legacy_engine.analytics.trends import regime_windows
 from legacy_engine.advisory.field import _normalize_shares
 from legacy_engine.ingestion import store
@@ -210,6 +211,46 @@ class TestBuildGlobalField:
         _load_labeled_corpus(con)
         fd = build_global_field(con)
         assert pytest.approx(sum(fd.shares.values()), abs=1e-9) == 1.0
+        con.close()
+
+    def test_transition_prior_excludes_only_the_current_boundary_affected_set(self):
+        con = _con()
+        prior_tid = _load_labeled_corpus(con)
+        con.execute("UPDATE tournaments SET date = '2026-06-30' WHERE id = ?", [prior_tid])
+        con.execute("UPDATE decks SET archetype = 'Historical' WHERE tournament_id = ?", [prior_tid])
+        current_tid = store.load_tournament(con, parse_cache_item(_PAPER_CHALLENGE, "mtgmelee"))
+        con.execute("UPDATE tournaments SET date = '2026-08-10' WHERE id = ?", [current_tid])
+        con.execute("UPDATE decks SET archetype = 'Current' WHERE tournament_id = ?", [current_tid])
+
+        field = build_transition_field(
+            con,
+            current_ban_since="2026-08-10",
+            until=None,
+            target_n=8,
+            affected_since={"Historical": "2025-11-10", "Current": "2026-08-10"},
+        )
+
+        assert field.kind == "transition-stabilized"
+        assert field.affected_archetypes == ("Current",)
+        assert field.prior is not None
+        assert field.effective_counts["Historical"] == field.prior_strength
+        assert field.effective_counts["Current"] == 2
+        con.close()
+
+    def test_transition_without_preceding_confirmed_regime_is_observed_thin(self):
+        con = _con()
+        tid = _load_labeled_corpus(con)
+        con.execute("UPDATE tournaments SET date = '2020-01-01' WHERE id = ?", [tid])
+        field = build_transition_field(
+            con,
+            current_ban_since="2021-01-01",
+            until=None,
+            affected_since={},
+            target_n=8,
+        )
+        assert field.prior is None
+        assert field.prior_strength == 0
+        assert field.kind == "observed-thin"
         con.close()
 
     def test_regime_currency_uses_positionable_decks_in_same_window(self):

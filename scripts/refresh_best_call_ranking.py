@@ -889,6 +889,20 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     for a, _v, n in camp_win:
         parent_win_tot[a] = parent_win_tot.get(a, 0) + n
     camp_frac = {(a, v): n / parent_win_tot[a] for a, v, n in camp_win}
+    camp_prior_frac: dict[tuple[str, str], float] = {}
+    if transition.prior is not None:
+        prior_rows = con.execute(
+            "select k.archetype, coalesce(nullif(k.variant,''),'unlabeled'), count(*) "
+            "from decks k join tournaments t on k.tournament_id=t.id "
+            "where substr(t.date,1,10) >= ? and substr(t.date,1,10) < ? group by 1,2",
+            [transition.prior.since, field_since],
+        ).fetchall()
+        prior_tot: dict[str, int] = {}
+        for a, _v, n in prior_rows:
+            prior_tot[a] = prior_tot.get(a, 0) + n
+        camp_prior_frac = {
+            (a, v): n / prior_tot[a] for a, v, n in prior_rows if prior_tot.get(a, 0)
+        }
 
     # ── Archetype level ──
     print("building archetype matrices...", flush=True)
@@ -948,6 +962,9 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 transition.observed.counts.get(subj, 0) / field_decks if field_decks else 0.0
             ),
             "decision_field_share": shares.get(subj, 0.0),
+            "observed_count": transition.observed.counts.get(subj, 0),
+            "prior_count": transition.effective_counts.get(subj, 0) - transition.observed.counts.get(subj, 0),
+            "decision_share": shares.get(subj, 0.0),
             "field_evidence_kind": transition.kind,
             "recent_4wk": recent.get(subj, 0),
             "_idx": i,
@@ -1020,8 +1037,14 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 )
                 for opp in field_opps if (lbl, opp) in strict_camp_cache[strict_since]
             }
+            parent_prior_only = (
+                transition.observed.counts.get(parent, 0) == 0
+                and transition.effective_counts.get(parent, 0) > 0
+            )
             frac = camp_frac.get((parent, camp), 0.0)
-            camps_out.append({
+            if parent_prior_only:
+                frac = camp_prior_frac.get((parent, camp), 0.0)
+            camp_row = {
                 "subject": lbl, **row_stats(
                     cells, top_k, cover_min, strict_common_sources=strict_sources,
                     strict_common_since=strict_since,
@@ -1035,7 +1058,19 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "camp_fraction_current": r4(frac),
                 "recent_4wk": camp_recent.get((parent, camp), 0),
                 "_idx": len(camps_out),
+            }
+            camp_row.update({
+                "observed_count": 0 if parent_prior_only else round(
+                    transition.observed.counts.get(parent, 0) * frac
+                ),
+                "prior_count": (
+                    transition.effective_counts.get(parent, 0)
+                    - transition.observed.counts.get(parent, 0)
+                ) if parent_prior_only else 0,
+                "decision_share": shares.get(parent, 0.0) * frac,
+                "field_evidence_kind": transition.kind,
             })
+            camps_out.append(camp_row)
 
     if set(camp_used) != set(camp_labels):
         missing = sorted(set(camp_labels) - set(camp_used))

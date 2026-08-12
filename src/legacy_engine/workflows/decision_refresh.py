@@ -99,11 +99,15 @@ def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
     if (
         summary.practical_call is not None
         and summary.practical_ranked_actions
-        and summary.practical_call not in summary.practical_ranked_actions
+        and summary.practical_call not in summary.practical_ranked_actions[:summary.rendered_shortlist_rows]
     ):
-        raise ValueError("ranking utility practical call is absent from ranked actions")
+        raise ValueError("ranking utility practical call is outside the rendered ranked prefix")
     if summary.status == "useful" and summary.practical_call is None:
         raise ValueError("useful ranking utility must publish a practical call")
+    if summary.status == "useful" and summary.grounded_rows < summary.supported_rows:
+        raise ValueError("useful ranking utility cannot have unsupported grounded rows")
+    if summary.status == "degraded" and summary.supported_rows and summary.grounded_rows >= summary.supported_rows:
+        raise ValueError("degraded ranking utility contradicts fully grounded support")
     if summary.status == "unavailable" and summary.supported_rows:
         raise ValueError("unavailable ranking utility cannot report supported rows")
 
@@ -235,9 +239,9 @@ def run_decision_refresh(
                     validate_ranking_utility(value)
                     ranking_utility = value
                     summary = f"{out_path}; utility={value.status}"
-                    if value.status == "degraded":
+                    if value.status in {"degraded", "unavailable"}:
                         status = RefreshStepStatus.DEGRADED
-                        reason = "; ".join(value.reasons) or "ranking utility degraded"
+                        reason = "; ".join(value.reasons) or f"ranking utility {value.status}"
                 else:
                     summary = str(out_path)
             steps.append(RefreshStepResult(name=name, status=status, summary=summary, reason=reason))
@@ -254,7 +258,13 @@ def run_decision_refresh(
             "recent_releases": source.recent_releases,
             "era_alarms": era_result.alarms,
         })
-    ranking_output = str(out_path) if steps[-1].status is RefreshStepStatus.COMPLETED else None
+    # A degraded ranking is still a written, candid artifact.  Only failed or
+    # not-run ranking steps should be reported as unwritten.
+    ranking_output = (
+        str(out_path)
+        if steps and steps[-1].status in {RefreshStepStatus.COMPLETED, RefreshStepStatus.DEGRADED}
+        else None
+    )
     return DecisionRefreshResult(
         steps=tuple(steps), card_coverage=coverage,
         format_awareness=awareness, ranking_output=ranking_output,

@@ -9,6 +9,8 @@ written via `write_entity_eras` (mirrors `tests/analytics/eras/test_store.py`'s 
 
 from __future__ import annotations
 
+from datetime import date
+
 from legacy_engine.analytics.eras.attribution import Attribution
 from legacy_engine.analytics.eras.consume import (
     EraHorizon,
@@ -95,6 +97,29 @@ class TestPairWindow:
 
 
 class TestEraHorizonsResolutionOrder:
+    def test_explicit_null_stable_since_keeps_confirmed_ban_candidates(self):
+        con = store.connect(":memory:")
+        decks = [_deck(f"affected{i}", ["The Fantasticar"]) for i in range(4)]
+        tid = store.load_tournament(
+            con, parse_cache_item(_tournament("affected", "2026-06-30", decks), "MTGO"),
+        )
+        con.execute("UPDATE decks SET archetype = 'Affected' WHERE tournament_id = ?", [tid])
+        eras = {"Affected": EntityEras(entity="Affected", stable_since=None, boundaries=(), inherited_from_parent=False)}
+        _write(con, eras)
+
+        horizons, _audit = era_horizons(
+            con, ["Affected"],
+            ban_events=((date(2026, 8, 10), "The Fantasticar", "confirmed"),),
+        )
+
+        horizon = horizons["Affected"]
+        assert horizon.source == "ban-clamped"
+        assert horizon.since == "2026-08-10"
+        assert horizon.stored_since is None
+        assert horizon.affected_since == "2026-08-10"
+        assert horizon.clamped_by_confirmed_ban is True
+        con.close()
+
     def test_exact_entry_present_with_date(self):
         con = store.connect(":memory:")
         boundary = EraBoundary(date="2026-04-20", signals=(), pvalue=0.001, bh_accepted=True, floor_rejected=False)

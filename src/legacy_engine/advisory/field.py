@@ -357,13 +357,18 @@ def build_transition_field(
     prior_since = _transition_previous_since(current_ban_since)
     prior = (
         _field_slice(con, since=prior_since, until=current_ban_since, provenance=provenance)
-        if prior_since is not None or current_ban_since
+        if prior_since is not None
         else None
     )
     if prior is not None and prior.deck_n == 0:
         prior = None
 
-    affected = tuple(sorted(label for label, since in affected_since.items() if since is not None))
+    # ``archetype_valid_since`` is a lifetime summary.  Transition stabilization
+    # must exclude only entities affected at this boundary; excluding every
+    # historically affected archetype silently discarded most of the prior field.
+    affected = tuple(sorted(
+        label for label, since in affected_since.items() if since == current_ban_since
+    ))
     affected_set = set(affected)
     prior_eligible = (
         {label: count for label, count in prior.counts.items() if label not in affected_set}

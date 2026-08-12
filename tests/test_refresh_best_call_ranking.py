@@ -125,7 +125,8 @@ process.stdout.write(JSON.stringify(result));
 # The additive cross-camp ranking fields — everything else must match the old path exactly.
 _ADDITIVE_FIELDS = {
     "p_best", "s_q", "s_cov", "s_caveated", "floor_observability", "reconciliation",
-    "ranking_evidence", "field_share_raw", "methodology",
+    "ranking_evidence", "field_share_raw", "methodology", "observed_count", "prior_count",
+    "decision_share", "field_evidence_kind",
 }
 
 # Field window covering both fixture tournaments but neither pre-ban load.
