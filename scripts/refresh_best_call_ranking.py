@@ -64,7 +64,7 @@ from pathlib import Path
 
 import duckdb
 
-from legacy_engine.advisory.field import build_custom_field
+from legacy_engine.advisory.field import build_custom_field, build_transition_field
 from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
 from legacy_engine.advisory.positioning import (
     _COVERAGE_RESTRICT_THRESHOLD,
@@ -72,6 +72,7 @@ from legacy_engine.advisory.positioning import (
     _PBEST_SUPPRESS_COVERAGE,
     _compute_data_coverage,
     ranking_evidence_payload,
+    practical_recommendation_order,
     rank_decks,
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
@@ -450,6 +451,12 @@ def ranking_evidence_for_row(row, *, measured_share, resolved_cells):
     """Classify presence from the unrounded field share, never its display projection."""
     return ranking_evidence_payload(
         field_share=row["field_share_raw"],
+        observed_field_share=row.get("observed_field_share"),
+        decision_field_share=row.get("decision_field_share"),
+        transition_prior=(
+            row.get("observed_field_share", row["field_share_raw"]) <= 0
+            and row.get("decision_field_share", row["field_share_raw"]) > 0
+        ),
         measured_share=measured_share,
         resolved_cells=resolved_cells,
         grounded=row["grounded"],
@@ -851,14 +858,20 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     field_events = con.execute(
         "select count(*) from tournaments where substr(date,1,10) >= ?", [field_since]).fetchone()[0]
 
-    win_rows = con.execute(
-        "select k.archetype, count(*) from decks k join tournaments t on k.tournament_id=t.id "
-        "where substr(t.date,1,10) >= ? and k.archetype is not null and k.archetype <> '' "
-        "group by 1", [field_since]).fetchall()
-    field_decks = con.execute(
-        "select count(*) from decks k join tournaments t on k.tournament_id=t.id "
-        "where substr(t.date,1,10) >= ?", [field_since]).fetchone()[0]
-    shares = {a: n / field_decks for a, n in win_rows} if field_decks else {}
+    all_labels = [row[0] for row in con.execute(
+        "select distinct archetype from decks where archetype is not null and archetype <> '' "
+        "order by archetype"
+    ).fetchall()]
+    ban_since = archetype_valid_since(con, all_labels)
+    transition = build_transition_field(
+        con,
+        current_ban_since=field_since,
+        until=None,
+        affected_since=ban_since,
+    )
+    win_rows = list(transition.observed.counts.items())
+    field_decks = transition.observed.deck_n
+    shares = transition.shares
     recent = dict(con.execute(
         "select k.archetype, count(*) from decks k join tournaments t on k.tournament_id=t.id "
         "where substr(t.date,1,10) >= ? group by 1", [current_4wk]).fetchall())
@@ -880,7 +893,6 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print("building archetype matrices...", flush=True)
     ad = build_adaptive_matrix(con, min_row_share=min_row_share)
     rows = ad.matrix.archetypes
-    ban_since = archetype_valid_since(con, list(rows))
     field_opps = sorted((a for a in rows if shares.get(a, 0) > 0),
                         key=lambda a: shares[a], reverse=True)
     sh = {a: shares.get(a, 0.0) for a in [*rows, *field_opps]}
@@ -931,6 +943,11 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             "cells": cells,
             "field_share": r4(shares.get(subj, 0.0)),
             "field_share_raw": shares.get(subj, 0.0),
+            "observed_field_share": (
+                transition.observed.counts.get(subj, 0) / field_decks if field_decks else 0.0
+            ),
+            "decision_field_share": shares.get(subj, 0.0),
+            "field_evidence_kind": transition.kind,
             "recent_4wk": recent.get(subj, 0),
             "_idx": i,
         })
@@ -1036,6 +1053,22 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     )
     for row in arch_out:
         row["methodology"] = arch_methodology[row["subject"]]
+        canonical = row["methodology"]["variants"]["ci-gated"]
+        row["ranking_evidence"] = ranking_evidence_payload(
+            field_share=row["field_share_raw"],
+            observed_field_share=row.get("observed_field_share"),
+            decision_field_share=row.get("decision_field_share"),
+            transition_prior=(
+                row.get("observed_field_share", row["field_share_raw"]) <= 0
+                and row.get("decision_field_share", row["field_share_raw"]) > 0
+            ),
+            measured_share=canonical["measured_coverage"],
+            resolved_cells=canonical["resolved_cells"],
+                grounded=(
+                    canonical["top_k_measured"]
+                    and canonical["measured_coverage"] >= cover_min
+                ),
+        )
     for row in camps_out:
         row["methodology"] = camp_methodology[row["subject"]]
 
@@ -1052,7 +1085,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     # so they are excluded from candidacy, not just from display, and their rows carry
     # p_best=None with the coverage that explains why. A camp's cell vs its own parent
     # is absent by design and imputed by the MC — data_coverage counts that hole.
-    field_counts = dict(win_rows)
+    field_counts = dict(transition.effective_counts)
     rank_field = build_custom_field(
         {o: shares[o] for o in field_opps},
         counts={o: field_counts[o] for o in field_opps},
@@ -1187,10 +1220,26 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         row["subject"]: (row["grounded"], row["recent_4wk"], row["agency"])
         for row in arch_out
     })
+    practical_order = practical_recommendation_order({
+        row["subject"]: row for row in arch_out if row.get("ranking_evidence")
+    })
 
     return {
         "meta": {
             "field_since": field_since, "field_decks": field_decks,
+            "observed_field_n": transition.observed.deck_n,
+            "effective_field_n": sum(transition.effective_counts.values()),
+            "prior_strength": transition.prior_strength,
+            "field_evidence_kind": transition.kind,
+            "transition_reason": transition.reason,
+            "affected_clamp_count": sum(
+                1 for horizon in ad.horizon_meta.values() if horizon.clamped_by_confirmed_ban
+            ),
+            "practical_recommendation": {
+                "chosen_action": practical_order[0] if practical_order else None,
+                "ranked_actions": list(practical_order),
+                "basis": "existing posterior lean q25, then median, then label",
+            },
             "regime_card": regime_card,
             "ground_n": ground_n, "top_k": top_k, "cover_min": cover_min,
             "min_row_share": min_row_share, "current_4wk": current_4wk,

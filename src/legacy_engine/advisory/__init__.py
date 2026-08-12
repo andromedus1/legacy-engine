@@ -2,8 +2,11 @@
 
 from legacy_engine.advisory.field import (
     FieldDistribution,
+    FieldSlice,
     FieldSource,
     RegimeCurrency,
+    TransitionField,
+    build_transition_field,
     build_custom_field,
     build_global_field,
     compute_regime_currency,
@@ -44,8 +47,11 @@ from legacy_engine.advisory.report import (
 
 __all__ = [
     "FieldDistribution",
+    "FieldSlice",
     "FieldSource",
     "RegimeCurrency",
+    "TransitionField",
+    "build_transition_field",
     "build_custom_field",
     "build_global_field",
     "compute_regime_currency",

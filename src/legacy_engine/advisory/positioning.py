@@ -40,6 +40,7 @@ Units:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field as dataclass_field
 from typing import Literal, TypedDict
 
@@ -65,7 +66,7 @@ _DEFAULT_RISK_QUANTILE: float = 0.25   # default lower-quantile for risk-adjuste
 _RISK_AVERSE_QUANTILE: float = 0.05   # quantile used when risk_averse=True
 
 RankingEvidenceStratum = Literal[
-    "grounded", "lean", "imputation-dominated", "inactive", "unscorable"
+    "grounded", "lean", "imputation-dominated", "transition-prior", "inactive", "unscorable"
 ]
 
 
@@ -73,23 +74,34 @@ class RankingEvidencePayload(TypedDict):
     stratum: RankingEvidenceStratum
     measured_share: float
     imputed_share: float
+    observed_field_share: float
+    decision_field_share: float
     eligible: bool
     reason: str | None
 
 
 def ranking_evidence_payload(
     *,
-    field_share: float,
+    field_share: float | None = None,
     measured_share: float,
     resolved_cells: int,
     grounded: bool,
+    observed_field_share: float | None = None,
+    decision_field_share: float | None = None,
+    transition_prior: bool = False,
     suppress_coverage: float = _PBEST_SUPPRESS_COVERAGE,
 ) -> RankingEvidencePayload:
     """Classify a row's evidence without changing its score or display presence."""
+    if decision_field_share is None:
+        decision_field_share = field_share if field_share is not None else 0.0
+    if observed_field_share is None:
+        observed_field_share = decision_field_share
+    if decision_field_share < 0.0 or observed_field_share < 0.0:
+        raise ValueError("field shares must be non-negative")
     measured = min(1.0, max(0.0, measured_share))
     imputed = min(1.0, max(0.0, 1.0 - measured))
     reason: str | None = None
-    if field_share <= 0.0:
+    if decision_field_share <= 0.0:
         stratum: RankingEvidenceStratum = "inactive"
         reason = "no current-field presence"
     elif resolved_cells == 0:
@@ -100,6 +112,8 @@ def ranking_evidence_payload(
         reason = f"measured field coverage {measured:.1%} is below {suppress_coverage:.0%}"
     elif imputed > 0.5:
         stratum = "imputation-dominated"
+    elif transition_prior and observed_field_share <= 0.0:
+        stratum = "transition-prior"
     elif grounded:
         stratum = "grounded"
     else:
@@ -108,9 +122,33 @@ def ranking_evidence_payload(
         "stratum": stratum,
         "measured_share": measured,
         "imputed_share": imputed,
+        "observed_field_share": float(observed_field_share),
+        "decision_field_share": float(decision_field_share),
         "eligible": stratum not in ("inactive", "unscorable"),
         "reason": reason,
     }
+
+
+def practical_recommendation_order(
+    rows: Mapping[str, Mapping[str, object]],
+) -> tuple[str, ...]:
+    """Order supported rows by the existing posterior lean, without changing Agency authority."""
+    eligible: list[tuple[str, float, float]] = []
+    for label, row in rows.items():
+        evidence = row.get("ranking_evidence")
+        if isinstance(evidence, Mapping) and not evidence.get("eligible", False):
+            continue
+        methodology = row.get("methodology")
+        lean = methodology.get("lean") if isinstance(methodology, Mapping) else row.get("lean")
+        if not isinstance(lean, Mapping):
+            continue
+        q25 = lean.get("q25")
+        median = lean.get("median")
+        if isinstance(q25, (int, float)) and isinstance(median, (int, float)):
+            eligible.append((str(label), float(q25), float(median)))
+    return tuple(label for label, _q25, _median in sorted(
+        eligible, key=lambda item: (-item[1], -item[2], item[0]),
+    ))
 
 
 # ---------------------------------------------------------------------------
