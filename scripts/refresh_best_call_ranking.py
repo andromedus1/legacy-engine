@@ -1041,7 +1041,8 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 transition.observed.counts.get(parent, 0) == 0
                 and transition.effective_counts.get(parent, 0) > 0
             )
-            frac = camp_frac.get((parent, camp), 0.0)
+            current_frac = camp_frac.get((parent, camp), 0.0)
+            frac = current_frac
             if parent_prior_only:
                 frac = camp_prior_frac.get((parent, camp), 0.0)
             camp_row = {
@@ -1055,7 +1056,8 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "parent": parent, "camp": camp,
                 "field_share": r4(shares.get(parent, 0.0) * frac),
                 "field_share_raw": shares.get(parent, 0.0) * frac,
-                "camp_fraction_current": r4(frac),
+                "camp_fraction_current": r4(current_frac),
+                "camp_fraction_decision": r4(frac),
                 "recent_4wk": camp_recent.get((parent, camp), 0),
                 "_idx": len(camps_out),
             }

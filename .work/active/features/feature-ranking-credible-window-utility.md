@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-credible-window-utility
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -396,10 +396,11 @@ The feature is implemented across the four dependency-ordered checkpoints:
 
 ## Implementation verification
 
-- Child commits: `469262b`, `2ae3758`, `755400e`, `1b3c79e`.
-- Focused checks: era/field (103 passed), ranking refresh (44 passed), refresh/status (38 passed),
-  positioning evidence/practical order (50 passed).
-- Authoritative suite: `PYTHONPATH=. uv run --no-sync python -m pytest -q` — 3838 passed, 1 skipped.
+- Child commits: `469262b`, `2ae3758`, `755400e`, `1b3c79e`; standard-review fixes: `6f7af2f`.
+- Focused checks: era/field, ranking refresh, refresh/status, scheduled status, and positioning
+  evidence/practical order passed, including all eight connected review regressions.
+- Authoritative suite after review fixes: `PYTHONPATH=. uv run --no-sync python -m pytest -q` —
+  **3845 passed, 1 skipped**.
 - Knowledge index regenerated and linted: 0 errors, 6 existing warnings (decision-count and README
   orphan warnings).
 
@@ -407,8 +408,9 @@ The feature is implemented across the four dependency-ordered checkpoints:
 
 - No benchmark estimator, protocol, production ordering, Modern port, sideboard advisor, or rules
   engine was changed. `uv.lock` remains user-owned and unmodified.
-- Camp row payload parity remains intact; transition field provenance is carried at archetype/meta
-  level and camp fractions continue to reflect exact observed current presence.
+- Camp row payload parity remains intact; transition field provenance is carried on archetype and
+  camp rows, and prior-only parents use preceding-regime camp composition without changing matchup
+  windows.
 - The validator carries an additive ranked-action tuple so it can prove a practical call is present
   in the rendered shortlist, which the minimal design sketch could not establish from a count alone.
 
@@ -436,3 +438,12 @@ claim was introduced.
 GPT-5.6 Sol pass. Focused review verification passed 192 tests. The review used hermetic probes and
 read-only production-DB queries; it made no repository or data changes. Closure requires receiver
 verification of the named fix story only; standard policy forbids a second independent pass.
+
+## Closure (2026-08-12)
+
+All eight connected blockers are closed by `feature-ranking-credible-window-utility-review-fixes`.
+The receiver verified current-boundary prior exclusion, explicit-null clamp provenance,
+prior-only camp composition, exact row provenance and first-read copy, transition-prior precedence,
+written-degraded/unavailable operational status, no-preceding-regime behavior, and strict utility
+consistency. Production recommendation ordering and benchmark authority are unchanged. No live HTML
+refresh, database mutation, future-only benchmark rerun, or `uv.lock` change was performed.
