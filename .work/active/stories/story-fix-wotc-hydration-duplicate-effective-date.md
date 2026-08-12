@@ -1,7 +1,7 @@
 ---
 id: story-fix-wotc-hydration-duplicate-effective-date
 kind: story
-stage: review
+stage: done
 tags: [bug, ingestion]
 parent: null
 depends_on: []
@@ -55,3 +55,25 @@ effective date, found 2` before the fix. The corrected parser returns the captur
 August 10 effective date, The Fantasticar Legacy ban, October 12 next announcement, and exact source
 URL. A conflicting second visible effective date still raises. Changed-file Ruff is clean and the
 focused monitor/ops slice is `68 passed`. No live scheduler run or adjacent issue was bundled.
+
+## Review (2026-08-12)
+
+**Verdict**: Approve
+
+**Blockers**: none
+
+**Important**: none
+
+**Nits**: none
+
+**Rejected**: none
+
+**Notes**: Bounded inline standalone-story review of commit `7de0ec5`; no independent reviewer was
+used. The implementation fixes the extraction boundary rather than deduplicating date strings:
+non-visible hydration content is excluded, while semantic H2 markers distinguish the actual format
+section from visible summary/TOC labels. Existing strict checks still reject zero or multiple
+visible effective dates, zero or multiple Legacy H2 sections, ambiguous actions, and action/no-change
+conflicts. The exact captured page parses to the attributable August 10 date, The Fantasticar ban,
+October 12 next announcement, and resolved URL. No persistent schema, CLI, scheduler, network
+adapter, or authority boundary changed. Final verification: changed-file Ruff clean; focused slice
+`68 passed`; full suite `3804 passed, 1 skipped`.
