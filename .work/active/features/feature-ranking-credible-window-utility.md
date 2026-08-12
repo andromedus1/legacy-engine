@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-credible-window-utility
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -374,3 +374,40 @@ After integration, the refresh script no longer independently decides global fie
 presence, ranking inclusion, and first-read recommendation. One package-owned transition/evidence
 projection feeds scoring, audit, rendering, and operational usefulness checks. Existing diagnostic
 variants remain; no fifth estimator or browser-only ranking is added.
+
+## Implementation summary
+
+The feature is implemented across the four dependency-ordered checkpoints:
+
+1. `EraHorizon` is now a typed candidate boundary. Direct confirmed ban affectedness is resolved
+   per entity/parent and can clamp an older stored era as `ban-clamped`, retaining both candidate
+   dates; unaffected and no-era fallback paths remain compatible.
+2. `build_transition_field` projects an exact observed post-ban field plus a preceding-regime prior
+   capped at the 500-deck floor. Affected archetypes receive no pseudo-counts, integer allocation
+   is deterministic, and effective shares never widen matchup pair windows.
+3. The existing posterior lean now has a deterministic practical order (Q25, median, label), and
+   the page first read shows that shortlist, intervals, evidence strata, observed/effective field
+   provenance, prior strength, clamp count, and the separate proof-grade production call. The
+   `production_recommendation_order` and benchmark authority are unchanged.
+4. `RankingUtilitySummary` is validated and threaded through generation, refresh, and scheduled
+   status. Contradictory output fails before acceptance; low grounded support is named degraded,
+   while evidence-empty output is explicitly unavailable. The causal postmortem and preventive
+   contract are recorded in the ranking runbook and architecture.
+
+## Implementation verification
+
+- Child commits: `469262b`, `2ae3758`, `755400e`, `1b3c79e`.
+- Focused checks: era/field (103 passed), ranking refresh (44 passed), refresh/status (38 passed),
+  positioning evidence/practical order (50 passed).
+- Authoritative suite: `PYTHONPATH=. uv run --no-sync python -m pytest -q` — 3838 passed, 1 skipped.
+- Knowledge index regenerated and linted: 0 errors, 6 existing warnings (decision-count and README
+  orphan warnings).
+
+## Scope / deviations
+
+- No benchmark estimator, protocol, production ordering, Modern port, sideboard advisor, or rules
+  engine was changed. `uv.lock` remains user-owned and unmodified.
+- Camp row payload parity remains intact; transition field provenance is carried at archetype/meta
+  level and camp fractions continue to reflect exact observed current presence.
+- The validator carries an additive ranked-action tuple so it can prove a practical call is present
+  in the rendered shortlist, which the minimal design sketch could not establish from a count alone.
