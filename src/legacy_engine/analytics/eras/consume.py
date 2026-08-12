@@ -25,8 +25,7 @@ number.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 
 import duckdb
 
@@ -120,8 +119,7 @@ def _resolve_parent(
     return _parent_label(label, split_variant)
 
 
-@dataclass(frozen=True)
-class EraHorizon:
+class EraHorizon(LegacyEngineModel):
     """One entity's resolved adaptive-matrix horizon.
 
     ``since``: the horizon date, or ``None`` for full history.
@@ -142,6 +140,9 @@ class EraHorizon:
     trigger: str | None
     alarm: str | None
     attribution_kind: str | None = None
+    stored_since: str | None = None
+    affected_since: str | None = None
+    clamped_by_confirmed_ban: bool = False
 
 
 def _winning_boundary_attribution(stored: StoredEntityEras):
@@ -167,12 +168,13 @@ def _winning_boundary_trigger(stored: StoredEntityEras) -> str | None:
 
 def era_horizons(
     con: duckdb.DuckDBPyConnection,
-    archetypes: list[str],
+    archetypes: Sequence[str],
     *,
     provenance: str | None = None,
     split_variant: str | None = None,
     camp_parent: "Mapping[str, str] | None" = None,
     affect_threshold: float = 0.25,
+    ban_events: Sequence[tuple[object, str, str]] | None = None,
 ) -> tuple[dict[str, EraHorizon], tuple[str, ...]]:
     """Resolve every label in ``archetypes`` to an ``EraHorizon`` (exact -> parent -> ban-only).
 
@@ -192,6 +194,78 @@ def era_horizons(
     stored = read_entity_eras(con)
     no_era_data = not stored
 
+    parent_for = {
+        label: _resolve_parent(label, split_variant, camp_parent) for label in archetypes
+    }
+    try:
+        affected_candidates = archetype_valid_since(
+            con,
+            sorted({*archetypes, *parent_for.values()}),
+            provenance=provenance,
+            affect_threshold=affect_threshold,
+            ban_events=ban_events,
+        )
+    except duckdb.CatalogException as exc:
+        # Era-only consumers and small unit fixtures may intentionally omit the corpus tables.
+        # The old adapter resolved those rows without touching affectedness; retain that safe
+        # degrade rather than turning a missing optional table into a hard failure.
+        if "decks" not in str(exc).lower():
+            raise
+        affected_candidates = {label: None for label in {*archetypes, *parent_for.values()}}
+
+    def affected_since_for(label: str) -> str | None:
+        candidates = [affected_candidates.get(label)]
+        parent = parent_for[label]
+        if parent != label:
+            candidates.append(affected_candidates.get(parent))
+        return max((candidate for candidate in candidates if candidate is not None), default=None)
+
+    def resolved(
+        label: str,
+        *,
+        stored_since: str | None,
+        source: str,
+        trigger: str | None,
+        alarm: str | None,
+        attribution_kind: str | None,
+    ) -> EraHorizon:
+        affected_since = affected_since_for(label)
+        winning_since = max(
+            (candidate for candidate in (stored_since, affected_since) if candidate is not None),
+            default=None,
+        )
+        clamped = (
+            stored_since is not None
+            and affected_since is not None
+            and affected_since > stored_since
+        )
+        if clamped:
+            source = "ban-clamped"
+            trigger = f"ban: valid_since {affected_since}"
+            attribution_kind = None
+        elif stored_since is None and affected_since is not None and source != "ban-only":
+            source = "ban-clamped"
+            trigger = f"ban: valid_since {affected_since}"
+            attribution_kind = None
+        elif stored_since is None and affected_since is not None and source == "ban-only":
+            trigger = f"ban: valid_since {affected_since}"
+        # Keep the untouched legacy shape byte-compatible.  Candidate fields are published when
+        # a confirmed ban actually overrides a stored horizon; unaffected/full-history and
+        # ban-only rows retain their original compact provenance.
+        candidate_fields = {
+            "stored_since": stored_since,
+            "affected_since": affected_since,
+            "clamped_by_confirmed_ban": clamped,
+        } if clamped else {}
+        return EraHorizon(
+            since=winning_since,
+            source=source,
+            trigger=trigger,
+            alarm=alarm,
+            attribution_kind=attribution_kind,
+            **candidate_fields,
+        )
+
     horizons: dict[str, EraHorizon] = {}
     need_ban_only: list[str] = []
 
@@ -199,9 +273,8 @@ def era_horizons(
         entry = stored.get(label)
         if entry is not None:
             attribution = _winning_boundary_attribution(entry)
-            horizons[label] = EraHorizon(
-                since=entry.stable_since,
-                source="era",
+            horizons[label] = resolved(
+                label, stored_since=entry.stable_since, source="era",
                 trigger=attribution.detail if attribution is not None else None,
                 alarm=(entry.alarm_note if entry.alarm_fired else None),
                 attribution_kind=attribution.kind if attribution is not None else None,
@@ -212,9 +285,8 @@ def era_horizons(
         parent_entry = stored.get(parent) if parent != label else None
         if parent_entry is not None:
             attribution = _winning_boundary_attribution(parent_entry)
-            horizons[label] = EraHorizon(
-                since=parent_entry.stable_since,
-                source="era-parent",
+            horizons[label] = resolved(
+                label, stored_since=parent_entry.stable_since, source="era-parent",
                 trigger=attribution.detail if attribution is not None else None,
                 alarm=(parent_entry.alarm_note if parent_entry.alarm_fired else None),
                 attribution_kind=attribution.kind if attribution is not None else None,
@@ -229,15 +301,15 @@ def era_horizons(
         )
         base_valid_since = archetype_valid_since(
             con, base_labels, provenance=provenance, affect_threshold=affect_threshold,
+            ban_events=ban_events,
         )
         for label in need_ban_only:
             base = _resolve_parent(label, split_variant, camp_parent)
             since = base_valid_since.get(base)
-            horizons[label] = EraHorizon(
-                since=since,
-                source="ban-only",
-                trigger=(f"ban: valid_since {since}" if since else None),
-                alarm=None,
+            horizons[label] = resolved(
+                label, stored_since=None, source="ban-only",
+                trigger=(f"ban: valid_since {since}" if since else None), alarm=None,
+                attribution_kind=None,
             )
 
     audit: tuple[str, ...] = ()
