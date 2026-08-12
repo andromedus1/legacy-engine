@@ -345,3 +345,112 @@ class TestCardDimensionReconciliation:
         assert [item.observed_name for item in report.normalized_existing] == ["[TMP] Wasteland"]
         assert report.unresolved_count == 0
         con.close()
+
+    @pytest.mark.parametrize(
+        ("observed", "canonical"),
+        [
+            ("[AL] Helm of Obedience", "Helm of Obedience"),
+            ("Clarion Conqueror // Clarion Conqueror", "Clarion Conqueror"),
+            (
+                "Scavenger Regent // Exude Toxin // Scavenger Regent",
+                "Scavenger Regent // Exude Toxin",
+            ),
+        ],
+    )
+    def test_resolves_verified_mtgmelee_serialization_shapes(self, observed, canonical):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name=canonical)])
+        con.execute(
+            "INSERT INTO tournaments VALUES ('t', 'T', '2025-01-01', 'u', 'Legacy', "
+            "'MTGmelee', 'paper')"
+        )
+        con.execute("INSERT INTO deck_cards VALUES ('t', 0, 'main', ?, 1)", [observed])
+
+        report = reconcile_card_dimension(
+            con, new_card_names=frozenset(), alias_manifest=None,
+            alias_snapshot_reason=None, resolved_at=NOW,
+        )
+
+        assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == canonical
+        assert report.normalized_existing[0].source == "provider_serialization:MTGmelee"
+        con.close()
+
+    def test_resolves_localized_faces_only_when_each_face_and_combination_are_unique(self):
+        from legacy_engine.models.card import PrintedCardAlias
+
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        canonical = "Witch Enchanter // Witch-Blessed Meadow"
+        store.load_cards(con, [Card(name=canonical)])
+        store.rebuild_card_aliases(con, [
+            PrintedCardAlias(
+                printed_name="Bruxa Encantadora", normalized_alias="bruxa encantadora",
+                canonical_name="Witch Enchanter", language="pt", scryfall_id="f1",
+            ),
+            PrintedCardAlias(
+                printed_name="Prado Abençoado pela Bruxa",
+                normalized_alias=normalize_alias_key("Prado Abençoado pela Bruxa"),
+                canonical_name="Witch-Blessed Meadow", language="pt", scryfall_id="f2",
+            ),
+        ], manifest=_manifest(alias_count=2))
+        con.execute(
+            "INSERT INTO tournaments VALUES ('t', 'T', '2025-01-01', 'u', 'Legacy', "
+            "'MTGmelee', 'paper')"
+        )
+        observed = "Bruxa Encantadora // Prado Abençoado pela Bruxa"
+        con.execute("INSERT INTO deck_cards VALUES ('t', 0, 'main', ?, 1)", [observed])
+        report = reconcile_card_dimension(
+            con, new_card_names=frozenset(), alias_manifest=None,
+            alias_snapshot_reason=None, resolved_at=NOW,
+        )
+        assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == canonical
+        assert report.normalized_existing[0].source == "provider_serialization:MTGmelee"
+        con.close()
+
+    @pytest.mark.parametrize(
+        ("observed", "canonical", "provider"),
+        [
+            ("[XYZ] Wasteland", "Wasteland", "MTGmelee"),
+            ("[AL] Helm of Obedience", "Helm of Obedience", "MTGO"),
+            ("Scavenger Regent // Exude Toxin // Other", "Scavenger Regent // Exude Toxin", "MTGmelee"),
+            ("Missing // Missing", "Other", "MTGmelee"),
+        ],
+    )
+    def test_provider_serialization_fails_closed(self, observed, canonical, provider):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name=canonical)])
+        con.execute(
+            "INSERT INTO tournaments VALUES ('t', 'T', '2025-01-01', 'u', 'Legacy', ?, 'paper')",
+            [provider],
+        )
+        con.execute("INSERT INTO deck_cards VALUES ('t', 0, 'main', ?, 1)", [observed])
+        report = reconcile_card_dimension(
+            con, new_card_names=frozenset(), alias_manifest=None,
+            alias_snapshot_reason=None, resolved_at=NOW,
+        )
+        assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == observed
+        assert report.unresolved_count == 1
+        con.close()
+
+    def test_provider_serialization_rejects_mixed_provenance(self):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name="Helm of Obedience")])
+        for event, provider in (("a", "MTGmelee"), ("b", "MTGO")):
+            con.execute(
+                "INSERT INTO tournaments VALUES (?, 'T', '2025-01-01', 'u', 'Legacy', ?, 'paper')",
+                [event, provider],
+            )
+            con.execute(
+                "INSERT INTO deck_cards VALUES (?, 0, 'main', '[AL] Helm of Obedience', 1)",
+                [event],
+            )
+        report = reconcile_card_dimension(
+            con, new_card_names=frozenset(), alias_manifest=None,
+            alias_snapshot_reason=None, resolved_at=NOW,
+        )
+        assert report.unresolved_count == 1
+        assert con.execute("SELECT count(*) FROM deck_cards WHERE name LIKE '[AL]%' ").fetchone()[0] == 2
+        con.close()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 import unicodedata
 from datetime import datetime
 
@@ -22,17 +23,39 @@ from legacy_engine.models.card import (
 logger = logging.getLogger(__name__)
 
 
-def load_provider_card_aliases(path: Path | str) -> dict[str, dict[str, str]]:
-    """Load verified historical provider names keyed by their exact observed spelling."""
+class ProviderSerializationRule(LegacyEngineModel):
+    """One evidence-backed provider grammar admitted at reconciliation time."""
+
+    kind: Literal["set_prefix", "duplicated_name", "duplicated_final_face", "localized_faces"]
+    provider: str
+    evidence: str
+    prefixes: tuple[str, ...] = ()
+
+
+def _load_provider_card_name_registry(
+    path: Path | str,
+) -> tuple[dict[str, dict[str, str]], tuple[ProviderSerializationRule, ...]]:
+    """Load exact exceptions and narrowly typed provider serialization rules."""
     source = Path(path)
     raw = json.loads(source.read_text())
-    if raw.get("schema_version") != 1 or not isinstance(raw.get("aliases"), list):
+    if (
+        not isinstance(raw, dict)
+        or not set(raw).issubset({"schema_version", "aliases", "serialization_rules"})
+        or raw.get("schema_version") != 1
+        or not isinstance(raw.get("aliases"), list)
+        or not isinstance(raw.get("serialization_rules", []), list)
+    ):
         raise ValueError(f"load_provider_card_aliases: invalid schema in {source}")
     aliases: dict[str, dict[str, str]] = {}
     required = ("observed_name", "canonical_name", "provider", "oracle_id", "evidence")
     for index, item in enumerate(raw["aliases"]):
-        if not isinstance(item, dict) or any(
-            not isinstance(item.get(field), str) or not item[field].strip() for field in required
+        if (
+            not isinstance(item, dict)
+            or set(item) != set(required)
+            or any(
+                not isinstance(item.get(field), str) or not item[field].strip()
+                for field in required
+            )
         ):
             raise ValueError(
                 f"load_provider_card_aliases: alias[{index}] lacks required provenance in {source}"
@@ -44,20 +67,68 @@ def load_provider_card_aliases(path: Path | str) -> dict[str, dict[str, str]]:
                 f"in {source}"
             )
         aliases[observed] = {field: item[field] for field in required if field != "observed_name"}
-    return aliases
+
+    rules: list[ProviderSerializationRule] = []
+    seen_rule_keys: set[tuple[str, str]] = set()
+    admitted_prefixes: set[tuple[str, str]] = set()
+    allowed_rule_fields = {"kind", "provider", "evidence", "prefixes"}
+    for index, item in enumerate(raw.get("serialization_rules", [])):
+        if not isinstance(item, dict) or not set(item).issubset(allowed_rule_fields):
+            raise ValueError(
+                f"load_provider_card_aliases: serialization_rules[{index}] has unknown fields"
+            )
+        try:
+            rule = ProviderSerializationRule.model_validate(item)
+        except Exception as exc:
+            raise ValueError(
+                f"load_provider_card_aliases: invalid serialization_rules[{index}] in {source}"
+            ) from exc
+        if not rule.provider.strip() or not rule.evidence.strip():
+            raise ValueError(
+                f"load_provider_card_aliases: serialization_rules[{index}] lacks provenance"
+            )
+        rule_key = (rule.provider, rule.kind)
+        if rule_key in seen_rule_keys:
+            raise ValueError(
+                f"load_provider_card_aliases: duplicate serialization rule {rule_key!r}"
+            )
+        seen_rule_keys.add(rule_key)
+        if rule.kind == "set_prefix":
+            if not rule.prefixes or any(
+                not prefix.strip()
+                or prefix != prefix.strip()
+                or (rule.provider, prefix) in admitted_prefixes
+                for prefix in rule.prefixes
+            ):
+                raise ValueError(
+                    f"load_provider_card_aliases: invalid or duplicate set prefix in rule[{index}]"
+                )
+            admitted_prefixes.update((rule.provider, prefix) for prefix in rule.prefixes)
+        elif rule.prefixes:
+            raise ValueError(
+                "load_provider_card_aliases: prefixes are only valid for set_prefix rules"
+            )
+        rules.append(rule)
+    return aliases, tuple(rules)
 
 
-def _load_default_provider_card_aliases() -> dict[str, dict[str, str]]:
+def load_provider_card_aliases(path: Path | str) -> dict[str, dict[str, str]]:
+    """Load verified historical provider names keyed by their exact observed spelling."""
+    return _load_provider_card_name_registry(path)[0]
+
+
+def _load_default_provider_card_name_registry(
+) -> tuple[dict[str, dict[str, str]], tuple[ProviderSerializationRule, ...]]:
     try:
         from legacy_engine.config import CARD_NAME_ALIASES_PATH
 
-        return load_provider_card_aliases(CARD_NAME_ALIASES_PATH)
+        return _load_provider_card_name_registry(CARD_NAME_ALIASES_PATH)
     except Exception as exc:
         logger.error("provider card aliases unavailable; exact reconciliation only: %s", exc)
-        return {}
+        return {}, ()
 
 
-PROVIDER_CARD_ALIASES = _load_default_provider_card_aliases()
+PROVIDER_CARD_ALIASES, PROVIDER_SERIALIZATION_RULES = _load_default_provider_card_name_registry()
 
 
 class CardCoverageReport(LegacyEngineModel):
@@ -111,6 +182,72 @@ def _is_non_latin_single_token(value: str) -> bool:
     return bool(letters) and any("LATIN" not in unicodedata.name(ch, "") for ch in letters)
 
 
+def provider_serialization_candidate(
+    con: duckdb.DuckDBPyConnection,
+    observed_name: str,
+    *,
+    providers: frozenset[str],
+    canonical_names: frozenset[str],
+    rules: tuple[ProviderSerializationRule, ...],
+    resolved_at: datetime,
+) -> CardNameResolution | None:
+    """Resolve only an admitted provider serialization shape with an exact target."""
+    if len(providers) != 1:
+        return None
+    provider = next(iter(providers))
+    parts = tuple(part.strip() for part in observed_name.split(" // "))
+
+    for rule in rules:
+        if rule.provider != provider:
+            continue
+        canonical: str | None = None
+        reason = ""
+        if rule.kind == "set_prefix":
+            for prefix in rule.prefixes:
+                marker = f"[{prefix}] "
+                if observed_name.startswith(marker):
+                    candidate = observed_name[len(marker):]
+                    if candidate in canonical_names:
+                        canonical = candidate
+                        reason = f"verified [{prefix}] set-prefix serialization"
+                    break
+        elif rule.kind == "duplicated_name":
+            if len(parts) == 2 and parts[0] == parts[1] and parts[0] in canonical_names:
+                canonical = parts[0]
+                reason = "verified duplicated-name serialization"
+        elif rule.kind == "duplicated_final_face":
+            if len(parts) == 3 and parts[0] == parts[2]:
+                candidate = " // ".join(parts[:2])
+                if candidate in canonical_names:
+                    canonical = candidate
+                    reason = "verified duplicated-final-face serialization"
+        elif rule.kind == "localized_faces" and len(parts) == 2:
+            resolved_faces: list[str] = []
+            for face in parts:
+                candidates = {
+                    item.canonical_name for item in fetch_card_alias_candidates(con, face)
+                }
+                if len(candidates) != 1:
+                    break
+                resolved_faces.append(next(iter(candidates)))
+            if len(resolved_faces) == 2:
+                candidate = " // ".join(resolved_faces)
+                if candidate in canonical_names:
+                    canonical = candidate
+                    reason = "verified independently unique localized-face composition"
+
+        if canonical is not None:
+            return _resolution(
+                observed_name,
+                CardNameStatus.CANONICAL,
+                resolved_at,
+                reason,
+                canonical=canonical,
+                source=f"provider_serialization:{provider}",
+            )
+    return None
+
+
 def reconcile_card_dimension(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -122,8 +259,12 @@ def reconcile_card_dimension(
     """Classify every observed deck-card name and apply only unique exact resolutions."""
     init_card_alias_schema(con)
     observed_rows = con.execute(
-        """SELECT name, count(DISTINCT tournament_id || ':' || CAST(deck_idx AS VARCHAR))
-           FROM deck_cards GROUP BY name ORDER BY name"""
+        """SELECT dc.name,
+                  count(DISTINCT dc.tournament_id || ':' || CAST(dc.deck_idx AS VARCHAR)),
+                  list(DISTINCT t.source ORDER BY t.source) FILTER (WHERE t.source IS NOT NULL)
+           FROM deck_cards dc
+           LEFT JOIN tournaments t ON t.id = dc.tournament_id
+           GROUP BY dc.name ORDER BY dc.name"""
     ).fetchall()
     canonical_names = tuple(row[0] for row in con.execute("SELECT name FROM cards").fetchall())
     exact = set(canonical_names)
@@ -141,7 +282,7 @@ def reconcile_card_dimension(
     updates: list[tuple[str, str]] = []
     affected_names: set[str] = set()
 
-    for observed, _deck_count in observed_rows:
+    for observed, _deck_count, provider_rows in observed_rows:
         canonical: str | None = None
         status: CardNameStatus | None = None
         reason = ""
@@ -158,33 +299,44 @@ def reconcile_card_dimension(
             else:
                 continue
         else:
-            canonical_candidates = canonical_by_key.get(key, set())
-            if len(canonical_candidates) == 1:
-                canonical = next(iter(canonical_candidates))
-                status = CardNameStatus.NEW_CARD if key in new_keys else CardNameStatus.CANONICAL
-                reason = "exact normalized canonical name in the card dimension"
-            elif len(canonical_candidates) > 1:
-                status = CardNameStatus.AMBIGUOUS
-                reason = "normalized canonical key maps to multiple English card names; no mapping applied"
+            provider_alias = PROVIDER_CARD_ALIASES.get(observed)
+            if provider_alias is not None:
+                canonical = provider_alias["canonical_name"]
+                if canonical not in exact:
+                    raise ValueError(
+                        f"provider card alias {observed!r} targets absent canonical card "
+                        f"{canonical!r}"
+                    )
+                source = f"curated:{provider_alias['provider']}"
+                scryfall_id = provider_alias["oracle_id"]
+                status = CardNameStatus.CANONICAL
+                reason = "verified historical provider name mapped to the current oracle name"
             else:
-                provider_alias = PROVIDER_CARD_ALIASES.get(observed)
-                if provider_alias is not None:
-                    canonical = provider_alias["canonical_name"]
-                    if canonical not in exact:
-                        raise ValueError(
-                            f"provider card alias {observed!r} targets absent canonical card "
-                            f"{canonical!r}"
-                        )
-                    source = f"curated:{provider_alias['provider']}"
-                    scryfall_id = provider_alias["oracle_id"]
-                    status = CardNameStatus.CANONICAL
-                    reason = "verified historical provider name mapped to the current oracle name"
-                    alias_candidates = ()
-                    alias_canonicals: set[str] = set()
+                canonical_candidates = canonical_by_key.get(key, set())
+                if len(canonical_candidates) == 1:
+                    canonical = next(iter(canonical_candidates))
+                    status = CardNameStatus.NEW_CARD if key in new_keys else CardNameStatus.CANONICAL
+                    reason = "exact normalized canonical name in the card dimension"
+                elif len(canonical_candidates) > 1:
+                    status = CardNameStatus.AMBIGUOUS
+                    reason = "normalized canonical key maps to multiple English card names; no mapping applied"
                 else:
+                    provider_resolution = provider_serialization_candidate(
+                        con,
+                        observed,
+                        providers=frozenset(provider_rows or ()),
+                        canonical_names=frozenset(exact),
+                        rules=PROVIDER_SERIALIZATION_RULES,
+                        resolved_at=resolved_at,
+                    )
+                    if provider_resolution is not None:
+                        canonical = provider_resolution.canonical_name
+                        source = provider_resolution.source
+                        status = provider_resolution.status
+                        reason = provider_resolution.reason
                     alias_candidates = fetch_card_alias_candidates(con, observed)
                     alias_canonicals = {item.canonical_name for item in alias_candidates}
-                if status is CardNameStatus.CANONICAL:
+                if status is not None:
                     pass
                 elif len(alias_canonicals) == 1:
                     candidate = alias_candidates[0]

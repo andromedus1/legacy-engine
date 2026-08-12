@@ -15,5 +15,28 @@
       "oracle_id": "09a70ae8-3859-4a09-901d-dce063fa3b5f",
       "evidence": "https://melee.gg/Tournament/View/212627"
     }
+  ],
+  "serialization_rules": [
+    {
+      "kind": "set_prefix",
+      "provider": "MTGmelee",
+      "evidence": "https://melee.gg/Tournament/View/358059",
+      "prefixes": ["A", "AL", "FE", "GP", "LRW", "MR", "PLC", "SHM", "TE", "US"]
+    },
+    {
+      "kind": "duplicated_name",
+      "provider": "MTGmelee",
+      "evidence": "https://melee.gg/Tournament/View/358609"
+    },
+    {
+      "kind": "duplicated_final_face",
+      "provider": "MTGmelee",
+      "evidence": "https://melee.gg/Tournament/View/212849"
+    },
+    {
+      "kind": "localized_faces",
+      "provider": "MTGmelee",
+      "evidence": "https://melee.gg/Tournament/View/360595"
+    }
   ]
 }
