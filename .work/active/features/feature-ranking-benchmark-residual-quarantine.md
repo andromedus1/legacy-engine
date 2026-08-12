@@ -404,6 +404,21 @@ from corrected committed code.
   `data/benchmarks/ranking-residual-quarantine-v2-fixed/` using protocol hash
   `800a1c4ccbc2d2e5e10c78727ce3d2f23cd1b416e685eb2d2afe63e6737695f2`, a byte-identical reconciled
   corpus copy (`b2e9655c7c25fb01fc124f4e8c7761dfcda30c055f0a652c4564ea95d3aff83a`), and descriptive
-  claim ceiling. Replay PID is `99562`; it is currently active on fold 1. The earlier partial v2
-  directory is not reused and no Best Call HTML refresh occurs until a corrected canonical summary
-  completes.
+  claim ceiling. The corrected 24-fold replay completed in about 6h30m: 22 folds were evaluable,
+  two were support-censored, and six B&R regimes were represented. Every fold-level quarantine
+  remained within its declared 0.5% deck / 2% round ceilings.
+- Canonical result: `descriptive`, summary artifact id
+  `9b14df2113c2b517c6e614f68812725b8576e9f6cbaa294703181cde55d4c6c0`. The promotion gate refused
+  a predictive claim because stable event-block regret advantage was not established against both
+  ranking baselines, required primary calibration metrics were unavailable, and the protocol was
+  permanently capped at descriptive. This is useful sensitivity evidence, not prospective
+  validation.
+- `decks/best-deck-best-call-ranking.html` was regenerated from the live database with that exact
+  summary. Page SHA-256 is
+  `7d5b66cb99b992c88b2a8a061ce4e62841b3d9d68f52923c464718ce3e3c3618`; its embedded benchmark
+  status, artifact id, protocol hash, and reasons exactly match the canonical summary. The current
+  production recommendation is `Dimir Tempo`, shown separately from the descriptive benchmark
+  result. Focused page/benchmark verification passed 80 tests.
+- The earlier partial v2 directory remains non-authoritative and was not reused. This full replay is
+  a rare validation operation; ordinary ranking-page refreshes reuse the reviewed summary artifact
+  instead of rebuilding all historical folds.

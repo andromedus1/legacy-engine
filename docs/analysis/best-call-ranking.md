@@ -184,6 +184,19 @@ protocol byte, source row, or production recommendation changed in response. The
 page reports the current production call separately, but it must not be described as predictively
 validated until a future-only run clears all gates.
 
+A separate corrected historical sensitivity replay used the opt-in residual quarantine policy and
+protocol hash `800a1c4ccbc2d2e5e10c78727ce3d2f23cd1b416e685eb2d2afe63e6737695f2` on a byte-identical
+reconciled corpus copy. It completed all 24 planned folds: 22 were evaluable, two were support-
+censored, and every quarantine stayed within the declared 0.5% deck / 2% round ceilings. Its
+canonical summary artifact id is
+`9b14df2113c2b517c6e614f68812725b8576e9f6cbaa294703181cde55d4c6c0`; status is **descriptive**.
+The promotion gate refused a predictive claim because stable event-block regret advantage was not
+established against both ranking baselines, required primary calibration metrics were unavailable,
+and the posthoc protocol ceiling forbids a stronger claim. The generated Best Call page embeds that
+exact status and identity while keeping the current production recommendation separate. Routine
+page refreshes should reuse this reviewed summary; rerunning every historical fold is reserved for
+material methodology, taxonomy, or history changes.
+
 ### Experimental player-effect diagnostic
 
 `advise benchmark player-effect plan|freeze|evaluate|run` asks whether repeat pilot identity adds
