@@ -1,14 +1,14 @@
 ---
 id: story-fix-missing-goblin-card-metadata
 kind: story
-stage: review
+stage: done
 tags: [bug, ingestion, cards, benchmark]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 ---
 
 # Resolve the verified historical Goblin card name
@@ -69,3 +69,11 @@ name with zero unresolved gaps. Before the fix it fails because the observed nam
 - Adjacent corpus-name gaps after the first cutoff are not bundled. The unchanged 24-fold benchmark
   will reveal whether any independently unresolved later names block subsequent folds; its result
   will be preserved without widening this fix or tuning the protocol.
+
+## Bounded inline review (2026-08-12)
+
+Verdict: pass, with no findings. The repair adds one evidence-bearing exact historical spelling,
+requires its canonical Scryfall target to exist, and preserves the raw cache and locked corpus. The
+regression exercises the production reconciliation seam, and focused, affected, and full-suite
+verification are green. Broader provider serialization and later metadata gaps remain outside this
+standalone fix and are tracked separately.
