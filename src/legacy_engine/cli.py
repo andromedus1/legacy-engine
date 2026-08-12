@@ -491,6 +491,107 @@ def refresh_card_coverage(db: str | None, verbose: bool) -> None:
         click.echo(line)
 
 
+# ── ops: local scheduled maintenance + status ──
+@main.group()
+def ops() -> None:
+    """Operate local scheduled maintenance jobs."""
+
+
+@ops.command("scheduled-refresh")
+@click.option("--db", type=click.Path(dir_okay=False), default=None,
+              help="DuckDB path (defaults to the configured analytical cache).")
+@click.option("--out", type=click.Path(dir_okay=False), default=None,
+              help="Ranking HTML path (defaults to decks/best-deck-best-call-ranking.html).")
+@click.option("--status-dir", type=click.Path(file_okay=False), default=None,
+              help="Operational status directory (defaults to data/ops/status).")
+@_verbose
+def ops_scheduled_refresh(
+    db: str | None,
+    out: str | None,
+    status_dir: str | None,
+    verbose: bool,
+) -> None:
+    """Run the decision-data refresh once with locking and durable status."""
+    _setup_logging(verbose)
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from uuid import uuid4
+
+    from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR, OPS_STATUS_DIR, PROJECT_ROOT
+    from legacy_engine.ops.scheduled_refresh import (
+        JOB_NAME,
+        run_scheduled_decision_refresh,
+    )
+    from legacy_engine.ops.status import (
+        JobOutcome,
+        job_status_audit_lines,
+        read_job_status,
+    )
+    from legacy_engine.workflows.decision_refresh import DefaultDecisionRefreshPorts
+
+    resolved_status_dir = Path(status_dir).resolve() if status_dir else OPS_STATUS_DIR
+    status = run_scheduled_decision_refresh(
+        DefaultDecisionRefreshPorts(),
+        db_path=Path(db).resolve() if db else DUCKDB_PATH,
+        out_path=(
+            Path(out).resolve()
+            if out
+            else PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html"
+        ),
+        status_dir=resolved_status_dir,
+        lock_path=(resolved_status_dir.parent / "locks" / f"{JOB_NAME}.lock")
+        if status_dir
+        else OPS_LOCK_DIR / f"{JOB_NAME}.lock",
+        clock=lambda: datetime.now(timezone.utc),
+        attempt_id_factory=lambda: uuid4().hex,
+        pid=os.getpid(),
+    )
+    view = read_job_status(
+        resolved_status_dir / f"{JOB_NAME}.json",
+        now=datetime.now(timezone.utc),
+    ) if status.outcome is not JobOutcome.SKIPPED_OVERLAP else None
+    if view is not None:
+        for line in job_status_audit_lines(view):
+            click.echo(line)
+    else:
+        click.echo(f"// ⚠ scheduled refresh: skipped_overlap — {status.reason}")
+    if status.outcome is JobOutcome.SKIPPED_OVERLAP:
+        raise click.exceptions.Exit(75)
+    if status.outcome is JobOutcome.FAILED:
+        raise click.exceptions.Exit(1)
+
+
+@ops.command("status")
+@click.option("--status-dir", type=click.Path(file_okay=False), default=None,
+              help="Operational status directory (defaults to data/ops/status).")
+@click.option("--brief", is_flag=True, default=False,
+              help="Print one session-friendly status line.")
+@_verbose
+def ops_status(status_dir: str | None, brief: bool, verbose: bool) -> None:
+    """Inspect the last recorded decision-data refresh."""
+    _setup_logging(verbose)
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from legacy_engine.config import OPS_STATUS_DIR
+    from legacy_engine.ops.scheduled_refresh import JOB_NAME
+    from legacy_engine.ops.status import job_status_audit_lines, read_job_status
+
+    resolved = Path(status_dir).resolve() if status_dir else OPS_STATUS_DIR
+    view = read_job_status(
+        resolved / f"{JOB_NAME}.json",
+        now=datetime.now(timezone.utc),
+    )
+    for line in job_status_audit_lines(view, brief=brief):
+        click.echo(line)
+
+
+@ops.group("scheduler")
+def ops_scheduler() -> None:
+    """Manage the local user LaunchAgent (repo implementation pending)."""
+
+
 # ── label: archetype classification ──
 @main.command()
 @_verbose

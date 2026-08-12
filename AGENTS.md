@@ -11,6 +11,11 @@ summaries, decisions, findings, and relationships. When knowledge-bearing artifa
 `/research-pipeline:knowledge-index` to regenerate all three layers from frontmatter. **Do not
 hand-edit the index files.**
 
+When `data/ops/status/decision-refresh.json` exists, run
+`.venv/bin/python scripts/session_ops_status.py` during orientation and surface any stale, failed,
+degraded, or pending-action result. This status projection is local-only and must never trigger a
+refresh or network call.
+
 ## Build process
 Follow the methodology at `~/dev/skills-v2/plugins/research-pipeline/docs/build-process.md`.
 Planning and foundation knowledge lives under `docs/`; grounded research uses `.research/` under
