@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import fcntl
+import threading
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -12,6 +14,7 @@ from legacy_engine.ops.format_monitor import (
     FormatMonitorState,
     MonitorEvidence,
     acknowledge_candidate,
+    acknowledge_monitor_candidate,
     add_candidate_evidence,
     extract_legacy_legalities,
     load_monitor_state,
@@ -127,11 +130,17 @@ class TestCandidateLifecycle:
 
     def test_registered_ban_retires_candidate_and_unban_stays_unsupported(self):
         state = _candidate_state()
+        candidate_id = state.candidates[0].candidate_id
+        state = add_candidate_evidence(state, candidate_id, MonitorEvidence(
+            source="wotc", source_url="https://magic.wizards.com/example",
+            observed_at=NOW + timedelta(hours=1), effective_date=date(2026, 8, 12),
+            detail="Example Card is banned.",
+        ))
         retired = merge_legality_observation(
             state, observed=extract_legacy_legalities(_rows("banned")), evidence=SCRYFALL,
             registered_events=((date(2026, 8, 12), "Example Card", "confirmed"),),
         )
-        assert retired.candidates == ()
+        assert retired.candidates[0].disposition is CandidateDisposition.CONFIRMED
 
         unban = _candidate_state("not_legal")
         # Move from not_legal to legal to exercise a transition the cumulative ledger cannot encode.
@@ -187,6 +196,31 @@ class TestMonitorStatePersistence:
         assert path.read_text() == previous
         assert list(tmp_path.glob("*.tmp")) == []
 
+    def test_acknowledgement_waits_for_active_state_transaction(self, tmp_path):
+        path = tmp_path / "format-monitor.json"
+        state = _candidate_state()
+        write_monitor_state(path, state)
+        lock_path = path.with_name(f".{path.name}.lock")
+        lock_path.touch()
+        finished = threading.Event()
+
+        with lock_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            worker = threading.Thread(target=lambda: (
+                acknowledge_monitor_candidate(
+                    path, state.candidates[0].candidate_id,
+                    acknowledged_at=NOW + timedelta(days=2),
+                ),
+                finished.set(),
+            ))
+            worker.start()
+            assert not finished.wait(0.05)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        worker.join(timeout=1)
+
+        assert finished.is_set()
+        assert load_monitor_state(path).candidates[0].disposition is CandidateDisposition.ACKNOWLEDGED
+
 
 class MonitorPorts:
     def __init__(self, rows, pages):
@@ -206,7 +240,7 @@ class MonitorPorts:
             raise FileNotFoundError(url)
         if isinstance(value, Exception):
             raise value
-        return value
+        return value, url
 
 
 def _wotc_page(legacy="No changes."):
@@ -260,6 +294,19 @@ class TestFormatMonitorComposition:
         )
         assert result.wotc_state.value == "pending"
         assert len([item for item in result.candidates if item.kind == "legality"]) == 1
+
+    def test_wotc_redirect_outside_provider_is_unavailable(self, tmp_path):
+        class RedirectPorts(MonitorPorts):
+            def fetch_wotc(self, url):
+                return _wotc_page(), "https://example.com/captured"
+
+        result = run_format_monitor(
+            RedirectPorts(_rows(), {}), state_path=tmp_path / "state.json", observed_at=NOW,
+            release_scan=ReleaseScan(upcoming=[], recently_released=[], scanned_at=NOW.date()),
+            release_scan_reason=None, new_card_names=(), registered_events=(),
+        )
+        assert result.wotc_state.value == "unavailable"
+        assert "outside provider boundary" in result.unavailable_reasons[0]
 
     def test_release_metadata_needs_actual_new_card_diff(self, tmp_path):
         url = "https://magic.wizards.com/en/news/announcements/banned-and-restricted-august-11-2026"

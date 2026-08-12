@@ -10,7 +10,9 @@ import hashlib
 import json
 import os
 import tempfile
+import fcntl
 from collections.abc import Iterable
+from contextlib import contextmanager
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -106,7 +108,7 @@ class FormatMonitorResult(LegacyEngineModel):
 
 class FormatMonitorPorts(Protocol):
     def oracle_rows(self) -> Iterable[dict[str, object]]: ...
-    def fetch_wotc(self, url: str) -> str: ...
+    def fetch_wotc(self, url: str) -> tuple[str, str]: ...
 
 
 class DefaultFormatMonitorPorts:
@@ -117,7 +119,7 @@ class DefaultFormatMonitorPorts:
 
         return iter_bulk_rows(ORACLE_CARDS_PATH)
 
-    def fetch_wotc(self, url: str) -> str:
+    def fetch_wotc(self, url: str) -> tuple[str, str]:
         import httpx
 
         from legacy_engine.config import USER_AGENT
@@ -128,10 +130,20 @@ class DefaultFormatMonitorPorts:
             follow_redirects=True,
             timeout=30.0,
         )
+        for hop in (*response.history, response):
+            _validate_wotc_uri(str(hop.url))
         if response.status_code == 404:
             raise FileNotFoundError(url)
         response.raise_for_status()
-        return response.text
+        return response.text, str(response.url)
+
+
+def _validate_wotc_uri(url: str) -> None:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "magic.wizards.com":
+        raise ValueError(f"WotC announcement URL is outside provider boundary: {url}")
 
 
 def _subject_id(observation: LegalityObservation) -> str:
@@ -223,7 +235,16 @@ def _is_registered(
     if candidate.current_value != "banned":
         return False
     normalized = normalize_name(candidate.subject_name)
-    return any(normalize_name(card) == normalized for _when, card, _reason in registered_events)
+    effective_dates = {
+        item.effective_date for item in candidate.evidence
+        if item.source == "wotc" and item.effective_date is not None
+    }
+    if not effective_dates:
+        return False
+    return any(
+        normalize_name(card) == normalized and when in effective_dates
+        for when, card, _reason in registered_events
+    )
 
 
 def merge_legality_observation(
@@ -307,13 +328,17 @@ def merge_legality_observation(
             unsupported_acceptance_reason=unsupported,
         )
         if _is_registered(candidate, registered_events):
-            candidates.pop(candidate_id, None)
-        else:
-            candidates[candidate_id] = candidate
+            candidate = candidate.model_copy(update={
+                "disposition": CandidateDisposition.CONFIRMED,
+            })
+        candidates[candidate_id] = candidate
 
     candidates = {
-        key: candidate for key, candidate in candidates.items()
-        if not _is_registered(candidate, registered_events)
+        key: (
+            candidate.model_copy(update={"disposition": CandidateDisposition.CONFIRMED})
+            if _is_registered(candidate, registered_events) else candidate
+        )
+        for key, candidate in candidates.items()
     }
     return state.model_copy(update={
         "legality_baseline_observed_at": evidence.observed_at,
@@ -477,7 +502,9 @@ def _project_result(
     unavailable = tuple(unavailable_reasons)
     pending: list[str] = []
     for candidate in state.candidates:
-        if candidate.disposition is CandidateDisposition.ACKNOWLEDGED:
+        if candidate.disposition in {
+            CandidateDisposition.ACKNOWLEDGED, CandidateDisposition.CONFIRMED,
+        }:
             continue
         action = (
             candidate.unsupported_acceptance_reason
@@ -497,7 +524,7 @@ def _project_result(
     )
 
 
-def run_format_monitor(
+def _run_format_monitor_unlocked(
     ports: FormatMonitorPorts,
     *,
     state_path: Path,
@@ -549,11 +576,14 @@ def run_format_monitor(
         try:
             for url in announcement_candidate_urls(expected):
                 try:
-                    html = ports.fetch_wotc(url)
+                    html, resolved_url = ports.fetch_wotc(url)
                 except FileNotFoundError:
                     missing += 1
                     continue
-                announcement = parse_wotc_legacy_announcement(html, source_url=url)
+                _validate_wotc_uri(resolved_url)
+                announcement = parse_wotc_legacy_announcement(
+                    html, source_url=resolved_url,
+                )
                 break
             if announcement is None:
                 raise ValueError(
@@ -595,6 +625,56 @@ def run_format_monitor(
         release_state=release_state,
         unavailable_reasons=reasons,
     )
+
+
+@contextmanager
+def _monitor_state_lock(state_path: Path):
+    lock_path = state_path.with_name(f".{state_path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def run_format_monitor(
+    ports: FormatMonitorPorts,
+    *,
+    state_path: Path,
+    observed_at: datetime,
+    release_scan: "ReleaseScan | None",
+    release_scan_reason: str | None,
+    new_card_names: tuple[str, ...],
+    registered_events: tuple[tuple[date, str, str], ...],
+) -> FormatMonitorResult:
+    """Serialize the complete monitor read/transition/write transaction."""
+    with _monitor_state_lock(state_path):
+        return _run_format_monitor_unlocked(
+            ports,
+            state_path=state_path,
+            observed_at=observed_at,
+            release_scan=release_scan,
+            release_scan_reason=release_scan_reason,
+            new_card_names=new_card_names,
+            registered_events=registered_events,
+        )
+
+
+def acknowledge_monitor_candidate(
+    path: Path, candidate_id: str, *, acknowledged_at: datetime,
+) -> FormatMonitorState:
+    """Atomically acknowledge against the latest state under the monitor lock."""
+    with _monitor_state_lock(path):
+        state = load_monitor_state(path)
+        if state is None:
+            raise FileNotFoundError(f"no format-monitor state at {path}")
+        updated = acknowledge_candidate(
+            state, candidate_id, acknowledged_at=acknowledged_at,
+        )
+        write_monitor_state(path, updated)
+        return updated
 
 
 def format_monitor_audit_lines(

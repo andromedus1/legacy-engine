@@ -3,7 +3,7 @@ name: architecture-legacy-engine
 description: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
 type: architecture
 kind: planning
-updated: 2026-08-11
+updated: 2026-08-12
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
   edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
@@ -322,7 +322,7 @@ the matchup + meta-share workloads.
 | fbettega MTG_decklistcache | git clone/pull (mirror) | none | PascalCase CacheItem JSON; daily commit ~18:32 UTC; **fragile single-maintainer — mirror locally** | fbettega-cache-schema, ingestion-ops-and-metashare |
 | Badaro MTGOFormatData | git subtree @ pinned SHA | none | rules-as-JSON; ~monthly Legacy updates; diff on refresh | mtgoformatdata-rule-schema |
 | Badaro MTGOArchetypeParser (C#, archived 2025-09-24) | reference only | none | frozen port target + golden-label source | archetype-matching-algorithm, csharp-python-port-strategy |
-| WotC B&R | manual/curated | none | dated snapshots; blacklist validation | legacy-foundations |
+| WotC B&R | scheduled HTTP detection; manual curated acceptance | none | attributed candidates; only `eras confirm` changes accepted truth | data-autonomy-upstream, legacy-foundations |
 
 All external data fetched once and mirrored; the engine makes **no network calls at analysis time**.
 

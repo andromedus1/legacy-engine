@@ -13,6 +13,7 @@ from typing import Protocol
 
 from legacy_engine.ops.status import (
     ArtifactIdentity,
+    FormatCandidateSummary,
     FormatMonitorSummary,
     JobOutcome,
     JobStatus,
@@ -150,7 +151,7 @@ def run_scheduled_decision_refresh(
 
     try:
         lock_context = lock_factory(lock_path)
-        with lock_context:
+        with lock_context, _terminal_signal_as_exit():
             running = _base_status(
                 attempt_id=attempt_id,
                 pid=pid,
@@ -163,8 +164,7 @@ def run_scheduled_decision_refresh(
             )
             write_job_status(canonical_path, running)
             try:
-                with _terminal_signal_as_exit():
-                    result = run_decision_refresh(ports, db_path=db_path, out_path=out_path)
+                result = run_decision_refresh(ports, db_path=db_path, out_path=out_path)
                 failed = next(
                     (step for step in result.steps if step.status is RefreshStepStatus.FAILED),
                     None,
@@ -235,6 +235,15 @@ def run_scheduled_decision_refresh(
                             wotc=monitor.wotc_state.value,
                             releases=monitor.release_state.value,
                             candidate_count=len(monitor.candidates),
+                            candidates=tuple(
+                                FormatCandidateSummary(
+                                    candidate_id=item.candidate_id,
+                                    kind=item.kind,
+                                    disposition=item.disposition.value,
+                                    subject_name=item.subject_name,
+                                )
+                                for item in monitor.candidates
+                            ),
                             unavailable_reasons=monitor.unavailable_reasons,
                         )
                         pending = tuple(dict.fromkeys((*pending, *monitor.pending_actions)))

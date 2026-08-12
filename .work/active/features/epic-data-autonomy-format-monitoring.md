@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-format-monitoring
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [epic-data-autonomy-local-refresh-operations]
@@ -409,3 +409,5 @@ the provider's declared object count; serialize monitor acknowledgement with sch
 transactions; match confirmations by card and effective date; extend SIGTERM terminalization
 through monitoring; persist candidate identities/dispositions in status; validate and retain the
 resolved WotC URL; and correct the stale automated-detection/manual-acceptance architecture label.
+All findings are resolved in the completed correction story; standard-weight closure requires only
+the recorded focused and full verification, not another independent pass.

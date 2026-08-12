@@ -626,22 +626,16 @@ def ops_monitor_acknowledge(
 
     from legacy_engine.config import FORMAT_MONITOR_STATE_PATH
     from legacy_engine.ops.format_monitor import (
-        acknowledge_candidate,
-        load_monitor_state,
-        write_monitor_state,
+        acknowledge_monitor_candidate,
     )
 
     path = Path(state_path).resolve() if state_path else FORMAT_MONITOR_STATE_PATH
-    state = load_monitor_state(path)
-    if state is None:
-        raise click.ClickException(f"no format-monitor state at {path}")
     try:
-        updated = acknowledge_candidate(
-            state, candidate_id, acknowledged_at=datetime.now(timezone.utc),
+        acknowledge_monitor_candidate(
+            path, candidate_id, acknowledged_at=datetime.now(timezone.utc),
         )
-    except ValueError as exc:
+    except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    write_monitor_state(path, updated)
     click.echo(f"// format candidate acknowledged: {candidate_id}")
     click.echo("// unchanged evidence will stay suppressed; new evidence will resurface it")
     click.echo("// acknowledgement does not change the B&R ledger; use `eras confirm` after review")

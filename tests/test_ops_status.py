@@ -11,6 +11,7 @@ from legacy_engine.ops.status import (
     JobOutcome,
     JobStatus,
     FormatMonitorSummary,
+    FormatCandidateSummary,
     job_status_audit_lines,
     read_job_status,
     write_attempt_status,
@@ -147,7 +148,12 @@ class TestStatusAuditLines:
             reason="WotC offline",
             format_monitor=FormatMonitorSummary(
                 legality="clear", wotc="unavailable", releases="clear",
-                candidate_count=1, unavailable_reasons=("WotC offline",),
+                candidate_count=1,
+                candidates=(FormatCandidateSummary(
+                    candidate_id="candidate-1", kind="legality", disposition="acknowledged",
+                    subject_name="Example Card",
+                ),),
+                unavailable_reasons=("WotC offline",),
             ),
         ))
         view = read_job_status(path, now=NOW)
@@ -156,3 +162,4 @@ class TestStatusAuditLines:
         assert "wotc=unavailable" in brief[0]
         assert "candidates=1" in brief[0]
         assert any("format monitor unavailable: WotC offline" in line for line in full)
+        assert any("candidate-1 — legality — acknowledged" in line for line in full)

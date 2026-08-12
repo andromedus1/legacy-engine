@@ -178,7 +178,7 @@ def test_download_bulk_data_mocked(tmp_path, monkeypatch):
     with ScryfallClient() as client:
         monkeypatch.setattr(
             client, "_fetch_bulk_metadata",
-            lambda: {"download_uri": "https://api.scryfall.com/bulk-data/oracle-cards-test.json", "updated_at": "2026-05-29"}
+            lambda: {"download_uri": "https://api.scryfall.com/bulk-data/oracle-cards-test.json", "updated_at": "2026-05-29", "object_count": 2}
         )
         monkeypatch.setattr(client.client, "get", lambda *a, **k: FakeResp())
         path = client.download_bulk_data()
@@ -228,6 +228,7 @@ def test_download_bulk_data_accepts_live_jsonl_download_uri(tmp_path, monkeypatc
     monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
         "updated_at": "2026-08-11T00:00:00Z",
+        "object_count": 2,
     })
 
     path = client.download_bulk_data(force=True)
@@ -276,12 +277,48 @@ def test_corrupt_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_pat
     monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
         "updated_at": "broken",
+        "object_count": 2,
     })
 
     with pytest.raises(json.JSONDecodeError):
         client.download_bulk_data(force=True)
 
     assert json.loads(oracle_path.read_text()) == [NORMAL]
+    assert metadata_path.read_text() == '{"updated_at":"last-good"}'
+
+
+def test_truncated_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_path, monkeypatch):
+    oracle_path = tmp_path / "oracle_cards.json"
+    metadata_path = tmp_path / "metadata.json"
+    oracle_path.write_text(json.dumps([NORMAL, LAND]), encoding="utf-8")
+    metadata_path.write_text('{"updated_at":"last-good"}', encoding="utf-8")
+
+    class Response:
+        headers = {"content-encoding": "gzip"}
+        def raise_for_status(self): return None
+        def iter_raw(self, chunk_size):
+            yield gzip.compress((json.dumps(NORMAL) + "\n").encode())
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+
+    class Http:
+        def stream(self, *args, **kwargs): return Response()
+        def close(self): return None
+
+    monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+    monkeypatch.setattr(scryfall, "ORACLE_CARDS_PATH", oracle_path)
+    monkeypatch.setattr(scryfall, "METADATA_PATH", metadata_path)
+    client = ScryfallClient()
+    client.client.close()
+    client.client = Http()
+    monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
+        "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
+        "updated_at": "truncated", "object_count": 2,
+    })
+
+    with pytest.raises(ValueError, match="row count mismatch"):
+        client.download_bulk_data(force=True)
+    assert json.loads(oracle_path.read_text()) == [NORMAL, LAND]
     assert metadata_path.read_text() == '{"updated_at":"last-good"}'
 
 
@@ -324,6 +361,7 @@ def test_download_prices_bulk_accepts_jsonl_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "_fetch_prices_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/default.jsonl.gz",
         "updated_at": "2026-08-11T00:00:00Z",
+        "object_count": 1,
     })
 
     client.download_prices_bulk(force=True)

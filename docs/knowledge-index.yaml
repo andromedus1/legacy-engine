@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-12T05:53:29Z'
+generated_at: '2026-08-12T06:12:29Z'
 generated_from: frontmatter
 total_docs: 32
 documents:
@@ -8,7 +8,7 @@ documents:
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-08-11'
+  updated: '2026-08-12'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four

@@ -29,11 +29,19 @@ class ArtifactIdentity(LegacyEngineModel):
     ranking_sha256: str | None = None
 
 
+class FormatCandidateSummary(LegacyEngineModel):
+    candidate_id: str
+    kind: Literal["legality", "release"]
+    disposition: Literal["open", "acknowledged", "confirmed"]
+    subject_name: str
+
+
 class FormatMonitorSummary(LegacyEngineModel):
     legality: str
     wotc: str
     releases: str
     candidate_count: int = Field(ge=0)
+    candidates: tuple[FormatCandidateSummary, ...] = ()
     unavailable_reasons: tuple[str, ...] = ()
 
 
@@ -219,6 +227,11 @@ def job_status_audit_lines(
         lines.append(
             f"// format monitor: legality={monitor.legality}, wotc={monitor.wotc}, "
             f"releases={monitor.releases}, candidates={monitor.candidate_count}"
+        )
+        lines.extend(
+            f"// format candidate: {candidate.candidate_id} — {candidate.kind} — "
+            f"{candidate.disposition} — {candidate.subject_name}"
+            for candidate in monitor.candidates
         )
         lines.extend(
             f"// ⚠ format monitor unavailable: {reason}"

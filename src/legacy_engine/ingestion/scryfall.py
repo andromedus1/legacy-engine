@@ -118,7 +118,23 @@ def _write_metadata(path: Path, payload: dict[str, object]) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
-def _stream_jsonl_bulk(client, uri: str, destination: Path) -> int:
+def _declared_object_count(meta: dict[str, object]) -> int:
+    count = meta.get("object_count")
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        raise ValueError("Scryfall bulk metadata is missing positive object_count")
+    return count
+
+
+def _validate_row_count(actual: int, expected: int) -> None:
+    if actual != expected:
+        raise ValueError(
+            f"Scryfall bulk row count mismatch: expected {expected}, received {actual}"
+        )
+
+
+def _stream_jsonl_bulk(
+    client, uri: str, destination: Path, *, expected_rows: int,
+) -> int:
     """Stream, validate, and atomically normalize gzipped JSONL to plain JSONL."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     raw_tmp = destination.with_name(f".{destination.name}.download.tmp")
@@ -145,6 +161,7 @@ def _stream_jsonl_bulk(client, uri: str, destination: Path) -> int:
                 count += 1
             handle.flush()
             os.fsync(handle.fileno())
+        _validate_row_count(count, expected_rows)
         os.replace(normalized_tmp, destination)
         return count
     finally:
@@ -219,17 +236,21 @@ class ScryfallClient:
                 return ORACLE_CARDS_PATH
 
         meta = self._fetch_bulk_metadata()
+        expected_rows = _declared_object_count(meta)
         uri, is_jsonl = _bulk_download_uri(meta)
         _validate_scryfall_uri(uri)
         logger.info("Downloading Scryfall %s bulk from %s", SCRYFALL_BULK_TYPE, uri)
         if is_jsonl:
-            card_count = _stream_jsonl_bulk(self.client, uri, ORACLE_CARDS_PATH)
+            card_count = _stream_jsonl_bulk(
+                self.client, uri, ORACLE_CARDS_PATH, expected_rows=expected_rows,
+            )
         else:
             resp = self.client.get(uri, follow_redirects=True)
             resp.raise_for_status()
             cards = resp.json()
             if not isinstance(cards, list) or not cards:
                 raise ValueError("Scryfall oracle bulk must be a non-empty card array")
+            _validate_row_count(len(cards), expected_rows)
             candidate = ORACLE_CARDS_PATH.with_name(f".{ORACLE_CARDS_PATH.name}.tmp")
             try:
                 candidate.write_text(json.dumps(cards), encoding="utf-8")
@@ -418,6 +439,7 @@ class ScryfallClient:
                 return SCRYFALL_PRICES_PATH
 
         meta = self._fetch_prices_metadata()
+        expected_rows = _declared_object_count(meta)
         uri, is_jsonl = _bulk_download_uri(meta)
         _validate_scryfall_uri(uri)
         logger.info(
@@ -428,7 +450,9 @@ class ScryfallClient:
         # Stream into a temp file first, then rename atomically so a partial download
         # never leaves a corrupt mirror.
         if is_jsonl:
-            _stream_jsonl_bulk(self.client, uri, SCRYFALL_PRICES_PATH)
+            _stream_jsonl_bulk(
+                self.client, uri, SCRYFALL_PRICES_PATH, expected_rows=expected_rows,
+            )
         else:
             tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
             try:
@@ -438,7 +462,8 @@ class ScryfallClient:
                         for chunk in resp.iter_bytes(chunk_size=64 * 1024):
                             fh.write(chunk)
                 # Validate before replacing the last-good mirror.
-                next(iter_bulk_rows(tmp_path))
+                count = sum(1 for _row in iter_bulk_rows(tmp_path))
+                _validate_row_count(count, expected_rows)
                 os.replace(tmp_path, SCRYFALL_PRICES_PATH)
             finally:
                 tmp_path.unlink(missing_ok=True)

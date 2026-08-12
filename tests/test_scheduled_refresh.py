@@ -221,6 +221,26 @@ class TestScheduledDecisionRefresh:
         assert status.format_monitor.wotc == "unavailable"
         assert any("format monitor unavailable" in item for item in status.pending_actions)
 
+    def test_sigterm_during_monitor_terminalizes_status_then_exits(self, tmp_path):
+        ports = RecordingPorts()
+
+        class MonitorPorts:
+            def oracle_rows(self):
+                signal.raise_signal(signal.SIGTERM)
+            def fetch_wotc(self, url):
+                raise AssertionError("unreachable")
+
+        with pytest.raises(SystemExit):
+            _run(
+                tmp_path, ports, format_monitor_ports=MonitorPorts(),
+                format_monitor_state_path=tmp_path / "state.json",
+            )
+        canonical = JobStatus.model_validate_json(
+            (tmp_path / "status" / "decision-refresh.json").read_text()
+        )
+        assert canonical.outcome is JobOutcome.FAILED
+        assert canonical.reason == "SystemExit"
+
     def test_monitor_candidate_projects_to_pending_action(self, tmp_path):
         ports = RecordingPorts()
         ports.refresh_sources = lambda db_path: SourceRefreshResult(
@@ -244,7 +264,7 @@ class TestScheduledDecisionRefresh:
                     "<h2>Legacy</h2><p>No changes.</p>"
                     "<h2>Vintage</h2><p>No changes.</p>"
                     "<p>Next announcement: October 12, 2026.</p>"
-                )
+                ), url
 
         status = _run(
             tmp_path, ports,
