@@ -81,6 +81,7 @@ class CardNameResolution(LegacyEngineModel):
     language: str | None = None
     scryfall_id: str | None = None
     source: str
+    evidence: str | None = None
     source_updated_at: str | None = None
     resolved_at: datetime
     reason: str

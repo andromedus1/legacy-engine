@@ -1,7 +1,7 @@
 ---
 id: feature-card-name-reconciliation-closure
 kind: feature
-stage: review
+stage: implementing
 tags: [ingestion, data-quality, benchmark]
 parent: null
 depends_on: [story-fix-missing-goblin-card-metadata, story-fix-set-prefixed-wasteland-name]
@@ -360,3 +360,14 @@ advise benchmark run --db <same-derived-copy> --protocol <frozen-protocol> ...
   its audit record remains deterministic; otherwise none.
 - Adjacent issues parked: none. The residual evidence queue is intentional fail-closed output, not a
   newly discovered implementation defect.
+
+## Review (2026-08-12)
+
+One balanced standard independent pass was completed in a fresh context. Verdict: blocked pending
+the named `feature-card-name-reconciliation-closure-review-fixes` story. The confirmed blocker is
+that filtered null tournament sources can make mixed known/missing provenance appear provider-pure.
+Accepted connected findings cover protocol validation before mutation, durable rule/gap evidence,
+fail-fast package-registry loading, duplicate-prefix validation, and their missing boundary tests.
+The reviewer confirmed strict cutoff/tail semantics, authority precedence, and the absence of generic
+bracket, fuzzy, or truncation repair. A comma-delimited human summary was retained as a nit because
+structured per-gap audit output owns machine-readable detail.

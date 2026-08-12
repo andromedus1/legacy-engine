@@ -138,11 +138,14 @@ legacy-engine refresh card-coverage \
 
 Scryfall oracle cards and current one-to-one printed-name aliases are authoritative. The package
 registry admits only evidence-bearing exact historical exceptions and narrowly typed provider
-serialization rules. Those rules require singular provider provenance and an exact canonical
-target already present in the card dimension. They do not generically strip brackets, guess by edit
+serialization rules. Those rules require complete singular provider provenance, retained rule
+evidence, and an exact canonical target already present in the card dimension. Missing provenance
+fails closed. They do not generically strip brackets, guess by edit
 distance, truncate tokens, or select among ambiguous localized aliases. The preflight prints every
 planned cutoff cohort plus the post-last-cutoff tail. Any planned-cutoff gap is a hard benchmark
-launch stop; ambiguous, suspected-truncated, and manual-evidence values stay visible and unresolved.
+launch stop; structured gap lines retain provider and event-URI provenance, while ambiguous,
+suspected-truncated, and manual-evidence values stay visible and unresolved. The protocol schedule
+is validated before reconciliation can mutate the derived copy.
 
 ### Current validation evidence (2026-08-12)
 

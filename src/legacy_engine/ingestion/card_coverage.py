@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Literal
 import unicodedata
@@ -21,9 +20,6 @@ from legacy_engine.models.card import (
     CardNameResolution,
     CardNameStatus,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class ProviderSerializationRule(LegacyEngineModel):
     """One evidence-backed provider grammar admitted at reconciliation time."""
@@ -96,7 +92,7 @@ def _load_provider_card_name_registry(
             )
         seen_rule_keys.add(rule_key)
         if rule.kind == "set_prefix":
-            if not rule.prefixes or any(
+            if len(rule.prefixes) != len(set(rule.prefixes)) or not rule.prefixes or any(
                 not prefix.strip()
                 or prefix != prefix.strip()
                 or (rule.provider, prefix) in admitted_prefixes
@@ -121,13 +117,9 @@ def load_provider_card_aliases(path: Path | str) -> dict[str, dict[str, str]]:
 
 def _load_default_provider_card_name_registry(
 ) -> tuple[dict[str, dict[str, str]], tuple[ProviderSerializationRule, ...]]:
-    try:
-        from legacy_engine.config import CARD_NAME_ALIASES_PATH
+    from legacy_engine.config import CARD_NAME_ALIASES_PATH
 
-        return _load_provider_card_name_registry(CARD_NAME_ALIASES_PATH)
-    except Exception as exc:
-        logger.error("provider card aliases unavailable; exact reconciliation only: %s", exc)
-        return {}, ()
+    return _load_provider_card_name_registry(CARD_NAME_ALIASES_PATH)
 
 
 PROVIDER_CARD_ALIASES, PROVIDER_SERIALIZATION_RULES = _load_default_provider_card_name_registry()
@@ -230,6 +222,16 @@ def card_coverage_preflight_lines(
             f"names={len(cohort.gaps)}; decks={sum(g.deck_count for g in cohort.gaps)}; "
             f"observed={names}"
         )
+        for gap in cohort.gaps:
+            lines.append("// coverage gap: " + json.dumps({
+                "cutoff": cohort.cutoff,
+                "observed_name": gap.observed_name,
+                "providers": gap.providers,
+                "event_uris": gap.event_uris,
+                "first_event_date": gap.first_event_date,
+                "rows": gap.row_count,
+                "decks": gap.deck_count,
+            }, ensure_ascii=False, sort_keys=True))
     return tuple(lines)
 
 
@@ -243,6 +245,7 @@ def _resolution(
     language: str | None = None,
     scryfall_id: str | None = None,
     source: str,
+    evidence: str | None = None,
     source_updated_at: str | None = None,
 ) -> CardNameResolution:
     return CardNameResolution(
@@ -253,6 +256,7 @@ def _resolution(
         language=language,
         scryfall_id=scryfall_id,
         source=source,
+        evidence=evidence,
         source_updated_at=source_updated_at,
         resolved_at=resolved_at,
         reason=reason,
@@ -328,6 +332,7 @@ def provider_serialization_candidate(
                 reason,
                 canonical=canonical,
                 source=f"provider_serialization:{provider}",
+                evidence=rule.evidence,
             )
     return None
 
@@ -345,7 +350,8 @@ def reconcile_card_dimension(
     observed_rows = con.execute(
         """SELECT dc.name,
                   count(DISTINCT dc.tournament_id || ':' || CAST(dc.deck_idx AS VARCHAR)),
-                  list(DISTINCT t.source ORDER BY t.source) FILTER (WHERE t.source IS NOT NULL)
+                  list(DISTINCT t.source ORDER BY t.source) FILTER (WHERE t.source IS NOT NULL),
+                  count(*) FILTER (WHERE t.source IS NULL) > 0
            FROM deck_cards dc
            LEFT JOIN tournaments t ON t.id = dc.tournament_id
            GROUP BY dc.name ORDER BY dc.name"""
@@ -366,12 +372,13 @@ def reconcile_card_dimension(
     updates: list[tuple[str, str]] = []
     affected_names: set[str] = set()
 
-    for observed, _deck_count, provider_rows in observed_rows:
+    for observed, _deck_count, provider_rows, missing_provider in observed_rows:
         canonical: str | None = None
         status: CardNameStatus | None = None
         reason = ""
         language = None
         scryfall_id = None
+        evidence = None
         source = "oracle_cards"
         key = normalize_alias_key(observed)
 
@@ -395,6 +402,7 @@ def reconcile_card_dimension(
                 scryfall_id = provider_alias["oracle_id"]
                 status = CardNameStatus.CANONICAL
                 reason = "verified historical provider name mapped to the current oracle name"
+                evidence = provider_alias["evidence"]
             else:
                 canonical_candidates = canonical_by_key.get(key, set())
                 if len(canonical_candidates) == 1:
@@ -408,7 +416,10 @@ def reconcile_card_dimension(
                     provider_resolution = provider_serialization_candidate(
                         con,
                         observed,
-                        providers=frozenset(provider_rows or ()),
+                        providers=frozenset((
+                            *tuple(provider_rows or ()),
+                            *(() if not missing_provider else ("<missing>",)),
+                        )),
                         canonical_names=frozenset(exact),
                         rules=PROVIDER_SERIALIZATION_RULES,
                         resolved_at=resolved_at,
@@ -418,6 +429,7 @@ def reconcile_card_dimension(
                         source = provider_resolution.source
                         status = provider_resolution.status
                         reason = provider_resolution.reason
+                        evidence = provider_resolution.evidence
                     alias_candidates = fetch_card_alias_candidates(con, observed)
                     alias_canonicals = {item.canonical_name for item in alias_candidates}
                 if status is not None:
@@ -452,6 +464,7 @@ def reconcile_card_dimension(
             language=language,
             scryfall_id=scryfall_id,
             source=source,
+            evidence=evidence,
             source_updated_at=(alias_manifest.source_updated_at if source == "scryfall_all_cards" and alias_manifest else None),
         )
         groups[status].append(resolution)
@@ -524,5 +537,9 @@ def card_coverage_audit_lines(
             report.unresolved,
         ):
             for item in items:
-                lines.append(f"//   {item.status.value}: {item.observed_name} — {item.reason}")
+                evidence = f"; evidence={item.evidence}" if item.evidence else ""
+                lines.append(
+                    f"//   {item.status.value}: {item.observed_name} — {item.reason}; "
+                    f"source={item.source}{evidence}"
+                )
     return tuple(lines)

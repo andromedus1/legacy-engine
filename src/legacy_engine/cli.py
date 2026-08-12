@@ -480,6 +480,13 @@ def refresh_card_coverage(db: str | None, benchmark_protocol: str | None, verbos
     )
 
     _setup_logging(verbose)
+    cutoffs = None
+    final_until = None
+    if benchmark_protocol:
+        try:
+            cutoffs, final_until = load_coverage_preflight_protocol(benchmark_protocol)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
     con = store.connect(db) if db else store.connect()
     try:
         diff = store.load_ingest_diff()
@@ -491,11 +498,7 @@ def refresh_card_coverage(db: str | None, benchmark_protocol: str | None, verbos
             resolved_at=datetime.now(timezone.utc),
         )
         cohorts = None
-        if benchmark_protocol:
-            try:
-                cutoffs, final_until = load_coverage_preflight_protocol(benchmark_protocol)
-            except ValueError as exc:
-                raise click.ClickException(str(exc)) from exc
+        if cutoffs is not None and final_until is not None:
             cohorts = unresolved_card_coverage_by_cutoff(
                 con, cutoffs=cutoffs, final_evaluation_until=final_until,
             )

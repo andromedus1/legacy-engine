@@ -327,6 +327,20 @@ class TestCardDimensionReconciliation:
         with pytest.raises(ValueError, match=r"alias\[0\] lacks required provenance"):
             load_provider_card_aliases(path)
 
+    def test_provider_alias_registry_rejects_duplicate_prefix_in_one_rule(self, tmp_path):
+        path = tmp_path / "aliases.json"
+        path.write_text(json.dumps({
+            "schema_version": 1,
+            "aliases": [],
+            "serialization_rules": [{
+                "kind": "set_prefix", "provider": "MTGmelee",
+                "evidence": "cache://event", "prefixes": ["AL", "AL"],
+            }],
+        }))
+
+        with pytest.raises(ValueError, match="invalid or duplicate set prefix"):
+            load_provider_card_aliases(path)
+
     def test_resolves_verified_provider_set_prefixed_card_name(self):
         con = store.connect(":memory:")
         store.init_schema(con)
@@ -374,6 +388,7 @@ class TestCardDimensionReconciliation:
 
         assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == canonical
         assert report.normalized_existing[0].source == "provider_serialization:MTGmelee"
+        assert report.normalized_existing[0].evidence
         con.close()
 
     def test_resolves_localized_faces_only_when_each_face_and_combination_are_unique(self):
@@ -453,4 +468,29 @@ class TestCardDimensionReconciliation:
         )
         assert report.unresolved_count == 1
         assert con.execute("SELECT count(*) FROM deck_cards WHERE name LIKE '[AL]%' ").fetchone()[0] == 2
+        con.close()
+
+    def test_provider_serialization_rejects_supported_plus_missing_provenance(self):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name="Helm of Obedience")])
+        for event, provider in (("known", "MTGmelee"), ("missing", None)):
+            con.execute(
+                "INSERT INTO tournaments VALUES (?, 'T', '2025-01-01', 'u', 'Legacy', ?, 'paper')",
+                [event, provider],
+            )
+            con.execute(
+                "INSERT INTO deck_cards VALUES (?, 0, 'main', '[AL] Helm of Obedience', 1)",
+                [event],
+            )
+
+        report = reconcile_card_dimension(
+            con, new_card_names=frozenset(), alias_manifest=None,
+            alias_snapshot_reason=None, resolved_at=NOW,
+        )
+
+        assert report.unresolved_count == 1
+        assert con.execute(
+            "SELECT count(*) FROM deck_cards WHERE name = '[AL] Helm of Obedience'"
+        ).fetchone()[0] == 2
         con.close()
