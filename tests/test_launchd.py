@@ -14,6 +14,7 @@ from legacy_engine.ops.launchd import (
     run_launch_agent_now,
     uninstall_launch_agent,
 )
+from legacy_engine.ops.scheduled_refresh import exclusive_file_lock
 
 
 class FakeLaunchctl:
@@ -64,6 +65,18 @@ class TestLaunchAgentRendering:
 
 
 class TestLaunchAgentLifecycle:
+    @pytest.mark.parametrize("operation", [install_launch_agent, uninstall_launch_agent])
+    def test_active_refresh_prevents_bootout(self, spec, operation):
+        spec.plist_path.parent.mkdir(parents=True)
+        spec.plist_path.write_bytes(render_launch_agent_plist(spec))
+        ctl = FakeLaunchctl([CommandResult(returncode=0)])
+        with exclusive_file_lock(spec.lock_path):
+            state = operation(spec, ctl)
+        assert not state.ok
+        assert "refresh is active" in state.detail
+        assert not any(call[0] == "bootout" for call in ctl.calls)
+        assert spec.plist_path.exists()
+
     def test_install_bootstraps_candidate(self, spec):
         launchctl = FakeLaunchctl([
             CommandResult(returncode=113, stderr="Could not find service"),
@@ -111,6 +124,51 @@ class TestLaunchAgentLifecycle:
         state = install_launch_agent(spec, launchctl)
         assert not state.ok
         assert state.loaded
+        assert spec.plist_path.read_bytes() == old
+        assert "reloaded previous agent" in state.detail
+
+    @pytest.mark.parametrize("failure_point", ["write", "logs", "process"])
+    def test_post_bootout_exception_restores_previous(
+        self, spec, monkeypatch, failure_point,
+    ):
+        old = b"old plist"
+        spec.plist_path.parent.mkdir(parents=True)
+        spec.plist_path.write_bytes(old)
+        real_atomic_write = __import__(
+            "legacy_engine.ops.launchd", fromlist=["_atomic_write"]
+        )._atomic_write
+        writes = 0
+
+        if failure_point == "write":
+            def fail_first_write(path, payload):
+                nonlocal writes
+                writes += 1
+                if writes == 1:
+                    raise OSError("candidate write failed")
+                real_atomic_write(path, payload)
+            monkeypatch.setattr("legacy_engine.ops.launchd._atomic_write", fail_first_write)
+        elif failure_point == "logs":
+            real_mkdir = type(spec.stdout_path.parent).mkdir
+            def fail_logs(path, *args, **kwargs):
+                if path == spec.stdout_path.parent:
+                    raise OSError("log directory failed")
+                return real_mkdir(path, *args, **kwargs)
+            monkeypatch.setattr(type(spec.stdout_path.parent), "mkdir", fail_logs)
+
+        class RaisingLaunchctl(FakeLaunchctl):
+            def run(self, *args):
+                if failure_point == "process" and args[0] == "bootstrap" and len(self.calls) == 2:
+                    self.calls.append(args)
+                    raise OSError("launchctl failed")
+                return super().run(*args)
+
+        ctl = RaisingLaunchctl([
+            CommandResult(returncode=0),
+            CommandResult(returncode=0),
+            CommandResult(returncode=0),
+        ])
+        state = install_launch_agent(spec, ctl)
+        assert not state.ok
         assert spec.plist_path.read_bytes() == old
         assert "reloaded previous agent" in state.detail
 

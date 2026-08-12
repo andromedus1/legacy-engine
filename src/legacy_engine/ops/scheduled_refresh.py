@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import signal
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
@@ -35,6 +36,13 @@ class Clock(Protocol):
     def __call__(self) -> datetime: ...
 
 
+def decision_refresh_lock_path(db_path: Path, out_path: Path, *, lock_dir: Path) -> Path:
+    """Return the shared lock identity for one protected artifact pair."""
+    identity = f"{db_path.resolve()}\0{out_path.resolve()}".encode()
+    digest = hashlib.sha256(identity).hexdigest()[:16]
+    return lock_dir / f"{JOB_NAME}-{digest}.lock"
+
+
 @contextmanager
 def exclusive_file_lock(path: Path):
     """Acquire a process-scoped non-blocking kernel lock."""
@@ -48,6 +56,25 @@ def exclusive_file_lock(path: Path):
         yield
     finally:
         handle.close()
+
+
+@contextmanager
+def _terminal_signal_as_exit():
+    """Turn launchd's SIGTERM into a catchable exit while this run owns the lock."""
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def terminate(signum, frame):
+        raise SystemExit(128 + signum)
+
+    try:
+        signal.signal(signal.SIGTERM, terminate)
+    except ValueError:  # Signal handlers are available only in the main interpreter thread.
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _artifacts(db_path: Path, out_path: Path, *, ranking_written: bool) -> ArtifactIdentity:
@@ -131,7 +158,8 @@ def run_scheduled_decision_refresh(
             )
             write_job_status(canonical_path, running)
             try:
-                result = run_decision_refresh(ports, db_path=db_path, out_path=out_path)
+                with _terminal_signal_as_exit():
+                    result = run_decision_refresh(ports, db_path=db_path, out_path=out_path)
                 failed = next(
                     (step for step in result.steps if step.status is RefreshStepStatus.FAILED),
                     None,

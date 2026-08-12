@@ -94,6 +94,26 @@ class TestOpsStatusCli:
 
 
 class TestScheduledRefreshCli:
+    def test_status_override_does_not_change_artifact_lock(self, runner, tmp_path, monkeypatch):
+        captured = []
+        status = _status(tmp_path)
+
+        def fake_run(ports, **kwargs):
+            captured.append(kwargs["lock_path"])
+            write_job_status(kwargs["status_dir"] / "decision-refresh.json", status)
+            return status
+
+        monkeypatch.setattr(
+            "legacy_engine.ops.scheduled_refresh.run_scheduled_decision_refresh", fake_run,
+        )
+        common = ["--db", str(tmp_path / "db.duckdb"), "--out", str(tmp_path / "ranking.html")]
+        for name in ("status-a", "status-b"):
+            result = runner.invoke(main, [
+                "ops", "scheduled-refresh", *common, "--status-dir", str(tmp_path / name),
+            ])
+            assert result.exit_code == 0, result.output
+        assert captured[0] == captured[1]
+
     @pytest.mark.parametrize(
         ("outcome", "exit_code"),
         [

@@ -3,12 +3,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import signal
 
 import pytest
 
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.ops.scheduled_refresh import (
     LockUnavailable,
+    decision_refresh_lock_path,
     run_scheduled_decision_refresh,
 )
 from legacy_engine.ops.status import JobOutcome, JobStatus
@@ -86,6 +88,15 @@ def _run(tmp_path, ports, **changes) -> JobStatus:
 
 
 class TestScheduledDecisionRefresh:
+    def test_lock_identity_depends_on_artifacts_not_status_storage(self, tmp_path):
+        db = tmp_path / "db.duckdb"
+        out = tmp_path / "ranking.html"
+        first = decision_refresh_lock_path(db, out, lock_dir=tmp_path / "locks")
+        second = decision_refresh_lock_path(db, out, lock_dir=tmp_path / "locks")
+        different = decision_refresh_lock_path(db, tmp_path / "other.html", lock_dir=tmp_path / "locks")
+        assert first == second
+        assert first != different
+
     def test_success_holds_lock_through_composition_and_status(self, tmp_path):
         ports = RecordingPorts()
         events: list[str] = []
@@ -162,3 +173,19 @@ class TestScheduledDecisionRefresh:
         )
         assert canonical.outcome is JobOutcome.FAILED
         assert canonical.reason == "KeyboardInterrupt"
+
+    def test_sigterm_records_failure_then_exits(self, tmp_path):
+        ports = RecordingPorts()
+
+        def terminate_during_refresh(db_path):
+            signal.raise_signal(signal.SIGTERM)
+
+        ports.refresh_sources = terminate_during_refresh
+        with pytest.raises(SystemExit) as raised:
+            _run(tmp_path, ports)
+        assert raised.value.code == 128 + signal.SIGTERM
+        canonical = JobStatus.model_validate_json(
+            (tmp_path / "status" / "decision-refresh.json").read_text()
+        )
+        assert canonical.outcome is JobOutcome.FAILED
+        assert canonical.reason == "SystemExit"

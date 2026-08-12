@@ -521,6 +521,7 @@ def ops_scheduled_refresh(
     from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR, OPS_STATUS_DIR, PROJECT_ROOT
     from legacy_engine.ops.scheduled_refresh import (
         JOB_NAME,
+        decision_refresh_lock_path,
         run_scheduled_decision_refresh,
     )
     from legacy_engine.ops.status import (
@@ -540,9 +541,11 @@ def ops_scheduled_refresh(
             else PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html"
         ),
         status_dir=resolved_status_dir,
-        lock_path=(resolved_status_dir.parent / "locks" / f"{JOB_NAME}.lock")
-        if status_dir
-        else OPS_LOCK_DIR / f"{JOB_NAME}.lock",
+        lock_path=decision_refresh_lock_path(
+            Path(db).resolve() if db else DUCKDB_PATH,
+            Path(out).resolve() if out else PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html",
+            lock_dir=OPS_LOCK_DIR,
+        ),
         clock=lambda: datetime.now(timezone.utc),
         attempt_id_factory=lambda: uuid4().hex,
         pid=os.getpid(),

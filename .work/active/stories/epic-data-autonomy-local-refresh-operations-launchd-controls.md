@@ -37,8 +37,8 @@ current architecture/runbook updates, and knowledge-index regeneration after doc
 - Updated README and architecture with install/inspect/run-now/status/log/uninstall behavior and
   explicit exclusions. Regenerated all three knowledge-index layers using the canonical plugin
   generator (48 indexed docs, 0 errors, 11 pre-existing warnings).
-- Full-suite collection exposed that bare pytest could not import shared `tests.*` helpers; added a
-  package marker instead of relying on an ambient `PYTHONPATH` workaround.
+- Full-suite collection exposed pre-existing mixed import styles in the test tree; verification used
+  the repository-root `PYTHONPATH` explicitly without changing unrelated ranking tests.
 
 ## Verification
 
@@ -46,5 +46,4 @@ current architecture/runbook updates, and knowledge-index regeneration after doc
   — passed.
 - `.venv/bin/pytest -q tests/test_launchd.py tests/test_ops_cli.py tests/test_ops_status.py tests/test_scheduled_refresh.py tests/test_decision_refresh.py tests/test_cli.py`
   — 125 passed.
-- `PYTHONPATH=. .venv/bin/pytest -q` — 3,757 passed, 1 skipped before the package-marker cleanup;
-  bare full-suite verification follows in the feature roll-up.
+- `PYTHONPATH=. .venv/bin/pytest -q` — 3,757 passed, 1 skipped.

@@ -274,8 +274,8 @@ def ops_status(status_dir: str | None, brief: bool, verbose: bool) -> None: ...
 - `ops scheduled-refresh` constructs `DefaultDecisionRefreshPorts`, supplies real UTC clock/UUID/pid,
   echoes the final audit lines, exits zero for success/degraded, and exits non-zero for failed or
   overlap. It never catches or edits individual refresh-step semantics in the CLI.
-- Refactor the manual `scripts/refresh_decision_data.py` only enough to share result-to-exit/audit
-  projection; it remains an unscheduled direct composition and does not acquire the operations lock.
+- Keep the manual `scripts/refresh_decision_data.py` as an unscheduled direct composition, but make
+  it acquire the same artifact-derived operations lock as the scheduled adapter before mutation.
 - `scripts/session_ops_status.py` calls the same read/brief formatter, has no network/DB imports, and
   exits zero even for missing/unhealthy state so it cannot break session startup. `AGENTS.md` session
   orientation invokes it when `data/ops/status/decision-refresh.json` exists and asks the agent to

@@ -237,15 +237,17 @@ decision-data composition daily at **07:30 local time** through the repository's
 while the Mac sleeps is coalesced and started after wake. The job writes stdout/stderr to
 `data/ops/logs/refresh.out.log` and `refresh.err.log`.
 
-Every attempt uses a non-blocking kernel lock. An overlapping invocation does no refresh work and
+Every scheduled or manual attempt targeting the same database/ranking pair uses the same
+artifact-derived non-blocking kernel lock. An overlapping invocation does no refresh work and
 leaves its own immutable evidence without overwriting the active run's canonical status. Canonical
 status lives at `data/ops/status/decision-refresh.json`; missing, malformed, failed, degraded,
 running, and more-than-36-hour-old records are distinct `ops status` results. A successful ranking
 records its exact path and SHA-256. A failed refresh preserves the prior ranking without claiming
 that artifact as newly written.
 
-The lifecycle is reversible: install is an identical-config no-op, safely reloads a changed plist,
-and restores the previous plist if bootstrap fails; uninstall retains the plist when bootout fails.
+The lifecycle is reversible: install is an identical-config no-op, refuses to boot out an active
+refresh, and restores/reloads the previous plist after any post-bootout failure; uninstall likewise
+refuses active-run bootout and retains the plist when bootout fails.
 Use `ops scheduler inspect`, `ops status`, and the two log files before intervening. This scheduler
 does **not** install the separate B&R monitor, upstream hot spare, vendor-price refresh, or a Modern
 deployment.

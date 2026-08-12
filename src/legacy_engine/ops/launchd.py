@@ -12,6 +12,11 @@ from typing import Protocol
 from pydantic import Field
 
 from legacy_engine.models.base import LegacyEngineModel
+from legacy_engine.ops.scheduled_refresh import (
+    LockUnavailable,
+    decision_refresh_lock_path,
+    exclusive_file_lock,
+)
 
 
 REFRESH_AGENT_LABEL = "com.legacy-engine.refresh"
@@ -50,6 +55,7 @@ class LaunchAgentSpec(LegacyEngineModel):
     repo_root: Path
     stdout_path: Path
     stderr_path: Path
+    lock_path: Path
     hour: int = Field(default=7, ge=0, le=23)
     minute: int = Field(default=30, ge=0, le=59)
 
@@ -77,6 +83,11 @@ def build_refresh_launch_agent_spec(
         repo_root=root,
         stdout_path=root / "data" / "ops" / "logs" / "refresh.out.log",
         stderr_path=root / "data" / "ops" / "logs" / "refresh.err.log",
+        lock_path=decision_refresh_lock_path(
+            root / "data" / "legacy.duckdb",
+            root / "decks" / "best-deck-best-call-ranking.html",
+            lock_dir=root / "data" / "ops" / "locks",
+        ),
     )
 
 
@@ -87,6 +98,7 @@ def _validate_spec(spec: LaunchAgentSpec) -> None:
         spec.repo_root,
         spec.stdout_path,
         spec.stderr_path,
+        spec.lock_path,
     )
     if any(not path.is_absolute() for path in paths):
         raise ValueError("LaunchAgent paths must be absolute")
@@ -171,49 +183,66 @@ def install_launch_agent(
     launchctl: LaunchctlPort,
 ) -> LaunchAgentState:
     candidate = render_launch_agent_plist(spec)
-    previous = spec.plist_path.read_bytes() if spec.plist_path.is_file() else None
-    prior = inspect_launch_agent(spec, launchctl)
-    if previous == candidate and prior.loaded:
-        return prior.model_copy(update={"ok": True, "detail": "already installed and loaded"})
+    try:
+        with exclusive_file_lock(spec.lock_path):
+            previous = spec.plist_path.read_bytes() if spec.plist_path.is_file() else None
+            prior = inspect_launch_agent(spec, launchctl)
+            if not prior.ok:
+                return prior.model_copy(update={"detail": f"cannot establish current state: {prior.detail}"})
+            if previous == candidate and prior.loaded:
+                return prior.model_copy(update={"ok": True, "detail": "already installed and loaded"})
 
-    if prior.loaded:
-        bootout = launchctl.run("bootout", spec.domain_target, str(spec.plist_path))
-        if bootout.returncode != 0:
-            return LaunchAgentState(
-                ok=False, installed=previous is not None, loaded=True,
-                plist_path=spec.plist_path,
-                detail=f"bootout failed; existing agent preserved: {_detail(bootout)}",
-            )
+            if prior.loaded:
+                bootout = launchctl.run("bootout", spec.domain_target, str(spec.plist_path))
+                if bootout.returncode != 0:
+                    return LaunchAgentState(
+                        ok=False, installed=previous is not None, loaded=True,
+                        plist_path=spec.plist_path,
+                        detail=f"bootout failed; existing agent preserved: {_detail(bootout)}",
+                    )
 
-    _atomic_write(spec.plist_path, candidate)
-    spec.stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    bootstrap = launchctl.run("bootstrap", spec.domain_target, str(spec.plist_path))
-    if bootstrap.returncode == 0:
-        return LaunchAgentState(
-            ok=True, installed=True, loaded=True, plist_path=spec.plist_path,
-            detail="installed and loaded",
-        )
+            try:
+                _atomic_write(spec.plist_path, candidate)
+                spec.stdout_path.parent.mkdir(parents=True, exist_ok=True)
+                bootstrap = launchctl.run("bootstrap", spec.domain_target, str(spec.plist_path))
+                if bootstrap.returncode == 0:
+                    return LaunchAgentState(
+                        ok=True, installed=True, loaded=True, plist_path=spec.plist_path,
+                        detail="installed and loaded",
+                    )
+                failure = f"bootstrap failed: {_detail(bootstrap)}"
+            except Exception as exc:
+                failure = f"install failed after bootout: {type(exc).__name__}: {exc}"
 
-    rollback_details: list[str] = []
-    if previous is None:
-        spec.plist_path.unlink(missing_ok=True)
-        rollback_details.append("removed failed candidate")
-    else:
-        _atomic_write(spec.plist_path, previous)
-        rollback_details.append("restored previous plist")
-        if prior.loaded:
-            restored = launchctl.run("bootstrap", spec.domain_target, str(spec.plist_path))
-            if restored.returncode == 0:
-                rollback_details.append("reloaded previous agent")
+            rollback_details: list[str] = []
+            if previous is None:
+                spec.plist_path.unlink(missing_ok=True)
+                rollback_details.append("removed failed candidate")
             else:
-                rollback_details.append(f"previous-agent reload failed: {_detail(restored)}")
-    return LaunchAgentState(
-        ok=False,
-        installed=spec.plist_path.is_file(),
-        loaded=prior.loaded and "reloaded previous agent" in rollback_details,
-        plist_path=spec.plist_path,
-        detail=f"bootstrap failed: {_detail(bootstrap)}; {'; '.join(rollback_details)}",
-    )
+                try:
+                    _atomic_write(spec.plist_path, previous)
+                    rollback_details.append("restored previous plist")
+                    if prior.loaded:
+                        restored = launchctl.run("bootstrap", spec.domain_target, str(spec.plist_path))
+                        if restored.returncode == 0:
+                            rollback_details.append("reloaded previous agent")
+                        else:
+                            rollback_details.append(f"previous-agent reload failed: {_detail(restored)}")
+                except Exception as exc:
+                    rollback_details.append(f"rollback failed: {type(exc).__name__}: {exc}")
+            return LaunchAgentState(
+                ok=False,
+                installed=spec.plist_path.is_file(),
+                loaded=prior.loaded and "reloaded previous agent" in rollback_details,
+                plist_path=spec.plist_path,
+                detail=f"{failure}; {'; '.join(rollback_details)}",
+            )
+    except LockUnavailable as exc:
+        return LaunchAgentState(
+            ok=False, installed=spec.plist_path.is_file(), loaded=True,
+            plist_path=spec.plist_path,
+            detail=f"refresh is active; scheduler configuration preserved: {exc}",
+        )
 
 
 def run_launch_agent_now(
@@ -239,14 +268,21 @@ def uninstall_launch_agent(
             ok=True, installed=False, loaded=False, plist_path=spec.plist_path,
             detail="already uninstalled",
         )
-    bootout = launchctl.run("bootout", spec.domain_target, str(spec.plist_path))
-    if bootout.returncode != 0 and not _not_loaded(bootout):
+    try:
+        with exclusive_file_lock(spec.lock_path):
+            bootout = launchctl.run("bootout", spec.domain_target, str(spec.plist_path))
+            if bootout.returncode != 0 and not _not_loaded(bootout):
+                return LaunchAgentState(
+                    ok=False, installed=True, loaded=True, plist_path=spec.plist_path,
+                    detail=f"bootout failed; plist preserved: {_detail(bootout)}",
+                )
+            spec.plist_path.unlink()
+            return LaunchAgentState(
+                ok=True, installed=False, loaded=False, plist_path=spec.plist_path,
+                detail="unloaded and removed",
+            )
+    except LockUnavailable as exc:
         return LaunchAgentState(
             ok=False, installed=True, loaded=True, plist_path=spec.plist_path,
-            detail=f"bootout failed; plist preserved: {_detail(bootout)}",
+            detail=f"refresh is active; plist preserved: {exc}",
         )
-    spec.plist_path.unlink()
-    return LaunchAgentState(
-        ok=True, installed=False, loaded=False, plist_path=spec.plist_path,
-        detail="unloaded and removed",
-    )

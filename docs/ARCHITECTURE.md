@@ -147,8 +147,8 @@ observed → label → analytics → advisory arc.
 | File | Responsibility |
 |---|---|
 | `status.py` | Typed canonical and immutable per-attempt JSON status, atomic same-directory replacement, 36-hour freshness classification, and shared `//` audit-line projection. Missing/invalid/failed/degraded/running/stale remain distinct. |
-| `scheduled_refresh.py` | Non-blocking `fcntl` execution lock around `workflows.decision_refresh.run_decision_refresh`; maps the existing workflow result to attributable status and hashes only a ranking written by that attempt. Overlap never mutates decision artifacts or canonical owner status. |
-| `launchd.py` | Generates the 07:30 local user LaunchAgent with `plistlib` and controls it through an injected `launchctl` port. Install/update rolls back on failed bootstrap; uninstall preserves the plist on failed bootout. |
+| `scheduled_refresh.py` | Artifact-derived non-blocking `fcntl` execution lock shared by scheduled and manual entrypoints around `workflows.decision_refresh.run_decision_refresh`; maps the existing workflow result to attributable status, best-effort terminalizes SIGTERM, and hashes only a ranking written by that attempt. Overlap never mutates decision artifacts or canonical owner status. |
+| `launchd.py` | Generates the 07:30 local user LaunchAgent with `plistlib` and controls it through an injected `launchctl` port. Lifecycle mutations hold the refresh lock, refuse active-run bootout, and restore/reload the previous configuration after any post-bootout failure; uninstall preserves the plist on failed bootout. |
 
 The LaunchAgent uses absolute repository/virtualenv/log paths, `WorkingDirectory`, and
 `StartCalendarInterval`; it omits `RunAtLoad`, `KeepAlive`, and `StartInterval`. Repository tests
