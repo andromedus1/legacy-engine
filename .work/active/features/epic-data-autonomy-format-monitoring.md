@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-format-monitoring
 kind: feature
-stage: review
+stage: implementing
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [epic-data-autonomy-local-refresh-operations]
@@ -397,3 +397,15 @@ atomicity. The design accepts those findings through the first prerequisite stor
 monitor-state contract, evidence-hash acknowledgement, explicit unsupported transitions, and strict
 unavailable semantics. It rejects a separate daemon and direct writes to curated ban truth because
 both violate existing project boundaries.
+
+## Review findings (2026-08-12)
+
+Effective weight: standard; one independent GPT-5.6 Sol pass. Closure needs fix verification only,
+not another independent pass.
+
+Receiver-confirmed current-cycle blockers are tracked in child story
+`epic-data-autonomy-format-monitoring-review-corrections`: reject truncated bulk candidates using
+the provider's declared object count; serialize monitor acknowledgement with scheduled state
+transactions; match confirmations by card and effective date; extend SIGTERM terminalization
+through monitoring; persist candidate identities/dispositions in status; validate and retain the
+resolved WotC URL; and correct the stale automated-detection/manual-acceptance architecture label.
