@@ -446,11 +446,6 @@ def plan_card_metadata_quarantine(
         [end, start, start],
     ).fetchall()
     duplicate_keys = {(str(event), str(player)) for event, player in duplicate_rows}
-    by_key = {
-        (str(event), str(player)): (int(deck_idx),)
-        for event, deck_idx, player, _date, _source, _uri in deck_rows
-        if str(player or "").strip()
-    }
     affected_keys = {
         (event, str(player).strip().lower())
         for (event, deck_idx), names in unresolved_by_deck.items()

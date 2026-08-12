@@ -10,6 +10,7 @@ import pytest
 from legacy_engine.advisory.ranking_benchmark import (
     BenchmarkFold,
     BenchmarkProtocol,
+    CardMetadataPolicy,
     protocol_sha256,
     write_frozen_predictions,
 )
@@ -118,6 +119,36 @@ def test_snapshot_excludes_every_future_or_derived_surface(tmp_path):
     assert not con.execute(
         "SELECT count(*) FROM information_schema.tables WHERE table_name='superarchetype_members'"
     ).fetchone()[0]
+    con.close()
+
+
+def test_quarantine_snapshot_removes_whole_training_deck_before_classification(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    con = store.connect(source)
+    con.execute("DELETE FROM rounds WHERE tournament_id='past'")
+    # One unresolved deck among 200 is exactly the preregistered 0.5% ceiling.
+    con.executemany(
+        "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+        [("past", idx, f"player-{idx}", "", None, None) for idx in range(2, 200)],
+    )
+    con.close()
+    con = store.connect(source)
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    # Make the first deck corrupt; it is removed as a unit, not partially repaired.
+    con.execute("UPDATE deck_cards SET name='Unresolved' WHERE tournament_id='past' AND deck_idx=0")
+    con.close()
+    output = tmp_path / "snapshot.duckdb"
+    manifest = build_origin_snapshot(
+        source, output, fold=_fold(), protocol_hash="protocol", card_metadata_policy=policy,
+    )
+    assert manifest.card_metadata_quarantine is not None
+    assert manifest.card_metadata_quarantine.retained_decks == 199
+    assert manifest.card_metadata_quarantine.excluded_decks[0].unresolved_names == ("Unresolved",)
+    con = duckdb.connect(str(output), read_only=True)
+    assert con.execute("SELECT count(*) FROM decks").fetchone()[0] == 199
+    assert con.execute("SELECT count(*) FROM deck_cards WHERE name='Unresolved'").fetchone()[0] == 0
     con.close()
 
 
