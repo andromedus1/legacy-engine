@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-format-monitoring
 kind: feature
-stage: review
+stage: done
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [epic-data-autonomy-local-refresh-operations]
@@ -411,3 +411,27 @@ through monitoring; persist candidate identities/dispositions in status; validat
 resolved WotC URL; and correct the stale automated-detection/manual-acceptance architecture label.
 All findings are resolved in the completed correction story; standard-weight closure requires only
 the recorded focused and full verification, not another independent pass.
+
+## Review (2026-08-12)
+
+**Verdict**: Approve
+
+**Blockers**: none. The two proposed blockers—truncated bulk replacement and acknowledgement/state
+race—were receiver-confirmed, fixed in `epic-data-autonomy-format-monitoring-review-corrections`,
+and covered by focused regression tests.
+
+**Important**: none unresolved. Dated confirmation, monitor-phase SIGTERM, candidate identity/status,
+redirect attribution/provider boundaries, and the stale external-integration assertion were fixed
+in the same correction story.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: Standard-weight substrate feature review used one independent GPT-5.6 Sol deep pass over
+the four-story aggregate. Applicable correctness, test, design, external-request security,
+schema/CLI compatibility, persistence, concurrency, lifecycle, operational, and foundation-doc
+lenses were covered. Post-fix verification was `191 passed` for the broader feature suite and
+`3800 passed, 1 skipped` for the full repository suite. Per standard policy, fixes were verified
+without commissioning another independent pass. The feature installs no live LaunchAgent and does
+not implement Modern, a hot spare, vendor prices, rules IR, or sideboard modeling.
