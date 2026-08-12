@@ -4,6 +4,7 @@ from pathlib import Path
 
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.models.card import CardAliasManifest
+from legacy_engine.ingestion.releases import SetRelease
 from legacy_engine.workflows.decision_refresh import (
     CampApplyResult,
     EraRunResult,
@@ -31,6 +32,9 @@ class RecordingPorts:
             new_card_names=frozenset({"New Card"}),
             upcoming_releases=("up: Upcoming",),
             recent_releases=("new: Recent",),
+            recent_release_records=(SetRelease(
+                code="new", name="Recent", released_at="2026-08-10",
+            ),),
             release_scan_reason="scan offline" if self.degrade_sources else None,
             alias_manifest=(
                 CardAliasManifest(
@@ -85,6 +89,7 @@ class TestDecisionRefresh:
         assert out_path.read_text() == "stable ranking"
         assert result.ranking_output == str(out_path)
         assert result.format_awareness.recent_releases == ("new: Recent",)
+        assert result.steps[0].status is RefreshStepStatus.COMPLETED
         assert result.format_awareness.era_alarms == ("possible change",)
 
     def test_required_failure_marks_all_dependents_not_run_and_preserves_last_good_output(self, tmp_path):

@@ -14,12 +14,16 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import field_validator
 
 from legacy_engine.ingestion.scryfall import normalize_name
 from legacy_engine.models.base import LegacyEngineModel
+
+if TYPE_CHECKING:
+    from legacy_engine.ingestion.ban_monitor import WotcAnnouncement
+    from legacy_engine.ingestion.releases import ReleaseScan
 
 
 LegacyLegality = Literal["legal", "not_legal", "restricted", "banned"]
@@ -91,6 +95,20 @@ class FormatMonitorState(LegacyEngineModel):
         return value
 
 
+class FormatMonitorResult(LegacyEngineModel):
+    legality_state: SignalState
+    wotc_state: SignalState
+    release_state: SignalState
+    candidates: tuple[FormatCandidate, ...]
+    pending_actions: tuple[str, ...] = ()
+    unavailable_reasons: tuple[str, ...] = ()
+
+
+class FormatMonitorPorts(Protocol):
+    def oracle_rows(self) -> Iterable[dict[str, object]]: ...
+    def fetch_wotc(self, url: str) -> str: ...
+
+
 def _subject_id(observation: LegalityObservation) -> str:
     return observation.oracle_id or normalize_name(observation.name).casefold()
 
@@ -135,6 +153,15 @@ def _candidate_id(
 ) -> str:
     payload = f"legacy\0{subject_id}\0{prior_value}\0{current_value}".encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def _release_candidate_id(set_codes: tuple[str, ...], new_names: tuple[str, ...]) -> str:
+    payload = json.dumps(
+        ["legacy", "release", sorted(code.casefold() for code in set_codes), sorted(new_names)],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _evidence_key(evidence: MonitorEvidence) -> tuple[str, str, str, str]:
@@ -282,6 +309,251 @@ def add_candidate_evidence(
             "updated_at": evidence.observed_at,
         })
     raise ValueError(f"unknown format-monitor candidate id: {candidate_id}")
+
+
+def merge_wotc_announcement(
+    state: FormatMonitorState,
+    announcement: "WotcAnnouncement",
+    *,
+    observed_at: datetime,
+) -> FormatMonitorState:
+    """Correlate attributable WotC actions to candidates by exact normalized name."""
+    candidates = {candidate.candidate_id: candidate for candidate in state.candidates}
+    for action in announcement.legacy_actions:
+        name_key = normalize_name(action.card).casefold()
+        current_value = {
+            "banned": "banned", "unbanned": "legal",
+            "restricted": "restricted", "unrestricted": "legal",
+        }[action.action]
+        prior_value = "banned" if action.action in {"unbanned", "unrestricted"} else "legal"
+        matching = [
+            candidate for candidate in candidates.values()
+            if normalize_name(candidate.subject_name).casefold() == name_key
+            and candidate.current_value == current_value
+        ]
+        if len(matching) > 1:
+            raise ValueError(f"ambiguous monitor candidates for WotC action {action.card!r}")
+        evidence = MonitorEvidence(
+            source="wotc",
+            source_url=announcement.source_url,
+            observed_at=observed_at,
+            effective_date=announcement.effective_date,
+            detail=f"{action.card} is {action.action}.",
+        )
+        if matching:
+            candidate = matching[0]
+            state = add_candidate_evidence(state, candidate.candidate_id, evidence)
+            candidates = {item.candidate_id: item for item in state.candidates}
+            continue
+        subject_id = name_key
+        candidate_id = _candidate_id(subject_id, prior_value, current_value)
+        evidence_tuple = (evidence,)
+        unsupported = None
+        if not (prior_value == "legal" and current_value == "banned"):
+            unsupported = (
+                f"eras confirm cannot represent Legacy {prior_value}->{current_value}; "
+                "requires a separately designed ledger evolution"
+            )
+        candidates[candidate_id] = FormatCandidate(
+            candidate_id=candidate_id,
+            kind="legality",
+            subject_id=subject_id,
+            subject_name=normalize_name(action.card),
+            prior_value=prior_value,
+            current_value=current_value,
+            evidence=evidence_tuple,
+            evidence_hash=_evidence_hash(evidence_tuple),
+            unsupported_acceptance_reason=unsupported,
+        )
+        state = state.model_copy(update={
+            "candidates": tuple(candidates[key] for key in sorted(candidates)),
+            "updated_at": observed_at,
+        })
+    return state.model_copy(update={
+        "next_wotc_announcement": announcement.next_announcement,
+        "last_good_wotc_url": announcement.source_url,
+        "updated_at": observed_at,
+    })
+
+
+def merge_release_observation(
+    state: FormatMonitorState,
+    *,
+    release_scan: "ReleaseScan",
+    new_card_names: tuple[str, ...],
+    observed_at: datetime,
+    source_url: str,
+) -> FormatMonitorState:
+    """Record recent sets only when the authoritative card ingest saw new names."""
+    if not new_card_names:
+        return state
+    candidates = {candidate.candidate_id: candidate for candidate in state.candidates}
+    detail = f"{len(new_card_names)} new card name(s): {', '.join(sorted(new_card_names)[:10])}"
+    recent = tuple(sorted(release_scan.recently_released, key=lambda item: item.code))
+    if not recent:
+        return state
+    codes = tuple(item.code for item in recent)
+    candidate_id = _release_candidate_id(codes, new_card_names)
+    evidence = MonitorEvidence(
+        source="card_diff", source_url=source_url, observed_at=observed_at,
+        effective_date=max(
+            (item.released_at for item in recent if item.released_at is not None),
+            default=None,
+        ),
+        detail=detail,
+    )
+    old = candidates.get(candidate_id)
+    merged = _merge_evidence(old.evidence if old else (), (evidence,))
+    evidence_hash = _evidence_hash(merged)
+    acknowledged_hash = old.acknowledged_evidence_hash if old else None
+    candidates[candidate_id] = FormatCandidate(
+        candidate_id=candidate_id,
+        kind="release",
+        subject_id="+".join(code.casefold() for code in codes),
+        subject_name="New card ingest during recent set window: "
+        + ", ".join(f"{item.code} ({item.name})" for item in recent),
+        current_value=f"{len(new_card_names)} new card name(s)",
+        disposition=(CandidateDisposition.ACKNOWLEDGED
+                     if acknowledged_hash == evidence_hash else CandidateDisposition.OPEN),
+        evidence=merged,
+        evidence_hash=evidence_hash,
+        acknowledged_evidence_hash=acknowledged_hash,
+    )
+    return state.model_copy(update={
+        "candidates": tuple(candidates[key] for key in sorted(candidates)),
+        "updated_at": observed_at,
+    })
+
+
+def _project_result(
+    state: FormatMonitorState,
+    *,
+    legality_state: SignalState,
+    wotc_state: SignalState,
+    release_state: SignalState,
+    unavailable_reasons: Iterable[str] = (),
+) -> FormatMonitorResult:
+    unavailable = tuple(unavailable_reasons)
+    pending: list[str] = []
+    for candidate in state.candidates:
+        if candidate.disposition is CandidateDisposition.ACKNOWLEDGED:
+            continue
+        action = (
+            candidate.unsupported_acceptance_reason
+            or (f"review and confirm with eras confirm: {candidate.subject_name}"
+                if candidate.kind == "legality" else
+                f"review new release evidence: {candidate.subject_name}")
+        )
+        pending.append(f"format candidate {candidate.candidate_id}: {action}")
+    pending.extend(f"format monitor unavailable: {reason}" for reason in unavailable)
+    return FormatMonitorResult(
+        legality_state=legality_state,
+        wotc_state=wotc_state,
+        release_state=release_state,
+        candidates=state.candidates,
+        pending_actions=tuple(pending),
+        unavailable_reasons=unavailable,
+    )
+
+
+def run_format_monitor(
+    ports: FormatMonitorPorts,
+    *,
+    state_path: Path,
+    observed_at: datetime,
+    release_scan: "ReleaseScan | None",
+    release_scan_reason: str | None,
+    new_card_names: tuple[str, ...],
+    registered_events: tuple[tuple[date, str, str], ...],
+) -> FormatMonitorResult:
+    """Run all monitor signals while preserving each signal's last-good evidence."""
+    from legacy_engine.ingestion.ban_monitor import (
+        announcement_candidate_urls,
+        parse_wotc_legacy_announcement,
+    )
+
+    if observed_at.utcoffset() is None:
+        raise ValueError("format monitor observed_at must be timezone-aware")
+    state = load_monitor_state(state_path) or FormatMonitorState(updated_at=observed_at)
+    reasons: list[str] = []
+
+    try:
+        observed = extract_legacy_legalities(ports.oracle_rows())
+        state = merge_legality_observation(
+            state,
+            observed=observed,
+            evidence=MonitorEvidence(
+                source="scryfall",
+                source_url="https://data.scryfall.io/oracle-cards",
+                observed_at=observed_at,
+                detail="Legacy legalities bulk snapshot",
+            ),
+            registered_events=registered_events,
+        )
+        legality_state = (
+            SignalState.PENDING
+            if any(candidate.kind == "legality" for candidate in state.candidates)
+            else SignalState.CLEAR
+        )
+    except Exception as exc:
+        legality_state = SignalState.UNAVAILABLE
+        reasons.append(f"Scryfall legality check: {exc}")
+
+    expected = state.next_wotc_announcement or observed_at.date()
+    if observed_at.date() < expected:
+        wotc_state = SignalState.NOT_DUE
+    else:
+        announcement = None
+        missing = 0
+        try:
+            for url in announcement_candidate_urls(expected):
+                try:
+                    html = ports.fetch_wotc(url)
+                except FileNotFoundError:
+                    missing += 1
+                    continue
+                announcement = parse_wotc_legacy_announcement(html, source_url=url)
+                break
+            if announcement is None:
+                raise ValueError(
+                    f"no announcement page found in {missing} bounded URL candidate(s)"
+                )
+            state = merge_wotc_announcement(state, announcement, observed_at=observed_at)
+            wotc_state = (
+                SignalState.PENDING if announcement.legacy_actions else SignalState.CLEAR
+            )
+        except Exception as exc:
+            wotc_state = SignalState.UNAVAILABLE
+            reasons.append(f"WotC attribution check: {exc}")
+
+    if release_scan_reason is not None:
+        release_state = SignalState.UNAVAILABLE
+        reasons.append(f"release check: {release_scan_reason}")
+    elif release_scan is None:
+        release_state = SignalState.UNAVAILABLE
+        reasons.append("release check: no typed release observation")
+    else:
+        state = merge_release_observation(
+            state,
+            release_scan=release_scan,
+            new_card_names=new_card_names,
+            observed_at=observed_at,
+            source_url="https://api.scryfall.com/sets",
+        )
+        release_state = (
+            SignalState.PENDING
+            if new_card_names and release_scan.recently_released
+            else SignalState.CLEAR
+        )
+
+    write_monitor_state(state_path, state)
+    return _project_result(
+        state,
+        legality_state=legality_state,
+        wotc_state=wotc_state,
+        release_state=release_state,
+        unavailable_reasons=reasons,
+    )
 
 
 def acknowledge_candidate(

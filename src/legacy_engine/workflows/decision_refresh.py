@@ -11,6 +11,7 @@ from typing import Protocol
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.models.card import CardAliasManifest
+from legacy_engine.ingestion.releases import SetRelease
 
 
 class RefreshStepStatus(StrEnum):
@@ -41,6 +42,8 @@ class SourceRefreshResult(LegacyEngineModel):
     alias_snapshot_reason: str | None = None
     upcoming_releases: tuple[str, ...] = ()
     recent_releases: tuple[str, ...] = ()
+    upcoming_release_records: tuple[SetRelease, ...] = ()
+    recent_release_records: tuple[SetRelease, ...] = ()
     release_scan_reason: str | None = None
     summary: str
 
@@ -285,6 +288,8 @@ class DefaultDecisionRefreshPorts:
             new_card_names=frozenset(diff.new_names), alias_manifest=manifest,
             alias_snapshot_reason=alias_reason, upcoming_releases=upcoming,
             recent_releases=recent, release_scan_reason=scan_reason,
+            upcoming_release_records=tuple(scan.upcoming) if scan_reason is None else (),
+            recent_release_records=tuple(scan.recently_released) if scan_reason is None else (),
             summary=f"{cache_stats.loaded} events reloaded; {len(diff.new_names)} new card names",
         )
 
