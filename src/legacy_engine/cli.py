@@ -3078,11 +3078,12 @@ def advise_benchmark_evaluate(
 
     from legacy_engine.advisory.ranking_benchmark import (
         BenchmarkProtocol, ExternalRankingSnapshot, FrozenOriginPredictions,
-        aggregate_benchmark, atomic_write_canonical, atomic_write_text, evaluate_origin, load_hashed_model,
+        SnapshotManifest, aggregate_benchmark, atomic_write_canonical, atomic_write_text,
+        evaluate_origin, load_hashed_model,
         render_benchmark_markdown,
     )
     from legacy_engine.workflows.ranking_benchmark import (
-        load_heldout_outcomes, validate_frozen_taxonomy,
+        load_heldout_outcomes, validate_frozen_taxonomy, validate_snapshot_quarantine,
     )
 
     protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
@@ -3092,6 +3093,16 @@ def advise_benchmark_evaluate(
     predictions, digest = load_hashed_model(
         Path(predictions_path), FrozenOriginPredictions, checksum,
     )
+    manifest_path = Path(predictions_path).with_name(f"{predictions.fold.fold_id}.manifest.json")
+    snapshot_path = manifest_path.with_name(f"{predictions.fold.fold_id}.duckdb")
+    if not manifest_path.is_file() or not snapshot_path.is_file():
+        raise click.ClickException(
+            "frozen prediction directory is missing its immutable snapshot manifest or corpus"
+        )
+    manifest, _manifest_digest = load_hashed_model(
+        manifest_path, SnapshotManifest, predictions.snapshot_manifest_sha256,
+    )
+    validate_snapshot_quarantine(manifest, protocol=protocol, snapshot_db=snapshot_path)
     validate_frozen_taxonomy(
         predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
     )

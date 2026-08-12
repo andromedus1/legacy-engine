@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-benchmark-residual-quarantine-review-fixes
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing, data-quality, bug]
 parent: feature-ranking-benchmark-residual-quarantine
 depends_on: [feature-ranking-benchmark-residual-quarantine-artifact-run]
@@ -35,3 +35,13 @@ artifact directory only after corrected code and tests are committed.
 - [ ] Markdown carries the exact exclusion evidence promised by the runbook.
 - [ ] Focused and full repository verification are green; corrected v2 artifacts never overwrite or
   reuse the invalid partial attempt.
+
+## Implementation notes
+- Execution capability: inline standard implementation of the receiver-confirmed review blockers.
+- Review weight: standard review already completed; no second review commissioned.
+- Files changed: `src/legacy_engine/advisory/ranking_benchmark.py`, `src/legacy_engine/workflows/ranking_benchmark.py`, `src/legacy_engine/cli.py`, focused benchmark tests, and this item.
+- Tests added/removed: adversarial outcome/label mutation, blank/duplicate identity, exact registration, summary ceiling, v1 hash, manifest/ledger/retained-corpus, held-out binding, and Markdown evidence tests; none removed.
+- Simplification: ledger digest explicitly excludes the separate retained-corpus hash, keeping identity outcome-blind while preserving corpus coherence checks.
+- Discrepancies from design: none; direct CLI evaluation now requires the sibling immutable manifest and snapshot so the workflow cannot silently skip evidence validation.
+- Adjacent issues parked: none.
+- Verification: 36 focused tests passed; full suite passed with `PYTHONPATH=.` (3,835 passed, 1 skipped); changed advisory/workflow/test Ruff passed; compileall passed. Default full-suite invocation remains unable to import `tests` without repository-root `PYTHONPATH`.

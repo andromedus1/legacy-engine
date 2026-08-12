@@ -113,7 +113,9 @@ class CardMetadataQuarantineLedger(LegacyEngineModel):
 
     @property
     def digest(self) -> str:
-        return content_sha256(self.model_dump(mode="json"))
+        # The ledger identity is deliberately pre-outcome.  The retained-corpus hash is
+        # a separate coherence check and may legitimately change when labels/results change.
+        return content_sha256(self.model_dump(mode="json", exclude={"retained_facts_sha256"}))
 
 
 class BenchmarkProtocol(LegacyEngineModel):
@@ -147,10 +149,14 @@ class BenchmarkProtocol(LegacyEngineModel):
         if self.card_metadata.mode == "quarantine-unresolved-decks":
             if self.registered_at is None:
                 raise ValueError("quarantine protocols require registered_at")
-            datetime.fromisoformat(self.registered_at.replace("Z", "+00:00"))
             registered = datetime.fromisoformat(self.registered_at.replace("Z", "+00:00"))
-            if registered.date() > first and self.claim_ceiling != "descriptive":
-                raise ValueError("posthoc quarantine protocols must have descriptive claim ceiling")
+            if registered.tzinfo is None:
+                raise ValueError("registered_at must include an explicit timezone")
+            first_instant = datetime.combine(first, datetime.min.time(), tzinfo=registered.tzinfo)
+            if registered >= first_instant and self.claim_ceiling != "descriptive":
+                raise ValueError(
+                    "quarantine protocols registered at or after first_cutoff must have descriptive claim ceiling"
+                )
         if final <= first:
             raise ValueError("final_evaluation_until must be after first_cutoff")
         if self.horizon_days < 1 or self.step_days < 1:
@@ -289,6 +295,7 @@ class HeldoutOutcomes(LegacyEngineModel):
     matches: tuple[HeldoutMatch, ...]
     decks: tuple[HeldoutDeck, ...]
     card_metadata_quarantine: CardMetadataQuarantineLedger | None = None
+    card_metadata_quarantine_sha256: str | None = None
 
 
 class FieldCoverageLedger(LegacyEngineModel):
@@ -360,6 +367,12 @@ class BenchmarkEvaluationSummary(LegacyEngineModel):
     reasons: tuple[str, ...]
     claim_ceiling: BenchmarkClaimCeiling = "predictive-claim-supported"
 
+    @model_validator(mode="after")
+    def _validate_claim_ceiling(self) -> "BenchmarkEvaluationSummary":
+        if self.claim_ceiling == "descriptive" and self.status == "predictive-claim-supported":
+            raise ValueError("summary status exceeds descriptive claim ceiling")
+        return self
+
 
 def canonical_json_bytes(value: object) -> bytes:
     """Stable, finite JSON encoding used by every benchmark hash boundary."""
@@ -371,6 +384,8 @@ def canonical_json_bytes(value: object) -> bytes:
                 value.pop("card_metadata_quarantine", None)
             if value.get("card_metadata_quarantine_sha256") is None:
                 value.pop("card_metadata_quarantine_sha256", None)
+            if value.get("claim_ceiling") == "predictive-claim-supported":
+                value.pop("claim_ceiling", None)
     return (json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
     ) + "\n").encode()
@@ -394,6 +409,29 @@ def protocol_sha256(protocol: BenchmarkProtocol) -> str:
         payload.pop("claim_ceiling", None)
         payload.pop("card_metadata", None)
     return content_sha256(payload)
+
+
+def validate_quarantine_ledger(
+    ledger: CardMetadataQuarantineLedger | None,
+    *,
+    policy: CardMetadataPolicy,
+    declared_digest: str | None = None,
+    retained_facts_sha256: str | None = None,
+) -> None:
+    """Validate the typed ledger/policy and its independent retained-corpus binding."""
+    if policy.mode == "quarantine-unresolved-decks":
+        if ledger is None:
+            raise ValueError("quarantine protocol requires a card metadata ledger")
+        if ledger.policy != policy:
+            raise ValueError("card metadata ledger policy does not match protocol")
+        if not ledger.within_ceiling:
+            raise ValueError("card metadata quarantine ledger failed its declared ceilings")
+        if declared_digest is not None and declared_digest != ledger.digest:
+            raise ValueError("card metadata quarantine ledger digest mismatch")
+        if retained_facts_sha256 is not None and ledger.retained_facts_sha256 != retained_facts_sha256:
+            raise ValueError("card metadata quarantine retained-corpus hash mismatch")
+    elif ledger is not None:
+        raise ValueError("strict protocol cannot carry a card metadata quarantine ledger")
 
 
 def plan_card_metadata_quarantine(
@@ -447,12 +485,13 @@ def plan_card_metadata_quarantine(
     duplicate_rows = con.execute(
         f"""SELECT d.tournament_id, lower(trim(d.player)) AS player_key
             FROM decks d JOIN tournaments t ON t.id=d.tournament_id
-            WHERE {date_clause} AND trim(coalesce(d.player,'')) <> ''
+            WHERE {date_clause}
             GROUP BY d.tournament_id, lower(trim(d.player)) HAVING count(*) > 1
             ORDER BY d.tournament_id, player_key""",
         [end, start, start],
     ).fetchall()
     duplicate_keys = {(str(event), str(player)) for event, player in duplicate_rows}
+    affected_event_ids: set[str] = set()
     affected_keys = {
         (event, str(player).strip().lower())
         for (event, deck_idx), names in unresolved_by_deck.items()
@@ -466,11 +505,17 @@ def plan_card_metadata_quarantine(
         if not names:
             continue
         player_key = str(player).strip().lower() or None
+        player_key = str(player or "").strip().lower() or None
+        identity_ambiguous = player_key is None or (str(event), player_key) in duplicate_keys
+        if identity_ambiguous:
+            # No tournament-local identity can safely join this deck to one round.  Remove
+            # every event round rather than allowing a blank/ambiguous key to understate support.
+            affected_event_ids.add(str(event))
         excluded_decks.append(QuarantinedDeck(
             tournament_id=str(event), deck_idx=int(deck_idx), player_key=player_key,
             event_date=str(event_date), source=str(source), event_uri=str(event_uri),
             unresolved_names=tuple(sorted(names)),
-            identity_ambiguous=(str(event), player_key) in duplicate_keys if player_key else False,
+            identity_ambiguous=identity_ambiguous,
         ))
     # Any duplicate key touching a quarantined deck is unsafe for every round using it.
     affected_keys |= {
@@ -486,7 +531,9 @@ def plan_card_metadata_quarantine(
     ).fetchall()
     excluded_round_keys = tuple(sorted(
         (str(event), int(match_idx)) for event, match_idx, player1, player2, _source in round_rows
-        if (str(event), str(player1)) in affected_keys or (str(event), str(player2)) in affected_keys
+        if str(event) in affected_event_ids
+        or (str(event), str(player1)) in affected_keys
+        or (str(event), str(player2)) in affected_keys
     ))
     raw_decks, raw_rounds = len(deck_rows), len(round_rows)
     deck_fraction = len(excluded_decks) / raw_decks if raw_decks else 0.0
@@ -524,8 +571,28 @@ def plan_card_metadata_quarantine(
         deck_fraction=deck_fraction, round_fraction=round_fraction,
         counts_by_source=dict(sorted(counts_by_source.items())), within_ceiling=not reasons,
         reasons=tuple(reasons), snapshot_source_fingerprint=content_sha256({
-            "decks": [list(row[:2]) + [row[3], row[4], row[5]] for row in deck_rows],
+            # Only card/deck/event/player dimensions enter the ledger identity.  Results,
+            # standings, stored labels, and any parsed outcome are intentionally absent.
+            "events": [
+                [row[0], row[1], row[2], row[3]]
+                for row in con.execute(
+                    f"SELECT t.id, substr(t.date,1,10), coalesce(t.uri,''), coalesce(t.source,'') "
+                    f"FROM tournaments t WHERE {date_clause} ORDER BY 1",
+                    [end, start, start],
+                ).fetchall()
+            ],
+            "decks": [[row[0], row[1], row[2]] for row in deck_rows],
+            "deck_cards": [list(row) for row in con.execute(
+                f"SELECT dc.tournament_id, dc.deck_idx, dc.board, dc.name, dc.count "
+                f"FROM deck_cards dc JOIN tournaments t ON t.id=dc.tournament_id "
+                f"WHERE {date_clause} ORDER BY 1,2,3,4,5", [end, start, start],
+            ).fetchall()],
             "rounds": [list(row[:4]) for row in round_rows],
+            "cards": [row[0] for row in con.execute(
+                f"SELECT DISTINCT dc.name FROM deck_cards dc JOIN tournaments t "
+                f"ON t.id=dc.tournament_id WHERE {date_clause} ORDER BY dc.name",
+                [end, start, start],
+            ).fetchall()],
         }),
     )
 
@@ -1054,7 +1121,20 @@ def evaluate_origin(
         raw_matches = outcome_rows.matches
         field_coverage = _field_coverage_ledger(outcome_rows.decks, universe)
         heldout_decks = outcome_rows.decks
+        retained_hash = content_sha256({
+            "decks": [deck.model_dump(mode="json") for deck in outcome_rows.decks],
+            "matches": [match.model_dump(mode="json") for match in outcome_rows.matches],
+        })
+        validate_quarantine_ledger(
+            outcome_rows.card_metadata_quarantine,
+            policy=protocol.card_metadata,
+            declared_digest=outcome_rows.card_metadata_quarantine_sha256,
+            retained_facts_sha256=(
+                retained_hash if protocol.card_metadata.mode == "quarantine-unresolved-decks" else None
+            ),
+        )
     else:
+        validate_quarantine_ledger(None, policy=protocol.card_metadata)
         raw_matches = outcome_rows
         field_coverage = None
         heldout_decks = ()
@@ -1117,18 +1197,18 @@ def evaluate_origin(
         reasons.append(player_reason)
     else:
         player_sensitivity = _player_component_sensitivity(predictions, normalized, protocol)
+    evaluation_payload: dict[str, object] = {
+        "matches": [match.model_dump(mode="json") for match in normalized],
+        "decks": [deck.model_dump(mode="json") for deck in heldout_decks],
+    }
+    if isinstance(outcome_rows, HeldoutOutcomes) and outcome_rows.card_metadata_quarantine is not None:
+        evaluation_payload["card_metadata_quarantine"] = (
+            outcome_rows.card_metadata_quarantine.model_dump(mode="json")
+        )
     return BenchmarkEvaluation(
         protocol_hash=predictions.protocol_hash,
         predictions_sha256=content_sha256(predictions),
-        evaluation_data_sha256=content_sha256({
-            "matches": [match.model_dump(mode="json") for match in normalized],
-            "decks": [deck.model_dump(mode="json") for deck in heldout_decks],
-            "card_metadata_quarantine": (
-                outcome_rows.card_metadata_quarantine.model_dump(mode="json")
-                if isinstance(outcome_rows, HeldoutOutcomes)
-                and outcome_rows.card_metadata_quarantine is not None else None
-            ),
-        }),
+        evaluation_data_sha256=content_sha256(evaluation_payload),
         fold=predictions.fold, exclusions=exclusions, estimators=tuple(evaluations),
         external=external_results, status="descriptive" if support.evaluable else "not-evaluable",
         reasons=tuple(reasons), player_sensitivity_reason=player_reason,
@@ -1302,6 +1382,15 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str:
                 f"{ledger.raw_rounds} retained ({ledger.round_fraction:.3%} excluded); "
                 f"sources={ledger.counts_by_source}; digest=`{ledger.digest}`."
             )
+            for deck in ledger.excluded_decks:
+                lines.append(
+                    f"- Quarantined deck `{deck.tournament_id}:{deck.deck_idx}`: "
+                    f"player={deck.player_key or '(blank)'}; ambiguous={deck.identity_ambiguous}; "
+                    f"event_date={deck.event_date}; source={deck.source or '(missing)'}; "
+                    f"event_uri={deck.event_uri or '(missing)'}; "
+                    f"unresolved_names={list(deck.unresolved_names)}; "
+                    f"ledger_reasons={list(ledger.reasons)}; digest=`{ledger.digest}`."
+                )
         for external in fold.external:
             lines.append(
                 f"- External `{external.estimator}`: common={external.common_matches}/"

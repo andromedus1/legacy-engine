@@ -29,6 +29,7 @@ from legacy_engine.advisory.ranking_benchmark import (
     project_matchup_probability,
     protocol_sha256,
     plan_card_metadata_quarantine,
+    validate_quarantine_ledger,
     validate_snapshot_manifest,
 )
 from legacy_engine.advisory.ranking_measurement import (
@@ -180,6 +181,10 @@ def _filter_training_facts(
         (item.tournament_id, item.player_key) for item in ledger.excluded_decks
         if item.player_key is not None
     }
+    excluded_events = {
+        item.tournament_id for item in ledger.excluded_decks
+        if item.identity_ambiguous and item.player_key is None
+    }
     filtered: dict[str, list[tuple]] = {}
     for table, rows in facts.items():
         if table == "decks":
@@ -190,8 +195,9 @@ def _filter_training_facts(
             filtered[table] = [row for row in rows if (str(row[0]), int(row[1])) not in excluded_rounds]
         elif table == "standings":
             filtered[table] = [row for row in rows if (
-                str(row[0]), normalize_player(row[2])
-            ) not in excluded_players]
+                str(row[0]) not in excluded_events
+                and (str(row[0]), normalize_player(row[2])) not in excluded_players
+            )]
         else:
             filtered[table] = rows
     return filtered
@@ -215,21 +221,44 @@ def _validate_closure(con: duckdb.DuckDBPyConnection) -> None:
 def _snapshot_semantic_hash(path: Path) -> str:
     con = duckdb.connect(str(path), read_only=True)
     try:
-        tables = {
-            table: con.execute(
-                f"SELECT {', '.join(columns)} FROM {table} ORDER BY "
-                + ", ".join(str(index + 1) for index in range(len(columns)))
-            ).fetchall()
-            for table, columns in _RAW_TABLE_COLUMNS.items()
-        }
-        tables["cards"] = con.execute("SELECT * FROM cards ORDER BY name").fetchall()
-        if con.execute(
-            "SELECT count(*) FROM information_schema.tables WHERE table_name='entity_eras'"
-        ).fetchone()[0]:
-            tables["entity_eras"] = con.execute("SELECT * FROM entity_eras ORDER BY 1").fetchall()
-        return content_sha256(tables)
+        return _snapshot_connection_semantic_hash(con)
     finally:
         con.close()
+
+
+def _snapshot_connection_semantic_hash(con: duckdb.DuckDBPyConnection) -> str:
+    tables = {
+        table: con.execute(
+            f"SELECT {', '.join(columns)} FROM {table} ORDER BY "
+            + ", ".join(str(index + 1) for index in range(len(columns)))
+        ).fetchall()
+        for table, columns in _RAW_TABLE_COLUMNS.items()
+    }
+    tables["cards"] = con.execute("SELECT * FROM cards ORDER BY name").fetchall()
+    if con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name='entity_eras'"
+    ).fetchone()[0]:
+        tables["entity_eras"] = con.execute("SELECT * FROM entity_eras ORDER BY 1").fetchall()
+    return content_sha256(tables)
+
+
+def validate_snapshot_quarantine(
+    manifest: SnapshotManifest,
+    *,
+    protocol: BenchmarkProtocol,
+    snapshot_db: Path,
+) -> None:
+    """Validate persisted policy, ledger digest, and retained snapshot corpus binding."""
+    validate_snapshot_manifest(manifest)
+    validate_quarantine_ledger(
+        manifest.card_metadata_quarantine,
+        policy=protocol.card_metadata,
+        declared_digest=manifest.card_metadata_quarantine_sha256,
+        retained_facts_sha256=(
+            _snapshot_semantic_hash(snapshot_db)
+            if protocol.card_metadata.mode == "quarantine-unresolved-decks" else None
+        ),
+    )
 
 
 def build_origin_snapshot(
@@ -315,7 +344,7 @@ def build_origin_snapshot(
         ]
         if quarantine is not None:
             quarantine = quarantine.model_copy(update={
-                "retained_facts_sha256": content_sha256(facts),
+                "retained_facts_sha256": _snapshot_connection_semantic_hash(destination),
             })
         manifest = SnapshotManifest(
             protocol_hash=protocol_hash,
@@ -343,7 +372,7 @@ def build_origin_snapshot(
                 "card availability is observed-by-cutoff because release dates are unavailable",
             ))),
             card_metadata_quarantine=quarantine,
-            card_metadata_quarantine_sha256=content_sha256(quarantine) if quarantine else None,
+            card_metadata_quarantine_sha256=quarantine.digest if quarantine else None,
         )
         validate_snapshot_manifest(manifest)
         destination.execute("CHECKPOINT")
@@ -520,6 +549,7 @@ def freeze_origin_predictions(
         raise ValueError("snapshot manifest protocol hash does not match protocol")
     if protocol.planned_folds and manifest.fold not in protocol.planned_folds:
         raise ValueError("snapshot fold is not in the preregistered fold schedule")
+    validate_snapshot_quarantine(manifest, protocol=protocol, snapshot_db=snapshot_db)
     planned_bans = tuple(
         event for event in protocol.ban_events_as_of if event[0] <= manifest.fold.cutoff
     )
@@ -819,6 +849,7 @@ def load_heldout_outcomes(
     return HeldoutOutcomes(
         matches=tuple(heldout), decks=decks,
         card_metadata_quarantine=quarantine,
+        card_metadata_quarantine_sha256=quarantine.digest if quarantine else None,
     )
 
 

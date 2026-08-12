@@ -152,6 +152,56 @@ def test_quarantine_snapshot_removes_whole_training_deck_before_classification(t
     con.close()
 
 
+def test_quarantine_manifest_binds_policy_digest_and_retained_snapshot(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    configured = _protocol().model_copy(update={
+        "registered_at": "2025-12-01T00:00:00Z",
+        "claim_ceiling": "descriptive", "card_metadata": policy,
+    })
+    snapshot = tmp_path / "snapshot.duckdb"
+    manifest = build_origin_snapshot(
+        source, snapshot, fold=_fold(), protocol_hash=protocol_sha256(configured),
+        card_metadata_policy=policy,
+    )
+    assert manifest.card_metadata_quarantine_sha256 == manifest.card_metadata_quarantine.digest
+    frozen = freeze_origin_predictions(snapshot, protocol=configured, manifest=manifest)
+    assert frozen.protocol_hash == protocol_sha256(configured)
+    with pytest.raises(ValueError, match="digest mismatch"):
+        freeze_origin_predictions(
+            snapshot, protocol=configured,
+            manifest=manifest.model_copy(update={"card_metadata_quarantine_sha256": "tampered"}),
+        )
+
+
+def test_quarantine_heldout_outcomes_bind_ledger_and_retained_hash(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    outcomes = load_heldout_outcomes(
+        source, _fold(), card_metadata_policy=policy,
+    )
+    assert outcomes.card_metadata_quarantine is not None
+    assert outcomes.card_metadata_quarantine_sha256 == outcomes.card_metadata_quarantine.digest
+
+
+def test_heldout_outcome_and_stored_label_mutations_do_not_change_ledger_digest(tmp_path):
+    one = _source_db(tmp_path / "one.duckdb", future_result="2-0")
+    two = _source_db(tmp_path / "two.duckdb", future_result="0-2")
+    con = store.connect(two)
+    con.execute("UPDATE decks SET archetype='Mutated Label' WHERE tournament_id='future'")
+    con.close()
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    first = load_heldout_outcomes(one, _fold(), card_metadata_policy=policy)
+    second = load_heldout_outcomes(two, _fold(), card_metadata_policy=policy)
+    assert first.card_metadata_quarantine.digest == second.card_metadata_quarantine.digest
+
+
 def test_post_cutoff_changes_leave_manifest_identical(tmp_path):
     one = _source_db(tmp_path / "one.duckdb", future_result="2-0")
     two = _source_db(tmp_path / "two.duckdb", future_result="0-2")

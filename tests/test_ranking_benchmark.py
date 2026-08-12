@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,7 +10,9 @@ from legacy_engine.advisory.ranking_benchmark import (
     ESTIMATOR_REGISTRY,
     BenchmarkFold,
     BenchmarkProtocol,
+    BenchmarkEvaluationSummary,
     CardMetadataPolicy,
+    CardMetadataQuarantineLedger,
     EvaluationSupport,
     ExternalRankingSnapshot,
     FrozenMatchupPrediction,
@@ -55,6 +58,19 @@ def test_protocol_preregisters_primary_and_estimators():
         protocol(estimator_ids=("coin-50",))
 
 
+def test_legacy_v1_protocol_and_summary_hashes_remain_byte_compatible():
+    protocol_path = Path("data/benchmarks/best-deck-decision-trust-current-corpus-v1/protocol.json")
+    summary_path = Path("data/benchmarks/best-deck-decision-trust-current-corpus-v1/summary.json")
+    if not protocol_path.exists() or not summary_path.exists():
+        pytest.skip("local frozen v1 artifacts unavailable")
+    protocol_bytes = protocol_path.read_bytes()
+    summary_bytes = summary_path.read_bytes()
+    loaded_protocol = BenchmarkProtocol.model_validate_json(protocol_bytes)
+    loaded_summary = BenchmarkEvaluationSummary.model_validate_json(summary_bytes)
+    assert protocol_sha256(loaded_protocol) == hashlib.sha256(protocol_bytes).hexdigest()
+    assert content_sha256(loaded_summary) == hashlib.sha256(summary_bytes).hexdigest()
+
+
 def test_card_metadata_policy_is_closed_and_posthoc_quarantine_is_descriptive():
     with pytest.raises(ValueError, match="zero ceilings"):
         CardMetadataPolicy(mode="require-complete", max_deck_fraction=0.001)
@@ -75,6 +91,23 @@ def test_card_metadata_policy_is_closed_and_posthoc_quarantine_is_descriptive():
         ),
     )
     assert configured.claim_ceiling == "descriptive"
+
+
+def test_same_cutoff_instant_is_posthoc_and_summary_type_rejects_ceiling_breach():
+    quarantine = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005,
+        max_round_fraction=0.02,
+    )
+    with pytest.raises(ValueError, match="at or after first_cutoff"):
+        protocol(
+            first_cutoff="2026-01-01", created_at="2026-01-01T00:00:00Z",
+            registered_at="2026-01-01T00:00:00Z", card_metadata=quarantine,
+        )
+    summary = aggregate_benchmark(_evaluation_protocol(), [])
+    payload = summary.model_dump(mode="json")
+    payload.update({"status": "predictive-claim-supported", "claim_ceiling": "descriptive"})
+    with pytest.raises(ValueError, match="exceeds descriptive"):
+        BenchmarkEvaluationSummary.model_validate(payload)
 
 
 def test_quarantine_ledger_removes_whole_decks_and_is_result_blind():
@@ -100,6 +133,38 @@ def test_quarantine_ledger_removes_whole_decks_and_is_result_blind():
     # The planner reads card/deck/player dimensions only; changing a result cannot affect it.
     changed = plan_card_metadata_quarantine(con, start=None, end="2025-02-01", policy=policy)
     assert changed == first
+
+
+def test_quarantine_blank_and_duplicate_identity_remove_rounds_conservatively():
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    con.execute("INSERT INTO tournaments VALUES ('e', 'E', '2025-01-01', '', 'Legacy', 'src', '')")
+    con.executemany(
+        "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("e", 0, "", "", None, None),
+            ("e", 1, "Bob", "", None, None),
+            ("e", 2, "Alice", "", None, None),
+            ("e", 3, "alice", "", None, None),
+        ],
+    )
+    con.executemany(
+        "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+        [("e", 0, "main", "Unknown blank", 1), ("e", 2, "main", "Unknown duplicate", 1)],
+    )
+    con.executemany(
+        "INSERT INTO rounds VALUES (?, ?, ?, ?, ?)",
+        [("e", 0, "", "Bob", "2-0"), ("e", 1, "Alice", "Bob", "2-0")],
+    )
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005,
+        max_round_fraction=0.02,
+    )
+    ledger = plan_card_metadata_quarantine(con, start=None, end="2025-02-01", policy=policy)
+    assert {item.deck_idx for item in ledger.excluded_decks} == {0, 2}
+    assert all(item.identity_ambiguous for item in ledger.excluded_decks)
+    assert ledger.excluded_round_keys == (("e", 0), ("e", 1))
+    assert ledger.round_fraction == 1.0
 
 
 def test_walk_forward_folds_keep_dates_whole_and_reset_at_ban():
@@ -329,6 +394,32 @@ def test_regret_names_tied_oracle_censor_and_report_exposes_full_evidence():
     for evidence in ("Brier", "Cal. int./slope", "Coverage", "Rank τ", "Top 3", "Regret"):
         assert evidence in rendered
     assert "Cumulative calibration residuals" in rendered
+
+
+def test_markdown_renders_exact_quarantine_evidence():
+    configured = _evaluation_protocol()
+    ledger = CardMetadataQuarantineLedger(
+        policy=CardMetadataPolicy(), raw_decks=100, retained_decks=99,
+        raw_rounds=100, retained_rounds=98,
+        excluded_decks=(
+            {
+                "tournament_id": "event-1", "deck_idx": 4, "player_key": "player",
+                "event_date": "2025-12-20", "source": "MTGmelee", "event_uri": "https://event",
+                "unresolved_names": ("Unknown Card",), "identity_ambiguous": False,
+            },
+        ),
+        excluded_round_keys=(("event-1", 3),), deck_fraction=0.01, round_fraction=0.02,
+        counts_by_source={"MTGmelee": {"raw_decks": 100, "retained_decks": 99,
+                                        "raw_rounds": 100, "retained_rounds": 98}},
+        within_ceiling=False, reasons=("round ceiling reason",),
+    )
+    fold = evaluate_origin(_predictions(configured), _heldout(), protocol=configured).model_copy(
+        update={"card_metadata_quarantine": ledger},
+    )
+    rendered = render_benchmark_markdown(aggregate_benchmark(configured, [fold]))
+    for evidence in ("event-1:4", "player", "Unknown Card", "https://event", "round ceiling reason"):
+        assert evidence in rendered
+    assert ledger.digest in rendered
 
 
 def test_aggregate_remains_descriptive_without_claim_support():
