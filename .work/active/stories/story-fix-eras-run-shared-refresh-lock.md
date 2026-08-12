@@ -1,7 +1,7 @@
 ---
 id: story-fix-eras-run-shared-refresh-lock
 kind: story
-stage: review
+stage: done
 tags: [bug, analytics, infra]
 parent: null
 depends_on: []
@@ -56,3 +56,25 @@ proves eras-owner→scheduled acquisition also raises `LockUnavailable`. `eras l
 Verification so far: `tests/test_cli_eras.py` is `20 passed`; the broader eras/scheduler/decision/ops
 slice is `216 passed`; changed-test and existing lock-module Ruff is clean. No live database,
 scheduler, status, ranking, or adjacent command was touched.
+
+## Review (2026-08-12)
+
+**Verdict**: Approve
+
+**Blockers**: none
+
+**Important**: none
+
+**Nits**: none
+
+**Rejected**: none
+
+**Notes**: Bounded inline standalone-story review of commit `525222d`; no independent reviewer was
+used. The resolved database path, `decks/best-deck-best-call-ranking.html`, and configured lock
+directory exactly match the production default decision-refresh identity. Lock lifetime covers every
+database mutation and close; it intentionally ends before human-readable output. Contention fails
+before DuckDB open with a clean Click error, while DuckDB's own lock remains unchanged as defense in
+depth. Bidirectional contention tests exercise the real kernel-backed lock, and `eras list` proves
+read-only behavior remains unlocked. No public schema, scheduler lifecycle, status, ranking, or
+other era command changed. Final verification: focused slice `216 passed`; full suite `3820 passed,
+1 skipped`.
