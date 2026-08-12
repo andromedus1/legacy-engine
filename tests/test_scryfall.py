@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 
 import pytest
 
@@ -184,6 +185,152 @@ def test_download_bulk_data_mocked(tmp_path, monkeypatch):
         assert path.exists()
         idx = client.load_card_index()
     assert "Brainstorm" in idx and "Volcanic Island" in idx
+
+
+def test_download_bulk_data_accepts_live_jsonl_download_uri(tmp_path, monkeypatch):
+    """Current Scryfall metadata exposes gzipped JSONL via jsonl_download_uri only."""
+    oracle_path = tmp_path / "oracle_cards.json"
+    metadata_path = tmp_path / "metadata.json"
+    payload = b"".join(json.dumps(card).encode() + b"\n" for card in (NORMAL, LAND))
+    compressed = gzip.compress(payload)
+
+    class Response:
+        headers = {"content-encoding": "gzip"}
+
+        def raise_for_status(self):
+            return None
+
+        def iter_raw(self, chunk_size):
+            yield compressed
+
+        def iter_bytes(self, chunk_size):
+            yield payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    class Http:
+        def stream(self, *args, **kwargs):
+            return Response()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+    monkeypatch.setattr(scryfall, "ORACLE_CARDS_PATH", oracle_path)
+    monkeypatch.setattr(scryfall, "METADATA_PATH", metadata_path)
+    client = ScryfallClient()
+    client.client.close()
+    client.client = Http()
+    monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
+        "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
+        "updated_at": "2026-08-11T00:00:00Z",
+    })
+
+    path = client.download_bulk_data(force=True)
+
+    assert path == oracle_path
+    assert [row["name"] for row in scryfall.iter_bulk_rows(path)] == [
+        "Brainstorm", "Volcanic Island",
+    ]
+    assert client.load_card_index()["Brainstorm"]["name"] == "Brainstorm"
+
+
+def test_corrupt_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_path, monkeypatch):
+    oracle_path = tmp_path / "oracle_cards.json"
+    metadata_path = tmp_path / "metadata.json"
+    oracle_path.write_text(json.dumps([NORMAL]), encoding="utf-8")
+    metadata_path.write_text('{"updated_at":"last-good"}', encoding="utf-8")
+
+    class Response:
+        headers = {"content-encoding": "gzip"}
+
+        def raise_for_status(self):
+            return None
+
+        def iter_raw(self, chunk_size):
+            yield gzip.compress(b'{"name":"Brainstorm"}\nnot-json\n')
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    class Http:
+        def stream(self, *args, **kwargs):
+            return Response()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+    monkeypatch.setattr(scryfall, "ORACLE_CARDS_PATH", oracle_path)
+    monkeypatch.setattr(scryfall, "METADATA_PATH", metadata_path)
+    client = ScryfallClient()
+    client.client.close()
+    client.client = Http()
+    monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
+        "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
+        "updated_at": "broken",
+    })
+
+    with pytest.raises(json.JSONDecodeError):
+        client.download_bulk_data(force=True)
+
+    assert json.loads(oracle_path.read_text()) == [NORMAL]
+    assert metadata_path.read_text() == '{"updated_at":"last-good"}'
+
+
+def test_download_prices_bulk_accepts_jsonl_metadata(tmp_path, monkeypatch):
+    price_path = tmp_path / "default_cards.json"
+    metadata_path = tmp_path / "prices_metadata.json"
+    price = {
+        "id": "p1", "name": "Brainstorm", "layout": "normal",
+        "games": ["paper"], "set": "ice", "prices": {"usd": "1.00"},
+    }
+
+    class Response:
+        headers = {"content-encoding": "gzip"}
+
+        def raise_for_status(self):
+            return None
+
+        def iter_raw(self, chunk_size):
+            yield gzip.compress((json.dumps(price) + "\n").encode())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    class Http:
+        def stream(self, *args, **kwargs):
+            return Response()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scryfall, "SCRYFALL_DIR", tmp_path)
+    monkeypatch.setattr(scryfall, "SCRYFALL_PRICES_PATH", price_path)
+    monkeypatch.setattr(scryfall, "SCRYFALL_PRICES_META_PATH", metadata_path)
+    client = ScryfallClient()
+    client.client.close()
+    client.client = Http()
+    monkeypatch.setattr(client, "_fetch_prices_metadata", lambda: {
+        "jsonl_download_uri": "https://data.scryfall.io/default.jsonl.gz",
+        "updated_at": "2026-08-11T00:00:00Z",
+    })
+
+    client.download_prices_bulk(force=True)
+
+    rows = list(client.iter_price_rows(price_path))
+    assert len(rows) == 1
+    assert rows[0].name == "Brainstorm"
 
 
 # ---------------------------------------------------------------------------
