@@ -28,24 +28,41 @@ class WotcAnnouncement(LegacyEngineModel):
 
 
 class _TextExtractor(HTMLParser):
+    _H2_MARKER = "@@wotc-h2@@"
     _BLOCKS = frozenset({
         "article", "br", "div", "h1", "h2", "h3", "h4", "li", "p", "section",
     })
+    _NON_VISIBLE = frozenset({"script", "style", "template", "noscript"})
 
     def __init__(self) -> None:
         super().__init__()
         self.parts: list[str] = []
+        self._hidden_depth = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in self._NON_VISIBLE:
+            self._hidden_depth += 1
+            return
+        if self._hidden_depth:
+            return
+        if tag == "h2":
+            self.parts.append(f"\n{self._H2_MARKER}")
         if tag in self._BLOCKS:
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in self._NON_VISIBLE:
+            if self._hidden_depth:
+                self._hidden_depth -= 1
+            return
+        if self._hidden_depth:
+            return
         if tag in self._BLOCKS:
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
-        self.parts.append(data)
+        if not self._hidden_depth:
+            self.parts.append(data)
 
     def text(self) -> str:
         lines = (" ".join(part.split()) for part in "".join(self.parts).splitlines())
@@ -81,13 +98,19 @@ def _parse_month_date(value: str) -> date:
 
 def _legacy_section(text: str) -> str:
     lines = text.splitlines()
-    indexes = [index for index, line in enumerate(lines) if line.strip() == "Legacy"]
+    marker = _TextExtractor._H2_MARKER
+    indexes = [
+        index for index, line in enumerate(lines)
+        if line.strip() == marker
+        and index + 1 < len(lines)
+        and lines[index + 1].strip() == "Legacy"
+    ]
     if len(indexes) != 1:
         raise ValueError(f"expected exactly one Legacy section, found {len(indexes)}")
-    start = indexes[0] + 1
+    start = indexes[0] + 2
     end = len(lines)
     for index in range(start, len(lines)):
-        if lines[index].strip() in _FORMATS:
+        if lines[index].strip() == marker:
             end = index
             break
     section = "\n".join(lines[start:end]).strip()
