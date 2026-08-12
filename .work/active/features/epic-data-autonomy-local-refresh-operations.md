@@ -1,7 +1,7 @@
 ---
 id: epic-data-autonomy-local-refresh-operations
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [feature-decision-data-currency]
@@ -450,3 +450,41 @@ A cross-model advisory pass was requested because lock/status semantics affect d
 local peer wrapper returned no usable result, so no peer suggestions were incorporated; this is a
 non-blocking advisory failure. The design's pre-mortem therefore records the uncatchable-process,
 status-filesystem, long-run overlap, and launchd rollback cases explicitly.
+
+## Implementation summary
+
+- `epic-data-autonomy-local-refresh-operations-runner-status` — done in `cec33b6`: typed atomic
+  canonical/per-attempt status, health classification, artifact identity, and exclusive kernel-lock
+  wrapper around the existing decision-refresh composition.
+- `epic-data-autonomy-local-refresh-operations-operator-cli` — done in `7437d26`: `ops
+  scheduled-refresh`, `ops status [--brief]`, shared no-network session projection, and session
+  orientation integration.
+- `epic-data-autonomy-local-refresh-operations-launchd-controls` — done in `82c4aa6`: generated
+  07:30 LaunchAgent, reversible install/inspect/run-now/uninstall controls behind an injected
+  process boundary, hermetic lifecycle coverage, runbook/architecture alignment, and canonical
+  knowledge-index regeneration.
+- No live LaunchAgent was installed, inspected, triggered, or removed during implementation. The
+  external-state lifecycle remains an explicit operator action after review.
+
+## Integrated verification
+
+- `.venv/bin/pytest -q tests/test_launchd.py tests/test_ops_cli.py tests/test_ops_status.py tests/test_scheduled_refresh.py tests/test_decision_refresh.py tests/test_cli.py`
+  — 125 passed.
+- `PYTHONPATH=. .venv/bin/pytest -q` — 3,757 passed, 1 skipped in 159.39 seconds. The explicit
+  `PYTHONPATH` preserves this repository's established mixed `tests.*` and sibling-module imports;
+  no unrelated ranking tests were changed to alter collection behavior.
+- `.venv/bin/python -m compileall -q src/legacy_engine/ops src/legacy_engine/cli.py scripts/session_ops_status.py`
+  — passed.
+- Canonical knowledge-index regeneration — 48 docs, 0 errors, 11 pre-existing warnings.
+- Ruff was unavailable in `.venv`; pytest, compileall, diff checks, and the standard independent
+  feature review are the verification path.
+
+## Run notes
+
+- **Ownership**: one cohesive feature owner followed the three-story dependency chain; shared CLI,
+  status, and launchd context made splitting across workers more costly than sequential ownership.
+- **Capability**: host implementation used the active frontier coding model at high reasoning; no
+  routine implementation delegation was needed because all three layers share one interface chain.
+- **Review weight**: `standard`, explicitly requested by the autopilot caller — one independent
+  fresh-context feature pass, followed by recipient adjudication and any confirmed fixes without a
+  second review pass.
