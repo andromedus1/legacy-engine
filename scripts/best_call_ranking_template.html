@@ -146,6 +146,13 @@ svg text { font-family: inherit; }
 .grounding-path { margin:8px 0; padding:9px 11px; border-left:3px solid var(--amber);
   background:var(--surface-1); font-size:13px; }
 .grounding-path ol { margin:6px 0; padding-left:22px; }
+.first-read { border-left:5px solid var(--s1); }
+.first-read h2 { margin:0 0 5px; font-size:17px; }
+.first-read .read-meta { color:var(--ink-2); font-size:12.5px; margin-bottom:9px; }
+.practical-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:7px; margin:0; padding:0; list-style:none; }
+.practical-list li { border:1px solid var(--grid); border-radius:7px; padding:7px 9px; }
+.practical-list .read-name { font-weight:700; }
+.practical-list .read-detail { display:block; color:var(--ink-2); font-size:12px; }
 @media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
 </style>
 </head>
@@ -158,6 +165,12 @@ in the Strategic Plans, Archetypes, or Subarchetypes tables
 to expand it. Plans show their member decks and direct plan-vs-plan ledger; archetypes and
 subarchetypes show every current-field opponent with shrunk + raw win rate, sample size, window,
 and blowout highlights.</div>
+
+<section class="card first-read" id="first-read" aria-labelledby="first-read-title">
+  <h2 id="first-read-title">Practical first read</h2>
+  <div id="practical-summary" class="read-meta"></div>
+  <ol id="practical-list" class="practical-list"></ol>
+</section>
 
 <div class="card methodology-control" role="group" aria-label="Ranking methodology view">
   <button id="methodology-view" type="button" aria-pressed="false">Posterior lean (diagnostic)</button>
@@ -441,6 +454,33 @@ const audit = [
 ].join("\n");
 document.getElementById("audit").textContent = audit;
 
+function renderPracticalFirstRead() {
+  const meta = M.practical_recommendation || {chosen_action:null, ranked_actions:[]};
+  const rows = new Map(D.arch.map(row => [row.subject, row]));
+  const labels = meta.ranked_actions || [];
+  const list = document.getElementById("practical-list");
+  const shown = labels.slice(0, 5).map(label => rows.get(label)).filter(Boolean);
+  const fieldN = M.observed_field_n == null ? M.field_decks : M.observed_field_n;
+  const effectiveN = M.effective_field_n == null ? fieldN : M.effective_field_n;
+  const prior = M.prior_strength || 0;
+  document.getElementById("practical-summary").textContent =
+    `Practical lean shortlist · ${fieldN.toLocaleString()} observed decks / `+
+    `${effectiveN.toLocaleString()} effective decision decks · `+
+    `${prior.toLocaleString()} prior pseudo-decks · `+
+    `${M.affected_clamp_count || 0} matchup horizon clamp(s). `+
+    `Proof-grade call: ${productionCall.chosen_action || "unavailable"}.`;
+  list.innerHTML = shown.length ? shown.map(row => {
+    const lean = row.methodology && row.methodology.lean;
+    const evidence = row.ranking_evidence || {};
+    const interval = lean ? `${fmtP(lean.ci_low)}–${fmtP(lean.ci_high)}` : "—";
+    const observed = row.observed_field_share == null ? row.field_share : row.observed_field_share;
+    return `<li><span class="read-name">${escT(row.subject)}</span>`+
+      `<span class="read-detail">Q25 ${lean ? fmtP(lean.q25) : "—"} · median ${lean ? fmtP(lean.median) : "—"} · 95% ${interval}</span>`+
+      `<span class="read-detail">${(100*observed).toFixed(1)}% observed field · `+
+      `${escT(evidence.stratum || "supported")}</span></li>`;
+  }).join("") : `<li><span class="read-name">No practical call</span>`+
+    `<span class="read-detail">${escT((M.utility || {}).reason || "evidence is unavailable")}</span></li>`;
+}
 function windowChip(r) {
   if (!r.since) return `<span class="chip">full history</span>`;
   return `<span class="chip">since ${r.since}</span>`;
@@ -465,6 +505,7 @@ function blowouts(r) {
 }
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
+renderPracticalFirstRead();
 // Camp-only P(best) cell: ONE shared-field MC across all camps + unsplit archetypes
 // (meta.rank carries seed/draws/basis). p_best=null = below the candidacy coverage gate
 // (cov shown as the reason); the chip is the risk-adjusted lower-quantile field WR,

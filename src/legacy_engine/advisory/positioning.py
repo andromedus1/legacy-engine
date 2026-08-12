@@ -141,6 +141,8 @@ def practical_recommendation_order(
         methodology = row.get("methodology")
         lean = methodology.get("lean") if isinstance(methodology, Mapping) else row.get("lean")
         if not isinstance(lean, Mapping):
+            lean = row.get("posterior_lean")
+        if not isinstance(lean, Mapping):
             continue
         q25 = lean.get("q25")
         median = lean.get("median")

@@ -26,6 +26,7 @@ from legacy_engine.advisory.positioning import (
     _DEFAULT_DRAWS,
     _row_winrate_inputs,
     _sample_S,
+    practical_recommendation_order,
     ranking_evidence_payload,
 )
 from legacy_engine.analytics import build_matrix
@@ -1248,6 +1249,19 @@ class TestRankingEvidencePayload:
         assert result["eligible"] is eligible
         assert result["measured_share"] + result["imputed_share"] == pytest.approx(1.0)
         assert (result["reason"] is not None) is (not eligible)
+
+    def test_practical_order_uses_lean_q25_then_median_then_label(self):
+        rows = {
+            "zeta": {"methodology": {"lean": {"q25": 0.60, "median": 0.65}},
+                     "ranking_evidence": {"eligible": True}},
+            "alpha": {"methodology": {"lean": {"q25": 0.60, "median": 0.65}},
+                      "ranking_evidence": {"eligible": True}},
+            "beta": {"methodology": {"lean": {"q25": 0.61, "median": 0.62}},
+                     "ranking_evidence": {"eligible": True}},
+            "unsupported": {"methodology": {"lean": {"q25": 0.99, "median": 0.99}},
+                             "ranking_evidence": {"eligible": False}},
+        }
+        assert practical_recommendation_order(rows) == ("beta", "alpha", "zeta")
 
 
 class TestPositioningCoverageRestrict:
