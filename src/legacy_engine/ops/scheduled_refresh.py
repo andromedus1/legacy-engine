@@ -79,7 +79,13 @@ def _terminal_signal_as_exit():
         signal.signal(signal.SIGTERM, previous)
 
 
-def _artifacts(db_path: Path, out_path: Path, *, ranking_written: bool) -> ArtifactIdentity:
+def _artifacts(
+    db_path: Path,
+    out_path: Path,
+    *,
+    ranking_written: bool,
+    ranking_utility: dict[str, object] | None = None,
+) -> ArtifactIdentity:
     digest = None
     if ranking_written:
         if not out_path.is_file():
@@ -94,6 +100,7 @@ def _artifacts(db_path: Path, out_path: Path, *, ranking_written: bool) -> Artif
         ranking_path=str(out_path.resolve()),
         ranking_written=ranking_written,
         ranking_sha256=digest,
+        ranking_utility=ranking_utility,
     )
 
 
@@ -197,6 +204,10 @@ def run_scheduled_decision_refresh(
                     db_path,
                     out_path,
                     ranking_written=result.ranking_output is not None,
+                    ranking_utility=(
+                        result.ranking_utility.model_dump(mode="json")
+                        if result.ranking_utility is not None else None
+                    ),
                 )
                 pending = tuple(
                     f"era alarm: {alarm}" for alarm in result.format_awareness.era_alarms

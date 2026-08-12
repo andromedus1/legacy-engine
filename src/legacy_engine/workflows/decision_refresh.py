@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.models.base import LegacyEngineModel
@@ -60,12 +60,61 @@ class EraRunResult(LegacyEngineModel):
     alarms: tuple[str, ...] = ()
 
 
+class RankingUtilitySummary(LegacyEngineModel):
+    """Typed publication contract for the generated ranking's first-read usefulness."""
+
+    observed_field_n: int
+    effective_field_n: int
+    prior_strength: int
+    affected_clamp_count: int
+    supported_rows: int
+    transition_prior_rows: int
+    grounded_rows: int
+    practical_call: str | None
+    proof_grade_call: str | None
+    rendered_shortlist_rows: int
+    status: Literal["useful", "degraded", "unavailable"]
+    reasons: tuple[str, ...] = ()
+    practical_ranked_actions: tuple[str, ...] = ()
+
+
+def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
+    """Reject contradictory generation metadata before a ranking artifact is published."""
+    for name in (
+        "observed_field_n", "effective_field_n", "prior_strength", "affected_clamp_count",
+        "supported_rows", "transition_prior_rows", "grounded_rows", "rendered_shortlist_rows",
+    ):
+        if getattr(summary, name) < 0:
+            raise ValueError(f"ranking utility {name} must be non-negative")
+    if summary.effective_field_n != summary.observed_field_n + summary.prior_strength:
+        raise ValueError("ranking utility effective field counts do not reconcile")
+    if summary.grounded_rows > summary.supported_rows:
+        raise ValueError("ranking utility grounded rows exceed supported rows")
+    if summary.transition_prior_rows > summary.supported_rows:
+        raise ValueError("ranking utility transition-prior rows exceed supported rows")
+    if summary.supported_rows and summary.practical_call is None:
+        raise ValueError("ranking utility has supported rows but no practical call")
+    if summary.practical_call is not None and summary.rendered_shortlist_rows < 1:
+        raise ValueError("ranking utility practical call is omitted from the rendered shortlist")
+    if (
+        summary.practical_call is not None
+        and summary.practical_ranked_actions
+        and summary.practical_call not in summary.practical_ranked_actions
+    ):
+        raise ValueError("ranking utility practical call is absent from ranked actions")
+    if summary.status == "useful" and summary.practical_call is None:
+        raise ValueError("useful ranking utility must publish a practical call")
+    if summary.status == "unavailable" and summary.supported_rows:
+        raise ValueError("unavailable ranking utility cannot report supported rows")
+
+
 class DecisionRefreshResult(LegacyEngineModel):
     steps: tuple[RefreshStepResult, ...]
     card_coverage: CardCoverageReport
     format_awareness: FormatAwareness
     ranking_output: str | None = None
     source_observation: SourceRefreshResult | None = None
+    ranking_utility: RankingUtilitySummary | None = None
 
 
 class DecisionRefreshPorts(Protocol):
@@ -76,7 +125,7 @@ class DecisionRefreshPorts(Protocol):
     def label(self, db_path: Path) -> int: ...
     def apply_staged_camps(self, db_path: Path) -> CampApplyResult: ...
     def run_eras(self, db_path: Path) -> EraRunResult: ...
-    def write_ranking(self, db_path: Path, out_path: Path) -> None: ...
+    def write_ranking(self, db_path: Path, out_path: Path) -> RankingUtilitySummary | None: ...
 
 
 _STEP_NAMES = ("sources", "card_coverage", "label", "staged_camps", "eras", "ranking")
@@ -131,6 +180,7 @@ def run_decision_refresh(
     coverage = _empty_coverage("card reconciliation not run")
     awareness = _format_awareness()
     era_result = EraRunResult()
+    ranking_utility: RankingUtilitySummary | None = None
 
     actions = (
         ("sources", lambda: ports.refresh_sources(db_path)),
@@ -181,7 +231,15 @@ def run_decision_refresh(
                 assert isinstance(era_result, EraRunResult)
                 summary = f"{era_result.entities} entities; {len(era_result.alarms)} alarms"
             elif name == "ranking":
-                summary = str(out_path)
+                if isinstance(value, RankingUtilitySummary):
+                    validate_ranking_utility(value)
+                    ranking_utility = value
+                    summary = f"{out_path}; utility={value.status}"
+                    if value.status == "degraded":
+                        status = RefreshStepStatus.DEGRADED
+                        reason = "; ".join(value.reasons) or "ranking utility degraded"
+                else:
+                    summary = str(out_path)
             steps.append(RefreshStepResult(name=name, status=status, summary=summary, reason=reason))
         except Exception as exc:
             failed = True
@@ -201,6 +259,7 @@ def run_decision_refresh(
         steps=tuple(steps), card_coverage=coverage,
         format_awareness=awareness, ranking_output=ranking_output,
         source_observation=source,
+        ranking_utility=ranking_utility,
     )
 
 
@@ -222,6 +281,15 @@ def decision_refresh_audit_lines(result: DecisionRefreshResult) -> tuple[str, ..
     lines.extend(f"// era alarm: {alarm}" for alarm in fmt.era_alarms)
     if result.ranking_output:
         lines.append(f"// ranking: {result.ranking_output}")
+    if result.ranking_utility is not None:
+        utility = result.ranking_utility
+        lines.append(
+            f"// ranking utility: {utility.status}; observed={utility.observed_field_n}, "
+            f"effective={utility.effective_field_n}, prior={utility.prior_strength}, "
+            f"supported={utility.supported_rows}, grounded={utility.grounded_rows}, "
+            f"practical={utility.practical_call or 'none'}"
+        )
+        lines.extend(f"// ranking utility reason: {reason}" for reason in utility.reasons)
     return tuple(lines)
 
 
@@ -367,7 +435,9 @@ class DefaultDecisionRefreshPorts:
             alarms=tuple(result.alarms[key].note for key in sorted(result.alarms)),
         )
 
-    def write_ranking(self, db_path: Path, out_path: Path) -> None:
+    def write_ranking(self, db_path: Path, out_path: Path) -> RankingUtilitySummary | None:
         from scripts.refresh_best_call_ranking import generate_ranking
 
-        generate_ranking(db_path=db_path, out_path=out_path)
+        blob = generate_ranking(db_path=db_path, out_path=out_path)
+        utility = blob.get("meta", {}).get("ranking_utility")
+        return RankingUtilitySummary.model_validate(utility) if utility is not None else None

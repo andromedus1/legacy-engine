@@ -1,420 +1,332 @@
-# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index to regenerate.
-# Frontmatter is the source of truth — edit each doc's frontmatter and re-run.
-#
-# schema_version controls lint mode:
-#   1 = grace (missing v2 fields produce warnings, not errors)
-#   2 = enforce (missing v2 fields are errors)
-# Set to 2 once the project's docs are fully backfilled to v2 frontmatter.
+# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: 2026-08-12T15:03:19Z
+generated_at: '2026-08-12T16:39:03Z'
 generated_from: frontmatter
-total_docs: 48
-
+total_docs: 32
 documents:
-  # ── planning ──────────────────────────────────────────────────────────────
-
-  - path: docs/ARCHITECTURE.md
-    title: "Architecture: legacy-engine"
-    type: architecture
-    kind: planning
-    updated: 2026-08-12
-    consumer_hint: Read for how legacy-engine is built — module map, file responsibilities, data flow, the core data models, storage decision, conventions, dependencies, and the built-vs-deferred split. The detailed architecture grounded in all four research streams.
-
-  - path: docs/analysis/best-call-ranking.md
-    title: Best Deck / Best Call agency ranking — refresh runbook
-    type: design
-    kind: planning
-    updated: 2026-08-12
-    status: active
-    consumer_hint: Read before refreshing or interpreting the Best Deck / Best Call agency ranking page — the one-command refresh runbook, the metric definitions, and the honesty gates baked into the page.
-
-  - path: docs/analysis/meta-deck-analysis-loop.md
-    title: The meta-deck analysis loop
-    type: design
-    kind: planning
-    updated: 2026-07-04
-    status: active
-    consumer_hint: Read before running deck-prep analysis on any archetype — the codified repeatable loop (stages, tools, honesty gates) and the simulation-engine feed spec it produces.
-
-  - path: docs/VISION.md
-    title: "Vision: legacy-engine"
-    type: north-star
-    kind: planning
-    updated: 2026-08-02
-    consumer_hint: Read first — the why and what of legacy-engine. Vision, problem, principles pointer, and the four-pillar domain model for the Legacy analytics platform.
-
-  - path: docs/PRINCIPLES.md
-    title: "Principles: legacy-engine"
-    type: principles
-    kind: planning
-    updated: 2026-06-13
-    consumer_hint: Read when making a design or modeling trade-off — the decision heuristics specific to legacy-engine (beyond generic best practice).
-
-  - path: docs/research-plan.md
-    title: "Research Plan: legacy-engine"
-    type: research-plan
-    kind: planning
-    updated: 2026-05-29
-    consumer_hint: Read to know what research must run before /architecture, and what's deferred per-pillar. The routing plan for /research, /deep-research, and /brief invocations.
-
-  - path: docs/SPEC.md
-    title: "Spec: legacy-engine"
-    type: spec
-    kind: planning
-    updated: 2026-08-11
-    consumer_hint: Read when scoping what to build — the capabilities, domain entities, and non-functional requirements of legacy-engine. Pairs with VISION (why) and ARCHITECTURE (how).
-
-  # ── research ──────────────────────────────────────────────────────────────
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/dynamic-metagame-representation.md
-    title: Dynamic metagame representation
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Temporal contracts for keeping superarchetype matchup estimates current without conflating outcome drift, composition drift, and taxonomy churn.
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/estimand-target-population.md
-    title: Estimand and target population
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Candidate estimands and target populations for comparing heterogeneous superarchetypes without confusing weighting choices with statistical regularization.
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/nontransitive-outcome-models.md
-    title: Non-transitive hierarchical outcome models
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Model families for estimating sparse member-pair matchup probabilities while preserving reciprocity and strategic cycles
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/parent.md
-    title: Decision-useful superarchetype representation
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Synthesis of the estimand, non-transitive modeling, sparse-evidence, temporal, and validation contracts required to test a decision-useful superarchetype representation.
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/sparse-selective-evidence.md
-    title: Sparse and selectively observed evidence
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: How sparse and selectively observed matchup evidence can support—or refuse—a family-level Legacy claim.
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/validation-decision-utility.md
-    title: Validation and decision utility
-    type: brief
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: A preregistered future-only validation protocol for deciding whether superarchetype representations improve probabilistic forecasts and real deck-selection decisions.
-
-  - path: docs/analysis/copy-count-distribution-study.md
-    title: Copy-count distribution study — winners' sideboard copy histograms vs the concave taper
-    type: brief
-    kind: research
-    updated: 2026-07-04
-    status: complete
-    consumer_hint: Read when modeling per-copy sideboard value or questioning the concave taper — the distribution-first empirical study of winners' copy-count histograms from the archetype sweep.
-
-  - path: docs/briefs/advisory-methods.md
-    title: "Brief: Advisory Statistics & Optimization Methods"
-    type: brief
-    kind: research
-    updated: 2026-07-04
-    status: draft
-    research_method: /research
-    consumer_hint: What statistical and optimization methods power the Meta Attack/Advisory pillar — matchup-matrix estimation, the meta-positioning score, the sideboard recommender, and the what-to-play advisor? Read before designing the advisory/ module.
-
-  - path: docs/briefs/card-adjacency-and-discovery.md
-    title: "Brief: Card-Level Adjacency & Discovery for Deck Tuning"
-    type: brief
-    kind: research
-    updated: 2026-05-31
-    research_method: /brief
-    consumer_hint: Read before designing epic-gap-discovery's card-adjacency-model + discovery-tuning — how to pick novel swap-in candidates a shell doesn't run yet, score them by transferred per-card value, and gate the exploration honestly.
-
-  - path: docs/briefs/card-semantics-ir.md
-    title: "Brief: Card-Semantics IR"
-    type: brief
-    kind: research
-    updated: 2026-07-31
-    research_method: /brief
-    blocks_phase: epic-card-semantics-ir
-    consumer_hint: What should the validated card-semantics IR look like — schema, extraction tiers, validation architecture — so the ~28 advisory regexes become consumers of typed facts instead of pattern-matching oracle text? Read before epic-design decomposes epic-card-semantics-ir's strategic track.
-
-  - path: docs/briefs/change-point-detection.md
-    title: "Brief: Change-Point Detection for Per-Entity Stable Eras"
-    type: brief
-    kind: research
-    updated: 2026-07-11
-    research_method: /brief
-    blocks_phase: epic-stable-era-windows
-    consumer_hint: How do you detect, per archetype and per camp, WHEN a deck was disturbed (ban, release, rebuild) from short weekly count/composition series — and control false positives across ~50-150 entities — so stable_since(entity) can replace ban-only valid_since? Read before designing epic-stable-era-windows.
-
-  - path: docs/briefs/data-autonomy-upstream.md
-    title: "Brief: Owning the Upstream — Hot-Spare Tournament Data + Scheduled Format Monitoring"
-    type: brief
-    kind: research
-    updated: 2026-07-31
-    research_method: /brief
-    blocks_phase: epic-data-autonomy
-    consumer_hint: What does it take to own the fbettega tournament-data generation as a hot-spare pipeline, and to put B&R/release/price monitoring on a launchd schedule that surfaces at session start? Read before designing epic-data-autonomy's upstream-ownership and monitoring arcs.
-
-  - path: docs/briefs/deck-generation-and-moxfield.md
-    title: "Brief: Deck Generation & Moxfield Surfacing"
-    type: brief
-    kind: research
-    updated: 2026-05-30
-    status: draft
-    research_method: /brief
-    blocks_phase: epic-deck-generation
-    consumer_hint: How should legacy-engine generate/tune decklists from its meta + advisory layers, and surface them to Moxfield? Read before designing epic-deck-generation.
-
-  - path: docs/briefs/deck-viz-platform.md
-    title: "Brief: Adapting a Vega-Lite Visualization Stack to legacy-engine"
-    type: brief
-    kind: research
-    updated: 2026-06-01
-    status: draft
-    research_method: /brief
-    consumer_hint: Read before designing/building the viz/ layer — how to adapt a Vega-Lite stack to legacy-engine; the dependency decisions (vl-convert-python, hand-built dicts), per-tile data contracts, charts.py migration map, and CLI surface.
-
-  - path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
-    title: "Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The exact C# matching algorithm of Badaro/MTGOArchetypeParser — how a decklist + rule set produces an archetype label — specified for a faithful Python reimplementation of legacy-engine's archetype/ module."
-
-  - path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
-    title: "C#→Python Port Strategy for the Archetype Classifier"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: "The C#→Python port strategy for the archetype classifier — vendor Badaro's MTGOFormatData JSON rules as a pinned data dependency, reimplement only the matcher in Python, and gate fidelity with a golden-test harness against the frozen C# parser's labels."
-
-  - path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
-    title: "Brief: fbettega Tournament-Data Cache — Schema & Ingestion Contract"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Read before designing the ingestion/ module — the exact JSON schema, repo layout, source/provenance encoding, update cadence, and consumption strategy for the fbettega tournament-data cache.
-
-  - path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
-    title: "Brief: Ingestion Operations & Meta-Share Computation"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: The operational + downstream-computation contract for the data layer — source-layer fragility, the mirror-and-decouple resilience strategy, the three meta-% definitions (raw / top-cut / win-rate-weighted), online-vs-paper splitting, and whether we can compute our own matchup matrix from the cache (we can — the JSON carries Rounds with pairings). Read before designing the ingestion boundary, the meta-share computation, or the matchup-matrix module.
-
-  - path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
-    title: "Brief: Badaro/MTGOFormatData — The Archetype Rule Schema (Legacy)"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: The exact JSON rule schema of Badaro/MTGOFormatData (the archetype-detection ruleset we WRAP, ported to Python). Defines the data contract the legacy-engine `archetype/` module consumes — condition types, archetype/variant/fallback structure, color flags, and the Legacy taxonomy. Read before designing the rule-loader and the matching algorithm.
-
-  - path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
-    title: "Brief: Prior-Art Scan — Ingestion & Archetype Classification"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Prior-art scan for the legacy-engine ingestion + archetype-classification pipeline — what already exists (ports, scrapers, classifiers, analytics platforms, card libs) and the reuse verdict for each. Read before deciding adopt-vs-build on the MTGOArchetypeParser port.
-
-  - path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
-    title: "Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: What Scryfall card fields the Legacy archetype classifier keys on, how MTGOArchetypeParser derives deck colors, how decklist names resolve to canonical cards, and whether edh-engine's Scryfall layer can be reused as-is. Read before designing the Card model, the name index, or the color-prefix step of the classifier.
-
-  - path: docs/briefs/legacy-foundations.md
-    title: "Brief: Legacy Format Foundations"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /research
-    consumer_hint: What are the rules, mulligan mechanics, and format constraints of Legacy that an analytics/simulation platform must encode? Read before designing the deck-as-data model, goldfish sim, or legality validation.
-
-  - path: docs/briefs/legacy-metagame.md
-    title: "Brief: Legacy Metagame (2026)"
-    type: brief
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /research
-    consumer_hint: What is the current Legacy metagame (2026) — tier list, archetype mechanics & goldfish speeds, data sources, and how to attack the field? Read before designing meta-ingestion, the matchup model, or the meta-speed metric.
-
-  - path: docs/briefs/scorer-flexibility-valuation.md
-    title: "Brief: Valuing flexibility / breadth in a field-weighted coverage optimizer"
-    type: brief
-    kind: research
-    updated: 2026-07-03
-    status: draft
-    research_method: /brief
-    blocks_phase: epic-scorer-flexibility-valuation
-    consumer_hint: How do you value a flexible catch-all (one card answering many matchups) in a coverage-based sideboard scorer, from first principles, without regressing to consensus? Read before designing epic-scorer-flexibility-valuation.
-
-  - path: docs/briefs/sideboard-core-and-hedge.md
-    title: "Brief: Sideboard solver — core + hedge"
-    type: brief
-    kind: research
-    updated: 2026-06-15
-    research_method: /brief
-    blocks_phase: epic-sideboard-core-and-hedge
-    consumer_hint: How should the sideboard solver decide how many copies to commit and how to spend leftover slots? Read before designing the two-stage core+hedge sideboard rework (epic-sideboard-core-and-hedge).
-
-  - path: docs/briefs/subarchetype-discovery.md
-    title: "Brief: Data-Driven Subarchetype Discovery"
-    type: brief
-    kind: research
-    updated: 2026-07-11
-    research_method: /brief
-    blocks_phase: epic-subarchetype-resolution
-    consumer_hint: How do you discover play-pattern subarchetypes WITHIN a flat parent label at corpus scale, decide which splits are real vs sampling noise, and feed a variant dimension into the matchup matrix + card win-rate without breaking the confidence-tier honesty gates? Read before designing epic-subarchetype-resolution.
-
-  - path: docs/briefs/superarchetype-aggregation-adversarial-read.md
-    title: "Adversarial Source-Support Read: `superarchetype-aggregation.md`"
-    type: brief
-    kind: research
-    updated: 2026-07-31
-    status: complete
-    research_method: adversarial-reader
-    consumer_hint: Adversarial passage-level source-support audit of docs/briefs/superarchetype-aggregation.md — read this before trusting any numeric threshold, method-transfer claim, or literature attribution in that brief, and before an epic-design session treats one of its gate values as sourced.
-
-  - path: docs/briefs/superarchetype-aggregation.md
-    title: "Brief: Superarchetype Aggregation"
-    type: brief
-    kind: research
-    updated: 2026-07-31
-    status: draft
-    research_method: /brief
-    blocks_phase: epic-superarchetype-layer
-    consumer_hint: How do you derive an honest win rate against a STRATEGY CLUSTER when almost no per-archetype matchup cell clears its sample gate — which clustering works at ~30-45 archetypes, which estimator pools member cells, and which gates stop pooling from smuggling in bias worse than the thin cell it replaced? Read before designing epic-superarchetype-layer.
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/parent.md
-    title: Energy Cabal Therapy primer — campaign synthesis
-    type: campaign
-    kind: research
-    updated: 2026-08-03
-    consumer_hint: Cross-specialist synthesis supporting the comprehensive Energy Cabal Therapy primer.
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/specialists/current-meta.md
-    title: Current Legacy field for the Energy Cabal Therapy primer
-    type: campaign
-    kind: research
-    updated: 2026-08-03
-    consumer_hint: "Agentic Research campaign: Current Legacy field for the Energy Cabal Therapy primer"
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/specialists/exact-75.md
-    title: "Exact-75 pilot brief: Energy Cabal Therapy"
-    type: campaign
-    kind: research
-    updated: 2026-08-03
-    consumer_hint: "Agentic Research campaign: Exact-75 pilot brief: Energy Cabal Therapy"
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/specialists/fair-matchups.md
-    title: "Fair-matchup report: Energy Cabal Therapy"
-    type: campaign
-    kind: research
-    updated: 2026-08-11
-    consumer_hint: Fair-matchup specialist report for the Energy Cabal Therapy primer
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/specialists/unfair-matchups.md
-    title: "Unfair-matchup report: Energy Cabal Therapy"
-    type: campaign
-    kind: research
-    updated: 2026-08-11
-    consumer_hint: Unfair-matchup specialist report for the Energy Cabal Therapy primer
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/verification-checklist.md
-    title: Energy Cabal Therapy primer — adversarial-read checklist
-    type: campaign
-    kind: research
-    updated: 2026-08-03
-    consumer_hint: Adversarial-read verification of the Energy Cabal Therapy primer campaign.
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/campaign.md
-    title: Campaign report — decision-useful superarchetype representation
-    type: campaign
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Deep-research campaign report for defining and validating a decision-useful superarchetype representation.
-
-  - path: .research/briefs/superarchetype-representation-prior-art/scout-landscape.md
-    title: "Scout Landscape: Decision-useful superarchetype representation"
-    type: landscape
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /scout
-    consumer_hint: Which prior-art approaches can help turn heterogeneous archetype members into a decision-useful superarchetype matchup representation?
-
-  - path: docs/briefs/ingestion-archetype-contracts/parent.md
-    title: "Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine"
-    type: program-parent
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Read first for the ingestion + archetype-parser data layer — the synthesized contracts and build plan for legacy-engine's ingestion/ and archetype/ modules. Navigation hub for the 7 specialist briefs.
-
-  - path: docs/briefs/ingestion-archetype-contracts/campaign.md
-    title: "Campaign Report: Ingestion + Archetype-Parser Data Contracts"
-    type: program-report
-    kind: research
-    updated: 2026-05-29
-    status: draft
-    research_method: /deep-research
-    consumer_hint: The quality report + metadata for the ingestion-archetype-contracts deep-research campaign. Read to know how trustworthy the brief set is, the contradictions flagged, and what to verify before building.
-
-  - path: docs/reviews/2026-08-01-shipped-features-deep-review.md
-    title: Fresh-context deep review — features shipped 2026-07-31/08-01
-    type: review
-    kind: research
-    updated: 2026-08-11
-    consumer_hint: "Read when auditing what actually shipped to main across 2026-07-31/08-01 — a fresh-context, adversarial post-merge deep review of the seven shipped features (superarchetype aggregation/chain/clustering, camp-incremental assignment, matchup-plan flex, era-alarm hygiene, multi-split matrix), with confirmed defects at file:line, vacuous-test findings, and implementation-note claims checked against code."
-
-  - path: .research/analysis/campaigns/energy-cabal-therapy-primer/dispatch.md
-    title: Energy Cabal Therapy comprehensive primer
-    type: synthesis-brief
-    kind: research
-    consumer_hint: "Agentic Research synthesis-brief: Energy Cabal Therapy comprehensive primer"
-
-  - path: .research/briefs/decision-useful-superarchetype-representation/verification-checklist.md
-    title: Verification checklist — decision-useful superarchetype representation
-    type: verification
-    kind: research
-    updated: 2026-08-01
-    status: draft
-    research_method: /deep-research
-    consumer_hint: Fresh-context adversarial passage-level verification of the six-brief decision-useful superarchetype representation campaign.
+- path: docs/ARCHITECTURE.md
+  title: 'Architecture: legacy-engine'
+  type: architecture
+  kind: planning
+  updated: '2026-08-12'
+  consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
+    data flow, the core data models, storage decision, conventions, dependencies,
+    and the built-vs-deferred split. The detailed architecture grounded in all four
+    research streams.
+- path: docs/analysis/best-call-ranking.md
+  title: Best Deck / Best Call agency ranking — refresh runbook
+  type: design
+  kind: planning
+  updated: '2026-08-12'
+  status: active
+  consumer_hint: Read before refreshing or interpreting the Best Deck / Best Call
+    agency ranking page — the one-command refresh runbook, the metric definitions,
+    and the honesty gates baked into the page.
+- path: docs/analysis/meta-deck-analysis-loop.md
+  title: The meta-deck analysis loop
+  type: design
+  kind: planning
+  updated: '2026-07-04'
+  status: active
+  consumer_hint: Read before running deck-prep analysis on any archetype — the codified
+    repeatable loop (stages, tools, honesty gates) and the simulation-engine feed
+    spec it produces.
+- path: docs/VISION.md
+  title: 'Vision: legacy-engine'
+  type: north-star
+  kind: planning
+  updated: '2026-08-02'
+  consumer_hint: Read first — the why and what of legacy-engine. Vision, problem,
+    principles pointer, and the four-pillar domain model for the Legacy analytics
+    platform.
+- path: docs/PRINCIPLES.md
+  title: 'Principles: legacy-engine'
+  type: principles
+  kind: planning
+  updated: '2026-06-13'
+  consumer_hint: Read when making a design or modeling trade-off — the decision heuristics
+    specific to legacy-engine (beyond generic best practice).
+- path: docs/research-plan.md
+  title: 'Research Plan: legacy-engine'
+  type: research-plan
+  kind: planning
+  updated: '2026-05-29'
+  consumer_hint: Read to know what research must run before /architecture, and what's
+    deferred per-pillar. The routing plan for /research, /deep-research, and /brief
+    invocations.
+- path: docs/SPEC.md
+  title: 'Spec: legacy-engine'
+  type: spec
+  kind: planning
+  updated: '2026-08-11'
+  consumer_hint: Read when scoping what to build — the capabilities, domain entities,
+    and non-functional requirements of legacy-engine. Pairs with VISION (why) and
+    ARCHITECTURE (how).
+- path: docs/analysis/copy-count-distribution-study.md
+  title: Copy-count distribution study — winners' sideboard copy histograms vs the
+    concave taper
+  type: brief
+  kind: research
+  updated: '2026-07-04'
+  status: complete
+  consumer_hint: Read when modeling per-copy sideboard value or questioning the concave
+    taper — the distribution-first empirical study of winners' copy-count histograms
+    from the archetype sweep.
+- path: docs/briefs/advisory-methods.md
+  title: 'Brief: Advisory Statistics & Optimization Methods'
+  type: brief
+  kind: research
+  updated: '2026-07-04'
+  status: draft
+  research_method: /research
+  consumer_hint: What statistical and optimization methods power the Meta Attack/Advisory
+    pillar — matchup-matrix estimation, the meta-positioning score, the sideboard
+    recommender, and the what-to-play advisor? Read before designing the advisory/
+    module.
+- path: docs/briefs/card-adjacency-and-discovery.md
+  title: 'Brief: Card-Level Adjacency & Discovery for Deck Tuning'
+  type: brief
+  kind: research
+  updated: '2026-05-31'
+  research_method: /brief
+  consumer_hint: Read before designing epic-gap-discovery's card-adjacency-model +
+    discovery-tuning — how to pick novel swap-in candidates a shell doesn't run yet,
+    score them by transferred per-card value, and gate the exploration honestly.
+- path: docs/briefs/card-semantics-ir.md
+  title: 'Brief: Card-Semantics IR'
+  type: brief
+  kind: research
+  updated: '2026-07-31'
+  research_method: /brief
+  blocks_phase: epic-card-semantics-ir
+  consumer_hint: What should the validated card-semantics IR look like — schema, extraction
+    tiers, validation architecture — so the ~28 advisory regexes become consumers
+    of typed facts instead of pattern-matching oracle text? Read before epic-design
+    decomposes epic-card-semantics-ir's strategic track.
+- path: docs/briefs/change-point-detection.md
+  title: 'Brief: Change-Point Detection for Per-Entity Stable Eras'
+  type: brief
+  kind: research
+  updated: '2026-07-11'
+  research_method: /brief
+  blocks_phase: epic-stable-era-windows
+  consumer_hint: How do you detect, per archetype and per camp, WHEN a deck was disturbed
+    (ban, release, rebuild) from short weekly count/composition series — and control
+    false positives across ~50-150 entities — so stable_since(entity) can replace
+    ban-only valid_since? Read before designing epic-stable-era-windows.
+- path: docs/briefs/data-autonomy-upstream.md
+  title: 'Brief: Owning the Upstream — Hot-Spare Tournament Data + Scheduled Format
+    Monitoring'
+  type: brief
+  kind: research
+  updated: '2026-07-31'
+  research_method: /brief
+  blocks_phase: epic-data-autonomy
+  consumer_hint: What does it take to own the fbettega tournament-data generation
+    as a hot-spare pipeline, and to put B&R/release/price monitoring on a launchd
+    schedule that surfaces at session start? Read before designing epic-data-autonomy's
+    upstream-ownership and monitoring arcs.
+- path: docs/briefs/deck-generation-and-moxfield.md
+  title: 'Brief: Deck Generation & Moxfield Surfacing'
+  type: brief
+  kind: research
+  updated: '2026-05-30'
+  status: draft
+  research_method: /brief
+  blocks_phase: epic-deck-generation
+  consumer_hint: How should legacy-engine generate/tune decklists from its meta +
+    advisory layers, and surface them to Moxfield? Read before designing epic-deck-generation.
+- path: docs/briefs/deck-viz-platform.md
+  title: 'Brief: Adapting a Vega-Lite Visualization Stack to legacy-engine'
+  type: brief
+  kind: research
+  updated: '2026-06-01'
+  status: draft
+  research_method: /brief
+  consumer_hint: Read before designing/building the viz/ layer — how to adapt a Vega-Lite
+    stack to legacy-engine; the dependency decisions (vl-convert-python, hand-built
+    dicts), per-tile data contracts, charts.py migration map, and CLI surface.
+- path: docs/briefs/ingestion-archetype-contracts/archetype-matching-algorithm.md
+  title: 'Brief: The Archetype-Matching Algorithm (Badaro/MTGOArchetypeParser)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The exact C# matching algorithm of Badaro/MTGOArchetypeParser — how
+    a decklist + rule set produces an archetype label — specified for a faithful Python
+    reimplementation of legacy-engine's archetype/ module.
+- path: docs/briefs/ingestion-archetype-contracts/csharp-python-port-strategy.md
+  title: C#→Python Port Strategy for the Archetype Classifier
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The C#→Python port strategy for the archetype classifier — vendor
+    Badaro's MTGOFormatData JSON rules as a pinned data dependency, reimplement only
+    the matcher in Python, and gate fidelity with a golden-test harness against the
+    frozen C# parser's labels.
+- path: docs/briefs/ingestion-archetype-contracts/fbettega-cache-schema.md
+  title: 'Brief: fbettega Tournament-Data Cache — Schema & Ingestion Contract'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Read before designing the ingestion/ module — the exact JSON schema,
+    repo layout, source/provenance encoding, update cadence, and consumption strategy
+    for the fbettega tournament-data cache.
+- path: docs/briefs/ingestion-archetype-contracts/ingestion-ops-and-metashare.md
+  title: 'Brief: Ingestion Operations & Meta-Share Computation'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The operational + downstream-computation contract for the data layer
+    — source-layer fragility, the mirror-and-decouple resilience strategy, the three
+    meta-% definitions (raw / top-cut / win-rate-weighted), online-vs-paper splitting,
+    and whether we can compute our own matchup matrix from the cache (we can — the
+    JSON carries Rounds with pairings). Read before designing the ingestion boundary,
+    the meta-share computation, or the matchup-matrix module.
+- path: docs/briefs/ingestion-archetype-contracts/mtgoformatdata-rule-schema.md
+  title: 'Brief: Badaro/MTGOFormatData — The Archetype Rule Schema (Legacy)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The exact JSON rule schema of Badaro/MTGOFormatData (the archetype-detection
+    ruleset we WRAP, ported to Python). Defines the data contract the legacy-engine
+    `archetype/` module consumes — condition types, archetype/variant/fallback structure,
+    color flags, and the Legacy taxonomy. Read before designing the rule-loader and
+    the matching algorithm.
+- path: docs/briefs/ingestion-archetype-contracts/prior-art-scan.md
+  title: 'Brief: Prior-Art Scan — Ingestion & Archetype Classification'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Prior-art scan for the legacy-engine ingestion + archetype-classification
+    pipeline — what already exists (ports, scrapers, classifiers, analytics platforms,
+    card libs) and the reuse verdict for each. Read before deciding adopt-vs-build
+    on the MTGOArchetypeParser port.
+- path: docs/briefs/ingestion-archetype-contracts/scryfall-card-contract.md
+  title: 'Brief: Scryfall Card-Data Contract for the Legacy Archetype Classifier'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: What Scryfall card fields the Legacy archetype classifier keys on,
+    how MTGOArchetypeParser derives deck colors, how decklist names resolve to canonical
+    cards, and whether edh-engine's Scryfall layer can be reused as-is. Read before
+    designing the Card model, the name index, or the color-prefix step of the classifier.
+- path: docs/briefs/legacy-foundations.md
+  title: 'Brief: Legacy Format Foundations'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /research
+  consumer_hint: What are the rules, mulligan mechanics, and format constraints of
+    Legacy that an analytics/simulation platform must encode? Read before designing
+    the deck-as-data model, goldfish sim, or legality validation.
+- path: docs/briefs/legacy-metagame.md
+  title: 'Brief: Legacy Metagame (2026)'
+  type: brief
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /research
+  consumer_hint: What is the current Legacy metagame (2026) — tier list, archetype
+    mechanics & goldfish speeds, data sources, and how to attack the field? Read before
+    designing meta-ingestion, the matchup model, or the meta-speed metric.
+- path: docs/briefs/scorer-flexibility-valuation.md
+  title: 'Brief: Valuing flexibility / breadth in a field-weighted coverage optimizer'
+  type: brief
+  kind: research
+  updated: '2026-07-03'
+  status: draft
+  research_method: /brief
+  blocks_phase: epic-scorer-flexibility-valuation
+  consumer_hint: How do you value a flexible catch-all (one card answering many matchups)
+    in a coverage-based sideboard scorer, from first principles, without regressing
+    to consensus? Read before designing epic-scorer-flexibility-valuation.
+- path: docs/briefs/sideboard-core-and-hedge.md
+  title: 'Brief: Sideboard solver — core + hedge'
+  type: brief
+  kind: research
+  updated: '2026-06-15'
+  research_method: /brief
+  blocks_phase: epic-sideboard-core-and-hedge
+  consumer_hint: How should the sideboard solver decide how many copies to commit
+    and how to spend leftover slots? Read before designing the two-stage core+hedge
+    sideboard rework (epic-sideboard-core-and-hedge).
+- path: docs/briefs/subarchetype-discovery.md
+  title: 'Brief: Data-Driven Subarchetype Discovery'
+  type: brief
+  kind: research
+  updated: '2026-07-11'
+  research_method: /brief
+  blocks_phase: epic-subarchetype-resolution
+  consumer_hint: How do you discover play-pattern subarchetypes WITHIN a flat parent
+    label at corpus scale, decide which splits are real vs sampling noise, and feed
+    a variant dimension into the matchup matrix + card win-rate without breaking the
+    confidence-tier honesty gates? Read before designing epic-subarchetype-resolution.
+- path: docs/briefs/superarchetype-aggregation-adversarial-read.md
+  title: 'Adversarial Source-Support Read: `superarchetype-aggregation.md`'
+  type: brief
+  kind: research
+  updated: '2026-07-31'
+  status: complete
+  research_method: adversarial-reader
+  consumer_hint: Adversarial passage-level source-support audit of docs/briefs/superarchetype-aggregation.md
+    — read this before trusting any numeric threshold, method-transfer claim, or literature
+    attribution in that brief, and before an epic-design session treats one of its
+    gate values as sourced.
+- path: docs/briefs/superarchetype-aggregation.md
+  title: 'Brief: Superarchetype Aggregation'
+  type: brief
+  kind: research
+  updated: '2026-07-31'
+  status: draft
+  research_method: /brief
+  blocks_phase: epic-superarchetype-layer
+  consumer_hint: How do you derive an honest win rate against a STRATEGY CLUSTER when
+    almost no per-archetype matchup cell clears its sample gate — which clustering
+    works at ~30-45 archetypes, which estimator pools member cells, and which gates
+    stop pooling from smuggling in bias worse than the thin cell it replaced? Read
+    before designing epic-superarchetype-layer.
+- path: docs/briefs/ingestion-archetype-contracts/parent.md
+  title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
+  type: program-parent
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: Read first for the ingestion + archetype-parser data layer — the
+    synthesized contracts and build plan for legacy-engine's ingestion/ and archetype/
+    modules. Navigation hub for the 7 specialist briefs.
+- path: docs/briefs/ingestion-archetype-contracts/campaign.md
+  title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
+  type: program-report
+  kind: research
+  updated: '2026-05-29'
+  status: draft
+  research_method: /deep-research
+  consumer_hint: The quality report + metadata for the ingestion-archetype-contracts
+    deep-research campaign. Read to know how trustworthy the brief set is, the contradictions
+    flagged, and what to verify before building.
+- path: docs/reviews/2026-08-01-shipped-features-deep-review.md
+  title: Fresh-context deep review — features shipped 2026-07-31/08-01
+  type: review
+  kind: research
+  updated: '2026-08-11'
+  consumer_hint: Read when auditing what actually shipped to main across 2026-07-31/08-01
+    — a fresh-context, adversarial post-merge deep review of the seven shipped features
+    (superarchetype aggregation/chain/clustering, camp-incremental assignment, matchup-plan
+    flex, era-alarm hygiene, multi-split matrix), with confirmed defects at file:line,
+    vacuous-test findings, and implementation-note claims checked against code.

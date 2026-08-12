@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.models.card import CardAliasManifest
 from legacy_engine.ingestion.releases import SetRelease
@@ -10,8 +12,10 @@ from legacy_engine.workflows.decision_refresh import (
     EraRunResult,
     RefreshStepStatus,
     SourceRefreshResult,
+    RankingUtilitySummary,
     decision_refresh_audit_lines,
     run_decision_refresh,
+    validate_ranking_utility,
 )
 
 
@@ -76,6 +80,25 @@ class RecordingPorts:
 
 
 class TestDecisionRefresh:
+    def test_usefulness_contract_rejects_supported_rows_without_practical_call(self):
+        with pytest.raises(ValueError, match="supported rows but no practical call"):
+            validate_ranking_utility(RankingUtilitySummary(
+                observed_field_n=10, effective_field_n=10, prior_strength=0,
+                affected_clamp_count=0, supported_rows=1, transition_prior_rows=0,
+                grounded_rows=0, practical_call=None, proof_grade_call=None,
+                rendered_shortlist_rows=0, status="unavailable",
+            ))
+
+    def test_usefulness_contract_accepts_degraded_but_actionable_summary(self):
+        summary = RankingUtilitySummary(
+            observed_field_n=26, effective_field_n=500, prior_strength=474,
+            affected_clamp_count=2, supported_rows=4, transition_prior_rows=1,
+            grounded_rows=0, practical_call="Control", proof_grade_call=None,
+            rendered_shortlist_rows=4, status="degraded",
+            reasons=("thin evidence",), practical_ranked_actions=("Control", "Tempo"),
+        )
+        validate_ranking_utility(summary)
+
     def test_runs_exact_order_and_writes_ranking_last_to_explicit_paths(self, tmp_path):
         ports = RecordingPorts()
         db_path = tmp_path / "tiny.duckdb"

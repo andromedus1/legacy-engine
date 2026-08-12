@@ -442,3 +442,30 @@ unchanged for inspection.
   lean, and imputation-dominated rows remain eligible. When the interactive matchup-n differs from
   the generated gate, evidence percentages are labeled `generated n=<gate>` and evidence grouping
   is disabled so generated strata cannot masquerade as interactive state.
+
+## Credible-window utility contract
+
+The page has two deliberately separate current-field views. The observed slice is the exact
+post-ban deck count and remains the only presence claim. When that slice is below the 500-deck
+field floor, `build_transition_field` may add at most `500 - observed_n` integer pseudo-decks from
+the immediately preceding confirmed regime, after removing directly affected archetypes and
+deterministically renormalizing the survivors. Effective counts drive ranking shares; observed
+counts remain adjacent and prior-only labels are `transition-prior`, never post-ban sightings.
+The transition projection never widens a matchup `PairWindow`.
+
+The practical first read orders supported rows by the existing posterior lean Q25, then median,
+then label. Its interval, evidence stratum, observed/effective field counts, prior strength, and
+ban-clamp count are rendered beside the separate ci-gated Agency call. This is a utility and
+uncertainty surface, not a new estimator and not benchmark evidence. The unchanged future-only
+benchmark remains the sole authority for any predictive-validation claim.
+
+Refresh generation emits a typed usefulness summary. Contradictory metadata (supported rows with
+no practical call, a call omitted from the rendered shortlist, or unreconciled observed/effective
+counts) fails before atomic replacement. A thin run can publish as `degraded` when practical rows
+exist but few are grounded; an evidence-empty run is explicitly `unavailable`.
+
+The August 10 cold-start failure chain was: a global post-ban field reset removed nearly all
+current composition, an older stored era could override the direct ban boundary for affected
+entities, `grounded` was promoted from a badge to a speaking gate, and file-exists status counted
+the resulting silent page as operational success. The preventive seams are entity-level horizon
+clamping, labeled transition provenance, a practical lean shortlist, and the usefulness contract.

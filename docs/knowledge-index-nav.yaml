@@ -1,67 +1,44 @@
-# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index to regenerate.
-# Navigator layer — auto-loaded at session start (capped at 10KB by harness).
-# Provides corpus situational awareness only. Read knowledge-index.yaml for full index.
-
+# Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: 2026-08-12T15:03:19Z
+generated_at: '2026-08-12T16:39:03Z'
 generated_from: frontmatter
-total_docs: 48
-
+total_docs: 32
 by_kind:
   planning: 7
-  research: 41
-  historical: 0
-
-# Substrate items (.work/) by tier. Query via .work/bin/work-view.
-substrate_summary:
-  active:
-    epic: 8
-    feature: 20
-    story: 52
-    release: 0
-  backlog: 25
-  releases:
-    v0.1.0: 1
-    v0.2.0: 1
-    v0.3.0: 1
-    v0.4.0: 1
-  archive: 0
-
-# Top 15 most-recently-updated docs (planning + research only).
+  research: 25
 recent:
-  - path: docs/ARCHITECTURE.md
-    title: "Architecture: legacy-engine"
-    kind: planning
-    updated: 2026-08-12
-  - path: docs/analysis/best-call-ranking.md
-    title: "Best Deck / Best Call agency ranking — refresh runbook"
-    kind: planning
-    updated: 2026-08-12
-  - path: docs/SPEC.md
-    title: "Spec: legacy-engine"
-    kind: planning
-    updated: 2026-08-11
-  - path: docs/VISION.md
-    title: "Vision: legacy-engine"
-    kind: planning
-    updated: 2026-08-02
-  - path: docs/analysis/meta-deck-analysis-loop.md
-    title: "The meta-deck analysis loop"
-    kind: planning
-    updated: 2026-07-04
-  - path: docs/PRINCIPLES.md
-    title: "Principles: legacy-engine"
-    kind: planning
-    updated: 2026-06-13
-  - path: docs/research-plan.md
-    title: "Research Plan: legacy-engine"
-    kind: planning
-    updated: 2026-05-29
-
-# Docs flagged with nav_priority: high in frontmatter — read at session start.
-load_bearing:
-  []  # no docs flagged with nav_priority: high — flag essential docs to populate
-
-# On-demand layers (Read tool):
+- path: docs/ARCHITECTURE.md
+  title: 'Architecture: legacy-engine'
+  kind: planning
+  updated: '2026-08-12'
+- path: docs/analysis/best-call-ranking.md
+  title: Best Deck / Best Call agency ranking — refresh runbook
+  kind: planning
+  updated: '2026-08-12'
+- path: docs/SPEC.md
+  title: 'Spec: legacy-engine'
+  kind: planning
+  updated: '2026-08-11'
+- path: docs/VISION.md
+  title: 'Vision: legacy-engine'
+  kind: planning
+  updated: '2026-08-02'
+- path: docs/analysis/meta-deck-analysis-loop.md
+  title: The meta-deck analysis loop
+  kind: planning
+  updated: '2026-07-04'
+- path: docs/PRINCIPLES.md
+  title: 'Principles: legacy-engine'
+  kind: planning
+  updated: '2026-06-13'
+- path: docs/briefs/ingestion-archetype-contracts/campaign.md
+  title: 'Campaign Report: Ingestion + Archetype-Parser Data Contracts'
+  kind: research
+  updated: '2026-05-29'
+- path: docs/briefs/ingestion-archetype-contracts/parent.md
+  title: 'Parent: Ingestion + Archetype-Parser Data Contracts for legacy-engine'
+  kind: research
+  updated: '2026-05-29'
+load_bearing: []
 full_index_path: docs/knowledge-index.yaml
 detail_index_path: docs/knowledge-index-detail.yaml

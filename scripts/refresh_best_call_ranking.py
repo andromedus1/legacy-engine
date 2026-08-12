@@ -115,6 +115,7 @@ from legacy_engine.advisory.ranking_measurement import (
     rank_variant_rows,
     select_ranking_cell,
 )
+from legacy_engine.workflows.decision_refresh import RankingUtilitySummary, validate_ranking_utility
 from legacy_engine.models.matchup import MatchupCell
 
 TEMPLATE_PATH = Path(__file__).parent / "best_call_ranking_template.html"
@@ -1223,6 +1224,45 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     practical_order = practical_recommendation_order({
         row["subject"]: row for row in arch_out if row.get("ranking_evidence")
     })
+    supported_rows = sum(
+        bool(row.get("ranking_evidence", {}).get("eligible")) for row in arch_out
+    )
+    grounded_rows = sum(
+        row.get("ranking_evidence", {}).get("stratum") == "grounded" for row in arch_out
+    )
+    transition_prior_rows = sum(
+        row.get("ranking_evidence", {}).get("stratum") == "transition-prior" for row in arch_out
+    )
+    utility_status = (
+        "unavailable" if not supported_rows else
+        "degraded" if grounded_rows < supported_rows else "useful"
+    )
+    utility_reasons: list[str] = []
+    if grounded_rows < supported_rows:
+        utility_reasons.append(
+            f"{grounded_rows}/{supported_rows} supported rows are proof-grade grounded; "
+            "practical lean remains available as a labeled lower-confidence view"
+        )
+    if not practical_order:
+        utility_reasons.append("no supported row has a serialized posterior lean")
+    utility = RankingUtilitySummary(
+        observed_field_n=transition.observed.deck_n,
+        effective_field_n=sum(transition.effective_counts.values()),
+        prior_strength=transition.prior_strength,
+        affected_clamp_count=sum(
+            1 for horizon in ad.horizon_meta.values() if horizon.clamped_by_confirmed_ban
+        ),
+        supported_rows=supported_rows,
+        transition_prior_rows=transition_prior_rows,
+        grounded_rows=grounded_rows,
+        practical_call=practical_order[0] if practical_order else None,
+        proof_grade_call=production_order[0] if production_order else None,
+        rendered_shortlist_rows=min(5, len(practical_order)),
+        status=utility_status,
+        reasons=tuple(utility_reasons),
+        practical_ranked_actions=practical_order,
+    )
+    validate_ranking_utility(utility)
 
     return {
         "meta": {
@@ -1240,6 +1280,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 "ranked_actions": list(practical_order),
                 "basis": "existing posterior lean q25, then median, then label",
             },
+            "ranking_utility": utility.model_dump(mode="json"),
             "regime_card": regime_card,
             "ground_n": ground_n, "top_k": top_k, "cover_min": cover_min,
             "min_row_share": min_row_share, "current_4wk": current_4wk,

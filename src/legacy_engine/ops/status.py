@@ -27,6 +27,7 @@ class ArtifactIdentity(LegacyEngineModel):
     ranking_path: str
     ranking_written: bool
     ranking_sha256: str | None = None
+    ranking_utility: dict[str, object] | None = None
 
 
 class FormatCandidateSummary(LegacyEngineModel):
@@ -222,6 +223,14 @@ def job_status_audit_lines(
         )
     else:
         lines.append(f"// ranking: not written ({ranking.ranking_path})")
+    if ranking.ranking_utility is not None:
+        utility = ranking.ranking_utility
+        lines.append(
+            f"// ranking utility: {utility.get('status', 'unknown')} · "
+            f"observed={utility.get('observed_field_n', 'n/a')} · "
+            f"effective={utility.get('effective_field_n', 'n/a')} · "
+            f"practical={utility.get('practical_call') or 'none'}"
+        )
     if status.format_monitor is not None:
         monitor = status.format_monitor
         lines.append(
