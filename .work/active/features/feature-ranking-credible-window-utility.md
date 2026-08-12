@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-credible-window-utility
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [feature-ranking-honesty-guards, feature-agency-page-methodology]
@@ -411,3 +411,28 @@ The feature is implemented across the four dependency-ordered checkpoints:
   level and camp fractions continue to reflect exact observed current presence.
 - The validator carries an additive ranked-action tuple so it can prove a practical call is present
   in the rendered shortlist, which the minimal design sketch could not establish from a count alone.
+
+## Review (2026-08-12)
+
+**Verdict**: Request changes
+
+**Blockers**: `feature-ranking-credible-window-utility-review-fixes` owns the complete connected
+fix set: current-ban-only prior exclusion; explicit-null clamp provenance; prior-only camp
+composition; exact observed/prior row evidence and truthful UI copy; degraded/unavailable artifact
+status; the missing August 10 usefulness regression; no-preceding-regime handling; and strict
+utility-summary consistency.
+
+**Important**: none deferred. The reviewer classified the no-preceding-regime and validator-prefix
+findings as Important, but the receiver promoted both into the current fix story because they are
+small direct violations of the designed transition/publication contracts.
+
+**Nits**: none.
+
+**Rejected**: transition stabilization does not widen matchup windows; the browser does not own a
+hidden alternate ranking; atomic generator replacement is intact; and no predictive-validation
+claim was introduced.
+
+**Notes**: Effective review weight `standard` (project default), exactly one fresh-context
+GPT-5.6 Sol pass. Focused review verification passed 192 tests. The review used hermetic probes and
+read-only production-DB queries; it made no repository or data changes. Closure requires receiver
+verification of the named fix story only; standard policy forbids a second independent pass.
