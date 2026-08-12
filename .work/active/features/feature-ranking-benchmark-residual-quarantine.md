@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-benchmark-residual-quarantine
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing, data-quality]
 parent: null
 depends_on: [feature-ranking-future-only-benchmark, feature-card-name-reconciliation-closure]
@@ -336,3 +336,21 @@ No design-time advisory pass was commissioned. The feature is bounded to the exi
 boundary, direct evidence resolves the alternatives, and the execution environment does not expose
 a different model class through the required advisory path. The normal standard independent feature
 review remains required after implementation.
+
+## Implementation summary
+
+- Implemented typed policy/ledger contracts, deterministic outcome-blind planning, and frozen-v1
+  protocol hash compatibility.
+- Applied one ledger before taxonomy/result parsing at snapshot and held-out boundaries, including
+  retained-facts/source fingerprints and evaluation-data hashes.
+- Added strict-default CLI controls, descriptive claim-ceiling enforcement, audit lines, Markdown
+  denominators/evidence, and architecture/runbook documentation.
+- Child commits: `7eaeb44` (policy-ledger), `b9c3275` (corpus-boundaries), `abf76bd` (artifact-run).
+- Focused verification: 29 benchmark/snapshot/CLI tests, Ruff checks, and compileall passed.
+- Empirical artifact: ignored `data/benchmarks/ranking-residual-quarantine-v2/` on a reconciled byte
+  copy. The required preflight found 53 unresolved names entering planned cutoffs, so this remains
+  historical/descriptive and cannot support a prospective claim. Full fold replay was launched after
+  controls verification and remains CPU-bound; final status/summary identity will be recorded if it
+  completes.
+- Discrepancy: the first child commit includes shared adapter plumbing consumed by the second child;
+  behavior and acceptance remain independently verified.

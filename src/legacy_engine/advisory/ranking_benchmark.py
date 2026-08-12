@@ -365,6 +365,12 @@ def canonical_json_bytes(value: object) -> bytes:
     """Stable, finite JSON encoding used by every benchmark hash boundary."""
     if isinstance(value, LegacyEngineModel):
         value = value.model_dump(mode="json")
+        # Additive quarantine fields must not perturb strict/v1 artifact bytes when absent.
+        if isinstance(value, dict):
+            if value.get("card_metadata_quarantine") is None:
+                value.pop("card_metadata_quarantine", None)
+            if value.get("card_metadata_quarantine_sha256") is None:
+                value.pop("card_metadata_quarantine_sha256", None)
     return (json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
     ) + "\n").encode()
