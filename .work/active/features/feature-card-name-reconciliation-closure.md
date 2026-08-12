@@ -1,7 +1,7 @@
 ---
 id: feature-card-name-reconciliation-closure
 kind: feature
-stage: drafting
+stage: implementing
 tags: [ingestion, data-quality, benchmark]
 parent: null
 depends_on: [story-fix-missing-goblin-card-metadata, story-fix-set-prefixed-wasteland-name]
@@ -140,3 +140,188 @@ provider normalization audit. The authoritative Scryfall alias table should elim
 manual entries; deterministic provider serialization rules should eliminate repetitive exact aliases.
 Retain the existing small curated registry only for source spellings that neither authority nor a
 proved provider grammar can represent.
+
+## Design decisions
+
+- The reconciliation seam receives the observed name's tournament-source set. A provider
+  serialization rule runs only when every occurrence belongs to its declared provider; an observed
+  spelling shared across supported and unsupported providers remains unresolved rather than being
+  globally rewritten.
+- Set prefixes are not stripped by a regex alone. The package registry records each admitted prefix,
+  provider, and evidence URI; the resolver then accepts only those declared prefixes and requires the
+  suffix to be an exact canonical card. The existing exact `[TMP] Wasteland` alias remains valid and
+  is not broadened implicitly.
+- Face serialization is structural and canonical-target-backed: only exact `A // A`, exact
+  `A // B // A`, and independently unique localized faces whose composed target exists can resolve.
+  Arbitrary repeated tokens, slash forms, or fuzzy candidates remain unresolved.
+- Preflight is an additive option on `refresh card-coverage`, using the same just-reconciled
+  connection and a frozen benchmark protocol path. It reports every required training cutoff with
+  counts and names, plus post-final-evaluation residuals separately; it never edits the protocol or
+  suppresses gaps outside the next fold.
+- Direct reading resolved the integration surface; no exploratory fan-out was needed. This is one
+  tightly coupled reconciliation module, CLI adapter, and hermetic test seam.
+
+## Architectural choice
+
+Three shapes were considered. First, adding all remaining spellings as exact aliases is operationally
+simple but duplicates Scryfall coverage and converts obvious provider serialization into permanent
+manual data. Second, normalizing punctuation, brackets, slash segments, and edit distance generically
+would be compact but can silently choose the wrong legal card. Third, the chosen hybrid keeps exact
+exception aliases for true historical spellings, adds a small typed registry for verified provider
+serialization grammars, and requires every derived candidate to match exactly one existing canonical
+target. This preserves raw/provider authority while eliminating repetitive aliases.
+
+The highest-risk unit is structural multi-face resolution because `cards` intentionally contains
+both combined cards and individual face rows. Candidate construction therefore never chooses a face
+by proximity: it creates only the three admitted shapes and succeeds only when the intended combined
+or single canonical string exists exactly. Localized composition independently resolves each printed
+face to one Scryfall canonical face, composes those names, and then checks the full target. Ambiguity
+at either face is terminal and named.
+
+## Implementation Units
+
+### Unit 1: Typed provider serialization candidates
+
+**Files**: `src/legacy_engine/ingestion/card_coverage.py`,
+`src/legacy_engine/data/card_name_aliases/legacy.json`,
+`tests/test_card_name_resolution.py`
+**Story**: `feature-card-name-reconciliation-closure-provider-serialization`
+
+```python
+class ProviderSerializationRule(LegacyEngineModel):
+    kind: Literal["set_prefix", "duplicated_name", "duplicated_final_face", "localized_faces"]
+    provider: str
+    evidence: str
+    prefixes: tuple[str, ...] = ()
+
+def provider_serialization_candidate(
+    con: duckdb.DuckDBPyConnection,
+    observed_name: str,
+    *,
+    providers: frozenset[str],
+    canonical_names: frozenset[str],
+    rules: tuple[ProviderSerializationRule, ...],
+) -> CardNameResolution | None: ...
+```
+
+**Implementation notes**:
+- Extend the package JSON schema additively with `serialization_rules`; validate kind-specific fields,
+  provider, evidence, duplicate prefixes, and unknown keys at load time.
+- Query observed names with `list(DISTINCT t.source)` through `deck_cards → tournaments`; missing or
+  mixed provider provenance cannot use a provider serialization rule.
+- Apply exact curated aliases first, then unique canonical normalization, then provider
+  serialization, then Scryfall localized aliases. Preserve that explicit authority order.
+- Emit `source="provider_serialization:<provider>"` and a reason naming the admitted shape. The
+  update transaction remains the only mutation and the raw observed value stays in the report.
+
+**Acceptance criteria**:
+- [ ] The four deterministic shape classes in the evidence ledger resolve to their exact existing
+  canonical target under MTGmelee provenance.
+- [ ] An undeclared bracket prefix, unsupported provider, mixed-provider spelling, absent target,
+  non-palindromic three-part name, or ambiguous localized face remains unresolved.
+- [ ] Existing exact Goblin/Wasteland aliases, canonical names, and unique localized aliases retain
+  their behavior and precedence.
+
+### Unit 2: Cutoff-aware coverage preflight
+
+**Files**: `src/legacy_engine/models/card.py`,
+`src/legacy_engine/ingestion/card_coverage.py`, `src/legacy_engine/cli.py`,
+`tests/test_card_coverage_cli.py`, `tests/test_card_name_resolution.py`
+**Story**: `feature-card-name-reconciliation-closure-cutoff-preflight`
+
+```python
+class CardCoverageGap(LegacyEngineModel):
+    observed_name: str
+    row_count: int
+    deck_count: int
+    first_event_date: str
+    providers: tuple[str, ...]
+    event_uris: tuple[str, ...]
+
+class CardCoverageCutoff(LegacyEngineModel):
+    cutoff: str | None
+    gaps: tuple[CardCoverageGap, ...]
+
+def unresolved_card_coverage_by_cutoff(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cutoffs: tuple[str, ...],
+    final_evaluation_until: str,
+) -> tuple[CardCoverageCutoff, ...]: ...
+```
+
+**Implementation notes**:
+- Read protocol JSON at the CLI boundary, require non-empty ordered unique `planned_folds[*].cutoff`
+  and `final_evaluation_until`, and do not import benchmark estimator code into ingestion.
+- Assign a gap to the first training cutoff strictly after its first event date. Residuals first seen
+  before final evaluation but after the last cutoff use `cutoff=None` and are labeled
+  `no-later-training-cutoff`.
+- Add `refresh card-coverage --benchmark-protocol FILE`; emit `// coverage preflight:` lines in
+  cutoff order with row/name/deck counts and exact names. Any required-cutoff gap makes the command
+  exit nonzero *after* printing the complete audit; post-last-cutoff gaps remain visible but do not
+  claim to block training snapshot closure.
+
+**Acceptance criteria**:
+- [ ] A hermetic corpus assigns boundary dates correctly under strict cutoff semantics and reports
+  all cutoff cohorts, not merely the first failure.
+- [ ] Invalid or mutable-looking protocol input fails at the CLI boundary with a specific error.
+- [ ] The command uses only the explicit test DB, preserves named ambiguity/truncation/manual gaps,
+  and exits nonzero exactly when a planned training cutoff still has a metadata gap.
+
+### Unit 3: Corpus closure gate and rolling documentation
+
+**Files**: `docs/ARCHITECTURE.md`, `docs/analysis/best-call-ranking.md`,
+`tests/test_card_coverage_cli.py`, `tests/test_ranking_benchmark_cli.py`
+**Story**: `feature-card-name-reconciliation-closure-corpus-gate`
+
+```text
+refresh card-coverage --db <derived-copy> --benchmark-protocol <frozen-protocol>
+advise benchmark run --db <same-derived-copy> --protocol <frozen-protocol> ...
+```
+
+**Implementation notes**:
+- Document the authority ladder, fail-closed classifications, and zero-required-gap launch gate as
+  current behavior, not migration history.
+- Use a fresh ignored byte-copy of the current live DB only after any active scheduler writer closes;
+  run normal reconciliation and record alias manifest identity plus the exact preflight command.
+- Restart the unchanged benchmark only if every planned-cutoff cohort is empty. A nonzero preflight is
+  the truthful terminal result for this feature, not permission to weaken closure or add guesses.
+
+**Acceptance criteria**:
+- [ ] Cross-feature CLI regression proves a nonzero preflight prevents the documented benchmark
+  launch and a zero-gap corpus clears it without changing protocol bytes/hash.
+- [ ] Current docs name Scryfall/current alias authority, provider serialization provenance, and the
+  zero-gap gate without claiming ambiguous values were resolved.
+- [ ] Fresh-copy evidence records required/post-last-cutoff counts and either the unchanged benchmark
+  artifact identity or the named reason it was not restarted.
+
+## Implementation order
+
+1. Typed provider serialization candidates — establishes the only new resolution authority.
+2. Cutoff-aware coverage preflight — measures that authority and prevents serial benchmark stops.
+3. Corpus closure gate and docs — verifies the integrated behavior on current derived data before
+   any benchmark restart.
+
+## Testing
+
+- `tests/test_card_name_resolution.py`: parameterized positive structural classes; negative provider,
+  target, shape, prefix, ambiguity, and precedence cases; cutoff grouping at exact date boundaries.
+- `tests/test_card_coverage_cli.py`: explicit file-backed DB and protocol fixtures; complete audit,
+  invalid protocol, blocking exit, no-later-cutoff disclosure, and green zero-gap exit.
+- `tests/test_ranking_benchmark_cli.py`: protocol bytes/hash remain unchanged across the preflight
+  handoff and benchmark continues to reject snapshot metadata gaps independently.
+- Focused verification covers card reconciliation + coverage CLI + benchmark CLI; integrated
+  verification runs the complete repository suite before review.
+
+## Risks
+
+- **Provider grammar overreach**: a shape that looks mechanical may be meaningful card text.
+  **Fallback**: provider allow-list + exact target requirement + negative tests; retain exact aliases
+  when the grammar cannot be proved.
+- **Face-table collision**: face-only rows can make a bad candidate look canonical. **Fallback**:
+  construct the intended combined target explicitly for multi-face shapes; never choose among matches.
+- **Freshness race with scheduler**: copying a DB during a write can produce misleading evidence.
+  **Fallback**: confirm no writer, byte-copy, and perform every mutation/read on the copy.
+- **Benchmark pressure encourages false closure**: unresolved tail may tempt fuzzy repair.
+  **Fallback**: preflight is intentionally fail-closed and the feature may complete with a named
+  nonzero residual; benchmark launch requires zero required gaps, not zero effort remaining.
