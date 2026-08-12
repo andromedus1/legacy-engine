@@ -16,6 +16,10 @@ CACHE_DIR = DATA_DIR / "cache"        # mirrored fbettega tournament JSON
 RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData rules
 BANLIST_DIR = DATA_DIR / "banlist"    # dated WotC B&R snapshots
 DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
+OPS_DIR = DATA_DIR / "ops"                # local operational state (created by writers)
+OPS_STATUS_DIR = OPS_DIR / "status"       # atomic job status + immutable attempts
+OPS_LOG_DIR = OPS_DIR / "logs"            # launchd stdout/stderr targets
+OPS_LOCK_DIR = OPS_DIR / "locks"          # kernel-backed execution lock files
 
 # Discovered-variant staging registry (derived side — written by `discover run`, read by
 # `discover list`/`discover promote`; never hand-curated, unlike VARIANTS_REGISTRY_PATH).
