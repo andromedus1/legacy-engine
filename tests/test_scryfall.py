@@ -228,7 +228,7 @@ def test_download_bulk_data_accepts_live_jsonl_download_uri(tmp_path, monkeypatc
     monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
         "updated_at": "2026-08-11T00:00:00Z",
-        "object_count": 2,
+        "compressed_size": len(compressed),
     })
 
     path = client.download_bulk_data(force=True)
@@ -237,7 +237,15 @@ def test_download_bulk_data_accepts_live_jsonl_download_uri(tmp_path, monkeypatc
     assert [row["name"] for row in scryfall.iter_bulk_rows(path)] == [
         "Brainstorm", "Volcanic Island",
     ]
+    assert json.loads(metadata_path.read_text())["compressed_size"] == len(compressed)
     assert client.load_card_index()["Brainstorm"]["name"] == "Brainstorm"
+
+
+def test_jsonl_completeness_requires_provider_size_or_count():
+    with pytest.raises(ValueError, match="lacks compressed_size and object_count"):
+        scryfall._bulk_completeness({
+            "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
+        })
 
 
 def test_corrupt_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_path, monkeypatch):
@@ -277,7 +285,7 @@ def test_corrupt_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_pat
     monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
         "updated_at": "broken",
-        "object_count": 2,
+        "compressed_size": len(gzip.compress(b'{"name":"Brainstorm"}\nnot-json\n')),
     })
 
     with pytest.raises(json.JSONDecodeError):
@@ -313,10 +321,11 @@ def test_truncated_jsonl_candidate_preserves_last_good_oracle_and_metadata(tmp_p
     client.client = Http()
     monkeypatch.setattr(client, "_fetch_bulk_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/oracle.jsonl.gz",
-        "updated_at": "truncated", "object_count": 2,
+        "updated_at": "truncated",
+        "compressed_size": len(gzip.compress((json.dumps(NORMAL) + "\n").encode())) + 1,
     })
 
-    with pytest.raises(ValueError, match="row count mismatch"):
+    with pytest.raises(ValueError, match="compressed size mismatch"):
         client.download_bulk_data(force=True)
     assert json.loads(oracle_path.read_text()) == [NORMAL, LAND]
     assert metadata_path.read_text() == '{"updated_at":"last-good"}'
@@ -361,7 +370,7 @@ def test_download_prices_bulk_accepts_jsonl_metadata(tmp_path, monkeypatch):
     monkeypatch.setattr(client, "_fetch_prices_metadata", lambda: {
         "jsonl_download_uri": "https://data.scryfall.io/default.jsonl.gz",
         "updated_at": "2026-08-11T00:00:00Z",
-        "object_count": 1,
+        "compressed_size": len(gzip.compress((json.dumps(price) + "\n").encode())),
     })
 
     client.download_prices_bulk(force=True)

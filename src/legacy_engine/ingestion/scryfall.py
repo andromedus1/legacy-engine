@@ -118,11 +118,24 @@ def _write_metadata(path: Path, payload: dict[str, object]) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
-def _declared_object_count(meta: dict[str, object]) -> int:
-    count = meta.get("object_count")
-    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
-        raise ValueError("Scryfall bulk metadata is missing positive object_count")
-    return count
+def _positive_metadata_int(meta: dict[str, object], key: str) -> int | None:
+    value = meta.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"Scryfall bulk metadata has invalid {key}")
+    return value
+
+
+def _bulk_completeness(meta: dict[str, object]) -> tuple[int | None, int | None]:
+    """Return provider-declared byte/row completeness without inventing thresholds."""
+    compressed_size = _positive_metadata_int(meta, "compressed_size")
+    object_count = _positive_metadata_int(meta, "object_count")
+    if compressed_size is None and object_count is None:
+        raise ValueError(
+            "Scryfall bulk metadata lacks compressed_size and object_count completeness"
+        )
+    return compressed_size, object_count
 
 
 def _validate_row_count(actual: int, expected: int) -> None:
@@ -133,7 +146,12 @@ def _validate_row_count(actual: int, expected: int) -> None:
 
 
 def _stream_jsonl_bulk(
-    client, uri: str, destination: Path, *, expected_rows: int,
+    client,
+    uri: str,
+    destination: Path,
+    *,
+    expected_compressed_size: int | None,
+    expected_rows: int | None,
 ) -> int:
     """Stream, validate, and atomically normalize gzipped JSONL to plain JSONL."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +170,14 @@ def _stream_jsonl_bulk(
                 for chunk in chunks:
                     handle.write(chunk)
 
+        if expected_compressed_size is not None:
+            actual_size = raw_tmp.stat().st_size
+            if actual_size != expected_compressed_size:
+                raise ValueError(
+                    "Scryfall bulk compressed size mismatch: "
+                    f"expected {expected_compressed_size}, received {actual_size}"
+                )
+
         count = 0
         with normalized_tmp.open("w", encoding="utf-8") as handle:
             for row in iter_bulk_rows(raw_tmp):
@@ -161,7 +187,8 @@ def _stream_jsonl_bulk(
                 count += 1
             handle.flush()
             os.fsync(handle.fileno())
-        _validate_row_count(count, expected_rows)
+        if expected_rows is not None:
+            _validate_row_count(count, expected_rows)
         os.replace(normalized_tmp, destination)
         return count
     finally:
@@ -236,13 +263,14 @@ class ScryfallClient:
                 return ORACLE_CARDS_PATH
 
         meta = self._fetch_bulk_metadata()
-        expected_rows = _declared_object_count(meta)
+        expected_compressed_size, expected_rows = _bulk_completeness(meta)
         uri, is_jsonl = _bulk_download_uri(meta)
         _validate_scryfall_uri(uri)
         logger.info("Downloading Scryfall %s bulk from %s", SCRYFALL_BULK_TYPE, uri)
         if is_jsonl:
             card_count = _stream_jsonl_bulk(
                 self.client, uri, ORACLE_CARDS_PATH, expected_rows=expected_rows,
+                expected_compressed_size=expected_compressed_size,
             )
         else:
             resp = self.client.get(uri, follow_redirects=True)
@@ -250,6 +278,8 @@ class ScryfallClient:
             cards = resp.json()
             if not isinstance(cards, list) or not cards:
                 raise ValueError("Scryfall oracle bulk must be a non-empty card array")
+            if expected_rows is None:
+                raise ValueError("legacy Scryfall array metadata requires object_count")
             _validate_row_count(len(cards), expected_rows)
             candidate = ORACLE_CARDS_PATH.with_name(f".{ORACLE_CARDS_PATH.name}.tmp")
             try:
@@ -262,6 +292,8 @@ class ScryfallClient:
         _write_metadata(METADATA_PATH, {
             "updated_at": meta.get("updated_at"),
             "card_count": card_count,
+            "compressed_size": expected_compressed_size,
+            "object_count": expected_rows,
             "bulk_type": SCRYFALL_BULK_TYPE,
         })
         logger.info("Downloaded %d cards", card_count)
@@ -439,7 +471,7 @@ class ScryfallClient:
                 return SCRYFALL_PRICES_PATH
 
         meta = self._fetch_prices_metadata()
-        expected_rows = _declared_object_count(meta)
+        expected_compressed_size, expected_rows = _bulk_completeness(meta)
         uri, is_jsonl = _bulk_download_uri(meta)
         _validate_scryfall_uri(uri)
         logger.info(
@@ -452,6 +484,7 @@ class ScryfallClient:
         if is_jsonl:
             _stream_jsonl_bulk(
                 self.client, uri, SCRYFALL_PRICES_PATH, expected_rows=expected_rows,
+                expected_compressed_size=expected_compressed_size,
             )
         else:
             tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
@@ -463,12 +496,16 @@ class ScryfallClient:
                             fh.write(chunk)
                 # Validate before replacing the last-good mirror.
                 count = sum(1 for _row in iter_bulk_rows(tmp_path))
+                if expected_rows is None:
+                    raise ValueError("legacy Scryfall array metadata requires object_count")
                 _validate_row_count(count, expected_rows)
                 os.replace(tmp_path, SCRYFALL_PRICES_PATH)
             finally:
                 tmp_path.unlink(missing_ok=True)
         _write_metadata(SCRYFALL_PRICES_META_PATH, {
             "updated_at": meta.get("updated_at"),
+            "compressed_size": expected_compressed_size,
+            "object_count": expected_rows,
             "bulk_type": SCRYFALL_PRICES_BULK_TYPE,
         })
         logger.info("Downloaded prices bulk (updated_at=%s)", meta.get("updated_at"))
