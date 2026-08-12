@@ -100,3 +100,17 @@ class CardAliasManifest(LegacyEngineModel):
     release_codes: tuple[str, ...]
     alias_count: int
     ambiguous_key_count: int
+
+
+class CardCoverageGap(LegacyEngineModel):
+    observed_name: str
+    row_count: int
+    deck_count: int
+    first_event_date: str
+    providers: tuple[str, ...]
+    event_uris: tuple[str, ...]
+
+
+class CardCoverageCutoff(LegacyEngineModel):
+    cutoff: str | None
+    gaps: tuple[CardCoverageGap, ...]

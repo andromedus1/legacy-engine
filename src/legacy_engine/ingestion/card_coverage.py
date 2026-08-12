@@ -16,6 +16,8 @@ from legacy_engine.ingestion.store import fetch_card_alias_candidates, init_card
 from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.models.card import (
     CardAliasManifest,
+    CardCoverageCutoff,
+    CardCoverageGap,
     CardNameResolution,
     CardNameStatus,
 )
@@ -147,6 +149,88 @@ class CardCoverageReport(LegacyEngineModel):
     @property
     def unresolved_count(self) -> int:
         return len(self.ambiguous) + len(self.suspected_truncated) + len(self.unresolved)
+
+
+def load_coverage_preflight_protocol(path: Path | str) -> tuple[tuple[str, ...], str]:
+    """Read only the immutable schedule fields needed by card-coverage preflight."""
+    source = Path(path)
+    try:
+        raw = json.loads(source.read_text())
+        folds = raw["planned_folds"]
+        final_until = raw["final_evaluation_until"]
+        cutoffs = tuple(fold["cutoff"] for fold in folds)
+        parsed_cutoffs = tuple(datetime.strptime(value, "%Y-%m-%d").date() for value in cutoffs)
+        parsed_final = datetime.strptime(final_until, "%Y-%m-%d").date()
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid benchmark protocol schedule in {source}") from exc
+    if (
+        not cutoffs
+        or len(cutoffs) != len(set(cutoffs))
+        or parsed_cutoffs != tuple(sorted(parsed_cutoffs))
+        or parsed_final <= parsed_cutoffs[-1]
+    ):
+        raise ValueError(
+            "benchmark protocol requires non-empty ordered unique planned_folds cutoffs "
+            "and a later final_evaluation_until"
+        )
+    return cutoffs, final_until
+
+
+def unresolved_card_coverage_by_cutoff(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    cutoffs: tuple[str, ...],
+    final_evaluation_until: str,
+) -> tuple[CardCoverageCutoff, ...]:
+    """Group unresolved observed metadata gaps by their first future training cutoff."""
+    rows = con.execute(
+        """SELECT dc.name,
+                  count(*) AS row_count,
+                  count(DISTINCT dc.tournament_id || ':' || CAST(dc.deck_idx AS VARCHAR)),
+                  min(t.date),
+                  list(DISTINCT t.source ORDER BY t.source) FILTER (WHERE t.source IS NOT NULL),
+                  list(DISTINCT t.uri ORDER BY t.uri) FILTER (WHERE t.uri IS NOT NULL)
+           FROM deck_cards dc
+           JOIN tournaments t ON t.id = dc.tournament_id
+           LEFT JOIN cards c ON c.name = dc.name
+           WHERE c.name IS NULL AND t.date < ?
+           GROUP BY dc.name
+           ORDER BY min(t.date), dc.name""",
+        [final_evaluation_until],
+    ).fetchall()
+    grouped: dict[str | None, list[CardCoverageGap]] = {cutoff: [] for cutoff in cutoffs}
+    grouped[None] = []
+    for observed, row_count, deck_count, first_date, providers, event_uris in rows:
+        cohort = next((cutoff for cutoff in cutoffs if first_date < cutoff), None)
+        grouped[cohort].append(
+            CardCoverageGap(
+                observed_name=observed,
+                row_count=row_count,
+                deck_count=deck_count,
+                first_event_date=first_date,
+                providers=tuple(providers or ()),
+                event_uris=tuple(event_uris or ()),
+            )
+        )
+    return tuple(
+        CardCoverageCutoff(cutoff=cutoff, gaps=tuple(grouped[cutoff]))
+        for cutoff in (*cutoffs, None)
+    )
+
+
+def card_coverage_preflight_lines(
+    cohorts: tuple[CardCoverageCutoff, ...],
+) -> tuple[str, ...]:
+    lines: list[str] = []
+    for cohort in cohorts:
+        label = cohort.cutoff or "no-later-training-cutoff"
+        names = ", ".join(gap.observed_name for gap in cohort.gaps) or "none"
+        lines.append(
+            f"// coverage preflight: cutoff={label}; rows={sum(g.row_count for g in cohort.gaps)}; "
+            f"names={len(cohort.gaps)}; decks={sum(g.deck_count for g in cohort.gaps)}; "
+            f"observed={names}"
+        )
+    return tuple(lines)
 
 
 def _resolution(

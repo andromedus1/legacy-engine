@@ -463,15 +463,20 @@ def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: b
 @refresh.command("card-coverage")
 @click.option("--db", type=click.Path(dir_okay=False), default=None,
               help="DuckDB path (defaults to the configured analytical cache).")
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Frozen benchmark protocol whose training cutoffs must have metadata closure.")
 @_verbose
-def refresh_card_coverage(db: str | None, verbose: bool) -> None:
+def refresh_card_coverage(db: str | None, benchmark_protocol: str | None, verbose: bool) -> None:
     """Reconcile exact card names and print one compact coverage audit."""
     from datetime import datetime, timezone
 
     from legacy_engine.ingestion import store
     from legacy_engine.ingestion.card_coverage import (
         card_coverage_audit_lines,
+        card_coverage_preflight_lines,
+        load_coverage_preflight_protocol,
         reconcile_card_dimension,
+        unresolved_card_coverage_by_cutoff,
     )
 
     _setup_logging(verbose)
@@ -485,10 +490,28 @@ def refresh_card_coverage(db: str | None, verbose: bool) -> None:
             alias_snapshot_reason=None,
             resolved_at=datetime.now(timezone.utc),
         )
+        cohorts = None
+        if benchmark_protocol:
+            try:
+                cutoffs, final_until = load_coverage_preflight_protocol(benchmark_protocol)
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
+            cohorts = unresolved_card_coverage_by_cutoff(
+                con, cutoffs=cutoffs, final_evaluation_until=final_until,
+            )
     finally:
         con.close()
     for line in card_coverage_audit_lines(report, verbose=verbose):
         click.echo(line)
+    if cohorts is not None:
+        for line in card_coverage_preflight_lines(cohorts):
+            click.echo(line)
+        blocking = tuple(cohort for cohort in cohorts if cohort.cutoff and cohort.gaps)
+        if blocking:
+            raise click.ClickException(
+                f"coverage preflight failed: {sum(len(c.gaps) for c in blocking)} "
+                "unresolved names enter planned training cutoffs"
+            )
 
 
 # ── ops: local scheduled maintenance + status ──
