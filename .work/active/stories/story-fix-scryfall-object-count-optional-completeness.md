@@ -1,7 +1,7 @@
 ---
 id: story-fix-scryfall-object-count-optional-completeness
 kind: story
-stage: review
+stage: done
 tags: [bug, ingestion]
 parent: null
 depends_on: []
@@ -60,3 +60,25 @@ Confirmation so far: changed-file Ruff is clean; the focused Scryfall/price/moni
 `124 passed`; a read-only live `/bulk-data` metadata check resolves `oracle_cards` to
 `(24502828, None)` and `default_cards` to `(77463009, None)` through the corrected helper. No bulk
 download, scheduler run, database mutation, provider-state mutation, or adjacent issue was bundled.
+
+## Review (2026-08-12)
+
+**Verdict**: Approve
+
+**Blockers**: none
+
+**Important**: none
+
+**Nits**: none
+
+**Rejected**: none
+
+**Notes**: Bounded inline standalone-story review of commit `5b8fbdc`; no independent reviewer was
+used. The patch matches the reproduced live contract and stays within the two-file repair boundary.
+Correctness review confirms exact compressed-byte comparison occurs before decompression and atomic
+replacement, while full row parsing still rejects structural corruption. Tests cover current
+oracle and prices metadata, missing completeness provenance, corrupt JSONL, truncated bytes, and
+last-good preservation. The change adds no public CLI/schema break, database or scheduler mutation,
+new dependency, credential path, or scope beyond Scryfall bulk completeness. Final verification:
+changed-file Ruff clean; focused slice `124 passed`; full suite `3801 passed, 1 skipped`; read-only
+live metadata reproduction resolved for both affected bulk types.
