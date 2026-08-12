@@ -150,6 +150,25 @@ def test_benchmark_cli_requires_explicit_db(tmp_path):
     assert "Missing option '--db'" in result.output
 
 
+def test_benchmark_plan_exposes_quarantine_policy_and_claim_ceiling(tmp_path):
+    db = _build_benchmark_db(tmp_path)
+    protocol = tmp_path / "quarantine-protocol.json"
+    result = CliRunner().invoke(main, [
+        "advise", "benchmark", "plan", "--db", db,
+        "--protocol-id", "quarantine", "--created-at", "2026-08-12T00:00:00Z",
+        "--registered-at", "2026-08-12T00:00:00Z", "--claim-ceiling", "descriptive",
+        "--card-metadata-policy", "quarantine-unresolved-decks",
+        "--max-quarantined-deck-fraction", "0.005",
+        "--max-quarantined-round-fraction", "0.02",
+        "--first-cutoff", "2026-01-01", "--until", "2026-01-29", "--out", str(protocol),
+    ])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(protocol.read_text())
+    assert payload["claim_ceiling"] == "descriptive"
+    assert payload["card_metadata"]["mode"] == "quarantine-unresolved-decks"
+    assert "card metadata: quarantine-unresolved-decks" in result.output
+
+
 def test_card_coverage_preflight_handoff_preserves_frozen_protocol(tmp_path, monkeypatch):
     import legacy_engine.workflows.ranking_benchmark as benchmark_workflow
 

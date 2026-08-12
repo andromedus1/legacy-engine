@@ -358,6 +358,7 @@ class BenchmarkEvaluationSummary(LegacyEngineModel):
     paired_differences: dict[str, dict[str, float | None]]
     status: Literal["not-evaluable", "descriptive", "predictive-claim-supported"]
     reasons: tuple[str, ...]
+    claim_ceiling: BenchmarkClaimCeiling = "predictive-claim-supported"
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -1116,6 +1117,11 @@ def evaluate_origin(
         evaluation_data_sha256=content_sha256({
             "matches": [match.model_dump(mode="json") for match in normalized],
             "decks": [deck.model_dump(mode="json") for deck in heldout_decks],
+            "card_metadata_quarantine": (
+                outcome_rows.card_metadata_quarantine.model_dump(mode="json")
+                if isinstance(outcome_rows, HeldoutOutcomes)
+                and outcome_rows.card_metadata_quarantine is not None else None
+            ),
         }),
         fold=predictions.fold, exclusions=exclusions, estimators=tuple(evaluations),
         external=external_results, status="descriptive" if support.evaluable else "not-evaluable",
@@ -1226,6 +1232,7 @@ def aggregate_benchmark(
         protocol_hash=protocol_sha256(protocol), folds=tuple(folds),
         evaluable_folds=len(evaluable), represented_regimes=len(regimes),
         paired_differences=paired, status=status, reasons=tuple(reasons),
+        claim_ceiling=protocol.claim_ceiling,
     )
 
 
@@ -1234,6 +1241,7 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str:
         "# Future-only ranking benchmark", "",
         f"- Status: **{summary.status}**",
         f"- Protocol hash: `{summary.protocol_hash}`",
+        f"- Claim ceiling: **{summary.claim_ceiling}**",
         f"- Evaluable folds: {summary.evaluable_folds}/{len(summary.folds)}",
         f"- Registered regimes represented: {summary.represented_regimes}", "",
     ]

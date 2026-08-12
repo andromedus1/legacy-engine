@@ -147,6 +147,23 @@ launch stop; structured gap lines retain provider and event-URI provenance, whil
 suspected-truncated, and manual-evidence values stay visible and unresolved. The protocol schedule
 is validated before reconciliation can mutate the derived copy.
 
+### Residual card-metadata quarantine (historical sensitivity only)
+
+The default benchmark policy remains `require-complete`: an unresolved card dimension is a hard
+fail, preserving the frozen v1 protocol and its bytes. A separately registered protocol may opt into
+`quarantine-unresolved-decks` with both ceilings declared (at most 0.5% of decks and 2% of rounds).
+The planner closes one typed, outcome-blind ledger before taxonomy or result parsing. It removes the
+entire affected deck, its standings row, and every round involving its tournament-local player key;
+duplicate keys are conservatively named. JSON and Markdown retain raw/retained denominators,
+source/event URIs, unresolved names, excluded identities, fractions, reasons, and canonical hashes.
+
+A protocol registered after its historical first origin is permanently capped at `descriptive`, even
+if statistical gates pass. It is a labeled sensitivity replay, not prospective validation; a new
+predictive-capable protocol must be registered before its first unopened cutoff. The two-phase
+`freeze`/`evaluate` and composed `run` paths consume the same ledger and refuse ceiling breaches or
+mutated immutable artifacts. A negative, descriptive, or not-evaluable result is valid evidence, and
+the v1 protocol/artifacts and raw cache are never overwritten.
+
 ### Current validation evidence (2026-08-12)
 
 The fixed current-corpus historical replay remains **not evaluable**, and the unchanged benchmark

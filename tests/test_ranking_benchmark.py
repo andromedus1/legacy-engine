@@ -342,6 +342,16 @@ def test_aggregate_remains_descriptive_without_claim_support():
     assert "Paired primary-minus-baseline log loss" in rendered
 
 
+def test_descriptive_protocol_claim_ceiling_is_serialized_and_enforced():
+    configured = _evaluation_protocol().model_copy(update={"claim_ceiling": "descriptive"})
+    fold = evaluate_origin(_predictions(configured), _heldout(), protocol=configured)
+    summary = aggregate_benchmark(configured, [fold])
+    assert summary.claim_ceiling == "descriptive"
+    assert summary.status == "descriptive"
+    assert any("claim ceiling is descriptive" in reason for reason in summary.reasons)
+    assert "Claim ceiling: **descriptive**" in render_benchmark_markdown(summary)
+
+
 def test_aggregate_requires_both_calibration_coefficients():
     configured = _evaluation_protocol()
     fold = evaluate_origin(_predictions(configured), _heldout(), protocol=configured)

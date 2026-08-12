@@ -2915,11 +2915,25 @@ def advise_benchmark() -> None:
     type=click.Choice(["retrospective-fixed-parent", "contemporaneous"]),
     default="retrospective-fixed-parent", show_default=True,
 )
+@click.option("--registered-at", default=None, help="Actual registration timestamp for this protocol.")
+@click.option(
+    "--claim-ceiling", type=click.Choice(["descriptive", "predictive-claim-supported"]),
+    default="predictive-claim-supported", show_default=True,
+)
+@click.option(
+    "--card-metadata-policy",
+    type=click.Choice(["require-complete", "quarantine-unresolved-decks"]),
+    default="require-complete", show_default=True,
+)
+@click.option("--max-quarantined-deck-fraction", type=float, default=0.0, show_default=True)
+@click.option("--max-quarantined-round-fraction", type=float, default=0.0, show_default=True)
 @click.option("--out", type=click.Path(dir_okay=False), required=True)
 @_verbose
 def advise_benchmark_plan(
     db: str, protocol_id: str, created_at: str, first_cutoff: str, final_until: str,
-    taxonomy_mode: str, out: str, verbose: bool,
+    taxonomy_mode: str, registered_at: str | None, claim_ceiling: str,
+    card_metadata_policy: str, max_quarantined_deck_fraction: float,
+    max_quarantined_round_fraction: float, out: str, verbose: bool,
 ) -> None:
     """Preregister the estimator set, support gates, and whole-date folds."""
     _setup_logging(verbose)
@@ -2929,13 +2943,20 @@ def advise_benchmark_plan(
     import duckdb
 
     from legacy_engine.advisory.ranking_benchmark import (
-        BenchmarkProtocol, atomic_write_canonical, plan_walk_forward_folds, protocol_sha256,
+        BenchmarkProtocol, CardMetadataPolicy, atomic_write_canonical,
+        plan_walk_forward_folds, protocol_sha256,
     )
     from legacy_engine.ingestion.banlist import BAN_EVENTS
 
     protocol = BenchmarkProtocol(
         protocol_id=protocol_id, created_at=created_at, taxonomy_mode=taxonomy_mode,
         first_cutoff=first_cutoff, final_evaluation_until=final_until,
+        registered_at=registered_at, claim_ceiling=claim_ceiling,
+        card_metadata=CardMetadataPolicy(
+            mode=card_metadata_policy,
+            max_deck_fraction=max_quarantined_deck_fraction,
+            max_round_fraction=max_quarantined_round_fraction,
+        ),
     )
     con = duckdb.connect(db, read_only=True)
     try:
@@ -2956,6 +2977,11 @@ def advise_benchmark_plan(
     digest = atomic_write_canonical(Path(out), protocol)
     click.echo(f"// benchmark protocol: {protocol.protocol_id} hash={protocol_sha256(protocol)}")
     click.echo(f"// taxonomy: {protocol.taxonomy_mode}; folds={len(folds)}; artifact={digest}")
+    click.echo(
+        f"// card metadata: {protocol.card_metadata.mode}; "
+        f"ceilings={protocol.card_metadata.max_deck_fraction:.3%}/"
+        f"{protocol.card_metadata.max_round_fraction:.3%}; claim={protocol.claim_ceiling}"
+    )
     for fold in folds:
         click.echo(
             f"// fold {fold.fold_id}: {len(fold.event_dates)} event dates; "
@@ -3009,6 +3035,7 @@ def advise_benchmark_freeze(
         taxonomy_mode=protocol.taxonomy_mode,
         taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
         ban_events=protocol.ban_events_as_of,
+        card_metadata_policy=protocol.card_metadata,
     )
     manifest_path = root / f"{fold.fold_id}.manifest.json"
     atomic_write_canonical(manifest_path, manifest)
@@ -3019,6 +3046,12 @@ def advise_benchmark_freeze(
     click.echo(f"// benchmark cutoff: {fold.cutoff}; taxonomy={manifest.taxonomy_mode}")
     click.echo(f"// snapshot manifest: {manifest_path} sha256={predictions.snapshot_manifest_sha256}")
     click.echo(f"// frozen predictions: {predictions_path} sha256={digest}")
+    if manifest.card_metadata_quarantine is not None:
+        ledger = manifest.card_metadata_quarantine
+        click.echo(
+            f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+            f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+        )
     for reason in manifest.reasons:
         click.echo(f"// ⚠ {reason}")
 
@@ -3072,6 +3105,7 @@ def advise_benchmark_evaluate(
             taxonomy_mode=predictions.taxonomy_mode,
             expected_rules_sha256=predictions.rules_sha256,
             taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            card_metadata_policy=protocol.card_metadata,
         ),
         protocol=protocol, external=external,
     )
@@ -3080,6 +3114,12 @@ def advise_benchmark_evaluate(
     atomic_write_text(Path(report), render_benchmark_markdown(summary))
     click.echo(f"// verified frozen predictions: sha256={digest}")
     click.echo(f"// exclusions: {evaluation.exclusions}")
+    if evaluation.card_metadata_quarantine is not None:
+        ledger = evaluation.card_metadata_quarantine
+        click.echo(
+            f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+            f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+        )
     click.echo(f"// support: {evaluation.status}; {'; '.join(evaluation.reasons) or 'all fold gates pass'}")
     click.echo(f"// evaluation: {out}; report: {report}")
 
@@ -3118,6 +3158,7 @@ def advise_benchmark_run(
                 taxonomy_mode=protocol.taxonomy_mode,
                 taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
                 ban_events=protocol.ban_events_as_of,
+                card_metadata_policy=protocol.card_metadata,
             )
             atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
             predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
@@ -3132,11 +3173,18 @@ def advise_benchmark_run(
                     taxonomy_mode=predictions.taxonomy_mode,
                     expected_rules_sha256=predictions.rules_sha256,
                     taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+                    card_metadata_policy=protocol.card_metadata,
                 ), protocol=protocol,
             )
             atomic_write_canonical(root / f"{fold.fold_id}.evaluation.json", evaluation)
             evaluations.append(evaluation)
             click.echo(f"// fold {fold.fold_id}: {evaluation.status}; predictions={digest}")
+            if evaluation.card_metadata_quarantine is not None:
+                ledger = evaluation.card_metadata_quarantine
+                click.echo(
+                    f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+                    f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+                )
         except ValueError as exc:
             reason = f"benchmark execution stopped at fold {fold.fold_id}: {exc}"
             partial = aggregate_benchmark(protocol, evaluations)
