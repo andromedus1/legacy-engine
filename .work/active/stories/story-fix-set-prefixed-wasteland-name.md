@@ -1,7 +1,7 @@
 ---
 id: story-fix-set-prefixed-wasteland-name
 kind: story
-stage: review
+stage: done
 tags: [bug, ingestion, cards, benchmark]
 parent: null
 depends_on: []
@@ -62,3 +62,11 @@ Before the fix it fails because the observed provider name is retained.
   The raw cache, `data/legacy.duckdb`, and protocol remain unchanged.
 - The exact unchanged benchmark replay follows from the committed code revision in a new immutable
   artifact directory. Any independently unresolved later name remains outside this fix.
+
+## Bounded inline review (2026-08-12)
+
+Verdict: pass, with no findings. The repair is confined to the existing evidence-bearing alias
+boundary, names a canonical card that must already exist, and deliberately avoids generic bracket
+stripping. The regression exercises the production reconciliation path and the focused, affected,
+and full suites are green. Raw/provider data, the locked database, and the benchmark protocol were
+not modified.
