@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-11
+updated: 2026-08-12
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -32,6 +32,7 @@ decisions:
   - "Every ranking row is derived from a typed selected-cell ledger. Its serialized replay must reproduce adjusted field WR exactly; a mismatch suppresses the headline. A strict-common-era estimate is shown separately as a divergence diagnostic and is never averaged into the adaptive headline."
   - "Every row reports floor observability at n>=10 and display-grade n>=30 independently of the interactive page gate. Zero display-grade cells means floor unobserved; missing bad matchups are not evidence of none. Event/month concentration >=40% is labeled on measured selected cells, never automatically corrected away."
   - "The benchmark protocol freezes the exact fold schedule and as-of B&R ledger. Claim coverage uses classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay and refuse different content."
+  - "Benchmark launch requires a zero-gap card-metadata preflight at every planned training cutoff on the same derived copy; exact Scryfall/current aliases and evidence-backed provider serialization may resolve names, while ambiguous, truncated, and manual candidates remain fail-closed."
   - "The generated page names its future-only validation status and summary artifact id. No supplied summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive, or predictive-claim-supported."
 ---
 
@@ -126,20 +127,42 @@ Its audit header then prints the summary's content-derived artifact id and one o
 error; the page never silently upgrades or substitutes validation evidence. The current production
 call printed beside it comes from the same grounded/current/Agency ordering used by the benchmark.
 
-### Current validation evidence (2026-08-11)
+Before `advise benchmark run`, reconcile and gate the same ignored derived database copy against
+the frozen protocol:
 
-The fixed current-corpus historical replay is **not evaluable**. Protocol
-`best-deck-decision-trust-current-corpus-v1` planned 24 whole-date folds from 2024-12-16 through
-the exclusive 2026-08-06 bound under protocol hash
-`6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`. Snapshot closure stopped
-before the first prediction artifact because 615 pre-cutoff deck-card rows for `_____ Goblin` have
-no observed card-dimension metadata. The canonical not-evaluable summary artifact is
-`42e0e6f643b7f32df1e19760c30ad0fb28a19bb11c3871c27b3f52fc7e202083` under the protocol's ignored
-`data/benchmarks/` directory. No estimator, threshold, source row, or production recommendation was
-changed in response. This was a retrospectively executed historical replay with its origin metadata
-frozen for reproducibility; it is not evidence that predictions were registered before those real
-events occurred. The generated evidence page still reports the current production call separately,
-but it must not be described as predictively validated until a future-only run clears all gates.
+```bash
+legacy-engine refresh card-coverage \
+  --db data/benchmarks/<protocol-id>/reconciled-corpus.duckdb \
+  --benchmark-protocol data/benchmarks/<protocol-id>/protocol.json
+```
+
+Scryfall oracle cards and current one-to-one printed-name aliases are authoritative. The package
+registry admits only evidence-bearing exact historical exceptions and narrowly typed provider
+serialization rules. Those rules require singular provider provenance and an exact canonical
+target already present in the card dimension. They do not generically strip brackets, guess by edit
+distance, truncate tokens, or select among ambiguous localized aliases. The preflight prints every
+planned cutoff cohort plus the post-last-cutoff tail. Any planned-cutoff gap is a hard benchmark
+launch stop; ambiguous, suspected-truncated, and manual-evidence values stay visible and unresolved.
+
+### Current validation evidence (2026-08-12)
+
+The fixed current-corpus historical replay remains **not evaluable**, and the unchanged benchmark
+was not restarted. A fresh ignored byte-copy of `data/legacy.duckdb` matched its source SHA-256
+`abb9cfc628335609ff063a1ed50c3463faf26021b97d4cf866366e7bdf098d7e`, then ran the normal
+reconciliation and frozen-protocol preflight above. The alias manifest was the 2026-08-11 Scryfall
+snapshot with 241,911 unique aliases and 457 ambiguous normalized keys. The preflight found 60 rows
+across 53 names entering planned training cutoffs, plus two rows/two names first appearing after the
+last cutoff. Therefore the zero-required-gap launch gate failed and no benchmark process opened
+future outcomes.
+
+The earliest open cohort is cutoff 2025-08-18 (`Explosao Elemental do Vermelho`); later cohorts
+retain the named ambiguous, suspected-truncated, and manual-evidence spellings rather than guessing
+targets. Protocol `best-deck-decision-trust-current-corpus-v1` still plans 24 whole-date folds from
+2024-12-16 through the exclusive 2026-08-06 bound under byte hash
+`6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`. No estimator, threshold,
+protocol byte, source row, or production recommendation changed in response. The generated evidence
+page reports the current production call separately, but it must not be described as predictively
+validated until a future-only run clears all gates.
 
 ### Experimental player-effect diagnostic
 

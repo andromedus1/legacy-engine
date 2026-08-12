@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
+from legacy_engine.models.card import Card
 
 
 def _build_benchmark_db(tmp_path: Path) -> str:
@@ -147,3 +148,41 @@ def test_benchmark_cli_requires_explicit_db(tmp_path):
     ])
     assert result.exit_code == 2
     assert "Missing option '--db'" in result.output
+
+
+def test_card_coverage_preflight_handoff_preserves_frozen_protocol(tmp_path, monkeypatch):
+    import legacy_engine.workflows.ranking_benchmark as benchmark_workflow
+
+    rules = tmp_path / "rules" / "Formats" / "Legacy" / "Archetypes"
+    rules.mkdir(parents=True)
+    monkeypatch.setattr(benchmark_workflow, "RULES_DIR", tmp_path / "rules")
+    db = _build_benchmark_db(tmp_path)
+    protocol = tmp_path / "protocol.json"
+    runner = CliRunner()
+    planned = runner.invoke(main, [
+        "advise", "benchmark", "plan", "--db", db,
+        "--protocol-id", "preflight-handoff", "--created-at", "2026-01-01T00:00:00Z",
+        "--first-cutoff", "2026-01-01", "--until", "2026-01-29", "--out", str(protocol),
+    ])
+    assert planned.exit_code == 0, planned.output
+    frozen_protocol = protocol.read_bytes()
+
+    con = store.connect(db)
+    con.execute("INSERT INTO deck_cards VALUES ('past', 0, 'side', 'Unresolved Card', 1)")
+    con.close()
+    blocked = runner.invoke(main, [
+        "refresh", "card-coverage", "--db", db, "--benchmark-protocol", str(protocol),
+    ])
+    assert blocked.exit_code != 0
+    assert "observed=Unresolved Card" in blocked.output
+    assert protocol.read_bytes() == frozen_protocol
+
+    con = store.connect(db)
+    store.load_cards(con, [Card(name="Unresolved Card")])
+    con.close()
+    cleared = runner.invoke(main, [
+        "refresh", "card-coverage", "--db", db, "--benchmark-protocol", str(protocol),
+    ])
+    assert cleared.exit_code == 0, cleared.output
+    assert "cutoff=2026-01-01; rows=0; names=0; decks=0" in cleared.output
+    assert protocol.read_bytes() == frozen_protocol
