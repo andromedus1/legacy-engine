@@ -1,7 +1,7 @@
 ---
 id: feature-card-name-reconciliation-closure
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, data-quality, benchmark]
 parent: null
 depends_on: [story-fix-missing-goblin-card-metadata, story-fix-set-prefixed-wasteland-name]
@@ -325,3 +325,38 @@ advise benchmark run --db <same-derived-copy> --protocol <frozen-protocol> ...
 - **Benchmark pressure encourages false closure**: unresolved tail may tempt fuzzy repair.
   **Fallback**: preflight is intentionally fail-closed and the feature may complete with a named
   nonzero residual; benchmark launch requires zero required gaps, not zero effort remaining.
+
+## Implementation notes
+
+- Execution capability: one direct feature owner across three sequential child checkpoints; the
+  registry, preflight, and corpus gate share one reconciliation contract and benefited from retained
+  context.
+- Review weight: standard, from the project/default policy. Feature is intentionally stopped at
+  `stage: review` for an independent pass.
+- Child commits: provider serialization `fa75638`; cutoff preflight `a0debfd`; corpus gate/docs
+  `11d3e18`.
+- Integrated behavior: exact curated exceptions remain authoritative; typed MTGmelee rules admit
+  only ten declared set codes and the three structural name/face shapes; every rule requires
+  singular provider provenance and an existing exact canonical target. Unique Scryfall aliases
+  remain the final automatic authority, while ambiguity, truncation, unsupported shapes, and manual
+  candidates remain named and unresolved.
+- CLI contract: `refresh card-coverage --benchmark-protocol` validates the frozen schedule, prints
+  every strictly assigned cutoff cohort plus the post-last-cutoff tail, and exits nonzero only when
+  planned training closure is open. Cross-feature regression proves protocol bytes are unchanged
+  across both blocked and cleared handoffs.
+- Fresh-copy evidence: source/copy SHA-256
+  `abb9cfc628335609ff063a1ed50c3463faf26021b97d4cf866366e7bdf098d7e`; Scryfall alias snapshot
+  `2026-08-11T21:18:07.865+00:00` with 241,911 aliases / 457 ambiguous keys; unchanged protocol
+  SHA-256 `6416fe6141d3f572c5c8f68a52021147a63639a6e2b2eba3482c2a1d0a2ac561`. Planned cohorts retain
+  60 rows / 53 names and the post-last cohort retains 2 rows / 2 names, so the benchmark was not
+  restarted. Earliest required blocker: `Explosao Elemental do Vermelho` at 2025-08-18.
+- Verification: focused integrated suites `31 passed`; full repository suite `3817 passed, 1
+  skipped` with `PYTHONPATH=.`. The first bare invocation lacked the repository root import path and
+  failed collection only; the correct project-root invocation is green. Knowledge-index regeneration
+  reports 0 errors and 11 standing warnings.
+- Simplification: one complete cutoff audit replaces serial benchmark discovery; no generic bracket
+  stripping, fuzzy/edit-distance repair, or truncation guessing was introduced.
+- Discrepancies from design: `provider_serialization_candidate` accepts injected `resolved_at` so
+  its audit record remains deterministic; otherwise none.
+- Adjacent issues parked: none. The residual evidence queue is intentional fail-closed output, not a
+  newly discovered implementation defect.
