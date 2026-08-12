@@ -18,3 +18,15 @@ files. The core question is whether to extract a shared format-aware engine with
 data/configuration and deployments after the best-deck decision-trust work proves the ranking
 contract. Do not pull goldfish/rules simulation or modeled sideboard recommendation into the
 portability prerequisite; both are already deferred.
+
+## Current decision — architecture target only
+
+The Modern deployment is intentionally deferred while Legacy is changing quickly. Do not extract
+a shared core, introduce a `FormatProfile` abstraction, create a Modern database/configuration,
+or stand up a second deployment yet: those would create a second maintenance surface before the
+Legacy contracts settle.
+
+Keep portability as a constraint on new boundaries, then revisit implementation only after the
+Legacy decision benchmark is evaluable and the local refresh/format-monitoring path is operating
+reliably. The eventual port should consume stable seams proved by Legacy rather than trying to
+predict them during the current high-velocity phase.

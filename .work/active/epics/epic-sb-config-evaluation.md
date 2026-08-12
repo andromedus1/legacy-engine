@@ -2,16 +2,20 @@
 id: epic-sb-config-evaluation
 kind: epic
 stage: drafting
-tags: [advisory, analytics]
+tags: [advisory, analytics, deferred]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-06-29
-updated: 2026-06-29
+updated: 2026-08-11
 ---
 
 # Sideboard & Configuration Evaluation
+
+> **DEFERRED 2026-08-11** — retain the empirical design, but do not activate it while trust in
+> modeled sideboard guidance is low. Observed deck and sideboard choices remain the operative
+> evidence; resumption requires an explicit operator decision.
 
 ## Brief
 
