@@ -1,14 +1,14 @@
 ---
 id: epic-data-autonomy-format-monitoring
 kind: feature
-stage: implementing
+stage: review
 tags: [ingestion, infra]
 parent: epic-data-autonomy
 depends_on: [epic-data-autonomy-local-refresh-operations]
 release_binding: null
 gate_origin: null
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 ---
 
 # Ban/restricted and new-release change monitoring
@@ -366,6 +366,27 @@ def ops_monitor_acknowledge(candidate_id: str, state_path: str | None, verbose: 
 - **Least certain**: WotC's future announcement URL/date convention may drift despite the current
   stable examples. The bounded probe and loud unavailable state are intentionally more important
   than clever scraping recovery.
+
+## Implementation result
+
+All four child stories are complete. The composed implementation repairs Scryfall's live gzipped
+JSONL contract, persists atomic last-good monitor state, correlates Scryfall/WotC evidence in either
+arrival order, carries the existing typed release observation/card diff through the decision
+refresh, and runs detection under the existing scheduler lock. Status preserves distinct
+clear/pending/not-due/unavailable signals; exact acknowledgement suppresses only an unchanged
+evidence hash. No monitor path mutates `data/banlist/events.json`, and `eras confirm` remains the
+only supported acceptance authority.
+
+No Modern deployment, additional scheduler, live LaunchAgent installation, hot spare, price
+provider, rules IR, or sideboard model was added.
+
+## Verification
+
+- Focused format-monitor integration: `59 passed`.
+- Full repository suite: `PYTHONPATH=. uv run pytest -q` → `3796 passed, 1 skipped`.
+- Ruff on all changed modules except the pre-existing monolithic CLI findings: clean. The CLI's
+  repository-wide F821/F541 findings predate and are outside this feature's exact changes.
+- Knowledge-index regeneration: 0 errors; 6 existing structural warnings.
 
 ## Other agent review
 
