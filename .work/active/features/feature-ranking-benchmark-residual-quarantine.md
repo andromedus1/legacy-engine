@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-benchmark-residual-quarantine
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing, data-quality]
 parent: null
 depends_on: [feature-ranking-future-only-benchmark, feature-card-name-reconciliation-closure]
@@ -383,3 +383,27 @@ JSON.
 under invalid contracts. Partial ignored files are non-authoritative debugging output and will not be
 used for the page. After the fix story is green, create a fresh artifact directory and restart only
 from corrected committed code.
+
+## Review-fix closure
+
+- Review-fix story `feature-ranking-benchmark-residual-quarantine-review-fixes` is done in commit
+  `84aedbf` (`implement: feature-ranking-benchmark-residual-quarantine-review-fixes`).
+- The ledger digest now excludes its separate retained-corpus hash and is built only from event,
+  card, deck, player, and round identity dimensions; result, standings, stored-label, held-out
+  classification, and outcome mutations are adversarially covered.
+- Blank or duplicate tournament-local identities conservatively remove all affected event rounds;
+  exact same-cutoff registration is posthoc, summary models reject statuses above their ceiling,
+  and strict/v1 protocol and summary hashes remain byte-compatible.
+- Direct freeze/evaluate paths now require and validate the manifest/held-out ledger, policy equality,
+  ceiling verdict, declared digest, and retained-corpus hash. Markdown emits exact deck identity,
+  player, unresolved names, event URI/source, reasons, and digest evidence.
+- Corrected verification: 36 focused tests; full repository `PYTHONPATH=. .venv/bin/pytest -q` passed
+  3,835 tests with one skip; changed advisory/workflow/test Ruff and compileall passed. The default
+  full invocation without `PYTHONPATH=.` has a pre-existing `tests` import-path collection failure.
+- Fresh ignored replay started only after commit `84aedbf` in
+  `data/benchmarks/ranking-residual-quarantine-v2-fixed/` using protocol hash
+  `800a1c4ccbc2d2e5e10c78727ce3d2f23cd1b416e685eb2d2afe63e6737695f2`, a byte-identical reconciled
+  corpus copy (`b2e9655c7c25fb01fc124f4e8c7761dfcda30c055f0a652c4564ea95d3aff83a`), and descriptive
+  claim ceiling. Replay PID is `99562`; it is currently active on fold 1. The earlier partial v2
+  directory is not reused and no Best Call HTML refresh occurs until a corrected canonical summary
+  completes.
