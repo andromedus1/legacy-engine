@@ -16,6 +16,14 @@ from legacy_engine.ops.status import (
     write_job_status,
 )
 from legacy_engine.ops.launchd import CommandResult
+from legacy_engine.ops.format_monitor import (
+    FormatMonitorState,
+    extract_legacy_legalities,
+    load_monitor_state,
+    merge_legality_observation,
+    MonitorEvidence,
+    write_monitor_state,
+)
 
 
 NOW = datetime.now(timezone.utc)
@@ -55,6 +63,7 @@ class TestOpsStatusCli:
         assert "scheduled-refresh" in result.output
         assert "status" in result.output
         assert "scheduler" in result.output
+        assert "monitor" in result.output
 
     def test_status_uses_explicit_temp_directory(self, runner, tmp_path):
         status_dir = tmp_path / "status"
@@ -114,6 +123,26 @@ class TestScheduledRefreshCli:
             assert result.exit_code == 0, result.output
         assert captured[0] == captured[1]
 
+    def test_status_override_derives_hermetic_monitor_state_path(self, runner, tmp_path, monkeypatch):
+        captured = {}
+        status = _status(tmp_path)
+
+        def fake_run(ports, **kwargs):
+            captured.update(kwargs)
+            write_job_status(kwargs["status_dir"] / "decision-refresh.json", status)
+            return status
+
+        monkeypatch.setattr(
+            "legacy_engine.ops.scheduled_refresh.run_scheduled_decision_refresh", fake_run,
+        )
+        status_dir = tmp_path / "ops" / "status"
+        result = runner.invoke(main, [
+            "ops", "scheduled-refresh", "--db", str(tmp_path / "db.duckdb"),
+            "--out", str(tmp_path / "ranking.html"), "--status-dir", str(status_dir),
+        ])
+        assert result.exit_code == 0, result.output
+        assert captured["format_monitor_state_path"] == tmp_path / "ops" / "state" / "format-monitor.json"
+
     @pytest.mark.parametrize(
         ("outcome", "exit_code"),
         [
@@ -151,6 +180,50 @@ class TestScheduledRefreshCli:
         ])
         assert result.exit_code == exit_code, result.output
         assert outcome.value in result.output or "healthy" in result.output
+
+
+class TestFormatMonitorCli:
+    def test_acknowledge_changes_only_exact_candidate_evidence(self, runner, tmp_path):
+        state_path = tmp_path / "format-monitor.json"
+        evidence = MonitorEvidence(
+            source="scryfall", source_url="https://data.scryfall.io/oracle",
+            observed_at=NOW, detail="bulk snapshot",
+        )
+        baseline = merge_legality_observation(
+            FormatMonitorState(updated_at=NOW),
+            observed=extract_legacy_legalities([{
+                "oracle_id": "one", "name": "Example Card",
+                "legalities": {"legacy": "legal"},
+            }]), evidence=evidence, registered_events=(),
+        )
+        candidate_state = merge_legality_observation(
+            baseline,
+            observed=extract_legacy_legalities([{
+                "oracle_id": "one", "name": "Example Card",
+                "legalities": {"legacy": "banned"},
+            }]), evidence=evidence.model_copy(update={"observed_at": NOW}),
+            registered_events=(),
+        )
+        write_monitor_state(state_path, candidate_state)
+        candidate_id = candidate_state.candidates[0].candidate_id
+
+        result = runner.invoke(main, [
+            "ops", "monitor", "acknowledge", candidate_id,
+            "--state-path", str(state_path),
+        ])
+
+        assert result.exit_code == 0, result.output
+        updated = load_monitor_state(state_path)
+        assert updated.candidates[0].acknowledged_evidence_hash == updated.candidates[0].evidence_hash
+        assert "does not change the B&R ledger" in result.output
+
+    def test_unknown_candidate_and_missing_state_fail_loudly(self, runner, tmp_path):
+        missing = runner.invoke(main, [
+            "ops", "monitor", "acknowledge", "missing",
+            "--state-path", str(tmp_path / "missing.json"),
+        ])
+        assert missing.exit_code != 0
+        assert "no format-monitor state" in missing.output
 
 
 class TestSchedulerCli:

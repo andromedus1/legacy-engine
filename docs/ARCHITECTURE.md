@@ -15,7 +15,8 @@ summary: |
   collection-aware acquire, refresh, primer) + generation/ (consensus, export, field-tuning, gap-discovery,
   card_distribution) → models/ (incl. collection, variant) → data/. collection/ is the personal-layer peer
   of ingestion/. goldfish/ is the deferred pillar; only goldfish-validated candidate-validation remains
-  deferred behind it.
+  deferred behind it. Local ops runs the decision refresh and detection-only format monitor under one
+  artifact lock; human `eras confirm` remains the only B&R acceptance authority.
 decisions:
   - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and vl-convert-python (Vega-Lite viz render)."
   - "STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/, data/scryfall/, data/rules/, data/banlist/, data/collection/); a rebuildable embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share + matchup-matrix + prices + collection joins. The one justified divergence from edh-engine's pure-files approach, driven by the rounds-join matchup workload."
@@ -31,6 +32,7 @@ decisions:
   - "HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag + named reason + suppressed magnitude. No silent zeros. Applies in window.py (thin-regime banner), primer/sideboard (degraded=True note), the sideboard recommender (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve rather than padding to a forced 15), speculation (PRE-DATA FORECAST label), prices (all_null flag), venue divergence."
   - "SUPERARCHETYPES (built; exploratory Best Call authority): analytics/superarchetype/ adds the third taxonomy level above parent archetype. An offline `superarchetype run` preview clusters archetypes on staple-stripped maindeck core sets (Jaccard + average-linkage agglomerative, AU multiscale-bootstrap cut over resampled card features; definers >=30 decks/>=8 core cards, the tail assigned by mean Jaccard dissimilarity to cluster definers) and explicit `--promote` persists a reviewed derived registry merged under a package-shipped curated override registry (hybrid-derived-curated-registry + curated-json-resource-loader). Clustering reads deck_cards ONLY — never rounds — so the cut can never be tuned against the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT axis one more level (camp -> parent -> cluster, extending _pool_opponent_tallies) and gains one shrinkage rung between the leave-camp-out parent cell and the subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display gate. Empty/absent registry is byte-identical to today (gated-additive)."
   - "STABLE ERAS: analytics/eras/ detects per-entity (archetype AND camp) era boundaries from the corpus itself (S1 presence cliffs/ramps, S2 composition CPD via ruptures, S3 share shifts, S4 WR corroboration; fleet BH-FDR + 30-deck era floor), persists them (entity_eras table + eras run|list|explain|confirm CLI, ban/release/unattributed attribution, BOCPD drift alarm), and stable_since replaces ban-only valid_since as the DEFAULT horizon everywhere (adaptive matrix, advisory window + detection-derived global field era, consensus/card-frequency, era-default discovery pools with Gate C temporal-mixing). Matchup cells shrink toward hierarchical priors (camp → leave-camp-out parent′ → marginal′ → 0.5; thin post-boundary cells toward their own pre-disturbance value, labeled)."
+  - "FORMAT MONITOR: the scheduled refresh consumes current Scryfall gzipped JSONL, diffs Legacy legalities, strictly parses WotC Legacy attribution, and combines the existing set scan with actual new-card ingest evidence. Machine state is atomic under data/ops; signals distinguish clear/pending/not_due/unavailable; acknowledgement suppresses unchanged evidence only; `eras confirm` remains the sole supported ban-registration authority."
 ---
 
 # Architecture: legacy-engine
@@ -134,10 +136,11 @@ observed → label → analytics → advisory arc.
 ### `ingestion/` — data acquisition (no runtime network calls; all pre-fetched + mirrored)
 | File | Responsibility | External dep | Brief |
 |---|---|---|---|
-| `scryfall.py` | **Extended from edh-engine** (ADR: extend, don't fork). Oracle-bulk download + name index over the WHOLE pool (~30k+ IDs) + `/cards/collection` batch fallback. Also `download_prices_bulk` / `iter_price_rows` for the default_cards bulk (one object per printing). UA+Accept headers, 50-100ms delay. | api.scryfall.com | scryfall-card-contract |
+| `scryfall.py` | **Extended from edh-engine** (ADR: extend, don't fork). Streams the current `jsonl_download_uri` gzipped JSONL contract atomically (legacy JSON arrays remain readable), indexes the WHOLE oracle pool (~30k+ IDs), and supports `/cards/collection` fallback plus printing prices. | api.scryfall.com | scryfall-card-contract |
 | `cache.py` | Mirror + parse the fbettega `MTG_decklistcache`. Parse the PascalCase `CacheItem {Tournament, Decks[], Rounds[], Standings[]}`; cards as `{Count, CardName}`; derive online/paper provenance from source-dir + Uri host; treat empty Rounds/Standings (Leagues) as normal. Incremental via `git pull` + day-folder diff. | github (fbettega) | fbettega-cache-schema |
 | `rules_vendor.py` | Vendor MTGOFormatData rules-as-JSON via git subtree into `data/rules/`, pinned to a commit SHA in `RULES_MANIFEST.json`. `legacy refresh rules` pulls upstream, diffs `Formats/Legacy/`, surfaces new archetypes/condition-types. | github (Badaro) | mtgoformatdata-rule-schema, csharp-python-port-strategy |
 | `banlist.py` | Maintain dated `BanListSnapshot`s (banned names + banned_date + ban_reason + category predicates) from WotC B&R announcements. Blacklist validation. `BAN_EVENTS` loads from package-shipped curated JSON (`data/banlist/events.json`); `eras confirm` appends a confirmed event — the drift-alarm → human-confirm → regime-heal loop. | (hand-curated + WotC) | legacy-foundations |
+| `ban_monitor.py` | Pure strict parser for the WotC Legacy section, effective date, actions/no-change, next-announcement cursor, and bounded date-slug candidates. Ambiguous or drifted pages fail unavailable; this adapter never writes accepted B&R truth. | magic.wizards.com | data-autonomy-upstream |
 | `prices.py` | Per-printing price layer: `price_quote(con, name)` → `PriceQuote` (cheapest paper USD across all printings). `PriceQuote.all_null=True` is the honest-null signal — never a silent 0 when every printing lacks a paper price. `deck_cost` accumulates totals and exposes an explicit `unpriced` list. | duckdb | — |
 | `releases.py` | Scryfall `/sets` scan: `fetch_sets` + `upcoming_and_recent` classify sets as upcoming or recently-released in a configurable horizon window. Used by `refresh cards` to decide whether to force a bulk re-pull (release-aware incremental). | api.scryfall.com | — |
 | `store.py` | Normalize parsed raw JSON → Pydantic models → load into DuckDB (`data/legacy.duckdb`). Owns `rebuild` (drop+recreate cards), `rebuild_prices` (drop+recreate card_prices), and `load_cards_diff` (non-destructive incremental). DuckDB is a **rebuildable derived cache**; raw JSON is the source of truth. | duckdb | ingestion-ops-and-metashare |
@@ -147,14 +150,16 @@ observed → label → analytics → advisory arc.
 | File | Responsibility |
 |---|---|
 | `status.py` | Typed canonical and immutable per-attempt JSON status, atomic same-directory replacement, 36-hour freshness classification, and shared `//` audit-line projection. Missing/invalid/failed/degraded/running/stale remain distinct. |
-| `scheduled_refresh.py` | Artifact-derived non-blocking `fcntl` execution lock shared by scheduled and manual entrypoints around `workflows.decision_refresh.run_decision_refresh`; maps the existing workflow result to attributable status, best-effort terminalizes SIGTERM, and hashes only a ranking written by that attempt. Overlap never mutates decision artifacts or canonical owner status. |
+| `scheduled_refresh.py` | Artifact-derived non-blocking `fcntl` execution lock shared by scheduled and manual entrypoints around `workflows.decision_refresh.run_decision_refresh` and the format monitor; maps both results to attributable status, best-effort terminalizes SIGTERM, and hashes only a ranking written by that attempt. A monitor outage degrades but does not discard a successful ranking. |
 | `launchd.py` | Generates the 07:30 local user LaunchAgent with `plistlib` and controls it through an injected `launchctl` port. Lifecycle mutations hold the refresh lock, refuse active-run bootout, and restore/reload the previous configuration after any post-bootout failure; uninstall preserves the plist on failed bootout. |
+| `format_monitor.py` | Typed atomic last-good legality/candidate state, stable evidence identities and acknowledgements, two-signal WotC/Scryfall correlation, release-window evidence, honest signal states, and `//` projection. Operational evidence is separate from `data/banlist/events.json`; no function imports or calls `append_ban_event`. |
 
 The LaunchAgent uses absolute repository/virtualenv/log paths, `WorkingDirectory`, and
 `StartCalendarInterval`; it omits `RunAtLoad`, `KeepAlive`, and `StartInterval`. Repository tests
-inject both paths and process results, so they never invoke live `launchctl` or touch
-`~/Library/LaunchAgents`. The scheduler automates the existing decision-data composition only; the
-B&R monitor, hot spare, vendor prices, and non-Legacy deployments remain separate scopes.
+inject both paths and process results, so they never invoke live `launchctl`, provider endpoints, or
+touch `~/Library/LaunchAgents`. The same locked job runs detection-only B&R/release monitoring and
+surfaces its state through `ops status`; the hot spare, vendor prices, and non-Legacy deployments
+remain separate scopes.
 
 ### `collection/` — the user's personal layer (local single-user; schema cloud-ready)
 

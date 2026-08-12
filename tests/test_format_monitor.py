@@ -5,6 +5,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from legacy_engine.ingestion.ban_monitor import parse_wotc_legacy_announcement
+from legacy_engine.ingestion.releases import ReleaseScan, SetRelease
 from legacy_engine.ops.format_monitor import (
     CandidateDisposition,
     FormatMonitorState,
@@ -16,8 +18,9 @@ from legacy_engine.ops.format_monitor import (
     merge_legality_observation,
     write_monitor_state,
     run_format_monitor,
+    format_monitor_audit_lines,
+    merge_wotc_announcement,
 )
-from legacy_engine.ingestion.releases import ReleaseScan, SetRelease
 
 
 NOW = datetime(2026, 8, 11, 18, tzinfo=timezone.utc)
@@ -142,6 +145,30 @@ class TestCandidateLifecycle:
         with pytest.raises(ValueError, match="unknown format-monitor candidate"):
             acknowledge_candidate(_empty_state(), "missing", acknowledged_at=NOW)
 
+    def test_scryfall_identity_enriches_wotc_first_candidate_without_duplicate(self):
+        baseline = merge_legality_observation(
+            _empty_state(), observed=extract_legacy_legalities(_rows()),
+            evidence=SCRYFALL, registered_events=(),
+        )
+        announcement = parse_wotc_legacy_announcement(
+            _wotc_page("Example Card is banned."),
+            source_url="https://magic.wizards.com/example",
+        )
+        wotc_first = merge_wotc_announcement(
+            baseline, announcement, observed_at=NOW + timedelta(hours=1),
+        )
+        correlated = merge_legality_observation(
+            wotc_first, observed=extract_legacy_legalities(_rows("banned")),
+            evidence=SCRYFALL.model_copy(update={"observed_at": NOW + timedelta(days=1)}),
+            registered_events=(),
+        )
+
+        assert len(correlated.candidates) == 1
+        assert correlated.candidates[0].subject_id == "oracle-1"
+        assert {item.source for item in correlated.candidates[0].evidence} == {
+            "scryfall", "wotc",
+        }
+
 
 class TestMonitorStatePersistence:
     def test_round_trip_and_failed_replace_preserve_last_good(self, tmp_path, monkeypatch):
@@ -257,3 +284,16 @@ class TestFormatMonitorComposition:
         )
         assert pending.release_state.value == "pending"
         assert len([item for item in pending.candidates if item.kind == "release"]) == 1
+
+    def test_audit_lines_keep_unavailable_and_pending_visible(self, tmp_path):
+        result = run_format_monitor(
+            MonitorPorts(RuntimeError("bulk offline"), {}),
+            state_path=tmp_path / "state.json", observed_at=NOW,
+            release_scan=None, release_scan_reason="sets offline", new_card_names=(),
+            registered_events=(),
+        )
+        brief = format_monitor_audit_lines(result, brief=True)
+        full = format_monitor_audit_lines(result)
+        assert brief[0].startswith("// ⚠ format monitor:")
+        assert "unavailable" in brief[0]
+        assert any("pending action" in line for line in full)

@@ -89,6 +89,8 @@ class TestDecisionRefresh:
         assert out_path.read_text() == "stable ranking"
         assert result.ranking_output == str(out_path)
         assert result.format_awareness.recent_releases == ("new: Recent",)
+        assert result.source_observation is not None
+        assert result.source_observation.new_card_names == frozenset({"New Card"})
         assert result.steps[0].status is RefreshStepStatus.COMPLETED
         assert result.format_awareness.era_alarms == ("possible change",)
 

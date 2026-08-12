@@ -109,6 +109,31 @@ class FormatMonitorPorts(Protocol):
     def fetch_wotc(self, url: str) -> str: ...
 
 
+class DefaultFormatMonitorPorts:
+    """Production external adapters; monitor orchestration remains hermetic."""
+
+    def oracle_rows(self) -> Iterable[dict[str, object]]:
+        from legacy_engine.ingestion.scryfall import ORACLE_CARDS_PATH, iter_bulk_rows
+
+        return iter_bulk_rows(ORACLE_CARDS_PATH)
+
+    def fetch_wotc(self, url: str) -> str:
+        import httpx
+
+        from legacy_engine.config import USER_AGENT
+
+        response = httpx.get(
+            url,
+            headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
+            follow_redirects=True,
+            timeout=30.0,
+        )
+        if response.status_code == 404:
+            raise FileNotFoundError(url)
+        response.raise_for_status()
+        return response.text
+
+
 def _subject_id(observation: LegalityObservation) -> str:
     return observation.oracle_id or normalize_name(observation.name).casefold()
 
@@ -238,6 +263,22 @@ def merge_legality_observation(
             continue
         candidate_id = _candidate_id(subject_id, before.legacy, after.legacy)
         old = candidates.get(candidate_id)
+        if old is None:
+            name_key = normalize_name(after.name).casefold()
+            matching = [
+                item for item in candidates.values()
+                if item.kind == "legality"
+                and normalize_name(item.subject_name).casefold() == name_key
+                and item.prior_value == before.legacy
+                and item.current_value == after.legacy
+            ]
+            if len(matching) > 1:
+                raise ValueError(
+                    f"ambiguous monitor candidates for Scryfall transition {after.name!r}"
+                )
+            if matching:
+                old = matching[0]
+                candidates.pop(old.candidate_id)
         merged_evidence = _merge_evidence(old.evidence if old else (), (evidence,))
         evidence_hash = _evidence_hash(merged_evidence)
         acknowledged_hash = old.acknowledged_evidence_hash if old else None
@@ -554,6 +595,31 @@ def run_format_monitor(
         release_state=release_state,
         unavailable_reasons=reasons,
     )
+
+
+def format_monitor_audit_lines(
+    result: FormatMonitorResult, *, brief: bool = False,
+) -> tuple[str, ...]:
+    """Render signal and candidate state using the project audit-line convention."""
+    signal_values = (
+        f"legality={result.legality_state.value}, wotc={result.wotc_state.value}, "
+        f"releases={result.release_state.value}"
+    )
+    warning = bool(result.pending_actions or result.unavailable_reasons)
+    prefix = "// ⚠" if warning else "//"
+    lines = [f"{prefix} format monitor: {signal_values}"]
+    if brief:
+        if result.pending_actions:
+            lines[0] += f" — {len(result.pending_actions)} pending operator action(s)"
+        return tuple(lines)
+    for candidate in result.candidates:
+        lines.append(
+            f"// format candidate: {candidate.candidate_id} — {candidate.kind} — "
+            f"{candidate.disposition.value} — {candidate.subject_name}: "
+            f"{candidate.prior_value or 'n/a'} -> {candidate.current_value}"
+        )
+    lines.extend(f"// ⚠ pending action: {action}" for action in result.pending_actions)
+    return tuple(lines)
 
 
 def acknowledge_candidate(

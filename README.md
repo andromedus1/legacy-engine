@@ -130,6 +130,7 @@ legacy-engine ops scheduler inspect   # loaded state, exact plist, schedule, and
 legacy-engine ops scheduler run-now   # launch now; never kills an already-running refresh
 legacy-engine ops status              # last outcome, phase/reason, artifact identity, pending actions
 legacy-engine ops status --brief      # one local-only session-orientation line
+legacy-engine ops monitor acknowledge CANDIDATE_ID  # suppress unchanged evidence after review
 legacy-engine ops scheduler uninstall # unload, then remove only legacy-engine's plist
 
 # Label every ingested deck with an archetype
@@ -245,12 +246,25 @@ running, and more-than-36-hour-old records are distinct `ops status` results. A 
 records its exact path and SHA-256. A failed refresh preserves the prior ranking without claiming
 that artifact as newly written.
 
+The same locked run also checks format currency. Scryfall's oracle bulk detects changes in
+`legalities.legacy`; WotC announcement pages supply attributable actions/effective dates; the
+existing `/sets` scan plus the actual card-ingest diff surfaces new-release evidence. Each signal
+is separately labeled `clear`, `pending`, `not_due`, or `unavailable`, and an upstream/parser
+failure retains last-good evidence and degrades the job rather than reporting false calm. Machine
+state lives at `data/ops/state/format-monitor.json` (or beside an explicit test/status override).
+
+Monitoring is deliberately **not authority**. `ops monitor acknowledge CANDIDATE_ID` suppresses
+only that candidate's unchanged evidence hash; materially new evidence resurfaces it. A reviewed
+Legacy ban becomes accepted engine truth only through the existing explicit
+`eras confirm DATE CARD REASON` command. Unbans or unexpected restriction transitions remain loud
+as unsupported pending actions because the cumulative ban ledger cannot honestly represent them.
+
 The lifecycle is reversible: install is an identical-config no-op, refuses to boot out an active
 refresh, and restores/reloads the previous plist after any post-bootout failure; uninstall likewise
 refuses active-run bootout and retains the plist when bootout fails.
-Use `ops scheduler inspect`, `ops status`, and the two log files before intervening. This scheduler
-does **not** install the separate B&R monitor, upstream hot spare, vendor-price refresh, or a Modern
-deployment.
+Use `ops scheduler inspect`, `ops status`, and the two log files before intervening. Format
+monitoring runs inside this job; there is no second LaunchAgent or daemon. The scheduler does **not**
+install an upstream hot spare, vendor-price refresh, or a Modern deployment.
 
 ### Deck-prep tooling (`scripts/`)
 
@@ -319,7 +333,7 @@ This project is built with a research-grounded, substrate-driven workflow:
 
 ```
 src/legacy_engine/
-  ingestion/   # Scryfall (oracle + prices bulk), fbettega cache, rules, banlist, releases, DuckDB store
+  ingestion/   # Scryfall JSONL bulk, fbettega cache, rules, banlist + WotC monitor, releases, DuckDB
   archetype/   # rules loader, matcher (ported Detect), colors, labeler, variants
   analytics/   # match_results, matchup (era-aware windows + hierarchical priors), metashare,
                #   trends, card_value, affectedness, discovery, subgroup, venue, speculation
@@ -332,6 +346,7 @@ src/legacy_engine/
   generation/  # consensus, export, tuning, discovery (modes 1+2+3), card_distribution, models
                #   (generate doctor lives in tuning/models)
   collection/  # persist (JSON SSOT), store (DuckDB), inventory, decks, allocation
+  ops/         # locked refresh, typed status, launchd controls, detection-only format monitor
   viz/         # Vega-Lite specs + theme + render (HTML/PNG) + 12-col layout + per-deck dashboard
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, Variant,
                #   Inventory, UserDeck, ...)

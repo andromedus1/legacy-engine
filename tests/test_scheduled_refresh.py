@@ -14,6 +14,7 @@ from legacy_engine.ops.scheduled_refresh import (
     run_scheduled_decision_refresh,
 )
 from legacy_engine.ops.status import JobOutcome, JobStatus
+from legacy_engine.ingestion.releases import SetRelease
 from legacy_engine.workflows.decision_refresh import (
     CampApplyResult,
     EraRunResult,
@@ -189,3 +190,67 @@ class TestScheduledDecisionRefresh:
         )
         assert canonical.outcome is JobOutcome.FAILED
         assert canonical.reason == "SystemExit"
+
+    def test_monitor_runs_under_same_lock_and_unavailable_degrades_not_fails(self, tmp_path):
+        ports = RecordingPorts()
+        events = []
+
+        class MonitorPorts:
+            def oracle_rows(self):
+                events.append("monitor")
+                raise RuntimeError("bulk offline")
+
+            def fetch_wotc(self, url):
+                raise FileNotFoundError(url)
+
+        @contextmanager
+        def lock(path):
+            events.append("lock-enter")
+            yield
+            events.append("lock-exit")
+
+        state_path = tmp_path / "state" / "format-monitor.json"
+        status = _run(
+            tmp_path, ports, lock_factory=lock,
+            format_monitor_ports=MonitorPorts(),
+            format_monitor_state_path=state_path,
+        )
+        assert events == ["lock-enter", "monitor", "lock-exit"]
+        assert status.outcome is JobOutcome.DEGRADED
+        assert status.artifacts.ranking_written
+        assert status.format_monitor.wotc == "unavailable"
+        assert any("format monitor unavailable" in item for item in status.pending_actions)
+
+    def test_monitor_candidate_projects_to_pending_action(self, tmp_path):
+        ports = RecordingPorts()
+        ports.refresh_sources = lambda db_path: SourceRefreshResult(
+            new_card_names=frozenset({"New Card"}),
+            recent_release_records=(SetRelease(
+                code="eoe", name="Edge of Eternities", released_at=NOW.date(),
+            ),),
+            summary="sources current",
+        )
+
+        class MonitorPorts:
+            def oracle_rows(self):
+                return [{
+                    "oracle_id": "one", "name": "Card",
+                    "legalities": {"legacy": "legal"},
+                }]
+
+            def fetch_wotc(self, url):
+                return (
+                    "<p>Changes effective as of August 11, 2026.</p>"
+                    "<h2>Legacy</h2><p>No changes.</p>"
+                    "<h2>Vintage</h2><p>No changes.</p>"
+                    "<p>Next announcement: October 12, 2026.</p>"
+                )
+
+        status = _run(
+            tmp_path, ports,
+            format_monitor_ports=MonitorPorts(),
+            format_monitor_state_path=tmp_path / "state.json",
+        )
+        assert status.outcome is JobOutcome.SUCCESS
+        assert status.format_monitor.candidate_count == 1
+        assert any("review new release evidence" in item for item in status.pending_actions)

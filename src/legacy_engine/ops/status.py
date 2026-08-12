@@ -29,6 +29,14 @@ class ArtifactIdentity(LegacyEngineModel):
     ranking_sha256: str | None = None
 
 
+class FormatMonitorSummary(LegacyEngineModel):
+    legality: str
+    wotc: str
+    releases: str
+    candidate_count: int = Field(ge=0)
+    unavailable_reasons: tuple[str, ...] = ()
+
+
 class JobStatus(LegacyEngineModel):
     schema_version: Literal[1] = 1
     job: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -43,6 +51,7 @@ class JobStatus(LegacyEngineModel):
     reason: str | None = None
     artifacts: ArtifactIdentity
     pending_actions: tuple[str, ...] = ()
+    format_monitor: FormatMonitorSummary | None = None
 
     @field_validator("started_at", "finished_at")
     @classmethod
@@ -184,6 +193,12 @@ def job_status_audit_lines(
         stamp = status.finished_at or status.started_at
         when = f" at {stamp.isoformat()}"
     head = f"{prefix} scheduled refresh: {view.health.value}{when} — {view.reason}"
+    if status is not None and status.format_monitor is not None:
+        monitor = status.format_monitor
+        head += (
+            f"; format monitor legality={monitor.legality}, wotc={monitor.wotc}, "
+            f"releases={monitor.releases}, candidates={monitor.candidate_count}"
+        )
     if brief or status is None:
         return (head,)
 
@@ -199,5 +214,15 @@ def job_status_audit_lines(
         )
     else:
         lines.append(f"// ranking: not written ({ranking.ranking_path})")
+    if status.format_monitor is not None:
+        monitor = status.format_monitor
+        lines.append(
+            f"// format monitor: legality={monitor.legality}, wotc={monitor.wotc}, "
+            f"releases={monitor.releases}, candidates={monitor.candidate_count}"
+        )
+        lines.extend(
+            f"// ⚠ format monitor unavailable: {reason}"
+            for reason in monitor.unavailable_reasons
+        )
     lines.extend(f"// ⚠ pending action: {action}" for action in status.pending_actions)
     return tuple(lines)

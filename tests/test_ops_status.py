@@ -10,6 +10,7 @@ from legacy_engine.ops.status import (
     JobHealth,
     JobOutcome,
     JobStatus,
+    FormatMonitorSummary,
     job_status_audit_lines,
     read_job_status,
     write_attempt_status,
@@ -138,3 +139,20 @@ class TestStatusAuditLines:
         assert len(lines) == 1
         assert lines[0].startswith("// ⚠ scheduled refresh: failed")
         assert "label broke" in lines[0]
+
+    def test_brief_and_full_output_surface_monitor_signal_states(self, tmp_path):
+        path = tmp_path / "status.json"
+        write_job_status(path, _status(
+            outcome=JobOutcome.DEGRADED,
+            reason="WotC offline",
+            format_monitor=FormatMonitorSummary(
+                legality="clear", wotc="unavailable", releases="clear",
+                candidate_count=1, unavailable_reasons=("WotC offline",),
+            ),
+        ))
+        view = read_job_status(path, now=NOW)
+        brief = job_status_audit_lines(view, brief=True)
+        full = job_status_audit_lines(view)
+        assert "wotc=unavailable" in brief[0]
+        assert "candidates=1" in brief[0]
+        assert any("format monitor unavailable: WotC offline" in line for line in full)

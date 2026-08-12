@@ -13,6 +13,7 @@ from typing import Protocol
 
 from legacy_engine.ops.status import (
     ArtifactIdentity,
+    FormatMonitorSummary,
     JobOutcome,
     JobStatus,
     write_attempt_status,
@@ -108,6 +109,7 @@ def _base_status(
     finished_at: datetime | None = None,
     reason: str | None = None,
     pending_actions: tuple[str, ...] = (),
+    format_monitor: FormatMonitorSummary | None = None,
 ) -> JobStatus:
     return JobStatus(
         job=JOB_NAME,
@@ -122,6 +124,7 @@ def _base_status(
         reason=reason,
         artifacts=artifacts,
         pending_actions=pending_actions,
+        format_monitor=format_monitor,
     )
 
 
@@ -136,6 +139,8 @@ def run_scheduled_decision_refresh(
     attempt_id_factory: Callable[[], str],
     pid: int,
     lock_factory: Callable[[Path], AbstractContextManager[None]] = exclusive_file_lock,
+    format_monitor_ports=None,
+    format_monitor_state_path: Path | None = None,
 ) -> JobStatus:
     """Run the production composition once and persist attributable status."""
     started_at = clock()
@@ -196,6 +201,59 @@ def run_scheduled_decision_refresh(
                 pending = tuple(
                     f"era alarm: {alarm}" for alarm in result.format_awareness.era_alarms
                 )
+                monitor_summary = None
+                if (format_monitor_ports is None) != (format_monitor_state_path is None):
+                    raise ValueError(
+                        "format_monitor_ports and format_monitor_state_path must be supplied together"
+                    )
+                if format_monitor_ports is not None and format_monitor_state_path is not None:
+                    try:
+                        from legacy_engine.ingestion.banlist import BAN_EVENTS
+                        from legacy_engine.ingestion.releases import ReleaseScan
+                        from legacy_engine.ops.format_monitor import run_format_monitor
+
+                        source = result.source_observation
+                        if source is None:
+                            raise ValueError("decision refresh produced no source observation")
+                        monitor = run_format_monitor(
+                            format_monitor_ports,
+                            state_path=format_monitor_state_path,
+                            observed_at=clock(),
+                            release_scan=(
+                                None if source.release_scan_reason is not None else ReleaseScan(
+                                    upcoming=list(source.upcoming_release_records),
+                                    recently_released=list(source.recent_release_records),
+                                    scanned_at=started_at.date(),
+                                )
+                            ),
+                            release_scan_reason=source.release_scan_reason,
+                            new_card_names=tuple(sorted(source.new_card_names)),
+                            registered_events=BAN_EVENTS,
+                        )
+                        monitor_summary = FormatMonitorSummary(
+                            legality=monitor.legality_state.value,
+                            wotc=monitor.wotc_state.value,
+                            releases=monitor.release_state.value,
+                            candidate_count=len(monitor.candidates),
+                            unavailable_reasons=monitor.unavailable_reasons,
+                        )
+                        pending = tuple(dict.fromkeys((*pending, *monitor.pending_actions)))
+                        if monitor.unavailable_reasons and outcome is JobOutcome.SUCCESS:
+                            outcome = JobOutcome.DEGRADED
+                            reason = "; ".join(monitor.unavailable_reasons)
+                            summary = "decision-data refresh completed; format monitor unavailable"
+                    except Exception as exc:
+                        monitor_summary = FormatMonitorSummary(
+                            legality="unavailable", wotc="unavailable", releases="unavailable",
+                            candidate_count=0, unavailable_reasons=(str(exc),),
+                        )
+                        pending = tuple(dict.fromkeys((
+                            *pending, f"format monitor unavailable: {exc}",
+                        )))
+                        if outcome is JobOutcome.SUCCESS:
+                            outcome = JobOutcome.DEGRADED
+                            reason = f"format monitor unavailable: {exc}"
+                            summary = "decision-data refresh completed; format monitor unavailable"
                 terminal = _base_status(
                     attempt_id=attempt_id,
                     pid=pid,
@@ -208,6 +266,7 @@ def run_scheduled_decision_refresh(
                     reason=reason,
                     artifacts=artifacts,
                     pending_actions=pending,
+                    format_monitor=monitor_summary,
                 )
             except (KeyboardInterrupt, SystemExit) as exc:
                 terminal = _base_status(

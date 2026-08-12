@@ -65,6 +65,7 @@ class DecisionRefreshResult(LegacyEngineModel):
     card_coverage: CardCoverageReport
     format_awareness: FormatAwareness
     ranking_output: str | None = None
+    source_observation: SourceRefreshResult | None = None
 
 
 class DecisionRefreshPorts(Protocol):
@@ -199,6 +200,7 @@ def run_decision_refresh(
     return DecisionRefreshResult(
         steps=tuple(steps), card_coverage=coverage,
         format_awareness=awareness, ranking_output=ranking_output,
+        source_observation=source,
     )
 
 

@@ -504,11 +504,14 @@ def ops() -> None:
               help="Ranking HTML path (defaults to decks/best-deck-best-call-ranking.html).")
 @click.option("--status-dir", type=click.Path(file_okay=False), default=None,
               help="Operational status directory (defaults to data/ops/status).")
+@click.option("--monitor-state-path", type=click.Path(dir_okay=False), default=None,
+              help="Format-monitor state path (defaults to data/ops/state/format-monitor.json).")
 @_verbose
 def ops_scheduled_refresh(
     db: str | None,
     out: str | None,
     status_dir: str | None,
+    monitor_state_path: str | None,
     verbose: bool,
 ) -> None:
     """Run the decision-data refresh once with locking and durable status."""
@@ -518,7 +521,10 @@ def ops_scheduled_refresh(
     from pathlib import Path
     from uuid import uuid4
 
-    from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR, OPS_STATUS_DIR, PROJECT_ROOT
+    from legacy_engine.config import (
+        DUCKDB_PATH, FORMAT_MONITOR_STATE_PATH, OPS_LOCK_DIR, OPS_STATUS_DIR, PROJECT_ROOT,
+    )
+    from legacy_engine.ops.format_monitor import DefaultFormatMonitorPorts
     from legacy_engine.ops.scheduled_refresh import (
         JOB_NAME,
         decision_refresh_lock_path,
@@ -532,6 +538,14 @@ def ops_scheduled_refresh(
     from legacy_engine.workflows.decision_refresh import DefaultDecisionRefreshPorts
 
     resolved_status_dir = Path(status_dir).resolve() if status_dir else OPS_STATUS_DIR
+    resolved_monitor_state = (
+        Path(monitor_state_path).resolve()
+        if monitor_state_path
+        else (
+            resolved_status_dir.parent / "state" / "format-monitor.json"
+            if status_dir else FORMAT_MONITOR_STATE_PATH
+        )
+    )
     status = run_scheduled_decision_refresh(
         DefaultDecisionRefreshPorts(),
         db_path=Path(db).resolve() if db else DUCKDB_PATH,
@@ -549,6 +563,8 @@ def ops_scheduled_refresh(
         clock=lambda: datetime.now(timezone.utc),
         attempt_id_factory=lambda: uuid4().hex,
         pid=os.getpid(),
+        format_monitor_ports=DefaultFormatMonitorPorts(),
+        format_monitor_state_path=resolved_monitor_state,
     )
     view = read_job_status(
         resolved_status_dir / f"{JOB_NAME}.json",
@@ -588,6 +604,47 @@ def ops_status(status_dir: str | None, brief: bool, verbose: bool) -> None:
     )
     for line in job_status_audit_lines(view, brief=brief):
         click.echo(line)
+
+
+@ops.group("monitor")
+def ops_monitor() -> None:
+    """Inspect and acknowledge machine-observed format changes."""
+
+
+@ops_monitor.command("acknowledge")
+@click.argument("candidate_id")
+@click.option("--state-path", type=click.Path(dir_okay=False), default=None,
+              help="Format-monitor state path (defaults to data/ops/state/format-monitor.json).")
+@_verbose
+def ops_monitor_acknowledge(
+    candidate_id: str, state_path: str | None, verbose: bool,
+) -> None:
+    """Acknowledge the exact evidence currently attached to CANDIDATE_ID."""
+    _setup_logging(verbose)
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from legacy_engine.config import FORMAT_MONITOR_STATE_PATH
+    from legacy_engine.ops.format_monitor import (
+        acknowledge_candidate,
+        load_monitor_state,
+        write_monitor_state,
+    )
+
+    path = Path(state_path).resolve() if state_path else FORMAT_MONITOR_STATE_PATH
+    state = load_monitor_state(path)
+    if state is None:
+        raise click.ClickException(f"no format-monitor state at {path}")
+    try:
+        updated = acknowledge_candidate(
+            state, candidate_id, acknowledged_at=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    write_monitor_state(path, updated)
+    click.echo(f"// format candidate acknowledged: {candidate_id}")
+    click.echo("// unchanged evidence will stay suppressed; new evidence will resurface it")
+    click.echo("// acknowledgement does not change the B&R ledger; use `eras confirm` after review")
 
 
 @ops.group("scheduler")
