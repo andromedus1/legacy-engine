@@ -20,6 +20,8 @@ OPS_DIR = DATA_DIR / "ops"                # local operational state (created by 
 OPS_STATUS_DIR = OPS_DIR / "status"       # atomic job status + immutable attempts
 OPS_LOG_DIR = OPS_DIR / "logs"            # launchd stdout/stderr targets
 OPS_LOCK_DIR = OPS_DIR / "locks"          # kernel-backed execution lock files
+OPS_STATE_DIR = OPS_DIR / "state"          # recoverable machine-observed operational state
+FORMAT_MONITOR_STATE_PATH = OPS_STATE_DIR / "format-monitor.json"
 
 # Discovered-variant staging registry (derived side — written by `discover run`, read by
 # `discover list`/`discover promote`; never hand-curated, unlike VARIANTS_REGISTRY_PATH).
