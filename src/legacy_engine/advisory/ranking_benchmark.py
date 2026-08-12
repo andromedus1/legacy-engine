@@ -28,8 +28,10 @@ BenchmarkEstimatorId = Literal[
 TaxonomyReplayMode = Literal["contemporaneous", "retrospective-fixed-parent"]
 OutcomeExclusionReason = Literal[
     "outside-fold", "mirror", "bye-draw-invalid", "ambiguous-player",
-    "unclassified", "emerging-label", "outside-frozen-universe",
+    "unclassified", "emerging-label", "outside-frozen-universe", "card-metadata-unresolved",
 ]
+CardMetadataPolicyMode = Literal["require-complete", "quarantine-unresolved-decks"]
+BenchmarkClaimCeiling = Literal["descriptive", "predictive-claim-supported"]
 
 ESTIMATOR_REGISTRY: tuple[BenchmarkEstimatorId, ...] = (
     "coin-50", "recent-raw-wr", "field-share", "top-finish-conversion",
@@ -63,6 +65,57 @@ class BenchmarkFold(LegacyEngineModel):
     event_dates: tuple[str, ...]
 
 
+class CardMetadataPolicy(LegacyEngineModel):
+    """Explicit, protocol-bound handling for unresolved deck-card metadata."""
+
+    mode: CardMetadataPolicyMode = "require-complete"
+    max_deck_fraction: float = 0.0
+    max_round_fraction: float = 0.0
+
+    @model_validator(mode="after")
+    def _validate_policy(self) -> "CardMetadataPolicy":
+        if self.mode == "require-complete":
+            if self.max_deck_fraction != 0.0 or self.max_round_fraction != 0.0:
+                raise ValueError("require-complete card metadata policy requires zero ceilings")
+        elif not 0.0 < self.max_deck_fraction <= 0.005:
+            raise ValueError("quarantine max_deck_fraction must be in (0, 0.005]")
+        elif not 0.0 < self.max_round_fraction <= 0.02:
+            raise ValueError("quarantine max_round_fraction must be in (0, 0.02]")
+        return self
+
+
+class QuarantinedDeck(LegacyEngineModel):
+    tournament_id: str
+    deck_idx: int
+    player_key: str | None
+    event_date: str
+    source: str
+    event_uri: str
+    unresolved_names: tuple[str, ...]
+    identity_ambiguous: bool = False
+
+
+class CardMetadataQuarantineLedger(LegacyEngineModel):
+    policy: CardMetadataPolicy
+    raw_decks: int
+    retained_decks: int
+    raw_rounds: int
+    retained_rounds: int
+    excluded_decks: tuple[QuarantinedDeck, ...]
+    excluded_round_keys: tuple[tuple[str, int], ...]
+    deck_fraction: float
+    round_fraction: float
+    counts_by_source: dict[str, dict[str, int]]
+    within_ceiling: bool
+    reasons: tuple[str, ...]
+    snapshot_source_fingerprint: str | None = None
+    retained_facts_sha256: str | None = None
+
+    @property
+    def digest(self) -> str:
+        return content_sha256(self.model_dump(mode="json"))
+
+
 class BenchmarkProtocol(LegacyEngineModel):
     protocol_id: str
     created_at: str
@@ -80,14 +133,24 @@ class BenchmarkProtocol(LegacyEngineModel):
     support: EvaluationSupport = Field(default_factory=EvaluationSupport)
     planned_folds: tuple[BenchmarkFold, ...] = ()
     ban_events_as_of: tuple[tuple[str, str, str], ...] = ()
+    registered_at: str | None = None
+    claim_ceiling: BenchmarkClaimCeiling = "predictive-claim-supported"
+    card_metadata: CardMetadataPolicy = Field(default_factory=CardMetadataPolicy)
 
     @model_validator(mode="after")
     def _validate_protocol(self) -> "BenchmarkProtocol":
         first = date.fromisoformat(self.first_cutoff)
         final = date.fromisoformat(self.final_evaluation_until)
         created = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
-        if created.date() > first:
+        if created.date() > first and self.card_metadata.mode == "require-complete":
             raise ValueError("created_at must be no later than first_cutoff")
+        if self.card_metadata.mode == "quarantine-unresolved-decks":
+            if self.registered_at is None:
+                raise ValueError("quarantine protocols require registered_at")
+            datetime.fromisoformat(self.registered_at.replace("Z", "+00:00"))
+            registered = datetime.fromisoformat(self.registered_at.replace("Z", "+00:00"))
+            if registered.date() > first and self.claim_ceiling != "descriptive":
+                raise ValueError("posthoc quarantine protocols must have descriptive claim ceiling")
         if final <= first:
             raise ValueError("final_evaluation_until must be after first_cutoff")
         if self.horizon_days < 1 or self.step_days < 1:
@@ -142,6 +205,8 @@ class SnapshotManifest(LegacyEngineModel):
     card_availability_sha256: str
     degraded: bool
     reasons: tuple[str, ...]
+    card_metadata_quarantine: CardMetadataQuarantineLedger | None = None
+    card_metadata_quarantine_sha256: str | None = None
 
 
 class FrozenMatchupPrediction(LegacyEngineModel):
@@ -215,12 +280,15 @@ class HeldoutDeck(LegacyEngineModel):
     event_date: str
     provenance: str
     archetype: str | None
-    exclusion_reason: Literal["unclassified", "emerging-label", "outside-frozen-universe"] | None
+    exclusion_reason: Literal[
+        "unclassified", "emerging-label", "outside-frozen-universe", "card-metadata-unresolved",
+    ] | None
 
 
 class HeldoutOutcomes(LegacyEngineModel):
     matches: tuple[HeldoutMatch, ...]
     decks: tuple[HeldoutDeck, ...]
+    card_metadata_quarantine: CardMetadataQuarantineLedger | None = None
 
 
 class FieldCoverageLedger(LegacyEngineModel):
@@ -279,6 +347,7 @@ class BenchmarkEvaluation(LegacyEngineModel):
     player_sensitivity: dict[str, float] | None = None
     paired_log_loss_differences: dict[str, dict[str, float | None]] = Field(default_factory=dict)
     field_coverage: FieldCoverageLedger | None = None
+    card_metadata_quarantine: CardMetadataQuarantineLedger | None = None
 
 
 class BenchmarkEvaluationSummary(LegacyEngineModel):
@@ -305,7 +374,158 @@ def content_sha256(value: object) -> str:
 
 
 def protocol_sha256(protocol: BenchmarkProtocol) -> str:
-    return content_sha256(protocol)
+    # v1 protocol bytes predate the additive quarantine fields.  Omitting only their
+    # defaults preserves the v1 digest while any declared policy/ceiling still binds
+    # the protocol hash as a new immutable experiment.
+    payload = protocol.model_dump(mode="json")
+    if (
+        protocol.registered_at is None
+        and protocol.claim_ceiling == "predictive-claim-supported"
+        and protocol.card_metadata == CardMetadataPolicy()
+    ):
+        payload.pop("registered_at", None)
+        payload.pop("claim_ceiling", None)
+        payload.pop("card_metadata", None)
+    return content_sha256(payload)
+
+
+def plan_card_metadata_quarantine(
+    con,
+    *,
+    start: str | None,
+    end: str,
+    policy: CardMetadataPolicy,
+) -> CardMetadataQuarantineLedger:
+    """Plan whole-deck exclusions from card closure, before labels or outcomes are read."""
+    if policy.mode == "require-complete":
+        unresolved = con.execute(
+            """SELECT count(*) FROM deck_cards dc JOIN decks d
+               ON d.tournament_id=dc.tournament_id AND d.deck_idx=dc.deck_idx
+               JOIN tournaments t ON t.id=d.tournament_id
+               LEFT JOIN cards c ON c.name=dc.name
+               WHERE substr(t.date,1,10) < ?
+                 AND (? IS NULL OR substr(t.date,1,10) >= ?)
+                 AND c.name IS NULL""", [end, start, start],
+        ).fetchone()[0]
+        if unresolved:
+            raise ValueError(
+                f"benchmark has {unresolved} deck-card rows without observed card metadata"
+            )
+        return CardMetadataQuarantineLedger(
+            policy=policy, raw_decks=0, retained_decks=0, raw_rounds=0, retained_rounds=0,
+            excluded_decks=(), excluded_round_keys=(), deck_fraction=0.0, round_fraction=0.0,
+            counts_by_source={}, within_ceiling=True, reasons=(),
+        )
+
+    date_clause = "substr(t.date,1,10) < ? AND (? IS NULL OR substr(t.date,1,10) >= ?)"
+    deck_rows = con.execute(
+        f"""SELECT d.tournament_id, d.deck_idx, d.player, substr(t.date,1,10),
+                   coalesce(t.source,''), coalesce(t.uri,'')
+            FROM decks d JOIN tournaments t ON t.id=d.tournament_id
+            WHERE {date_clause} ORDER BY t.date, d.tournament_id, d.deck_idx""",
+        [end, start, start],
+    ).fetchall()
+    card_rows = con.execute(
+        f"""SELECT dc.tournament_id, dc.deck_idx, dc.name
+            FROM deck_cards dc JOIN tournaments t ON t.id=dc.tournament_id
+            LEFT JOIN cards c ON c.name=dc.name
+            WHERE {date_clause} AND c.name IS NULL
+            ORDER BY dc.tournament_id, dc.deck_idx, dc.name""",
+        [end, start, start],
+    ).fetchall()
+    unresolved_by_deck: dict[tuple[str, int], set[str]] = {}
+    for tournament_id, deck_idx, name in card_rows:
+        unresolved_by_deck.setdefault((str(tournament_id), int(deck_idx)), set()).add(str(name))
+
+    duplicate_rows = con.execute(
+        f"""SELECT d.tournament_id, lower(trim(d.player)) AS player_key
+            FROM decks d JOIN tournaments t ON t.id=d.tournament_id
+            WHERE {date_clause} AND trim(coalesce(d.player,'')) <> ''
+            GROUP BY d.tournament_id, lower(trim(d.player)) HAVING count(*) > 1
+            ORDER BY d.tournament_id, player_key""",
+        [end, start, start],
+    ).fetchall()
+    duplicate_keys = {(str(event), str(player)) for event, player in duplicate_rows}
+    by_key = {
+        (str(event), str(player)): (int(deck_idx),)
+        for event, deck_idx, player, _date, _source, _uri in deck_rows
+        if str(player or "").strip()
+    }
+    affected_keys = {
+        (event, str(player).strip().lower())
+        for (event, deck_idx), names in unresolved_by_deck.items()
+        for _event, _idx, player, _date, _source, _uri in deck_rows
+        if _event == event and int(_idx) == deck_idx and str(player or "").strip()
+    }
+    excluded_decks: list[QuarantinedDeck] = []
+    for event, deck_idx, player, event_date, source, event_uri in deck_rows:
+        key = (str(event), int(deck_idx))
+        names = unresolved_by_deck.get(key)
+        if not names:
+            continue
+        player_key = str(player).strip().lower() or None
+        excluded_decks.append(QuarantinedDeck(
+            tournament_id=str(event), deck_idx=int(deck_idx), player_key=player_key,
+            event_date=str(event_date), source=str(source), event_uri=str(event_uri),
+            unresolved_names=tuple(sorted(names)),
+            identity_ambiguous=(str(event), player_key) in duplicate_keys if player_key else False,
+        ))
+    # Any duplicate key touching a quarantined deck is unsafe for every round using it.
+    affected_keys |= {
+        (deck.tournament_id, deck.player_key)
+        for deck in excluded_decks if deck.player_key is not None and deck.identity_ambiguous
+    }
+    round_rows = con.execute(
+        f"""SELECT r.tournament_id, r.match_idx, lower(trim(coalesce(r.player1,''))),
+                   lower(trim(coalesce(r.player2,''))), coalesce(t.source,'')
+            FROM rounds r JOIN tournaments t ON t.id=r.tournament_id
+            WHERE {date_clause} ORDER BY t.date, r.tournament_id, r.match_idx""",
+        [end, start, start],
+    ).fetchall()
+    excluded_round_keys = tuple(sorted(
+        (str(event), int(match_idx)) for event, match_idx, player1, player2, _source in round_rows
+        if (str(event), str(player1)) in affected_keys or (str(event), str(player2)) in affected_keys
+    ))
+    raw_decks, raw_rounds = len(deck_rows), len(round_rows)
+    deck_fraction = len(excluded_decks) / raw_decks if raw_decks else 0.0
+    round_fraction = len(excluded_round_keys) / raw_rounds if raw_rounds else 0.0
+    reasons: list[str] = []
+    if deck_fraction > policy.max_deck_fraction:
+        reasons.append(
+            f"quarantined deck fraction {deck_fraction:.3%} exceeds ceiling {policy.max_deck_fraction:.3%}"
+        )
+    if round_fraction > policy.max_round_fraction:
+        reasons.append(
+            f"quarantined round fraction {round_fraction:.3%} exceeds ceiling {policy.max_round_fraction:.3%}"
+        )
+    counts_by_source: dict[str, dict[str, int]] = {}
+    excluded_deck_keys = {(d.tournament_id, d.deck_idx) for d in excluded_decks}
+    excluded_round_set = set(excluded_round_keys)
+    for event, _idx, _player, _date, source, _uri in deck_rows:
+        stats = counts_by_source.setdefault(str(source), {
+            "raw_decks": 0, "retained_decks": 0, "raw_rounds": 0, "retained_rounds": 0,
+        })
+        stats["raw_decks"] += 1
+        if (str(event), int(_idx)) not in excluded_deck_keys:
+            stats["retained_decks"] += 1
+    for event, match_idx, _p1, _p2, source in round_rows:
+        stats = counts_by_source.setdefault(str(source), {
+            "raw_decks": 0, "retained_decks": 0, "raw_rounds": 0, "retained_rounds": 0,
+        })
+        stats["raw_rounds"] += 1
+        if (str(event), int(match_idx)) not in excluded_round_set:
+            stats["retained_rounds"] += 1
+    return CardMetadataQuarantineLedger(
+        policy=policy, raw_decks=raw_decks, retained_decks=raw_decks - len(excluded_decks),
+        raw_rounds=raw_rounds, retained_rounds=raw_rounds - len(excluded_round_keys),
+        excluded_decks=tuple(excluded_decks), excluded_round_keys=excluded_round_keys,
+        deck_fraction=deck_fraction, round_fraction=round_fraction,
+        counts_by_source=dict(sorted(counts_by_source.items())), within_ceiling=not reasons,
+        reasons=tuple(reasons), snapshot_source_fingerprint=content_sha256({
+            "decks": [list(row[:2]) + [row[3], row[4], row[5]] for row in deck_rows],
+            "rounds": [list(row[:4]) for row in round_rows],
+        }),
+    )
 
 
 _VARIANT_ESTIMATOR: dict[str, BenchmarkEstimatorId] = {
@@ -372,10 +592,16 @@ def atomic_write_text(path: Path, text: str) -> None:
 def _field_coverage_ledger(
     decks: Sequence[HeldoutDeck], universe: set[str],
 ) -> FieldCoverageLedger:
-    exclusions = {"unclassified": 0, "emerging-label": 0, "outside-frozen-universe": 0}
+    exclusions = {
+        "unclassified": 0, "emerging-label": 0, "outside-frozen-universe": 0,
+        "card-metadata-unresolved": 0,
+    }
     counts: dict[str, int] = {}
     classified = covered = 0
     for deck in decks:
+        if deck.exclusion_reason == "card-metadata-unresolved":
+            exclusions["card-metadata-unresolved"] += 1
+            continue
         if deck.archetype is None:
             exclusions["unclassified"] += 1
             continue
@@ -834,7 +1060,7 @@ def evaluate_origin(
     exclusions: dict[OutcomeExclusionReason, int] = {
         reason: 0 for reason in (
             "outside-fold", "mirror", "bye-draw-invalid", "ambiguous-player",
-            "unclassified", "emerging-label", "outside-frozen-universe",
+            "unclassified", "emerging-label", "outside-frozen-universe", "card-metadata-unresolved",
         )
     }
     for match in raw_matches:
@@ -902,6 +1128,9 @@ def evaluate_origin(
         player_sensitivity=player_sensitivity,
         paired_log_loss_differences=_paired_event_log_loss(predictions, normalized, protocol),
         field_coverage=field_coverage,
+        card_metadata_quarantine=(
+            outcome_rows.card_metadata_quarantine if isinstance(outcome_rows, HeldoutOutcomes) else None
+        ),
     )
 
 
@@ -992,8 +1221,10 @@ def aggregate_benchmark(
     ) if evaluable else False
     if not calibration_available:
         reasons.append("required primary calibration metrics are unavailable")
+    if protocol.claim_ceiling == "descriptive":
+        reasons.append("protocol claim ceiling is descriptive; no predictive validation claim is permitted")
     status = (
-        "predictive-claim-supported" if not reasons
+        "predictive-claim-supported" if not reasons and protocol.claim_ceiling == "predictive-claim-supported"
         else ("descriptive" if evaluable else "not-evaluable")
     )
     return BenchmarkEvaluationSummary(
@@ -1053,6 +1284,14 @@ def render_benchmark_markdown(summary: BenchmarkEvaluationSummary) -> str:
             lines.append(
                 f"- Classified field ledger: covered={fold.field_coverage.covered_decks}/"
                 f"{fold.field_coverage.classified_decks}; exclusions={fold.field_coverage.exclusions}."
+            )
+        if fold.card_metadata_quarantine is not None:
+            ledger = fold.card_metadata_quarantine
+            lines.append(
+                f"- Card metadata ledger: decks {ledger.retained_decks}/{ledger.raw_decks} retained "
+                f"({ledger.deck_fraction:.3%} excluded), rounds {ledger.retained_rounds}/"
+                f"{ledger.raw_rounds} retained ({ledger.round_fraction:.3%} excluded); "
+                f"sources={ledger.counts_by_source}; digest=`{ledger.digest}`."
             )
         for external in fold.external:
             lines.append(

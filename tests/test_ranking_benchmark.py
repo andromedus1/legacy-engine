@@ -9,6 +9,7 @@ from legacy_engine.advisory.ranking_benchmark import (
     ESTIMATOR_REGISTRY,
     BenchmarkFold,
     BenchmarkProtocol,
+    CardMetadataPolicy,
     EvaluationSupport,
     ExternalRankingSnapshot,
     FrozenMatchupPrediction,
@@ -22,10 +23,12 @@ from legacy_engine.advisory.ranking_benchmark import (
     content_sha256,
     evaluate_origin,
     plan_walk_forward_folds,
+    plan_card_metadata_quarantine,
     project_matchup_probability,
     protocol_sha256,
     render_benchmark_markdown,
 )
+from legacy_engine.ingestion import store
 from legacy_engine.advisory.ranking_measurement import (
     MethodologyVariantSpec,
     RankingCellMeasurement,
@@ -50,6 +53,53 @@ def test_protocol_preregisters_primary_and_estimators():
     assert len(configured.estimator_ids) == 10
     with pytest.raises(ValueError, match="preregistered estimator registry"):
         protocol(estimator_ids=("coin-50",))
+
+
+def test_card_metadata_policy_is_closed_and_posthoc_quarantine_is_descriptive():
+    with pytest.raises(ValueError, match="zero ceilings"):
+        CardMetadataPolicy(mode="require-complete", max_deck_fraction=0.001)
+    with pytest.raises(ValueError, match="require registered_at"):
+        protocol(
+            created_at="2026-08-12T00:00:00Z", first_cutoff="2025-01-01",
+            card_metadata=CardMetadataPolicy(
+                mode="quarantine-unresolved-decks", max_deck_fraction=0.005,
+                max_round_fraction=0.02,
+            ),
+        )
+    configured = protocol(
+        created_at="2026-08-12T00:00:00Z", first_cutoff="2025-01-01",
+        registered_at="2026-08-12T00:00:00Z", claim_ceiling="descriptive",
+        card_metadata=CardMetadataPolicy(
+            mode="quarantine-unresolved-decks", max_deck_fraction=0.005,
+            max_round_fraction=0.02,
+        ),
+    )
+    assert configured.claim_ceiling == "descriptive"
+
+
+def test_quarantine_ledger_removes_whole_decks_and_is_result_blind():
+    con = store.connect(":memory:")
+    store.init_schema(con)
+    con.execute("INSERT INTO cards VALUES ('Known', '', 0, '', '', '', '', 'normal', false, NULL, NULL)")
+    con.execute("INSERT INTO tournaments VALUES ('e', 'E', '2025-01-01', 'uri', 'Legacy', 'src', 'prov')")
+    con.executemany(
+        "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+        [('e', 0, 'Alice', '1-0', None, None), ('e', 1, 'Bob', '0-1', None, None)],
+    )
+    con.executemany(
+        "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+        [('e', 0, 'main', 'Unknown', 4), ('e', 1, 'main', 'Known', 4)],
+    )
+    con.execute("INSERT INTO rounds VALUES ('e', 0, 'Alice', 'Bob', '2-0')")
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    first = plan_card_metadata_quarantine(con, start=None, end="2025-02-01", policy=policy)
+    assert not first.within_ceiling
+    con.execute("UPDATE rounds SET result='0-2'")
+    # The planner reads card/deck/player dimensions only; changing a result cannot affect it.
+    changed = plan_card_metadata_quarantine(con, start=None, end="2025-02-01", policy=policy)
+    assert changed == first
 
 
 def test_walk_forward_folds_keep_dates_whole_and_reset_at_ban():

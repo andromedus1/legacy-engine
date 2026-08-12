@@ -21,11 +21,14 @@ from legacy_engine.advisory.ranking_benchmark import (
     HeldoutDeck,
     HeldoutMatch,
     HeldoutOutcomes,
+    CardMetadataPolicy,
+    CardMetadataQuarantineLedger,
     SnapshotManifest,
     TaxonomySnapshotManifest,
     content_sha256,
     project_matchup_probability,
     protocol_sha256,
+    plan_card_metadata_quarantine,
     validate_snapshot_manifest,
 )
 from legacy_engine.advisory.ranking_measurement import (
@@ -131,11 +134,18 @@ def _copy_training_facts(
     source: duckdb.DuckDBPyConnection,
     destination: duckdb.DuckDBPyConnection,
     cutoff: str,
-) -> dict[str, list[tuple]]:
+    ledger: CardMetadataQuarantineLedger | None = None,
+) -> tuple[dict[str, list[tuple]], dict[str, list[tuple]]]:
     facts: dict[str, list[tuple]] = {}
+    raw_facts: dict[str, list[tuple]] = {}
     for table, columns in _RAW_TABLE_COLUMNS.items():
         rows = _rows(source, table, columns, cutoff)
+        raw_facts[table] = rows
         facts[table] = rows
+    if ledger is not None:
+        facts = _filter_training_facts(facts, ledger)
+    for table, columns in _RAW_TABLE_COLUMNS.items():
+        rows = facts[table]
         if rows:
             placeholders = ",".join("?" for _ in columns)
             destination.executemany(
@@ -156,7 +166,35 @@ def _copy_training_facts(
         if cards:
             destination.executemany("INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", cards)
     facts["cards"] = cards
-    return facts
+    return facts, raw_facts
+
+
+def _filter_training_facts(
+    facts: dict[str, list[tuple]], ledger: CardMetadataQuarantineLedger,
+) -> dict[str, list[tuple]]:
+    excluded_decks = {(event, deck_idx) for event, deck_idx in (
+        (item.tournament_id, item.deck_idx) for item in ledger.excluded_decks
+    )}
+    excluded_rounds = set(ledger.excluded_round_keys)
+    excluded_players = {
+        (item.tournament_id, item.player_key) for item in ledger.excluded_decks
+        if item.player_key is not None
+    }
+    filtered: dict[str, list[tuple]] = {}
+    for table, rows in facts.items():
+        if table == "decks":
+            filtered[table] = [row for row in rows if (str(row[0]), int(row[1])) not in excluded_decks]
+        elif table == "deck_cards":
+            filtered[table] = [row for row in rows if (str(row[0]), int(row[1])) not in excluded_decks]
+        elif table == "rounds":
+            filtered[table] = [row for row in rows if (str(row[0]), int(row[1])) not in excluded_rounds]
+        elif table == "standings":
+            filtered[table] = [row for row in rows if (
+                str(row[0]), normalize_player(row[2])
+            ) not in excluded_players]
+        else:
+            filtered[table] = rows
+    return filtered
 
 
 def _validate_closure(con: duckdb.DuckDBPyConnection) -> None:
@@ -203,6 +241,7 @@ def build_origin_snapshot(
     taxonomy_mode: str = "retrospective-fixed-parent",
     taxonomy_snapshot: Path | None = None,
     ban_events: tuple[tuple[str, str, str], ...] | None = None,
+    card_metadata_policy: CardMetadataPolicy | None = None,
 ) -> SnapshotManifest:
     """Build an atomic, raw-facts-only pre-cutoff corpus and recompute its era ledger."""
     if source_db.resolve() == destination_db.resolve():
@@ -231,7 +270,14 @@ def build_origin_snapshot(
     destination = store.connect(temporary_name)
     try:
         store.init_schema(destination)
-        facts = _copy_training_facts(source, destination, cutoff)
+        quarantine: CardMetadataQuarantineLedger | None = None
+        if card_metadata_policy is not None and card_metadata_policy.mode == "quarantine-unresolved-decks":
+            quarantine = plan_card_metadata_quarantine(
+                source, start=None, end=cutoff, policy=card_metadata_policy,
+            )
+            if not quarantine.within_ceiling:
+                raise ValueError("; ".join(quarantine.reasons))
+        facts, raw_facts = _copy_training_facts(source, destination, cutoff, quarantine)
         if not rules_path.is_dir():
             raise ValueError("benchmark taxonomy rules payload must be a rules directory")
         # Both modes replay their pinned parent rules. Stored archetype/variant columns are
@@ -263,10 +309,14 @@ def build_origin_snapshot(
             for row in facts["rounds"]
         )
         serialized_bans = tuple((d.isoformat(), card, reason) for d, card, reason in events_as_of)
-        fingerprint_facts = dict(facts)
+        fingerprint_facts = dict(raw_facts)
         fingerprint_facts["decks"] = [
-            (*row[:4], None, None) for row in facts["decks"]
+            (*row[:4], None, None) for row in raw_facts["decks"]
         ]
+        if quarantine is not None:
+            quarantine = quarantine.model_copy(update={
+                "retained_facts_sha256": content_sha256(facts),
+            })
         manifest = SnapshotManifest(
             protocol_hash=protocol_hash,
             fold=fold,
@@ -292,6 +342,8 @@ def build_origin_snapshot(
                 if fold.regime_start == fold.cutoff else None,
                 "card availability is observed-by-cutoff because release dates are unavailable",
             ))),
+            card_metadata_quarantine=quarantine,
+            card_metadata_quarantine_sha256=content_sha256(quarantine) if quarantine else None,
         )
         validate_snapshot_manifest(manifest)
         destination.execute("CHECKPOINT")
@@ -598,13 +650,15 @@ def freeze_origin_predictions(
 
 def _classified_labels(
     con: duckdb.DuckDBPyConnection, taxonomy_snapshot: Path, cutoff: str,
+    excluded_decks: set[tuple[str, int]] | None = None,
 ) -> dict[tuple[str, int], str]:
     _manifest, rules_path = _load_taxonomy_snapshot(taxonomy_snapshot, cutoff)
-    return _classified_labels_with_rules(con, rules_path)
+    return _classified_labels_with_rules(con, rules_path, excluded_decks=excluded_decks)
 
 
 def _classified_labels_with_rules(
     con: duckdb.DuckDBPyConnection, rules_path: Path,
+    excluded_decks: set[tuple[str, int]] | None = None,
 ) -> dict[tuple[str, int], str]:
     if not rules_path.is_dir():
         raise ValueError("taxonomy rules payload must be a rules directory")
@@ -613,6 +667,8 @@ def _classified_labels_with_rules(
     for tournament_id, deck_idx in con.execute(
         "SELECT tournament_id, deck_idx FROM decks ORDER BY 1, 2"
     ).fetchall():
+        if excluded_decks and (str(tournament_id), int(deck_idx)) in excluded_decks:
+            continue
         main: dict[str, int] = {}
         side: dict[str, int] = {}
         cards = []
@@ -641,21 +697,36 @@ def load_heldout_outcomes(
     taxonomy_mode: str = "retrospective-fixed-parent",
     expected_rules_sha256: str | None = None,
     taxonomy_snapshot: Path | None = None,
+    card_metadata_policy: CardMetadataPolicy | None = None,
 ) -> HeldoutOutcomes:
     """Read future match outcomes and a separate classified field-mass denominator."""
     con = duckdb.connect(str(source_db), read_only=True)
     try:
+        quarantine: CardMetadataQuarantineLedger | None = None
+        if card_metadata_policy is not None and card_metadata_policy.mode == "quarantine-unresolved-decks":
+            quarantine = plan_card_metadata_quarantine(
+                con, start=fold.cutoff, end=fold.evaluation_until, policy=card_metadata_policy,
+            )
+            if not quarantine.within_ceiling:
+                raise ValueError("; ".join(quarantine.reasons))
+        excluded_decks = {
+            (item.tournament_id, item.deck_idx) for item in quarantine.excluded_decks
+        } if quarantine is not None else set()
         if taxonomy_mode == "contemporaneous":
             if taxonomy_snapshot is None:
                 raise ValueError("contemporaneous held-out classification requires a taxonomy snapshot")
-            classified = _classified_labels(con, taxonomy_snapshot, fold.cutoff)
+            classified = _classified_labels(
+                con, taxonomy_snapshot, fold.cutoff, excluded_decks=excluded_decks,
+            )
         elif taxonomy_mode == "retrospective-fixed-parent":
             if taxonomy_snapshot is not None:
                 raise ValueError("retrospective held-out classification does not accept a snapshot")
             actual_rules = _tree_hash(RULES_DIR)
             if expected_rules_sha256 is not None and actual_rules != expected_rules_sha256:
                 raise ValueError("retrospective parent taxonomy rules changed after prediction freeze")
-            classified = _classified_labels_with_rules(con, RULES_DIR)
+            classified = _classified_labels_with_rules(
+                con, RULES_DIR, excluded_decks=excluded_decks,
+            )
         else:
             raise ValueError(f"unknown taxonomy mode: {taxonomy_mode}")
         deck_rows = con.execute(
@@ -698,11 +769,16 @@ def load_heldout_outcomes(
         event_id, event_date, provenance, player1, player2, result,
         deck1, deck2, arch1, arch2, amb1, amb2,
     ) in rows:
-        arch1 = classified.get((str(event_id), int(deck1))) if deck1 is not None else None
-        arch2 = classified.get((str(event_id), int(deck2))) if deck2 is not None else None
+        deck_key1 = (str(event_id), int(deck1)) if deck1 is not None else None
+        deck_key2 = (str(event_id), int(deck2)) if deck2 is not None else None
+        card_excluded = deck_key1 in excluded_decks or deck_key2 in excluded_decks
+        arch1 = classified.get(deck_key1) if deck_key1 is not None else None
+        arch2 = classified.get(deck_key2) if deck_key2 is not None else None
         outcome = parse_match_result(result)
         reason = None
-        if amb1 or amb2:
+        if card_excluded:
+            reason = "card-metadata-unresolved"
+        elif amb1 or amb2:
             reason = "ambiguous-player"
         elif outcome is None or outcome.winner is None or not (player2 and str(player2).strip()):
             reason = "bye-draw-invalid"
@@ -727,9 +803,23 @@ def load_heldout_outcomes(
         ))
     decks = tuple(HeldoutDeck(
         event_id=str(event_id), event_date=str(event_date), provenance=str(provenance),
-        archetype=classified.get((str(event_id), int(deck_idx))), exclusion_reason=None,
+        archetype=classified.get((str(event_id), int(deck_idx))),
+        exclusion_reason=(
+            "card-metadata-unresolved"
+            if (str(event_id), int(deck_idx)) in excluded_decks else None
+        ),
     ) for event_id, event_date, provenance, deck_idx in deck_rows)
-    return HeldoutOutcomes(matches=tuple(heldout), decks=decks)
+    if quarantine is not None:
+        quarantine = quarantine.model_copy(update={
+            "retained_facts_sha256": content_sha256({
+                "decks": [deck.model_dump(mode="json") for deck in decks],
+                "matches": [match.model_dump(mode="json") for match in heldout],
+            }),
+        })
+    return HeldoutOutcomes(
+        matches=tuple(heldout), decks=decks,
+        card_metadata_quarantine=quarantine,
+    )
 
 
 def load_heldout_matches(
