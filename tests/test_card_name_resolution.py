@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 import pytest
 
 from legacy_engine.ingestion import store
-from legacy_engine.ingestion.card_coverage import reconcile_card_dimension
+from legacy_engine.ingestion.card_coverage import (
+    load_provider_card_aliases,
+    reconcile_card_dimension,
+)
 from legacy_engine.ingestion import scryfall
 from legacy_engine.ingestion.scryfall import ScryfallClient, normalize_alias_key
 from legacy_engine.models.card import Card, CardAliasManifest, CardNameStatus
@@ -294,3 +297,32 @@ class TestCardDimensionReconciliation:
         assert report.unresolved_count == 0
         assert report.alias_snapshot_degraded
         con.close()
+
+    def test_resolves_verified_provider_historical_name_to_current_oracle_name(self):
+        con = store.connect(":memory:")
+        store.init_schema(con)
+        store.load_cards(con, [Card(name="________ Goblin")])
+        con.execute("INSERT INTO deck_cards VALUES ('t', 0, 'main', '_____ Goblin', 4)")
+
+        report = reconcile_card_dimension(
+            con,
+            new_card_names=frozenset(),
+            alias_manifest=None,
+            alias_snapshot_reason=None,
+            resolved_at=NOW,
+        )
+
+        assert con.execute("SELECT name FROM deck_cards").fetchone()[0] == "________ Goblin"
+        assert [item.observed_name for item in report.normalized_existing] == ["_____ Goblin"]
+        assert report.unresolved_count == 0
+        con.close()
+
+    def test_provider_alias_registry_requires_complete_provenance(self, tmp_path):
+        path = tmp_path / "aliases.json"
+        path.write_text(json.dumps({
+            "schema_version": 1,
+            "aliases": [{"observed_name": "Old", "canonical_name": "Current"}],
+        }))
+
+        with pytest.raises(ValueError, match=r"alias\[0\] lacks required provenance"):
+            load_provider_card_aliases(path)

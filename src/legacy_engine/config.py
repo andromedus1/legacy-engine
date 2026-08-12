@@ -43,6 +43,8 @@ BAN_EVENTS_DIR = PACKAGE_DATA_DIR / "banlist"
 BAN_EVENTS_PATH = BAN_EVENTS_DIR / "events.json"        # shipped dated B&R events (curated SSOT;
                                                          # ingestion.banlist.BAN_EVENTS binds from
                                                          # this at import; `eras confirm` appends)
+CARD_NAME_ALIASES_DIR = PACKAGE_DATA_DIR / "card_name_aliases"
+CARD_NAME_ALIASES_PATH = CARD_NAME_ALIASES_DIR / "legacy.json"  # verified provider-name history
 
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"

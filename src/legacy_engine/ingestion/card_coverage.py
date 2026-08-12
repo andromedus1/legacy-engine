@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
 import unicodedata
 from datetime import datetime
 
 import duckdb
 
-from legacy_engine.ingestion.scryfall import normalize_alias_key, normalize_name
+from legacy_engine.ingestion.scryfall import normalize_alias_key
 from legacy_engine.ingestion.store import fetch_card_alias_candidates, init_card_alias_schema
 from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.models.card import (
@@ -15,6 +18,46 @@ from legacy_engine.models.card import (
     CardNameResolution,
     CardNameStatus,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def load_provider_card_aliases(path: Path | str) -> dict[str, dict[str, str]]:
+    """Load verified historical provider names keyed by their exact observed spelling."""
+    source = Path(path)
+    raw = json.loads(source.read_text())
+    if raw.get("schema_version") != 1 or not isinstance(raw.get("aliases"), list):
+        raise ValueError(f"load_provider_card_aliases: invalid schema in {source}")
+    aliases: dict[str, dict[str, str]] = {}
+    required = ("observed_name", "canonical_name", "provider", "oracle_id", "evidence")
+    for index, item in enumerate(raw["aliases"]):
+        if not isinstance(item, dict) or any(
+            not isinstance(item.get(field), str) or not item[field].strip() for field in required
+        ):
+            raise ValueError(
+                f"load_provider_card_aliases: alias[{index}] lacks required provenance in {source}"
+            )
+        observed = item["observed_name"]
+        if observed == item["canonical_name"] or observed in aliases:
+            raise ValueError(
+                f"load_provider_card_aliases: invalid or duplicate observed name {observed!r} "
+                f"in {source}"
+            )
+        aliases[observed] = {field: item[field] for field in required if field != "observed_name"}
+    return aliases
+
+
+def _load_default_provider_card_aliases() -> dict[str, dict[str, str]]:
+    try:
+        from legacy_engine.config import CARD_NAME_ALIASES_PATH
+
+        return load_provider_card_aliases(CARD_NAME_ALIASES_PATH)
+    except Exception as exc:
+        logger.error("provider card aliases unavailable; exact reconciliation only: %s", exc)
+        return {}
+
+
+PROVIDER_CARD_ALIASES = _load_default_provider_card_aliases()
 
 
 class CardCoverageReport(LegacyEngineModel):
@@ -124,9 +167,26 @@ def reconcile_card_dimension(
                 status = CardNameStatus.AMBIGUOUS
                 reason = "normalized canonical key maps to multiple English card names; no mapping applied"
             else:
-                alias_candidates = fetch_card_alias_candidates(con, observed)
-                alias_canonicals = {item.canonical_name for item in alias_candidates}
-                if len(alias_canonicals) == 1:
+                provider_alias = PROVIDER_CARD_ALIASES.get(observed)
+                if provider_alias is not None:
+                    canonical = provider_alias["canonical_name"]
+                    if canonical not in exact:
+                        raise ValueError(
+                            f"provider card alias {observed!r} targets absent canonical card "
+                            f"{canonical!r}"
+                        )
+                    source = f"curated:{provider_alias['provider']}"
+                    scryfall_id = provider_alias["oracle_id"]
+                    status = CardNameStatus.CANONICAL
+                    reason = "verified historical provider name mapped to the current oracle name"
+                    alias_candidates = ()
+                    alias_canonicals: set[str] = set()
+                else:
+                    alias_candidates = fetch_card_alias_candidates(con, observed)
+                    alias_canonicals = {item.canonical_name for item in alias_candidates}
+                if status is CardNameStatus.CANONICAL:
+                    pass
+                elif len(alias_canonicals) == 1:
                     candidate = alias_candidates[0]
                     canonical = candidate.canonical_name
                     language = candidate.language

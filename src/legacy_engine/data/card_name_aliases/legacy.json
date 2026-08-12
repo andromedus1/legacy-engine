@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "aliases": [
+    {
+      "observed_name": "_____ Goblin",
+      "canonical_name": "________ Goblin",
+      "provider": "fbettega/MTG_decklistcache",
+      "oracle_id": "88222fd2-8316-426c-8218-64f6be5ca0f8",
+      "evidence": "https://magic.wizards.com/en/news/announcements/may-13-2024-banned-and-restricted-announcement"
+    }
+  ]
+}
