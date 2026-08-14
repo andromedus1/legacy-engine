@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-12
+updated: 2026-08-13
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -453,11 +453,12 @@ deterministically renormalizing the survivors. Effective counts drive ranking sh
 counts remain adjacent and prior-only labels are `transition-prior`, never post-ban sightings.
 The transition projection never widens a matchup `PairWindow`.
 
-The practical first read orders supported rows by the existing posterior lean Q25, then median,
-then label. Its interval, evidence stratum, observed/effective field counts, prior strength, and
-ban-clamp count are rendered beside the separate ci-gated Agency call. This is a utility and
-uncertainty surface, not a new estimator and not benchmark evidence. The unchanged future-only
-benchmark remains the sole authority for any predictive-validation claim.
+The status payload retains a practical ordering of supported rows by the existing posterior lean
+Q25, then median, then label. The generated page does not render a separate practical-shortlist
+card; the archetype and camp tables remain the single decision surface, with the posterior lean
+available only through the explicitly diagnostic methodology toggle. This is an uncertainty view,
+not a new estimator and not benchmark evidence. The unchanged future-only benchmark remains the
+sole authority for any predictive-validation claim.
 
 Refresh generation emits a typed usefulness summary. Contradictory metadata (supported rows with
 no practical call, a call omitted from the rendered shortlist, or unreconciled observed/effective
@@ -468,4 +469,5 @@ The August 10 cold-start failure chain was: a global post-ban field reset remove
 current composition, an older stored era could override the direct ban boundary for affected
 entities, `grounded` was promoted from a badge to a speaking gate, and file-exists status counted
 the resulting silent page as operational success. The preventive seams are entity-level horizon
-clamping, labeled transition provenance, a practical lean shortlist, and the usefulness contract.
+clamping, labeled transition provenance, status-level practical ordering, the opt-in posterior
+table view, and the usefulness contract.

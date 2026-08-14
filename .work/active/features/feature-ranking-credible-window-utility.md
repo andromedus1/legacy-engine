@@ -8,7 +8,7 @@ depends_on: [feature-ranking-honesty-guards, feature-agency-page-methodology]
 release_binding: null
 gate_origin: null
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-13
 ---
 
 # Credible-window ranking utility
@@ -408,6 +408,10 @@ The feature is implemented across the four dependency-ordered checkpoints:
 
 - No benchmark estimator, protocol, production ordering, Modern port, sideboard advisor, or rules
   engine was changed. `uv.lock` remains user-owned and unmodified.
+- Operator-directed UI follow-up (2026-08-13): removed the dedicated Practical first read card.
+  The practical posterior order remains in refresh/status metadata, and the existing Posterior lean
+  toggle remains the only opt-in page surface for that diagnostic. New utility summaries serialize
+  `rendered_shortlist_rows: 0`; the field remains readable for compatibility with older snapshots.
 - Camp row payload parity remains intact; transition field provenance is carried on archetype and
   camp rows, and prior-only parents use preceding-regime camp composition without changing matchup
   windows.

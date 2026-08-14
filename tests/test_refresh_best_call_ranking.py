@@ -888,6 +888,8 @@ class TestMainEndToEnd:
         assert "display-grade floor" in template
         assert "floorObservabilityHtml" in template
         assert "c.concentration_warning" in template
+        assert 'title="${escA(c.concentration_warning)}">⚠ concentrated</span>' in template
+        assert '<div class="evidence-warn">${escT(c.concentration_warning)}</div>' not in template
 
     def test_interactive_gate_labels_generated_evidence_and_disables_grouping(self):
         template = rbcr.TEMPLATE_PATH.read_text()
@@ -971,6 +973,8 @@ class TestMainEndToEnd:
 
     def test_methodology_control_is_accessible_and_keeps_authority_boundaries(self):
         template = rbcr.TEMPLATE_PATH.read_text()
+        assert 'id="first-read"' not in template
+        assert "renderPracticalFirstRead" not in template
         assert 'id="methodology-view"' in template
         assert 'aria-label="Ranking methodology view"' in template
         assert 'id="methodology-status" class="methodology-status" aria-live="polite"' in template

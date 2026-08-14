@@ -61,7 +61,7 @@ class EraRunResult(LegacyEngineModel):
 
 
 class RankingUtilitySummary(LegacyEngineModel):
-    """Typed publication contract for the generated ranking's first-read usefulness."""
+    """Typed publication contract for the generated ranking's evidence usefulness."""
 
     observed_field_n: int
     effective_field_n: int
@@ -72,6 +72,8 @@ class RankingUtilitySummary(LegacyEngineModel):
     grounded_rows: int
     practical_call: str | None
     proof_grade_call: str | None
+    # Backward-compatible status field. The dedicated shortlist UI was removed; new
+    # artifacts serialize zero while older status snapshots remain readable.
     rendered_shortlist_rows: int
     status: Literal["useful", "degraded", "unavailable"]
     reasons: tuple[str, ...] = ()
@@ -94,14 +96,12 @@ def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
         raise ValueError("ranking utility transition-prior rows exceed supported rows")
     if summary.supported_rows and summary.practical_call is None:
         raise ValueError("ranking utility has supported rows but no practical call")
-    if summary.practical_call is not None and summary.rendered_shortlist_rows < 1:
-        raise ValueError("ranking utility practical call is omitted from the rendered shortlist")
     if (
         summary.practical_call is not None
         and summary.practical_ranked_actions
-        and summary.practical_call not in summary.practical_ranked_actions[:summary.rendered_shortlist_rows]
+        and summary.practical_call != summary.practical_ranked_actions[0]
     ):
-        raise ValueError("ranking utility practical call is outside the rendered ranked prefix")
+        raise ValueError("ranking utility practical call does not lead the practical ranking")
     if summary.status == "useful" and summary.practical_call is None:
         raise ValueError("useful ranking utility must publish a practical call")
     if summary.status == "useful" and summary.grounded_rows < summary.supported_rows:
