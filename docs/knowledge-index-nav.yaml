@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-08-12T17:04:49Z'
+generated_at: '2026-08-14T03:04:30Z'
 generated_from: frontmatter
 total_docs: 32
 by_kind:
@@ -10,19 +10,19 @@ recent:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   kind: planning
-  updated: '2026-08-12'
-- path: docs/analysis/best-call-ranking.md
-  title: Best Deck / Best Call agency ranking — refresh runbook
-  kind: planning
-  updated: '2026-08-12'
+  updated: '2026-08-13'
 - path: docs/SPEC.md
   title: 'Spec: legacy-engine'
   kind: planning
-  updated: '2026-08-11'
+  updated: '2026-08-13'
 - path: docs/VISION.md
   title: 'Vision: legacy-engine'
   kind: planning
-  updated: '2026-08-02'
+  updated: '2026-08-13'
+- path: docs/analysis/best-call-ranking.md
+  title: Best Deck / Best Call agency ranking — refresh runbook
+  kind: planning
+  updated: '2026-08-13'
 - path: docs/analysis/meta-deck-analysis-loop.md
   title: The meta-deck analysis loop
   kind: planning

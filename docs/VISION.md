@@ -15,11 +15,11 @@ decisions:
   - "MVP arc = ingestion + meta analytics + advisory + deck generation (consensus baseline, field-tuning mode 2, export) shipped together; goldfish simulation and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation come in later pillars."
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
-  - "Per-entity stable eras: every per-archetype/per-camp statistic windows to the entity's own detected stable era (change-point detection on composition/play-rate/win-rate — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint detection self-heals banlist announcement lag; every windowed figure names its window and triggering disturbance."
+  - "Per-entity stable eras: every per-archetype/per-camp statistic uses the entity's own detected and certified set of compatible time intervals, not just one global ban regime or monotone suffix; bans and releases nominate disturbances, confirmed affectedness remains a hard boundary, and every windowed figure names the admitted intervals and evidence provenance."
   - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. Superarchetypes expose pooled strategy-family evidence with labeled provenance and intra-cluster flags; they remain an exploratory navigation/explanation layer while archetype-level Best Call stays decision-authoritative until the future-only benchmark passes."
   - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). maintainer-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
-updated: 2026-08-02
+updated: 2026-08-13
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -44,7 +44,7 @@ scattered "This Week in Legacy" articles; matchup knowledge lives in Discord and
 "what should I play this weekend?" is answered by feel. There is no rigorous, reproducible way to:
 
 - Track the metagame from raw tournament results under a *consistent, auditable* **three-level** archetype taxonomy — superarchetype (strategy cluster) above, parent archetype in the middle, data-driven subarchetype (camp) below — so decks that share a label but play differently are not pooled into one matchup row or one card-win-rate denominator, while strategy families provide explicitly exploratory pooled context where specific labels are too thin to speak on their own
-- Window every per-entity statistic to that entity's own **stable era** — bans *and* new-card releases rebuild decks mid-regime, so pooling across a disturbance mixes generations of the same label into one number; each figure should draw on the largest window of still-solid data and name the disturbance that bounds it
+- Window every per-entity statistic to that entity's own **certified stable-era intervals** — bans *and* new-card releases rebuild decks mid-regime, so pooling across an incompatible disturbance mixes generations of the same label into one number; compatible historical pockets may be recovered across excluded gaps, but each figure must name the admitted intervals, their certification, and the disturbance or evidence rule that excludes each gap
 - Compute matchup matrices and a deck's **expected win rate against the weighted field**
 - Recommend a sideboard package that maximally covers the expected field (hosers → targets)
 - Measure how fast and consistently a deck executes its plan (goldfish clock) and aggregate that into a **meta-speed distribution**

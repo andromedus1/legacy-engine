@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-12T17:04:49Z'
+generated_at: '2026-08-14T03:04:30Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -107,16 +107,13 @@ documents:
       subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird
       and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
       gate. Empty/absent registry is byte-identical to today (gated-additive).'
-    - 'STABLE ERAS: analytics/eras/ detects per-entity (archetype AND camp) era boundaries
-      from the corpus itself (S1 presence cliffs/ramps, S2 composition CPD via ruptures,
-      S3 share shifts, S4 WR corroboration; fleet BH-FDR + 30-deck era floor), persists
-      them (entity_eras table + eras run|list|explain|confirm CLI, ban/release/unattributed
-      attribution, BOCPD drift alarm), and stable_since replaces ban-only valid_since
-      as the DEFAULT horizon everywhere (adaptive matrix, advisory window + detection-derived
-      global field era, consensus/card-frequency, era-default discovery pools with
-      Gate C temporal-mixing). Matchup cells shrink toward hierarchical priors (camp
-      → leave-camp-out parent′ → marginal′ → 0.5; thin post-boundary cells toward
-      their own pre-disturbance value, labeled).'
+    - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
+      as the current/fallback projection. The intended recurrent-era extension separates
+      outcome-free candidate discovery from independent equivalence certification,
+      persists versioned EraCertificates over disjoint half-open intervals, and lets
+      matchup consumption intersect subject and opponent interval sets before estimation.
+      Confirmed affectedness is a semantic veto; expanded evidence remains distinct
+      from current-only evidence and requires future-only validation before promotion.'
     - 'FORMAT MONITOR: the scheduled refresh consumes current Scryfall gzipped JSONL,
       diffs Legacy legalities, strictly parses WotC Legacy attribution, and combines
       the existing set scan with actual new-card ingest evidence. Machine state is
@@ -301,11 +298,11 @@ documents:
       matchups are first-class, unlike edh-engine's 4-player goldfish framing.
     - Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped
       by date for historical analysis.
-    - 'Per-entity stable eras: every per-archetype/per-camp statistic windows to the
-      entity''s own detected stable era (change-point detection on composition/play-rate/win-rate
-      — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint
-      detection self-heals banlist announcement lag; every windowed figure names its
-      window and triggering disturbance.'
+    - 'Per-entity stable eras: every per-archetype/per-camp statistic uses the entity''s
+      own detected and certified set of compatible time intervals, not just one global
+      ban regime or monotone suffix; bans and releases nominate disturbances, confirmed
+      affectedness remains a hard boundary, and every windowed figure names the admitted
+      intervals and evidence provenance.'
     - 'Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes,
       curated overrides) → parent archetype → camp. Superarchetypes expose pooled
       strategy-family evidence with labeled provenance and intra-cluster flags; they
@@ -462,13 +459,12 @@ documents:
     - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
-    - 'STABLE ERAS: per-entity era boundaries detected from the corpus (change-point
-      ensemble + fleet FDR + era floors), persisted with attribution and a drift alarm
-      (eras run|list|explain|confirm), and consumed as the DEFAULT window everywhere
-      (adaptive matrix, detection-derived global field era, consensus/card-frequency,
-      era-default discovery pools with Gate C); matchup cells carry hierarchical +
-      cross-era priors with prior_source labels. Byte-identical ban-only fallback
-      when no era data exists.'
+    - 'STABLE ERAS: the built detector persists per-entity boundaries and stable_since
+      fallbacks; the intended recurrent-era contract certifies a union of compatible
+      historical intervals with outcome-free discovery, affectedness/context/support
+      guards, and pairwise subject/opponent intersection. Current-only evidence remains
+      the fallback, and expanded evidence cannot become authoritative without future-only
+      validation.'
     - 'SUPERARCHETYPES: a third taxonomy level ABOVE parent archetype — strategy clusters
       derived from staple-stripped maindeck core sets (Jaccard + average-linkage agglomerative,
       AU-bootstrap cut) with a curated override layer, persisted as a registry by
