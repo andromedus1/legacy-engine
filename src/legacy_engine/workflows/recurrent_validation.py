@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from typing import Protocol
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 
 from legacy_engine.advisory.ranking_benchmark import (
     BenchmarkFold,
@@ -30,6 +30,7 @@ from legacy_engine.advisory.recurrent_validation import (
     RecurrentBenchmarkFold,
     RecurrentBenchmarkProtocol,
     RefitStageArtifact,
+    StageName,
     ValidationBundle,
     aggregate_recurrent_validation,
     build_future_case_manifest,
@@ -60,7 +61,7 @@ class _ClosedModel(LegacyEngineModel):
 class OriginStageRequest(_ClosedModel):
     """Exact input contract presented to one origin-local refit stage."""
 
-    stage: str
+    stage: StageName
     snapshot_db: str
     snapshot_manifest_sha256: str
     prior_output_sha256: str
@@ -91,12 +92,30 @@ class FrozenOriginArtifact(_ClosedModel):
     snapshot_file_sha256: str
     origin: FrozenRecurrentOrigin
 
+    @model_validator(mode="after")
+    def _artifact_identity(self) -> "FrozenOriginArtifact":
+        expected = content_sha256(
+            self.model_dump(mode="json", exclude={"artifact_sha256"})
+        )
+        if self.artifact_sha256 != expected:
+            raise ValueError("frozen origin artifact digest mismatch")
+        return self
+
 
 class OriginEvaluationArtifact(_ClosedModel):
     artifact_sha256: str
     cases: FutureCaseManifest
     predictive: OriginPredictiveEvaluation
     decision: OriginDecisionEvaluation
+
+    @model_validator(mode="after")
+    def _artifact_identity(self) -> "OriginEvaluationArtifact":
+        expected = content_sha256(
+            self.model_dump(mode="json", exclude={"artifact_sha256"})
+        )
+        if self.artifact_sha256 != expected:
+            raise ValueError("origin evaluation artifact digest mismatch")
+        return self
 
 
 def _file_sha256(path: Path) -> str:
@@ -170,18 +189,18 @@ def seal_and_store_recurrent_origin(
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(snapshot_db, snapshot_path)
     snapshot_file_sha = _file_sha256(snapshot_path)
+    artifact_payload = {
+        "snapshot_manifest_sha256": snapshot_manifest_sha256,
+        "snapshot_file_sha256": snapshot_file_sha,
+        "origin": origin,
+    }
     artifact = FrozenOriginArtifact(
-        artifact_sha256="0" * 64,
-        snapshot_manifest_sha256=snapshot_manifest_sha256,
-        snapshot_file_sha256=snapshot_file_sha,
-        origin=origin,
-    )
-    artifact = artifact.model_copy(
-        update={
-            "artifact_sha256": content_sha256(
-                artifact.model_dump(mode="json", exclude={"artifact_sha256"})
-            )
-        }
+        artifact_sha256=content_sha256({
+            "snapshot_manifest_sha256": snapshot_manifest_sha256,
+            "snapshot_file_sha256": snapshot_file_sha,
+            "origin": origin.model_dump(mode="json"),
+        }),
+        **artifact_payload,
     )
     atomic_write_canonical(directory / "origin.json", artifact)
     return artifact
@@ -279,18 +298,18 @@ def evaluate_recurrent_origin(
     )
     predictive = evaluate_recurrent_predictions(origin, cases, protocol=protocol)
     decision = evaluate_recurrent_decisions(origin, cases, protocol=protocol)
+    artifact_payload = {
+        "cases": cases,
+        "predictive": predictive,
+        "decision": decision,
+    }
     artifact = OriginEvaluationArtifact(
-        artifact_sha256="0" * 64,
-        cases=cases,
-        predictive=predictive,
-        decision=decision,
-    )
-    artifact = artifact.model_copy(
-        update={
-            "artifact_sha256": content_sha256(
-                artifact.model_dump(mode="json", exclude={"artifact_sha256"})
-            )
-        }
+        artifact_sha256=content_sha256({
+            "cases": cases.model_dump(mode="json"),
+            "predictive": predictive.model_dump(mode="json"),
+            "decision": decision.model_dump(mode="json"),
+        }),
+        **artifact_payload,
     )
     atomic_write_canonical(
         artifact_root / "evaluations" / artifact.artifact_sha256 / "evaluation.json",
@@ -309,6 +328,19 @@ def aggregate_recurrent_evidence(
     """Assess every frozen challenger and write the complete content-addressed bundle."""
     if len(origins) != len(evaluations):
         raise ValueError("origins and evaluations must align one-to-one")
+    for origin, evaluation in zip(origins, evaluations, strict=True):
+        if evaluation.cases.fold_id != origin.manifest.fold.fold_id:
+            raise ValueError("origin and evaluation fold identities differ")
+        if evaluation.cases.origin_predictions_sha256 != origin.predictions_sha256:
+            raise ValueError("origin and evaluation prediction identities differ")
+        if evaluation.predictive.future_cases != evaluation.cases:
+            raise ValueError("evaluation predictive branch uses a different case manifest")
+        if evaluation.decision.case_sha256 != evaluation.cases.case_sha256:
+            raise ValueError("evaluation decision branch uses different future cases")
+        if evaluation.decision.field_mass_sha256 != evaluation.cases.field_mass_sha256:
+            raise ValueError("evaluation decision branch uses different future field mass")
+        if evaluation.decision.action_universe_sha256 != evaluation.cases.action_universe_sha256:
+            raise ValueError("evaluation decision branch uses a different action universe")
     configs: dict[str, str] = {}
     for estimator in EVIDENCE_ESTIMATOR_REGISTRY:
         values = {origin.candidate_config_sha256[estimator] for origin in origins}

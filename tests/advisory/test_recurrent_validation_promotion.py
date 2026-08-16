@@ -146,3 +146,24 @@ def test_outer_outcomes_are_consumed_once_and_candidate_config_is_exact():
     assert frozen.candidate_config_sha256["recurrent-expanded-v1"] == content_sha256({
         "config": "recurrent-expanded-v1"
     })
+
+
+def test_predictive_and_decision_branches_must_bind_the_same_origin_and_cases():
+    value = protocol(small=True)
+    frozen, predictive, decision = _complete_evidence(value)
+    with pytest.raises(ValueError, match="origin identities differ"):
+        aggregate_recurrent_validation(
+            [predictive],
+            [decision.model_copy(update={"origin_predictions_sha256": "1" * 64})],
+            protocol=value,
+            candidate_id="recurrent-expanded-v1",
+            candidate_config_sha256=frozen.candidate_config_sha256["recurrent-expanded-v1"],
+        )
+    with pytest.raises(ValueError, match="field identities differ"):
+        aggregate_recurrent_validation(
+            [predictive],
+            [decision.model_copy(update={"field_mass_sha256": "1" * 64})],
+            protocol=value,
+            candidate_id="recurrent-expanded-v1",
+            candidate_config_sha256=frozen.candidate_config_sha256["recurrent-expanded-v1"],
+        )

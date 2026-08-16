@@ -114,6 +114,18 @@ def test_protocol_fold_horizon_case_and_action_identity_are_required():
             cases.model_copy(update={"action_universe_sha256": "1" * 64}),
             protocol=value,
         )
+    with pytest.raises(ValueError, match="eligible event ids"):
+        evaluate_recurrent_predictions(
+            frozen,
+            cases.model_copy(update={"eligible_event_ids": ("invented-support",)}),
+            protocol=value,
+        )
+    with pytest.raises(ValueError, match="field shares"):
+        evaluate_recurrent_predictions(
+            frozen,
+            cases.model_copy(update={"future_field_shares": {"a": 1.0, "b": 0.0}}),
+            protocol=value,
+        )
 
 
 def test_exclusions_are_global_and_future_field_denominator_is_not_renormalized():
@@ -156,6 +168,20 @@ def test_duplicate_match_ids_refuse_even_when_rows_are_identical():
         build_future_case_manifest(
             frozen,
             [row, dict(row)],
+            protocol=value,
+            future_field_counts={"a": 1, "b": 1},
+        )
+
+
+def test_non_boolean_decisive_outcome_cannot_cross_the_future_case_boundary():
+    value = protocol(small=True)
+    frozen = origin(value)
+    rows = future_rows(value)
+    rows[0]["subject_won"] = "false"
+    with pytest.raises(ValueError, match="must be a boolean"):
+        build_future_case_manifest(
+            frozen,
+            rows,
             protocol=value,
             future_field_counts={"a": 1, "b": 1},
         )

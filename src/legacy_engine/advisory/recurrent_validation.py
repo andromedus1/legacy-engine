@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, TypeAlias
 
 import numpy as np
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from legacy_engine.analytics.amplification import AMPLIFICATION_METHOD_IDS, MethodId
 from legacy_engine.advisory.ranking_benchmark import (
@@ -374,6 +374,58 @@ class OriginRefitManifest(_ClosedModel):
     status: Literal["complete", "not-evaluable", "invalid"]
     reasons: tuple[str, ...] = ()
 
+    @model_validator(mode="after")
+    def _chain_identity(self) -> "OriginRefitManifest":
+        _require_sha256("snapshot_manifest_sha256", self.snapshot_manifest_sha256)
+        if tuple(stage.stage for stage in self.stages) != _STAGE_ORDER:
+            raise ValueError("origin manifest stages are incomplete or out of order")
+        prior = self.snapshot_manifest_sha256
+        for stage in self.stages:
+            if stage.input_sha256 != prior:
+                raise ValueError(f"origin manifest has a disconnected {stage.stage} stage")
+            if stage.data_until != self.fold.data_until:
+                raise ValueError(f"origin manifest {stage.stage} data clock differs from fold")
+            if stage.knowledge_as_of != self.fold.knowledge_as_of:
+                raise ValueError(f"origin manifest {stage.stage} knowledge clock differs from fold")
+            if stage.max_outcome_date is not None and (
+                stage.max_outcome_date >= self.fold.data_until
+            ):
+                raise ValueError(f"origin manifest {stage.stage} includes a future outcome")
+            prior = stage.output_sha256
+        stage_map = {stage.stage: stage for stage in self.stages}
+        expected_runs = {
+            "discovery": self.discovery_run_id,
+            "certification": self.certification_run_id,
+            "interval": self.interval_corpus_id,
+            "structure": self.structure_snapshot_id,
+            "amplification": self.amplification_run_id,
+        }
+        if any(stage_map[name].run_id != run_id for name, run_id in expected_runs.items()):
+            raise ValueError("origin manifest run identities differ from stage artifacts")
+        if self.stage_input_sha256 != {
+            stage.stage: stage.input_sha256 for stage in self.stages
+        }:
+            raise ValueError("origin manifest stage-input ledger mismatch")
+        if self.stage_config_sha256 != {
+            stage.stage: stage.config_sha256 for stage in self.stages
+        }:
+            raise ValueError("origin manifest stage-config ledger mismatch")
+        expected_max = max(
+            (stage.max_outcome_date for stage in self.stages if stage.max_outcome_date),
+            default="",
+        )
+        if self.max_outcome_date != expected_max:
+            raise ValueError("origin manifest maximum outcome date mismatch")
+        if self.outcome_ids_sha256 != content_sha256(
+            [stage.outcome_ids_sha256 for stage in self.stages]
+        ):
+            raise ValueError("origin manifest outcome ledger mismatch")
+        if self.outcome_columns_accessed_by_discovery:
+            raise ValueError("origin discovery outcome-access ledger must be empty")
+        if self.status == "complete" and any(stage.status != "complete" for stage in self.stages):
+            raise ValueError("complete origin manifest contains an incomplete stage")
+        return self
+
 
 class FrozenRecurrentOrigin(_ClosedModel):
     protocol_sha256: str
@@ -387,6 +439,68 @@ class FrozenRecurrentOrigin(_ClosedModel):
     common_pair_universe_sha256: str
     predictions_sha256: str
     code_commit: str
+
+    @model_validator(mode="after")
+    def _sealed_identity(self) -> "FrozenRecurrentOrigin":
+        _require_sha256("protocol_sha256", self.protocol_sha256)
+        actions = tuple(sorted(self.action_universe))
+        if self.action_universe != actions or len(actions) < 2 or len(actions) != len(set(actions)):
+            raise ValueError("sealed action universe must contain at least two sorted unique actions")
+        if set(self.field_shares) != set(actions):
+            raise ValueError("sealed field shares must exactly cover the action universe")
+        if any(not math.isfinite(value) or value < 0 for value in self.field_shares.values()):
+            raise ValueError("sealed field shares must be finite and nonnegative")
+        if sum(self.field_shares.values()) > 1 + 1e-12:
+            raise ValueError("sealed field shares cannot exceed total field mass")
+        expected_pairs = set(_prediction_pairs(actions))
+        expected_keys = {
+            (estimator, subject, opponent)
+            for estimator in EVIDENCE_ESTIMATOR_REGISTRY
+            for subject, opponent in expected_pairs
+        }
+        prediction_keys = {
+            (item.estimator_id, item.subject, item.opponent) for item in self.predictions
+        }
+        if len(self.predictions) != len(expected_keys) or prediction_keys != expected_keys:
+            raise ValueError("sealed predictions do not cover the exact estimator/pair grid")
+        expected_prediction_sha = content_sha256(
+            [item.model_dump(mode="json") for item in self.predictions]
+        )
+        if self.predictions_sha256 != expected_prediction_sha:
+            raise ValueError("sealed prediction digest mismatch")
+        expected_pair_sha = content_sha256(
+            sorted(f"{left}\0{right}" for left, right in expected_pairs)
+        )
+        if self.common_pair_universe_sha256 != expected_pair_sha:
+            raise ValueError("sealed pair-universe digest mismatch")
+        draw_keys = {
+            (item.estimator_id, item.subject, item.opponent)
+            for item in self.joint_draws.series
+        }
+        if len(self.joint_draws.series) != len(expected_keys) or draw_keys != expected_keys:
+            raise ValueError("sealed draws do not cover the exact estimator/pair grid")
+        fits = {
+            (item.estimator_id, item.subject, item.opponent): item.fit_id
+            for item in self.predictions
+        }
+        for series in self.joint_draws.series:
+            key = (series.estimator_id, series.subject, series.opponent)
+            if fits[key] != series.fit_id:
+                raise ValueError("sealed draw fit identity differs from prediction")
+        if any(
+            item.draw_artifact_sha256 != self.joint_draws.artifact_sha256
+            for item in self.predictions
+        ):
+            raise ValueError("sealed prediction draw identity differs from joint draws")
+        if set(self.recommendation_actions) != set(EVIDENCE_ESTIMATOR_REGISTRY):
+            raise ValueError("sealed recommendations do not cover the exact estimator registry")
+        if set(self.candidate_config_sha256) != set(EVIDENCE_ESTIMATOR_REGISTRY):
+            raise ValueError("sealed configs do not cover the exact estimator registry")
+        for estimator, digest in self.candidate_config_sha256.items():
+            _require_sha256(f"candidate_config_sha256[{estimator}]", digest)
+        if not self.code_commit:
+            raise ValueError("sealed origin requires a code commit identity")
+        return self
 
 
 def _expected_stage_configs(protocol: RecurrentBenchmarkProtocol) -> dict[str, str]:
@@ -569,7 +683,16 @@ class FutureCase(_ClosedModel):
     opponent_deck_id: str | None = None
     subject: str
     opponent: str
-    subject_won: bool
+    subject_won: StrictBool
+
+    @model_validator(mode="after")
+    def _case_identity(self) -> "FutureCase":
+        if not all((self.match_id, self.event_id, self.event_date, self.subject, self.opponent)):
+            raise ValueError("future case identities must be non-empty")
+        date.fromisoformat(self.event_date)
+        if self.subject == self.opponent:
+            raise ValueError("future cases cannot contain structural mirrors")
+        return self
 
 
 class FutureCaseManifest(_ClosedModel):
@@ -578,17 +701,91 @@ class FutureCaseManifest(_ClosedModel):
     fold_id: str
     data_until: str
     evaluation_until: str
+    action_universe: tuple[str, ...]
     action_universe_sha256: str
     eligible_match_ids: tuple[str, ...]
     eligible_event_ids: tuple[str, ...]
     eligible_deck_ids: tuple[str, ...]
     cases: tuple[FutureCase, ...]
+    future_field_counts: dict[str, int]
     future_field_shares: dict[str, float]
     eligible_field_mass: float = Field(ge=0, le=1)
     total_future_decks: int = Field(ge=0)
     case_sha256: str
     field_mass_sha256: str
     exclusions: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _manifest_identity(self) -> "FutureCaseManifest":
+        for name in (
+            "protocol_sha256",
+            "origin_predictions_sha256",
+            "action_universe_sha256",
+            "case_sha256",
+            "field_mass_sha256",
+        ):
+            _require_sha256(name, getattr(self, name))
+        actions = tuple(sorted(self.action_universe))
+        if self.action_universe != actions or len(actions) < 2 or len(actions) != len(set(actions)):
+            raise ValueError("case action universe must contain at least two sorted unique actions")
+        if self.action_universe_sha256 != content_sha256(actions):
+            raise ValueError("case action universe digest mismatch")
+        cases = tuple(sorted(self.cases, key=lambda item: item.match_id))
+        if self.cases != cases or len(cases) != len({item.match_id for item in cases}):
+            raise ValueError("future cases must have sorted unique match ids")
+        if not all(self.data_until <= item.event_date < self.evaluation_until for item in cases):
+            raise ValueError("future case lies outside the exact evaluation horizon")
+        expected_matches = tuple(item.match_id for item in cases)
+        expected_events = tuple(sorted({item.event_id for item in cases}))
+        expected_decks = tuple(sorted({
+            deck_id
+            for item in cases
+            for deck_id in (item.subject_deck_id, item.opponent_deck_id)
+            if deck_id is not None
+        }))
+        if self.eligible_match_ids != expected_matches:
+            raise ValueError("eligible match ids differ from future cases")
+        if self.eligible_event_ids != expected_events:
+            raise ValueError("eligible event ids differ from future cases")
+        if self.eligible_deck_ids != expected_decks:
+            raise ValueError("eligible deck ids differ from future cases")
+        if self.case_sha256 != content_sha256(
+            [item.model_dump(mode="json") for item in cases]
+        ):
+            raise ValueError("future case manifest digest mismatch")
+        if any(not isinstance(count, int) or isinstance(count, bool) or count < 0
+               for count in self.future_field_counts.values()):
+            raise ValueError("future field counts must be nonnegative integers")
+        total = sum(self.future_field_counts.values())
+        if self.total_future_decks != total:
+            raise ValueError("future field total differs from field counts")
+        expected_shares = {
+            action: self.future_field_counts.get(action, 0) / total if total else 0.0
+            for action in actions
+        }
+        if self.future_field_shares != expected_shares:
+            raise ValueError("future field shares differ from unrenormalized counts")
+        if not math.isclose(
+            self.eligible_field_mass, sum(expected_shares.values()), abs_tol=1e-12
+        ):
+            raise ValueError("eligible field mass differs from unrenormalized shares")
+        field_payload = {
+            "counts": dict(sorted(self.future_field_counts.items())),
+            "shares": expected_shares,
+            "total": total,
+            "action_universe": actions,
+        }
+        if self.field_mass_sha256 != content_sha256(field_payload):
+            raise ValueError("future field-mass digest mismatch")
+        if any(
+            reason not in FutureExclusionReason.__args__
+            or not isinstance(count, int)
+            or isinstance(count, bool)
+            or count < 0
+            for reason, count in self.exclusions.items()
+        ):
+            raise ValueError("future exclusions must use typed reasons and nonnegative counts")
+        return self
 
 
 def _row_identity(row: Mapping[str, object]) -> bytes:
@@ -645,6 +842,8 @@ def build_future_case_manifest(
                 raise ValueError(f"unknown future exclusion reason {reason!r}")
             exclusions[reason] += 1
             continue
+        if not isinstance(row["subject_won"], bool):
+            raise ValueError("future subject_won must be a boolean for decisive matches")
         cases.append(
             FutureCase(
                 match_id=match_id,
@@ -694,11 +893,13 @@ def build_future_case_manifest(
         fold_id=fold.fold_id,
         data_until=fold.data_until,
         evaluation_until=fold.evaluation_until,
+        action_universe=origin.action_universe,
         action_universe_sha256=content_sha256(origin.action_universe),
         eligible_match_ids=match_ids,
         eligible_event_ids=event_ids,
         eligible_deck_ids=deck_ids,
         cases=cases_tuple,
+        future_field_counts=dict(sorted(future_field_counts.items())),
         future_field_shares=shares,
         eligible_field_mass=sum(shares.values()),
         total_future_decks=total_decks,
@@ -828,6 +1029,9 @@ def _validate_evaluation_binding(
     cases: FutureCaseManifest,
     protocol: RecurrentBenchmarkProtocol,
 ) -> None:
+    # Revalidate serialized values so unchecked ``model_copy`` mutations cannot bypass
+    # the content identities at this outcome-opening boundary.
+    FutureCaseManifest.model_validate(cases.model_dump(mode="json"))
     if origin.protocol_sha256 != recurrent_protocol_sha256(protocol):
         raise ValueError("origin protocol identity differs from evaluation protocol")
     if cases.protocol_sha256 != origin.protocol_sha256:
@@ -841,12 +1045,10 @@ def _validate_evaluation_binding(
         or cases.evaluation_until != fold.evaluation_until
     ):
         raise ValueError("case manifest fold or horizon differs from origin")
-    if cases.action_universe_sha256 != content_sha256(origin.action_universe):
-        raise ValueError("case action universe differs from origin")
-    if cases.case_sha256 != content_sha256(
-        [case.model_dump(mode="json") for case in cases.cases]
+    if cases.action_universe != origin.action_universe or (
+        cases.action_universe_sha256 != content_sha256(origin.action_universe)
     ):
-        raise ValueError("future case manifest digest mismatch")
+        raise ValueError("case action universe differs from origin")
 
 
 def evaluate_recurrent_predictions(
@@ -1471,6 +1673,17 @@ def aggregate_recurrent_validation(
         raise ValueError("each outer outcome may be consumed exactly once")
     if set(predictive_by_fold) != set(decision_by_fold):
         raise ValueError("predictive and decision evaluations must cover identical folds")
+    for fold_id in predictive_by_fold:
+        predictive = predictive_by_fold[fold_id]
+        decision = decision_by_fold[fold_id]
+        if predictive.origin_predictions_sha256 != decision.origin_predictions_sha256:
+            raise ValueError(f"predictive and decision origin identities differ for {fold_id}")
+        if predictive.future_cases.case_sha256 != decision.case_sha256:
+            raise ValueError(f"predictive and decision case identities differ for {fold_id}")
+        if predictive.future_cases.field_mass_sha256 != decision.field_mass_sha256:
+            raise ValueError(f"predictive and decision field identities differ for {fold_id}")
+        if predictive.future_cases.action_universe_sha256 != decision.action_universe_sha256:
+            raise ValueError(f"predictive and decision action identities differ for {fold_id}")
     invalid = any(
         item.protocol_sha256 != protocol_hash or item.status == "invalid"
         for item in (*predictive_evaluations, *decision_evaluations)
@@ -1541,11 +1754,11 @@ def aggregate_recurrent_validation(
     origin_ids = tuple(
         content_sha256(
             {
-                "predictive": predictive_by_fold[fold_id].model_dump(mode="json"),
-                "decision": decision_by_fold[fold_id].model_dump(mode="json"),
+                "predictive": predictive_by_fold[fold.fold_id].model_dump(mode="json"),
+                "decision": decision_by_fold[fold.fold_id].model_dump(mode="json"),
             }
         )
-        for fold_id in sorted(predictive_by_fold)
+        for fold in folds
     )
     return PromotionAssessment(
         protocol_sha256=protocol_hash,
@@ -1611,6 +1824,11 @@ class ValidationBundle(_ClosedModel):
         fold_ids = tuple(origin.manifest.fold.fold_id for origin in self.origins)
         if len(fold_ids) != len(set(fold_ids)):
             raise ValueError("validation bundle contains duplicate origins")
+        canonical_fold_ids = tuple(
+            fold.fold_id for fold in self.protocol.folds if fold.fold_id in set(fold_ids)
+        )
+        if fold_ids != canonical_fold_ids:
+            raise ValueError("validation bundle origins must follow protocol fold order")
         if any(origin.protocol_sha256 != protocol_hash for origin in self.origins):
             raise ValueError("bundle origin protocol mismatch")
         if tuple(case.fold_id for case in self.cases) != fold_ids:
@@ -1619,8 +1837,50 @@ class ValidationBundle(_ClosedModel):
             raise ValueError("bundle predictive evaluations must align exactly with origins")
         if tuple(item.fold_id for item in self.decision_evaluations) != fold_ids:
             raise ValueError("bundle decision evaluations must align exactly with origins")
+        expected_candidates = tuple(EVIDENCE_ESTIMATOR_REGISTRY[2:])
+        if tuple(item.candidate_id for item in self.assessments) != expected_candidates:
+            raise ValueError("bundle assessments must cover the exact challenger registry")
         if any(assessment.protocol_sha256 != protocol_hash for assessment in self.assessments):
             raise ValueError("bundle assessment protocol mismatch")
+        for origin, cases, predictive, decision in zip(
+            self.origins,
+            self.cases,
+            self.predictive_evaluations,
+            self.decision_evaluations,
+            strict=True,
+        ):
+            if predictive.future_cases != cases:
+                raise ValueError("bundle predictive case manifest differs from bundle cases")
+            if predictive.origin_predictions_sha256 != origin.predictions_sha256:
+                raise ValueError("bundle predictive origin identity mismatch")
+            if decision.origin_predictions_sha256 != origin.predictions_sha256:
+                raise ValueError("bundle decision origin identity mismatch")
+            if decision.case_sha256 != cases.case_sha256:
+                raise ValueError("bundle decision case identity mismatch")
+            if decision.field_mass_sha256 != cases.field_mass_sha256:
+                raise ValueError("bundle decision field identity mismatch")
+            if decision.action_universe_sha256 != cases.action_universe_sha256:
+                raise ValueError("bundle decision action identity mismatch")
+        for assessment in self.assessments:
+            configs = {
+                origin.candidate_config_sha256[assessment.candidate_id]
+                for origin in self.origins
+            }
+            if configs and configs != {assessment.candidate_config_sha256}:
+                raise ValueError("bundle assessment candidate-config identity mismatch")
+            expected_origin_ids = tuple(
+                content_sha256({
+                    "predictive": predictive.model_dump(mode="json"),
+                    "decision": decision.model_dump(mode="json"),
+                })
+                for predictive, decision in zip(
+                    self.predictive_evaluations,
+                    self.decision_evaluations,
+                    strict=True,
+                )
+            )
+            if assessment.origin_evaluation_ids != expected_origin_ids:
+                raise ValueError("bundle assessment origin-evaluation identity mismatch")
         return self
 
 
