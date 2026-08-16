@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import duckdb
 from pydantic import field_validator, model_validator
@@ -12,15 +12,22 @@ from pydantic import field_validator, model_validator
 from legacy_engine.analytics.eras.discovery import (
     DiscoveryBoundary,
     DiscoveryCalibration,
-    DiscoveryReason,
     EntityDiscoveryResult,
     OutcomeFreeModel,
     OutcomeFreeCorpus,
-    canonical_json,
     discover_recurrent_states,
     load_outcome_free_corpus,
     payload_sha256,
 )
+
+if TYPE_CHECKING:
+    from legacy_engine.analytics.eras.certification import PartitionManifest
+
+
+def _digest_event_ids(event_ids: Sequence[str]) -> str:
+    """Hash a canonical event-id set (empty sets are meaningful)."""
+
+    return payload_sha256(tuple(sorted(set(event_ids))))
 
 DiscoveryRunStatus = Literal["complete", "degraded"]
 DiscoveryRunReason = Literal["no-eligible-parent-archetypes"]
@@ -53,6 +60,13 @@ class DiscoveryManifest(OutcomeFreeModel):
     source_sha256: str
     feature_allowlist: tuple[str, ...]
     seed: int
+    # Certification is only valid for an explicitly partitioned discovery
+    # run.  These fields are intentionally part of the run id: changing the
+    # split cannot silently reuse an old candidate family.
+    partition_role: Literal["discovery", "certification"]
+    partition_plan_id: str
+    partition_rule_sha256: str
+    partition_event_ids_sha256: str
 
     @field_validator(
         "method_id", "calibration_id", "calibration_sha256", "taxonomy_version",
@@ -85,6 +99,14 @@ class DiscoveryManifest(OutcomeFreeModel):
         for key, value in digest_fields.items():
             if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
                 raise ValueError(f"{key} must be a lowercase SHA-256 hex digest")
+        for key in ("partition_rule_sha256", "partition_event_ids_sha256"):
+            value = getattr(self, key)
+            if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+                raise ValueError(f"{key} must be a lowercase SHA-256 hex digest")
+        if not self.partition_plan_id.strip():
+            raise ValueError("partition_plan_id must be non-empty")
+        if self.partition_role != "discovery":
+            raise ValueError("only partition_role='discovery' may be persisted as a discovery run")
         return self
 
 
@@ -101,6 +123,7 @@ def build_discovery_manifest(
     corpus: OutcomeFreeCorpus,
     calibration: DiscoveryCalibration,
     *,
+    partition: "PartitionManifest",
     seed: int,
 ) -> DiscoveryManifest:
     boundaries_payload = [boundary.model_dump(mode="json") for boundary in corpus.semantic_boundaries]
@@ -117,6 +140,54 @@ def build_discovery_manifest(
         source_sha256=corpus.source_sha256,
         feature_allowlist=DISCOVERY_FEATURE_ALLOWLIST,
         seed=seed,
+        partition_role="discovery",
+        partition_plan_id=partition.plan_id,
+        partition_rule_sha256=partition.rule_sha256,
+        partition_event_ids_sha256=partition.discovery_event_ids_sha256,
+    )
+
+
+def run_discovery_corpus(
+    corpus: OutcomeFreeCorpus,
+    calibration: DiscoveryCalibration,
+    *,
+    partition: "PartitionManifest",
+    seed: int = 0,
+) -> DiscoveryRun:
+    """Run the pure discovery engine on an already partitioned corpus.
+
+    Keeping this composition function DB-free is the independence boundary:
+    the certification half can never accidentally become visible to
+    nomination through a connection or a fallback full-corpus load.
+    """
+
+    if partition.discovery_events != len({deck.event_id for deck in corpus.decks}):
+        raise ValueError("partition manifest discovery event count does not match corpus")
+    event_digest = _digest_event_ids(deck.event_id for deck in corpus.decks)
+    if event_digest != partition.discovery_event_ids_sha256:
+        raise ValueError("partition manifest discovery_event_ids_sha256 does not match corpus")
+    manifest = build_discovery_manifest(corpus, calibration, partition=partition, seed=seed)
+    results = discover_recurrent_states(corpus, calibration, seed=seed)
+    eligible = {
+        deck.parent_archetype
+        for deck in corpus.decks
+        if deck.parent_archetype.strip().casefold() != "unknown"
+        and not deck.parent_archetype.strip().casefold().startswith("conflict(")
+        and sum(item.parent_archetype == deck.parent_archetype for item in corpus.decks)
+        >= calibration.min_subject_decks
+    }
+    reasons: tuple[DiscoveryRunReason, ...] = () if eligible else ("no-eligible-parent-archetypes",)
+    status: DiscoveryRunStatus = "complete" if eligible else "degraded"
+    results_payload = [result.model_dump(mode="json") for result in results]
+    results_sha256 = payload_sha256(results_payload)
+    run_id = payload_sha256(manifest.model_dump(mode="json"))
+    return DiscoveryRun(
+        run_id=run_id,
+        manifest=manifest,
+        results_sha256=results_sha256,
+        status=status,
+        reasons=reasons,
+        results=results,
     )
 
 
@@ -146,28 +217,23 @@ def run_recurrent_discovery(
         semantic_boundaries=semantic_boundaries,
         provenance=provenance,
     )
-    manifest = build_discovery_manifest(corpus, calibration, seed=seed)
-    results = discover_recurrent_states(corpus, calibration, seed=seed)
-    eligible = {
-        deck.parent_archetype
-        for deck in corpus.decks
-        if deck.parent_archetype.strip().casefold() != "unknown"
-        and not deck.parent_archetype.strip().casefold().startswith("conflict(")
-        and sum(item.parent_archetype == deck.parent_archetype for item in corpus.decks)
-        >= calibration.min_subject_decks
-    }
-    reasons: tuple[DiscoveryRunReason, ...] = () if eligible else ("no-eligible-parent-archetypes",)
-    status: DiscoveryRunStatus = "complete" if eligible else "degraded"
-    results_payload = [result.model_dump(mode="json") for result in results]
-    results_sha256 = payload_sha256(results_payload)
-    run_id = payload_sha256(manifest.model_dump(mode="json"))
-    run = DiscoveryRun(
-        run_id=run_id,
-        manifest=manifest,
-        results_sha256=results_sha256,
-        status=status,
-        reasons=reasons,
-        results=results,
+    from legacy_engine.analytics.eras.certification import EventPartitionPlan
+    from legacy_engine.analytics.eras.certification import partition_outcome_free_corpus
+
+    # The shipped certification profile supplies the fixed split plan.  A
+    # caller may still pass a different plan through run_discovery_corpus for
+    # controlled tests/challenger profiles.
+    from legacy_engine.config import CERTIFICATION_CALIBRATION_PATH
+    from legacy_engine.analytics.eras.certification import load_certification_calibration
+
+    certification_calibration = load_certification_calibration(CERTIFICATION_CALIBRATION_PATH)
+    plan: EventPartitionPlan = certification_calibration.partition
+    partitioned = partition_outcome_free_corpus(corpus, plan)
+    run = run_discovery_corpus(
+        partitioned.discovery,
+        calibration,
+        partition=partitioned.manifest,
+        seed=seed,
     )
     # Local import keeps the composition root independent of the storage
     # implementation and avoids a module cycle.
@@ -183,5 +249,6 @@ __all__ = [
     "DiscoveryManifest",
     "DiscoveryRun",
     "build_discovery_manifest",
+    "run_discovery_corpus",
     "run_recurrent_discovery",
 ]

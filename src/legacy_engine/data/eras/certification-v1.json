@@ -1,0 +1,36 @@
+{
+  "profile_id": "recurrent-certification-v1-candidate",
+  "profile_state": "candidate",
+  "method_id": "cluster-bootstrap-equivalence-v1",
+  "feature_schema_version": "recurrent-certification-features-v1",
+  "control_evidence_sha256": "8c7c4f8e0f2a1bb8e3a2af7e90d7d5e1e0c4bb5d3f5a1e14b4c7f9c3a2d8e6f1",
+  "partition": {
+    "plan_id": "recurrent-certification-events-v1",
+    "salt": "legacy-engine-recurrent-certification-v1",
+    "modulus": 2,
+    "discovery_buckets": [0]
+  },
+  "family_alpha": 0.05,
+  "bootstrap_replicates": 399,
+  "power_replicates": 199,
+  "safely_inside_ratio": 0.8,
+  "target_power": 0.8,
+  "min_candidate_events": 3,
+  "min_reference_events": 3,
+  "min_time_buckets": 3,
+  "min_effective_events": 2.0,
+  "max_event_share": 0.6,
+  "max_source_share": 0.8,
+  "max_context_weight": 4.0,
+  "max_unsupported_context_share": 0.25,
+  "context_smoothing": 0.5,
+  "rbf_bandwidth": 1.0,
+  "margins": {
+    "main_js": 0.12,
+    "side_js": 0.18,
+    "mixture_energy": 0.2,
+    "field_js": 0.25,
+    "source_js": 0.25,
+    "omnibus_mmd2": 0.2
+  }
+}
