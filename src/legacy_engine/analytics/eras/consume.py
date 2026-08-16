@@ -87,6 +87,53 @@ class EntityEligibility(LegacyEngineModel):
     reasons: tuple[str, ...]
 
 
+class EvidenceConcentration(LegacyEngineModel):
+    raw_n: int
+    distinct_events: int
+    distinct_dates: int
+    distinct_pilots: int | None
+    pilot_identity_available: bool
+    effective_events: float
+    max_event_id: str | None = None
+    max_event_share: float | None = None
+    max_source: str | None = None
+    max_source_share: float | None = None
+    max_component_id: str | None = None
+    max_component_share: float | None = None
+    event_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    component_counts: dict[str, int] = {}
+
+
+class PriorEvidenceAudit(LegacyEngineModel):
+    policy: Literal["pre-disturbance", "hierarchy-only"]
+    observation_match_ids_sha256: str
+    prior_match_ids_sha256: str | None
+    overlap_n: int
+    reason: str
+
+
+class MatchupEvidenceView(LegacyEngineModel):
+    kind: Literal["current-only", "certified-expanded", "added-history"]
+    cell: object | None = None
+    match_ids: tuple[str, ...]
+    pair_component_ids: tuple[str, ...]
+    certificate_ids: tuple[str, ...]
+    concentration: EvidenceConcentration
+    prior: PriorEvidenceAudit
+    status: Literal["available", "thin", "concentrated", "abstained"]
+    reasons: tuple[str, ...]
+
+
+class MatchupEvidenceViews(LegacyEngineModel):
+    subject: str
+    opponent: str
+    clock: AnalysisClock
+    current_only: MatchupEvidenceView
+    certified_expanded: MatchupEvidenceView
+    added_history: MatchupEvidenceView
+
+
 def _source_key(source: EligibilitySourceRef) -> str:
     return json.dumps(source.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
 
@@ -514,6 +561,81 @@ def build_entity_eligibility(
         certificate_run_id=certificate_run_id, clock=clock, status=status,
         reasons=tuple(dict.fromkeys(reasons)),
     )
+
+
+def _digest_ids(ids: Sequence[str]) -> str:
+    return sha256("\n".join(sorted(ids)).encode()).hexdigest()
+
+
+def _concentration(rows: Sequence[object]) -> EvidenceConcentration:
+    event_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    component_counts: dict[str, int] = {}
+    dates: set[date] = set()
+    pilots: set[str] = set()
+    pilot_available = True
+    for selected in rows:
+        record = selected.match
+        event_counts[record.event_id] = event_counts.get(record.event_id, 0) + 1
+        source_counts[record.provenance] = source_counts.get(record.provenance, 0) + 1
+        component_counts[selected.pair_component_id] = component_counts.get(selected.pair_component_id, 0) + 1
+        dates.add(record.event_date)
+        if record.subject_player_id is None or record.opponent_player_id is None:
+            pilot_available = False
+        else:
+            pilots.update((record.subject_player_id, record.opponent_player_id))
+    raw_n = len(rows)
+    def dominant(values: dict[str, int]) -> tuple[str | None, float | None]:
+        if not values or not raw_n:
+            return None, None
+        key, count = max(sorted(values.items()), key=lambda item: item[1])
+        return key, count / raw_n
+    event, event_share = dominant(event_counts)
+    source, source_share = dominant(source_counts)
+    component, component_share = dominant(component_counts)
+    effective = (raw_n * raw_n / sum(count * count for count in event_counts.values())) if raw_n else 0.0
+    return EvidenceConcentration(
+        raw_n=raw_n, distinct_events=len(event_counts), distinct_dates=len(dates),
+        distinct_pilots=len(pilots) if pilot_available else None,
+        pilot_identity_available=pilot_available, effective_events=effective,
+        max_event_id=event, max_event_share=event_share, max_source=source,
+        max_source_share=source_share, max_component_id=component,
+        max_component_share=component_share, event_counts=event_counts,
+        source_counts=source_counts, component_counts=component_counts,
+    )
+
+
+def build_evidence_views(
+    subject: str, opponent: str, rows: Sequence[object], *, clock: AnalysisClock,
+    prior_match_ids: Sequence[str] = (), reasons: Sequence[str] = (), cell: object | None = None,
+) -> MatchupEvidenceViews:
+    """Build exact current/expanded/added views from selected match ids."""
+    current = tuple(row for row in rows if row.view == "current-only")
+    expanded = tuple(row for row in rows if row.view == "certified-expanded")
+    current_ids = {row.match.match_id for row in current}
+    expanded_ids = {row.match.match_id for row in expanded}
+    if not current_ids <= expanded_ids:
+        raise ValueError("current evidence must be a subset of expanded evidence")
+    added = tuple(row for row in expanded if row.match.match_id not in current_ids)
+    if len({row.match.match_id for row in added}) != len(added):
+        raise ValueError("added evidence contains duplicate match ids")
+    prior_ids = tuple(prior_match_ids)
+    def view(kind: Literal["current-only", "certified-expanded", "added-history"], selected: Sequence[object], policy: Literal["pre-disturbance", "hierarchy-only"]) -> MatchupEvidenceView:
+        ids = tuple(row.match.match_id for row in selected)
+        overlap = len(set(ids) & set(prior_ids))
+        if policy == "hierarchy-only" and overlap:
+            raise ValueError("admitted observations overlap hierarchy prior")
+        local_reasons = list(reasons)
+        if not selected:
+            local_reasons.append("zero-support")
+        concentration = _concentration(selected)
+        if concentration.max_event_share is not None and concentration.max_event_share >= 0.8:
+            local_reasons.append("event-concentrated")
+        status: Literal["available", "thin", "concentrated", "abstained"] = "available" if selected else "thin"
+        if concentration.max_event_share is not None and concentration.max_event_share >= 0.8:
+            status = "concentrated"
+        return MatchupEvidenceView(kind=kind, cell=cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(prior_ids) if prior_ids else None, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
+    return MatchupEvidenceViews(subject=subject, opponent=opponent, clock=clock, current_only=view("current-only", current, "pre-disturbance"), certified_expanded=view("certified-expanded", expanded, "hierarchy-only"), added_history=view("added-history", added, "hierarchy-only"))
 
 
 def resolve_field_era(

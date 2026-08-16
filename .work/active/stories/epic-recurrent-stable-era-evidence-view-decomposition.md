@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-view-decomposition
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: [epic-recurrent-stable-era-evidence-interval-selection]
@@ -37,3 +37,22 @@ with proven empty observation/prior intersection.
 
 Run focused decomposition/concentration/prior tests, existing matchup tests, Ruff on touched files,
 and compileall as specified by the parent feature.
+
+## Implementation notes
+
+- Added typed concentration, prior-audit, and current/expanded/added evidence-view models.
+- Added exact match-id partition construction with subset/disjointness assertions and hierarchy-only
+  prior enforcement for admitted historical rows.
+- Added event/source/component concentration, effective-event support, nullable pilot identity, and
+  explicit thin/concentrated/zero-support statuses.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_consume.py` — 23 passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras/consume.py` — passed.
+
+## Simplifications/deviations
+
+- Cell construction remains injectable (`cell` on the view) pending the final matrix adapter; this
+  keeps decomposition independent of the existing matchup import graph while all raw evidence
+  invariants are enforced here.
