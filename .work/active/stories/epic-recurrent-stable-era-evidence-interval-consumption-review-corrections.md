@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption-review-corrections
 kind: story
-stage: done
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: []
@@ -71,3 +71,10 @@ named fix set is green, the parent closes administratively without another indep
 
 Certification-owned files were intentionally excluded from this checkpoint; their worker changes
 remain uncommitted in the shared worktree.
+
+## Root verification gap
+
+After `d968c19`, exact integration proof is still missing. Add DB-backed tests for certificate
+envelope/current-reference behavior and populated parent/camp/multi-split matrix evidence, plus
+actual view-local hierarchy calculation and no-double-count proof. The existing three pure tests do
+not satisfy the review acceptance set.

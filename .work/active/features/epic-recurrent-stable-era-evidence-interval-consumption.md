@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -597,3 +597,9 @@ Correction verification additionally covers gap exclusion, stable component conc
 match-id partition, and prior-overlap refusal in `tests/analytics/eras/test_interval_consumption.py`.
 The follow-up correction validates certificate authority before current-reference adoption,
 independently aggregates all three view cells, and returns populated parent/multi-split evidence.
+
+Root verification remains open: `d968c19` returns the evidence mapping and independent W-L-n
+tallies, but still has only three shallow tests; omits a DB-backed exact-certificate/current test,
+camp/multi-split parity, and a returned-populated-evidence assertion; and labels expanded/added
+`hierarchy-only` while using the flat default prior instead of hierarchy inputs computed from each
+selected view. These named contracts must be implemented and directly exercised before closure.
