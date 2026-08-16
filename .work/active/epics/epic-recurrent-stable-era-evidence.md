@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence
 kind: epic
-stage: review
+stage: done
 tags: [analytics, advisory, testing, ui]
 parent: null
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-credible-window-utility, feature-ranking-future-only-benchmark]
@@ -182,3 +182,14 @@ bootstrap/semantic integrity, canonical one-orientation interval ledgers, real c
 complete report composition/cutoff safety, and executable future-validation gates. The final full
 repository verification is `3,982 passed, 1 skipped`; the combined corrected acceptance surface is
 `95 passed`. Only the pre-existing uncommitted `uv.lock` remains outside the epic.
+
+## Aggregate review
+
+Approved with no material findings. A fresh reviewer traced the complete methodology arc from the
+structural discovery firewall through independent certification, exact pairwise interval authority,
+one-orientation selected outcomes, non-overlapping direct/history/prior roles, camp current-only
+semantics, differentiated amplification fits and aligned draws, exact-run diagnostic publication,
+authority sealing, retrospective cutoff invariance, and cutoff-local future scoring/regret/gating.
+The review confirmed that promotion remains an inert operator proposal and that no latest alias or
+automatic production actuator exists. Its targeted adversarial/integration slice passed
+`139 tests in 11.54s`.
