@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -540,3 +540,30 @@ def build_interval_adaptive_matrix(
   design-time advisory pass was run. This is non-blocking under the advisory policy.
 - Receiver judgment: approved research, foundation decisions, discovery contracts, and certification
   design support the exact-set architecture; the integrated standard feature review remains required.
+
+## Implementation summary
+
+Implemented the interval-consumption seam across four sequential checkpoints:
+
+- `interval-algebra`: typed independent clocks, deterministic disjoint half-open atoms,
+  provenance-preserving intersection, exact certification-run and immutable availability checks,
+  and explicit scalar/camp current fallback.
+- `interval-selection`: deterministic resolved match ids, exact pair membership, exclusive
+  `data_until`, and selected-row component/certificate provenance.
+- `view-decomposition`: current/expanded/added match-id partition, concentration/effective-event
+  diagnostics, nullable pilot identity, and hierarchy-only prior overlap enforcement.
+- `matrix-consumption`: current-authoritative interval wrapper, non-lossy scalar projection refusal
+  for disjoint sets, and typed ranking evidence-source metadata.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras tests/test_match_results.py tests/test_matchup.py tests/test_matchup_multi_split.py tests/test_ranking_measurement.py` — 400 passed.
+- `uv run ruff check src/legacy_engine/analytics/eras/consume.py src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py src/legacy_engine/advisory/ranking_measurement.py` — passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py src/legacy_engine/advisory/ranking_measurement.py` — passed.
+
+## Simplifications/deviations
+
+- Existing adaptive/multi-split internals remain the mature compatibility implementation behind the
+  new interval wrapper; certificate-backed matrix population is exposed through the resolved-match
+  and evidence-view seams for the next consumer integration. Current-only values remain unchanged.
+- `uv.lock` was pre-existing dirty state and was intentionally not staged or modified.
