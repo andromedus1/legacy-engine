@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-13
+updated: 2026-08-16
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -12,7 +12,10 @@ summary: |
   authority, the opt-in seeded posterior lean, grounded/current strata, rank stability
   and paths to grounding, the cross-camp P(best) column, and the five-plan strategic
   taxonomy, including exact archetype-versus-plan evidence in every archetype dropdown;
-  the page itself carries the authoritative definitional prose.
+  the page itself carries the authoritative definitional prose. Typed report targets may
+  add diagnostic-only recurrent interval and amplification evidence without changing the
+  mature ranking payload, and may publish exclusive-cutoff “Today’s model” siblings in a
+  failure-safe offline bundle.
 decisions:
   - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
@@ -34,6 +37,11 @@ decisions:
   - "The benchmark protocol freezes the exact fold schedule and as-of B&R ledger. Claim coverage uses classified held-out deck mass, while field-weighted regret includes structural 50% mirror utility and requires a stable event-bootstrap oracle. Deterministic artifacts allow byte-identical replay and refuse different content."
   - "Benchmark launch requires a zero-gap card-metadata preflight at every planned training cutoff on the same derived copy; exact Scryfall/current aliases and evidence-backed provider serialization may resolve names, while ambiguous, truncated, and manual candidates remain fail-closed."
   - "The generated page names its future-only validation status and summary artifact id. No supplied summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive, or predictive-claim-supported."
+  - "Recurrent interval and amplification evidence is diagnostic-only. The attachment exposes current-only, certified-expanded, and added-history views plus six named challenger slots, while a canonical authority-payload digest proves that Agency, candidacy, P(best), ordering, and every mature row metric are unchanged."
+  - "Parents may consume an exact certification run; camps remain current-only and cannot acquire certified historical intervals or added-history observations. Missing, invalid, non-final, future, unpromoted, or guard-mismatched certificates abstain with named reasons rather than widening evidence."
+  - "An explicitly requested amplification run is exact-run only: no latest-run lookup or approximate reuse. Missing or mismatched corpus, clock, certificate, direct baselines, profile registry/order, fit identities, match-set digests, or comparison audit fails generation before atomic replacement; omitting the run is a valid typed not-assessed state."
+  - "A retrospective report target uses an exclusive data_until cutoff, the latest confirmed ban boundary strictly before that cutoff, and the label Today’s model because taxonomy/configuration are current at knowledge_as_of. It is never represented as what the engine knew then."
+  - "A report bundle stages every available page and its escaped manifest before publication, replaces historical siblings before the canonical current page, and restores the complete prior bundle after any replacement failure. Unavailable targets have reasons but no href and remain disabled in navigation."
 ---
 
 # Best Deck / Best Call agency ranking — refresh runbook
@@ -65,6 +73,65 @@ ledger; it does not scrape announcements or confirm changes automatically.
 The individual CLI commands and `scripts/refresh_best_call_ranking.py` remain available for focused
 operation and debugging. The composition excludes prices, upstream hot-spare behavior, cloud state,
 git commits, and pushes.
+
+## Recurrent evidence diagnostics and report targets
+
+A typed report target adds a separate diagnostic attachment to the mature Best Call payload. It does
+not feed Agency, the practical or production ordering, candidacy, grounding, P(best), the posterior
+lean, or any browser threshold recomputation. Generation hashes the complete authority payload before
+attachment and verifies it again afterward. Each parent pair can show three direct, exact-match views:
+
+- **Current only** — the scalar/current reference interval used as the no-certificate baseline.
+- **Certified expanded** — current evidence plus historical half-open components admitted by both
+  entities' exact certificates.
+- **Added history** — only the matches contributed by those admitted historical components.
+
+Each view carries W-L/n, shrunk and raw estimates, interval, confidence/status, concentration,
+match-set digest, component ids, certificate ids, and prior audit. The detail also lists admitted
+half-open components and six named amplification challengers. All of this remains frozen generated
+evidence: changing the page's interactive matchup threshold neither recomputes nor promotes it.
+Without an amplification run, the attachment and all six challenger slots are explicitly
+`not-assessed`; the direct interval views still render. Certificate defects or an unavailable exact
+certificate result abstain to current-only evidence with named reasons. Camps are deliberately
+current-only: their expanded view must equal current-only, their added-history set must be empty, and
+they cannot carry a historical certificate.
+
+Amplification is exact-run and fail-closed. `--amplification-run-id` performs an id lookup, never a
+latest-run lookup, and the requested run must bind to the report's interval corpus, clock,
+certificate, direct baselines, diagnostic-only profile, complete six-method registry/order, fair
+comparison audit, fit identities, and exact current/history/borrowed match-set digests. A missing or
+mismatched requested run raises before the ranking file's atomic replacement, preserving the last
+good page. Omitting the flag is not a failure; it is the honest `not-assessed` posture.
+
+For a single retrospective page, use the supported typed-target flags:
+
+```bash
+.venv/bin/python scripts/refresh_best_call_ranking.py \
+  --db data/legacy.duckdb \
+  --out decks/best-deck-best-call-ranking--before-2026-08-10.html \
+  --data-until 2026-08-10 \
+  --knowledge-as-of 2026-08-16T00:00:00-06:00 \
+  --target-id before-2026-08-10 \
+  --target-label "Before The Fantasticar"
+```
+
+`--data-until` is exclusive: every outcome-bearing section uses event dates strictly before the
+cutoff, confirmed bans are also restricted to dates strictly before it, and the field begins at the
+latest confirmed prior ban boundary. Section-level row counts, maximum event dates, and input hashes
+are embedded in the target audit. The page labels this mode **Today's model** because
+`knowledge_as_of` supplies current taxonomy, configuration, certificates, and derived structure; it
+does not claim “as known then.” Optional `--certificate-run-id` and `--amplification-run-id` bind
+exact evidence runs. The amplification run's cutoff must equal the requested target cutoff.
+
+The package-level bundle writer can publish one ordered target set containing exactly one Current
+target and zero or more Today's-model siblings. It stages all available HTML and escaped manifest
+JSON before touching canonical paths, publishes historical siblings first and Current last, and
+rolls back every prior artifact if any replacement fails. Every page's manifest selects that page's
+own target. Available entries have an href and no reasons; unavailable entries have reasons, no
+href, appear disabled in the selector, and are listed visibly. Navigation only follows a manifest
+href, target labels/reasons are HTML-escaped, and row disclosure state is scoped by target id so one
+historical page cannot restore another target's UI state. There is currently no bundle CLI; callers
+use `legacy_engine.advisory.best_call_bundle.generate_ranking_bundle`.
 
 ## Future-only ranking benchmark
 
@@ -242,9 +309,12 @@ per parent) when the corpus has grown materially — staged splits carry frozen
 membership, so **new decks get camp labels only after a re-staged PASS + apply**.
 A gate-A FAIL keeps the old frozen split; treat that parent's camp rows as stale.
 
-Knobs (defaults are the page's published method): `--field-since` (defaults to the
-latest confirmed ban event date), `--ground-n 8`, `--top-k 8`, `--cover-min 0.8`,
-`--min-row-share 0.001`, `--db`, `--out`.
+Knobs (defaults are the page's published method): `--field-since` (legacy untargeted mode;
+defaults to the latest confirmed ban event date), `--ground-n 8`, `--top-k 8`,
+`--cover-min 0.8`, `--min-row-share 0.001`, `--db`, and `--out`. Typed target generation adds
+`--data-until`, `--knowledge-as-of`, `--certificate-run-id`, `--amplification-run-id`,
+`--target-id`, and `--target-label`. A typed target derives its field window from its confirmed
+historical regime and rejects a conflicting `--field-since` override.
 
 ## What the script does
 

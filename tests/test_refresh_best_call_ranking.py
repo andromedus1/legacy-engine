@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 
 from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
+from legacy_engine.advisory.best_call_targets import ReportTarget
 
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
@@ -54,7 +55,6 @@ from test_matchup_multi_split import (  # noqa: E402
 from test_matchup_superarchetype import (  # noqa: E402
     _hero_con,
     _hero_registry,
-    _registry,
 )
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "refresh_best_call_ranking.py"
@@ -96,7 +96,10 @@ class Element {
   constructor() {
     this.attrs = {}; this.listeners = {}; this.textContent = ""; this.innerHTML = "";
     this.value = ""; this.disabled = false; this.title = ""; this.style = {};
+    this.dataset = {}; this.children = []; this.selected = false; this.hidden = false;
   }
+  append(child) { this.children.push(child); }
+  get selectedOptions() { return this.children.filter(child => child.selected); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   getAttribute(name) { return this.attrs[name] ?? null; }
@@ -111,7 +114,14 @@ const document = {
   querySelectorAll() { return []; },
   querySelector() { return null; },
 };
-const context = vm.createContext({document, CSS: {escape: value => String(value)}});
+const saved = new Map();
+const localStorage = {
+  getItem(key) { return saved.has(key) ? saved.get(key) : null; },
+  setItem(key, value) { saved.set(key, String(value)); },
+};
+const window = {location: {href: ""}};
+const context = vm.createContext({document, localStorage, window,
+  CSS: {escape: value => String(value)}});
 vm.runInContext(fs.readFileSync(0, "utf8"), context);
 const result = vm.runInContext(process.argv[1], context);
 process.stdout.write(JSON.stringify(result));
@@ -336,6 +346,20 @@ def _build_fixture(con) -> None:
     _load_murktide_control_reinforcement(con)
 
 
+def _current_target() -> ReportTarget:
+    return ReportTarget(
+        target_id="current",
+        label="Current </script><script>alert(1)</script>",
+        mode="current",
+        mode_label="Current",
+        data_until=None,
+        effective_data_until=dt.date(2026, 5, 26),
+        knowledge_as_of=dt.datetime(2026, 8, 16, tzinfo=dt.UTC),
+        field_since=dt.date(2026, 5, 18),
+        regime_card="Undercity Informer",
+    )
+
+
 def script_con():
     """Two-parent corpus + pre-ban loads + era rows covering all three horizon sources.
 
@@ -553,7 +577,6 @@ class TestCrossCampRanking:
         con = script_con()
         blob = _blob(con)
         con.close()
-        suppress = blob["meta"]["rank"]["suppress_cov"]
         caveat = blob["meta"]["rank"]["caveat_cov"]
         ranked = 0
         for r in blob["camps"]:
@@ -925,6 +948,12 @@ class TestMainEndToEnd:
                 "regime_card": None, "audit": [],
             },
             "arch": [], "camps": [camp], "plans": [],
+            "report_target": {
+                "target_id": "before-test", "label": "Before hostile </option>",
+                "mode_label": "Today's model", "data_until": "2026-01-31",
+                "effective_data_until": "2026-01-31",
+                "knowledge_as_of": "2026-08-16T00:00:00+00:00",
+            },
         }
         result = _run_template_javascript(blob, r"""
 (() => {
@@ -949,12 +978,20 @@ class TestMainEndToEnd:
   return {
     initial, tiedGrounded: tied.grounded, expanded,
     collapsed: toggle.attrs["aria-expanded"], stalePbest: pbestHtml(D.camps[0]),
+    targetControlHidden: document.getElementById("target-control").hidden,
+    targetOption: document.getElementById("report-target").children[0].textContent,
+    targetMode: document.getElementById("target-mode").textContent,
+    targetStatus: document.getElementById("target-status").textContent,
   };
 })()
 """)
         assert result["initial"]["interactiveN"] == 8
         assert result["initial"]["sortValue"] == pytest.approx(0.2)
         assert result["initial"]["pbest"].startswith("20.0%")
+        assert result["targetControlHidden"] is False
+        assert "Before hostile </option>" in result["targetOption"]
+        assert result["targetMode"] == "Today’s model"
+        assert result["targetStatus"].startswith("Exclusive data cutoff")
         assert 'aria-expanded="false"' in result["initial"]["row"]
         assert 'aria-controls="row-detail-c-0"' in result["initial"]["row"]
         assert result["tiedGrounded"] is False
@@ -1104,3 +1141,120 @@ class TestMainEndToEnd:
         )
         assert flagged == absent
         assert '"sa"' not in flagged
+
+
+class TestEvidenceTargetIntegration:
+    def test_current_target_attaches_diagnostics_without_changing_authority(
+        self, tmp_path
+    ):
+        db_path = tmp_path / "ranking.duckdb"
+        con = store.connect(db_path)
+        _build_fixture(con)
+        con.close()
+        baseline = rbcr.generate_ranking(
+            db_path=db_path,
+            out_path=tmp_path / "baseline.html",
+            field_since="2026-05-18",
+            ground_n=3,
+            data_until="2026-05-26",
+        )
+        target_path = tmp_path / "target.html"
+        attached = rbcr.generate_ranking(
+            db_path=db_path,
+            out_path=target_path,
+            target=_current_target(),
+            ground_n=3,
+        )
+        assert rbcr.canonical_json(rbcr._authority_payload(attached)) == rbcr.canonical_json(
+            baseline
+        )
+        assert attached["evidence"]["status"] == "not-assessed"
+        assert all("diagnostic_evidence" in row for row in attached["arch"])
+        assert attached["camps"]
+        assert all(
+            row["diagnostic_evidence"]["pairs"]
+            and all(
+                "camp-current-only" in pair["reasons"]
+                and pair["current_only"]["match_ids_sha256"]
+                == pair["certified_expanded"]["match_ids_sha256"]
+                and pair["added_history"]["n"] == 0
+                for pair in row["diagnostic_evidence"]["pairs"]
+            )
+            for row in attached["camps"]
+        )
+        rendered = target_path.read_text()
+        assert "Current </script><script>alert(1)</script>" not in rendered
+        assert "\\u003c/script\\u003e" in rendered
+        assert "Evidence diagnostics — diagnostic only" in rendered
+
+    def test_retrospective_blob_is_invariant_to_cutoff_date_and_future_rows(
+        self, tmp_path
+    ):
+        db_path = tmp_path / "ranking.duckdb"
+        con = store.connect(db_path)
+        _build_fixture(con)
+        con.close()
+        target = ReportTarget(
+            target_id="before-informer",
+            label="Before Undercity Informer",
+            mode="retrospective-current-model",
+            mode_label="Today's model",
+            data_until=dt.date(2026, 5, 18),
+            effective_data_until=dt.date(2026, 5, 18),
+            knowledge_as_of=dt.datetime(2026, 8, 16, tzinfo=dt.UTC),
+            field_since=dt.date(2025, 11, 10),
+            regime_card="Entomb",
+        )
+        before = rbcr.generate_ranking(
+            db_path=db_path,
+            out_path=tmp_path / "before.html",
+            target=target,
+            ground_n=3,
+        )
+        con = store.connect(db_path)
+        con.execute(
+            "INSERT INTO tournaments VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ["future", "future", "2026-05-18", "", "Legacy", "mtgo", "online"],
+        )
+        con.executemany(
+            "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("future", 0, "future-a", "", "Doomsday", "hostile </script>"),
+                ("future", 1, "future-b", "", "Control", None),
+            ],
+        )
+        con.execute(
+            "INSERT INTO rounds VALUES (?, ?, ?, ?, ?)",
+            ["future", 0, "future-a", "future-b", "2-0"],
+        )
+        con.execute(
+            "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+            ["future", 0, "main", "Undercity Informer", 4],
+        )
+        con.close()
+        after = rbcr.generate_ranking(
+            db_path=db_path,
+            out_path=tmp_path / "after.html",
+            target=target,
+            ground_n=3,
+        )
+        assert rbcr.canonical_json(before) == rbcr.canonical_json(after)
+        audit = after["meta"]["target_data_audit"]
+        assert all(
+            section["max_event_date"] is None
+            or section["max_event_date"] < "2026-05-18"
+            for section in audit["sections"]
+        )
+        con = store.connect(db_path)
+        con.execute("UPDATE tournaments SET date='2026-05-17' WHERE id='future'")
+        con.close()
+        moved_inside = rbcr.generate_ranking(
+            db_path=db_path,
+            out_path=tmp_path / "moved-inside.html",
+            target=target,
+            ground_n=3,
+        )
+        assert (
+            moved_inside["meta"]["target_data_audit"]["audit_sha256"]
+            != audit["audit_sha256"]
+        )

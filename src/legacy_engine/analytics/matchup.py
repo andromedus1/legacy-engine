@@ -881,6 +881,7 @@ def build_adaptive_matrix(
     affect_threshold: float = 0.25,
     split_variant: str | None = None,
     horizons: dict[str, str | None] | None = None,
+    ban_events=None,
     until: str | None = None,
 ) -> AdaptiveMatrix:
     """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
@@ -942,6 +943,7 @@ def build_adaptive_matrix(
         horizon_meta, audit_preamble = era_horizons(
             con, included, provenance=provenance, split_variant=split_variant,
             affect_threshold=affect_threshold,
+            ban_events=ban_events,
         )
         valid_since = {a: horizon_meta[a].since for a in included}
 
@@ -1111,6 +1113,7 @@ def build_multi_split_adaptive(
     min_row_share: float = 0.02,
     affect_threshold: float = 0.25,
     horizons: dict[str, str | None] | None = None,
+    ban_events=None,
     superarchetypes: "SuperarchetypeRegistry | None" = None,
     apply_superarchetype_priors: bool = True,
     until: str | None = None,
@@ -1183,6 +1186,7 @@ def build_multi_split_adaptive(
         horizon_meta, audit_preamble = era_horizons(
             con, entities, provenance=provenance, camp_parent=camp_parent,
             affect_threshold=affect_threshold,
+            ban_events=ban_events,
         )
         valid_since = {a: horizon_meta[a].since for a in entities}
 
@@ -1466,7 +1470,7 @@ def build_multi_split_adaptive(
 def build_interval_adaptive_matrix(
     con, *, clock, certificate_run_id: str | None = None, provenance: str | None = None,
     requested_since=None, split_variant: str | None = None,
-    split_variants=None, **existing_matrix_options,
+    split_variants=None, ban_events=None, **existing_matrix_options,
 ) -> IntervalAdaptiveMatrix:
     """Build the compatibility matrix through the interval consumption boundary.
 
@@ -1478,12 +1482,14 @@ def build_interval_adaptive_matrix(
     if split_parents is not None:
         current = build_multi_split_adaptive(
             con, parents=split_parents, provenance=provenance,
+            ban_events=ban_events,
             **existing_matrix_options,
         )
         current_matrix = current.multi
     else:
         current = build_adaptive_matrix(
             con, provenance=provenance, split_variant=split_variant,
+            ban_events=ban_events,
             **existing_matrix_options,
         )
         current_matrix = current.matrix
@@ -1506,6 +1512,7 @@ def build_interval_adaptive_matrix(
         entity: build_entity_eligibility(
             con, entity, clock=clock, certificate_run_id=certificate_run_id,
             requested_since=requested_since, camp_parent=camp_parent,
+            ban_events=ban_events,
         ) for entity in entities
     }
     pair_keys = tuple(key for key in current_matrix.cells if key[0] != key[1])

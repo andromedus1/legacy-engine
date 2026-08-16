@@ -490,6 +490,7 @@ def build_entity_eligibility(
     requested_since: date | None = None,
     camp_parent: Mapping[str, str] | None = None,
     provenance: str | None = None,
+    ban_events: Sequence[tuple[object, str, str]] | None = None,
 ) -> EntityEligibility:
     """Compile scalar horizons and one exact certification run into interval authority."""
     from legacy_engine.analytics.eras.certificate_store import read_certification_run
@@ -498,6 +499,7 @@ def build_entity_eligibility(
     is_camp = parent is not None
     horizons, _ = era_horizons(
         con, [entity], provenance=provenance, camp_parent=camp_parent,
+        ban_events=ban_events,
     )
     horizon = horizons[entity].since
     current_start = date.fromisoformat(horizon) if horizon else None

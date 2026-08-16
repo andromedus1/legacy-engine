@@ -143,6 +143,17 @@ svg text { font-family: inherit; }
 .methodology-control { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .methodology-control button[aria-pressed="true"] { border-color:var(--s1); color:var(--ink); }
 .methodology-status { color:var(--muted); font-size:13px; }
+.target-control { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.target-control select { max-width:100%; padding:6px 30px 6px 8px; color:var(--ink);
+  background:var(--surface-1); border:1px solid var(--ring); border-radius:6px; }
+.target-control select:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+.target-unavailable { flex-basis:100%; margin:2px 0 0; color:var(--muted); font-size:12px; }
+.diagnostic-boundary { border-left:3px solid var(--s1); padding:7px 9px; margin:0 0 9px;
+  background:color-mix(in oklab, var(--s1) 6%, transparent); }
+.diagnostic-table { min-width:720px; }
+.diagnostic-table td { vertical-align:top; white-space:normal; }
+.diagnostic-table code { overflow-wrap:anywhere; }
+.diagnostic-scroll { overflow-x:auto; }
 .grounding-path { margin:8px 0; padding:9px 11px; border-left:3px solid var(--amber);
   background:var(--surface-1); font-size:13px; }
 .grounding-path ol { margin:6px 0; padding-left:22px; }
@@ -153,6 +164,13 @@ svg text { font-family: inherit; }
 <div class="viz-root">
 <h1>Best Deck / Best Call — ranked by Agency</h1>
 <div class="audit" id="audit"></div>
+<div class="card target-control" id="target-control" hidden>
+  <label for="report-target"><b>Report target</b></label>
+  <select id="report-target" aria-describedby="target-status target-unavailable"></select>
+  <span class="chip" id="target-mode"></span>
+  <span id="target-status" class="methodology-status" aria-live="polite"></span>
+  <ul id="target-unavailable" class="target-unavailable"></ul>
+</div>
 <div class="hint" role="note"><span class="hint-label">Interactive tables</span><b>Click any row</b>
 in the Strategic Plans, Archetypes, or Subarchetypes tables
 to expand it. Plans show their member decks and direct plan-vs-plan ledger; archetypes and
@@ -429,6 +447,8 @@ const nParents = new Set(D.camps.map(r => r.parent)).size;
 const validation = M.benchmark_validation || {status:"not-run", artifact_id:null,
   reason:"no benchmark summary artifact supplied to page generation"};
 const productionCall = M.production_recommendation || {chosen_action:null};
+const reportTarget = D.report_target || null;
+const evidenceAudit = M.evidence_audit || null;
 const audit = [
   `// corpus through ${M.corpus_max}`
     + (M.corpus_decks ? ` · ${nf(M.corpus_decks)} decks / ${nf(M.corpus_events)} events` : "")
@@ -440,13 +460,20 @@ const audit = [
   `// current production call: ${productionCall.chosen_action || "unavailable"} · shared grounded/current/Agency ordering`,
   `// future-only validation: ${validation.status} · artifact ${validation.artifact_id || "none"}`
     + (validation.reason ? ` · ${validation.reason}` : ""),
+  ...(reportTarget ? [`// report target: ${reportTarget.target_id} · ${reportTarget.mode_label}`+
+    ` · requested cutoff ${reportTarget.data_until || "open"} · effective cutoff ${reportTarget.effective_data_until}`+
+    ` · knowledge ${reportTarget.knowledge_as_of}`] : []),
+  ...(evidenceAudit ? [`// evidence: ${evidenceAudit.status} · certificate ${evidenceAudit.certificate_run_id || "none"}`+
+    ` · amplification ${evidenceAudit.amplification_run_id || "none"} · interval ${evidenceAudit.interval_corpus_sha256}`+
+    ` · authority ${evidenceAudit.authority_payload_sha256}`+
+    (evidenceAudit.reasons.length ? ` · ${evidenceAudit.reasons.join("; ")}` : "")] : []),
   ...(M.audit || []),
 ].join("\n");
 document.getElementById("audit").textContent = audit;
 
 function windowChip(r) {
   if (!r.since) return `<span class="chip">full history</span>`;
-  return `<span class="chip">since ${r.since}</span>`;
+  return `<span class="chip">since ${escT(r.since)}</span>`;
 }
 // Blowout tally over current-field matchups clearing the selected n gate: classified on the RAW
 // observed win rate — full <40%, half 40–45%. The measured-cell gate keeps thinner
@@ -468,6 +495,44 @@ function blowouts(r) {
 }
 const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
+const targetScope = (D.report_target || {}).target_id || "current";
+(function targetNavigation() {
+  const manifestNode = document.getElementById("report-bundle-manifest");
+  const target = D.report_target;
+  if ((!manifestNode || !manifestNode.textContent) && !target) return;
+  const manifest = manifestNode && manifestNode.textContent ? JSON.parse(manifestNode.textContent) : {
+    selected_target_id: target.target_id,
+    targets: [{...target, href:null, status:"available", reasons:[]}],
+  };
+  const control = document.getElementById("target-control");
+  const select = document.getElementById("report-target");
+  control.hidden = false;
+  manifest.targets.forEach(entry => {
+    const option = document.createElement("option");
+    option.value = entry.target_id;
+    option.textContent = `${entry.label} · ${entry.mode_label === "Today's model" ? "Today’s model" : entry.mode_label}`;
+    option.disabled = entry.status !== "available";
+    option.selected = entry.target_id === manifest.selected_target_id;
+    if (entry.href) option.dataset.href = entry.href;
+    select.append(option);
+  });
+  const selected = manifest.targets.find(entry => entry.target_id === manifest.selected_target_id);
+  document.getElementById("target-mode").textContent =
+    selected.mode_label === "Today's model" ? "Today’s model" : selected.mode_label;
+  document.getElementById("target-status").textContent = selected.data_until
+    ? `Exclusive data cutoff ${selected.data_until}; current taxonomy and configuration`
+    : `Current corpus through ${D.meta.corpus_max}; evidence cutoff ${selected.effective_data_until}`;
+  const unavailable = manifest.targets.filter(entry => entry.status === "unavailable");
+  document.getElementById("target-unavailable").innerHTML = unavailable.map(entry =>
+    `<li>${escT(entry.label)} unavailable — ${entry.reasons.map(escT).join("; ")}</li>`
+  ).join("");
+  select.addEventListener("change", event => {
+    const option = event.currentTarget.selectedOptions[0];
+    if (!option || !option.dataset.href) return;
+    document.getElementById("target-status").textContent = `Opening ${option.textContent}`;
+    window.location.href = option.dataset.href;
+  });
+})();
 // Camp-only P(best) cell: ONE shared-field MC across all camps + unsplit archetypes
 // (meta.rank carries seed/draws/basis). p_best=null = below the candidacy coverage gate
 // (cov shown as the reason); the chip is the risk-adjusted lower-quantile field WR,
@@ -565,14 +630,14 @@ function floorObservabilityHtml(r) {
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
   const cls = (r.grounded ? "" : "thin") + stale;
-  const baseName = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
+  const baseName = camp ? `${escT(r.parent)} <span style="color:var(--ink-2)">[${escT(r.camp)}]</span>` : escT(r.subject);
   const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
   const detailId = `row-detail-${camp ? "c" : "a"}-${r._idx}`;
   const methodAgency = agencyValue(r);
   const w = Math.max(2, Math.round((methodAgency || 0) * 220));
   const agencyTxt = agencyCellHtml(r);
   const floorTxt = (r.floor == null ? "—" :
-    `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`) + floorObservabilityHtml(r);
+    `${fmtP(r.floor)} <span class="chip">vs ${escT(r.floor_opp)}</span>`) + floorObservabilityHtml(r);
   const b = blowouts(r);
   const bTxt = `${b.score % 1 ? b.score.toFixed(1) : b.score}` +
     ` <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span>`;
@@ -813,9 +878,83 @@ function archetypePlanHtml(r) {
     `<div class="footnote">Built directly from this archetype's decisive matches against every member of each primary plan; no rendered row averages or composition-family leans.</div>`);
 }
 
-// Open/closed state of the two nested disclosures, remembered across row expansions so a
-// reader who only wants one of them stops re-collapsing the other on every row.
-const subsectionOpen = { plans: true, exact: false };
+function diagnosticValue(view) {
+  const estimate = view.estimate == null ? "n/a" : `${fmtP(view.estimate)}%`;
+  const interval = view.ci_low == null ? "" : ` · 95% ${fmtP(view.ci_low)}–${fmtP(view.ci_high)}`;
+  const reasons = view.reasons.length ? ` · ${view.reasons.map(escT).join("; ")}` : "";
+  const concentration = view.concentration;
+  const concentrationAudit = `effective events ${concentration.effective_events.toFixed(1)}`+
+    `${concentration.max_event_share == null ? "" : ` · max event ${fmtP(concentration.max_event_share)}%`}`+
+    `${concentration.max_source_share == null ? "" : ` · max source ${fmtP(concentration.max_source_share)}%`}`+
+    `${concentration.max_component_share == null ? "" : ` · max component ${fmtP(concentration.max_component_share)}%`}`;
+  const components = view.component_ids.length ? view.component_ids.map(escT).join(", ") : "none";
+  const certificates = view.certificate_ids.length ? view.certificate_ids.map(escT).join(", ") : "none";
+  return `${estimate}${interval} · ${view.wins}-${view.losses} (n=${view.n}) `+
+    `<span class="chip">${escT(view.status)}</span>${reasons}`+
+    `<br><small>${concentrationAudit} · match digest <code>${escT(view.match_ids_sha256)}</code>`+
+    ` · components ${components} · certificates ${certificates}`+
+    ` · prior ${escT(view.prior_audit.policy)} / ${escT(view.prior_audit.reason)}`+
+    ` / overlap ${view.prior_audit.overlap_n}`+
+    `${view.prior_audit.prior_match_ids_sha256 ? ` / digest <code>${escT(view.prior_audit.prior_match_ids_sha256)}</code>` : ""}</small>`;
+}
+function evidenceDiagnosticsHtml(r) {
+  const evidence = r.diagnostic_evidence;
+  if (!evidence) return "";
+  const pairs = evidence.pairs || [];
+  const direct = pairs.map(pair => `<tr><td>${escT(pair.opponent)}</td>`+
+    `<td>${diagnosticValue(pair.current_only)}</td>`+
+    `<td>${diagnosticValue(pair.certified_expanded)}</td>`+
+    `<td>${diagnosticValue(pair.added_history)}</td></tr>`).join("");
+  const components = pairs.flatMap(pair => pair.interval_components.map(component => {
+    const sources = component.sources.map(source => `${escT(source.entity)}: ${escT(source.source)}`+
+      `${source.segment_id ? ` / ${escT(source.segment_id)}` : ""}`+
+      `${source.certificate_id ? ` / ${escT(source.certificate_id)}` : ""}`).join("; ");
+    return `<tr><td>${escT(pair.opponent)}</td><td><code>${escT(component.component_id)}</code></td>`+
+      `<td>[${escT(component.start || "−∞")}, ${escT(component.end)})</td>`+
+      `<td>${sources}</td><td>${component.current_match_n} / ${component.expanded_match_n} / ${component.added_history_match_n}</td></tr>`;
+  })).join("");
+  const challengers = pairs.flatMap(pair => pair.challengers.map(challenger => {
+    const served = challenger.served == null
+      ? `n/a — ${challenger.reasons.map(escT).join("; ") || escT(challenger.service_state)}`
+      : `${fmtP(challenger.served.median)}% · 95% ${fmtP(challenger.served.ci_low)}–${fmtP(challenger.served.ci_high)}`;
+    const support = challenger.support == null ? "n/a" :
+      `direct ${challenger.support.direct_matches} · history ${challenger.support.historical_matches} · borrowed ${challenger.support.borrowed_matches}`;
+    const concentration = challenger.borrowing_concentration == null ? "none" :
+      `effective donors ${challenger.borrowing_concentration.effective_donor_pairs.toFixed(1)} · effective members ${challenger.borrowing_concentration.effective_members.toFixed(1)}`+
+      ` · max donor ${challenger.borrowing_concentration.max_donor_pair_share == null ? "n/a" : fmtP(challenger.borrowing_concentration.max_donor_pair_share)+"%"}`+
+      ` · max member ${challenger.borrowing_concentration.max_member_share == null ? "n/a" : fmtP(challenger.borrowing_concentration.max_member_share)+"%"}`+
+      ` · max family ${challenger.borrowing_concentration.max_family_share == null ? "n/a" : fmtP(challenger.borrowing_concentration.max_family_share)+"%"}`;
+    const ablation = challenger.ablations == null ? "n/a" :
+      `history Δ ${challenger.ablations.history_delta == null ? "n/a" : fmtP(challenger.ablations.history_delta)} · borrowing Δ ${challenger.ablations.borrowing_delta == null ? "n/a" : fmtP(challenger.ablations.borrowing_delta)} · non-additive residual ${challenger.ablations.nonadditive_remainder == null ? "n/a" : fmtP(challenger.ablations.nonadditive_remainder)}`;
+    const digests = `current <code>${escT(challenger.current_match_ids_sha256 || "n/a")}</code>`+
+      ` · history <code>${escT(challenger.historical_match_ids_sha256 || "n/a")}</code>`+
+      ` · borrowed <code>${escT(challenger.borrowed_match_ids_sha256 || "n/a")}</code>`+
+      ` · refused all-case audit <code>${escT(challenger.all_case_sha256 || "n/a")}</code>`;
+    const reasons = challenger.reasons.length ? challenger.reasons.map(escT).join("; ") : "none";
+    return `<tr><td>${escT(pair.opponent)}</td><td><code>${escT(challenger.method_id)}</code></td>`+
+      `<td>${served}<br><small>reasons: ${reasons}</small></td><td>${escT(challenger.service_state)}`+
+      `<br><small>fit <code>${escT(challenger.fit_id || "n/a")}</code></small></td>`+
+      `<td>${challenger.confidence ? escT(challenger.confidence.level)+" / "+escT(challenger.confidence.production)+" / "+escT(challenger.confidence.source) : "n/a"} / ${escT(challenger.imputation || "n/a")}</td>`+
+      `<td>${support}<br>${concentration}<br>${ablation}<br><b>additive attribution: false</b><br>${digests}</td></tr>`;
+  })).join("");
+  const body = `<div class="diagnostic-boundary"><b>Diagnostic only — ranking authority unchanged.</b> `+
+    `These direct and challenger estimates are frozen generated evidence. Browser threshold controls do not recompute, hide, rank, or promote them. `+
+    `<span class="chip">${escT(evidence.status)}</span> ${evidence.reasons.map(escT).join("; ")}</div>`+
+    (pairs.length ? `<div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Current only</th><th>Certified expanded</th><th>Added history</th></tr></thead><tbody>${direct}</tbody></table></div>`+
+    `<h4>Admitted half-open components</h4><div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Component</th><th>Bounds</th><th>Provenance</th><th>n current / expanded / added</th></tr></thead><tbody>${components || `<tr><td colspan="5">n/a — no admitted interval components</td></tr>`}</tbody></table></div>`+
+    `<h4>Six named challengers</h4><div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Method</th><th>Served estimate</th><th>Service state</th><th>Confidence / imputation</th><th>Direct, history, borrowed decomposition</th></tr></thead><tbody>${challengers}</tbody></table></div>` :
+    `<p>n/a — ${evidence.reasons.map(escT).join("; ")}</p>`);
+  return subsectionHtml("evidence", "Evidence diagnostics — diagnostic only",
+    `<span class="chip">${escT(evidence.status)}</span>`, body);
+}
+
+// Nested disclosure state is scoped by target so a historical page never restores rows
+// belonging to another artifact.
+let subsectionOpen = { plans: true, exact: false, evidence: false };
+try {
+  subsectionOpen = {...subsectionOpen,
+    ...JSON.parse(localStorage.getItem(`best-call-subsections:${targetScope}`) || "{}")};
+} catch (_) {}
 let groupByRankingEvidence = false;
 function subsectionHtml(key, title, chip, body) {
   return `<details class="subsection" data-sub="${key}"${subsectionOpen[key] ? " open" : ""}>`+
@@ -871,7 +1010,7 @@ function renderTable(id, rows, camp) {
       const src = tr.dataset.v === "c" ? D.camps : D.arch;
       const r = src[Number(tr.dataset.i)];
       const cells = r.cells.map(c => {
-        const lbl = `${c.opp} <span class="chip">${(100*c.share).toFixed(1)}%</span>`;
+        const lbl = `${escT(c.opp)} <span class="chip">${(100*c.share).toFixed(1)}%</span>`;
         if (!c.measured) return `<div class="unm">${lbl} — unmeasured (n=${c.n})</div>`;
         const raw = c.raw == null ? "" : ` raw ${fmtP(c.raw)}`;
         // Same thresholds as blowouts(): measured cells only, raw WR <40% full / 40–45% half.
@@ -883,7 +1022,7 @@ function renderTable(id, rows, camp) {
         const ci = c.ci_low != null ? ` · 95% ${fmtP(c.ci_low)}–${fmtP(c.ci_high)}` : "";
         const concentration = c.concentration_warning ?
           ` <span class="chip" title="${escA(c.concentration_warning)}">⚠ concentrated</span>` : "";
-        return `<div${cls}>${lbl} ${fmtP(c.p)}%${raw}${ci} · n=${c.n} <span class="chip">${c.window}</span>${tag}${concentration}</div>`;
+        return `<div${cls}>${lbl} ${fmtP(c.p)}%${raw}${ci} · n=${c.n} <span class="chip">${escT(c.window)}</span>${tag}${concentration}</div>`;
       }).join("");
       const key = `<div class="bo-key">measured matchups tinted by raw WR:` +
         `<span class="sw" style="background:var(--bo-critical)"></span>blowout (&lt;40%)` +
@@ -894,16 +1033,18 @@ function renderTable(id, rows, camp) {
       const exactBody = `${groundingPathHtml(r)}${leanDetailHtml(r)}${key}<div class="cells">${cells}</div>`;
       // Camp rows carry no plan block, so there is nothing to scroll past — they keep the
       // plain always-open section rather than a disclosure that only ever hides its own content.
+      const diagnostics = evidenceDiagnosticsHtml(r);
       const body = camp
-        ? `<section><h3 style="margin:4px 0 7px">Exact archetype matchups</h3>${exactBody}</section>`
+        ? `<section><h3 style="margin:4px 0 7px">Exact archetype matchups</h3>${exactBody}</section>${diagnostics}`
         : archetypePlanHtml(r) + subsectionHtml("exact", "Exact archetype matchups",
-            `<span class="chip">${measured} of ${r.cells.length} measured</span>`, exactBody);
+            `<span class="chip">${measured} of ${r.cells.length} measured</span>`, exactBody) + diagnostics;
       const d = document.createElement("tr");
       d.className = "detail";
       d.id = toggle.getAttribute("aria-controls");
       d.innerHTML = `<td colspan="${cols.length}">${body}</td>`;
       d.querySelectorAll("details.subsection").forEach(el => el.addEventListener("toggle", () => {
         subsectionOpen[el.dataset.sub] = el.open;
+        try { localStorage.setItem(`best-call-subsections:${targetScope}`, JSON.stringify(subsectionOpen)); } catch (_) {}
       }));
       tr.after(d);
       setRowDisclosureState(toggle, true);

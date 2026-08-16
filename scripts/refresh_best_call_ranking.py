@@ -55,7 +55,9 @@ Runbook: docs/analysis/best-call-ranking.md
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
+from hashlib import sha256
 import json
 import os
 import tempfile
@@ -65,6 +67,17 @@ from pathlib import Path
 import duckdb
 
 from legacy_engine.advisory.field import build_custom_field, build_transition_field
+from legacy_engine.advisory.best_call_evidence import (
+    build_report_evidence,
+    canonical_json,
+)
+from legacy_engine.advisory.best_call_targets import (
+    ReportDataAudit,
+    ReportDataSectionAudit,
+    ReportTarget,
+    confirmed_bans_before,
+    target_regime,
+)
 from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
 from legacy_engine.advisory.positioning import (
     _COVERAGE_RESTRICT_THRESHOLD,
@@ -76,11 +89,16 @@ from legacy_engine.advisory.positioning import (
     rank_decks,
 )
 from legacy_engine.analytics.affectedness import archetype_valid_since
-from legacy_engine.analytics.eras.consume import clamp_pair_window
+from legacy_engine.analytics.amplification import (
+    build_interval_evidence_corpus,
+    read_amplification_run,
+)
+from legacy_engine.analytics.eras.consume import AnalysisClock, clamp_pair_window
 from legacy_engine.analytics.matchup import (
     DISPLAY_GATE_N,
     MatchupMatrix,
     build_adaptive_matrix,
+    build_interval_adaptive_matrix,
     build_matrix,
     build_multi_split_adaptive,
     build_multi_split_matrix,
@@ -164,6 +182,125 @@ def _atomic_write_text(path: Path, text: str) -> None:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
         raise
+
+
+def _json_for_script(value: object, *, compact: bool = False) -> str:
+    """Serialize JSON without permitting HTML/script parser breakouts."""
+    separators = (",", ":") if compact else None
+    return (
+        json.dumps(value, ensure_ascii=False, sort_keys=compact, separators=separators)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _authority_payload(blob: dict) -> dict:
+    """Return the complete mature ranking contract, excluding additive diagnostics/audits."""
+    payload = copy.deepcopy(blob)
+    payload.pop("evidence", None)
+    payload.pop("report_target", None)
+    for row in [*payload.get("arch", ()), *payload.get("camps", ())]:
+        row.pop("diagnostic_evidence", None)
+    meta = payload.get("meta", {})
+    meta.pop("target_data_audit", None)
+    meta.pop("evidence_audit", None)
+    return payload
+
+
+def _digest_rows(rows: object) -> str:
+    return sha256(canonical_json(rows).encode()).hexdigest()
+
+
+def _source_payload(con, *, since: str | None, until: str | None, cards: bool) -> dict:
+    bounds = "(? IS NULL OR substr(t.date,1,10) >= ?) AND (? IS NULL OR substr(t.date,1,10) < ?)"
+    params = [since, since, until, until]
+    tournaments = con.execute(
+        f"SELECT t.id, substr(t.date,1,10), t.provenance, t.format, t.source "
+        f"FROM tournaments t WHERE {bounds} ORDER BY 1", params,
+    ).fetchall()
+    decks = con.execute(
+        f"SELECT d.tournament_id, d.deck_idx, d.player, d.archetype, d.variant "
+        f"FROM decks d JOIN tournaments t ON t.id=d.tournament_id "
+        f"WHERE {bounds} ORDER BY 1,2", params,
+    ).fetchall()
+    rounds = con.execute(
+        f"SELECT r.tournament_id, r.match_idx, r.player1, r.player2, r.result "
+        f"FROM rounds r JOIN tournaments t ON t.id=r.tournament_id "
+        f"WHERE {bounds} ORDER BY 1,2", params,
+    ).fetchall()
+    payload = {"tournaments": tournaments, "decks": decks, "rounds": rounds}
+    if cards:
+        payload["deck_cards"] = con.execute(
+            f"SELECT dc.tournament_id, dc.deck_idx, dc.board, dc.name, dc.count "
+            f"FROM deck_cards dc JOIN tournaments t ON t.id=dc.tournament_id "
+            f"WHERE {bounds} ORDER BY 1,2,3,4", params,
+        ).fetchall()
+    return payload
+
+
+def _section_audit(
+    con, section: str, *, since: str | None, until: str | None, cards: bool = False,
+) -> ReportDataSectionAudit:
+    payload = _source_payload(con, since=since, until=until, cards=cards)
+    max_row = con.execute(
+        "SELECT max(cast(substr(date,1,10) AS DATE)) FROM tournaments "
+        "WHERE (? IS NULL OR substr(date,1,10) >= ?) "
+        "AND (? IS NULL OR substr(date,1,10) < ?)",
+        [since, since, until, until],
+    ).fetchone()
+    return ReportDataSectionAudit(
+        section=section,
+        row_count=sum(len(rows) for rows in payload.values()),
+        max_event_date=max_row[0] if max_row else None,
+        input_sha256=_digest_rows(payload),
+    )
+
+
+def _report_data_audit(
+    con,
+    *,
+    requested_until: str | None,
+    effective_until: str,
+    field_since: str,
+    recent_since: str,
+    interval_sha256: str | None = None,
+) -> ReportDataAudit:
+    sections = [
+        _section_audit(con, "corpus", since=None, until=effective_until),
+        _section_audit(con, "field", since=field_since, until=effective_until),
+        _section_audit(con, "recent", since=recent_since, until=effective_until),
+        _section_audit(con, "camps", since=field_since, until=effective_until),
+        _section_audit(con, "matchups", since=None, until=effective_until),
+        _section_audit(con, "plans", since=field_since, until=effective_until),
+        _section_audit(
+            con, "affectedness", since=None, until=effective_until, cards=True
+        ),
+    ]
+    if interval_sha256 is not None:
+        sections.append(
+            ReportDataSectionAudit(
+                section="interval-evidence",
+                row_count=0,
+                max_event_date=max((item.max_event_date for item in sections), default=None),
+                input_sha256=interval_sha256,
+            )
+        )
+    payload = {
+        "requested_data_until": requested_until,
+        "effective_data_until": effective_until,
+        "sections": [item.model_dump(mode="json") for item in sections],
+    }
+    return ReportDataAudit(
+        requested_data_until=dt.date.fromisoformat(requested_until)
+        if requested_until
+        else None,
+        effective_data_until=dt.date.fromisoformat(effective_until),
+        sections=tuple(sections),
+        audit_sha256=_digest_rows(payload),
+    )
 
 
 def r4(x: float | None) -> float | None:
@@ -852,22 +989,31 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                  regime_card, parents, superarchetypes=None, benchmark_validation=None,
-                 data_until: str | None = None):
+                 data_until: str | None = None, ban_events=None):
     date_clause = " where substr(date,1,10) < ?" if data_until else ""
     corpus_max = con.execute(f"select max(substr(date,1,10)) from tournaments{date_clause}", [data_until] if data_until else []).fetchone()[0]
     if corpus_max is None:
         raise ValueError("report target has no tournaments before data_until")
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
     corpus_decks, corpus_events = con.execute(
-        "select (select count(*) from decks), (select count(*) from tournaments)").fetchone()
+        "select (select count(*) from decks d join tournaments t on t.id=d.tournament_id "
+        "where (? is null or substr(t.date,1,10) < ?)), "
+        "(select count(*) from tournaments t where (? is null or substr(t.date,1,10) < ?))",
+        [data_until, data_until, data_until, data_until],
+    ).fetchone()
     field_events = con.execute(
-        "select count(*) from tournaments where substr(date,1,10) >= ?", [field_since]).fetchone()[0]
+        "select count(*) from tournaments where substr(date,1,10) >= ? "
+        "and (? is null or substr(date,1,10) < ?)",
+        [field_since, data_until, data_until],
+    ).fetchone()[0]
 
     all_labels = [row[0] for row in con.execute(
-        "select distinct archetype from decks where archetype is not null and archetype <> '' "
-        "order by archetype"
+        "select distinct d.archetype from decks d join tournaments t on t.id=d.tournament_id "
+        "where d.archetype is not null and d.archetype <> '' "
+        "and (? is null or substr(t.date,1,10) < ?) order by d.archetype",
+        [data_until, data_until],
     ).fetchall()]
-    ban_since = archetype_valid_since(con, all_labels)
+    ban_since = archetype_valid_since(con, all_labels, ban_events=ban_events)
     transition = build_transition_field(
         con,
         current_ban_since=field_since,
@@ -878,16 +1024,19 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     shares = transition.shares
     recent = dict(con.execute(
         "select k.archetype, count(*) from decks k join tournaments t on k.tournament_id=t.id "
-        "where substr(t.date,1,10) >= ? group by 1", [current_4wk]).fetchall())
+        "where substr(t.date,1,10) >= ? and (? is null or substr(t.date,1,10) < ?) "
+        "group by 1", [current_4wk, data_until, data_until]).fetchall())
 
     camp_win = con.execute(
         "select k.archetype, coalesce(nullif(k.variant,''),'unlabeled'), count(*) "
         "from decks k join tournaments t on k.tournament_id=t.id "
-        "where substr(t.date,1,10) >= ? group by 1,2", [field_since]).fetchall()
+        "where substr(t.date,1,10) >= ? and (? is null or substr(t.date,1,10) < ?) "
+        "group by 1,2", [field_since, data_until, data_until]).fetchall()
     camp_recent = {(a, v): n for a, v, n in con.execute(
         "select k.archetype, coalesce(nullif(k.variant,''),'unlabeled'), count(*) "
         "from decks k join tournaments t on k.tournament_id=t.id "
-        "where substr(t.date,1,10) >= ? group by 1,2", [current_4wk]).fetchall()}
+        "where substr(t.date,1,10) >= ? and (? is null or substr(t.date,1,10) < ?) "
+        "group by 1,2", [current_4wk, data_until, data_until]).fetchall()}
     parent_win_tot: dict[str, int] = {}
     for a, _v, n in camp_win:
         parent_win_tot[a] = parent_win_tot.get(a, 0) + n
@@ -897,8 +1046,9 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         prior_rows = con.execute(
             "select k.archetype, coalesce(nullif(k.variant,''),'unlabeled'), count(*) "
             "from decks k join tournaments t on k.tournament_id=t.id "
-            "where substr(t.date,1,10) >= ? and substr(t.date,1,10) < ? group by 1,2",
-            [transition.prior.since, field_since],
+            "where substr(t.date,1,10) >= ? and substr(t.date,1,10) < ? "
+            "and (? is null or substr(t.date,1,10) < ?) group by 1,2",
+            [transition.prior.since, field_since, data_until, data_until],
         ).fetchall()
         prior_tot: dict[str, int] = {}
         for a, _v, n in prior_rows:
@@ -909,7 +1059,9 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
 
     # ── Archetype level ──
     print("building archetype matrices...", flush=True)
-    ad = build_adaptive_matrix(con, min_row_share=min_row_share, until=data_until)
+    ad = build_adaptive_matrix(
+        con, min_row_share=min_row_share, until=data_until, ban_events=ban_events,
+    )
     rows = ad.matrix.archetypes
     field_opps = sorted((a for a in rows if shares.get(a, 0) > 0),
                         key=lambda a: shares[a], reverse=True)
@@ -983,6 +1135,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     msa = build_multi_split_adaptive(
         con, parents=parents, min_row_share=min_row_share, superarchetypes=superarchetypes,
         apply_superarchetype_priors=False,
+        ban_events=ban_events,
         until=data_until,
     )
     camp_parent = msa.multi.camp_parent
@@ -1305,7 +1458,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     )
     validate_ranking_utility(utility)
 
-    return {
+    blob = {
         "meta": {
             "field_since": field_since, "field_decks": field_decks,
             "observed_field_n": transition.observed.deck_n,
@@ -1387,6 +1540,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         "camps": camps_out,
         "plans": plans,
     }
+    return blob
 
 
 def generate_ranking(
@@ -1401,39 +1555,280 @@ def generate_ranking(
     include_superarchetypes: bool = True,
     benchmark_summary_path: Path | None = None,
     data_until: str | None = None,
+    target: ReportTarget | None = None,
 ) -> dict:
     """Compute and write the ranking page; the CLI is only argument presentation."""
-    latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
-    effective_since = field_since or latest_ban[0].isoformat()
-    regime_card = latest_ban[1] if effective_since == latest_ban[0].isoformat() else None
+    if target is not None and data_until is not None:
+        raise ValueError("pass target or data_until, not both")
+    if target is not None and field_since is not None and field_since != target.field_since.isoformat():
+        raise ValueError("field_since differs from the typed report target")
+    requested_until = target.data_until.isoformat() if target and target.data_until else data_until
+    if target is not None:
+        effective_until = target.effective_data_until.isoformat()
+        effective_since = target.field_since.isoformat()
+        regime_card = target.regime_card
+        ban_events = confirmed_bans_before(target.effective_data_until)
+    else:
+        cutoff = dt.date.fromisoformat(data_until) if data_until else dt.date.max
+        ban_events = tuple(event for event in BAN_EVENTS if event[0] < cutoff)
+        latest_ban = max(ban_events, key=lambda event: event[0])
+        effective_since = field_since or latest_ban[0].isoformat()
+        regime_card = latest_ban[1] if effective_since == latest_ban[0].isoformat() else None
+        effective_until = data_until
     parents = staged_split_parents()
     con = duckdb.connect(str(db_path), read_only=True)
     try:
+        if target is not None and target.mode == "current":
+            corpus_max = con.execute(
+                "SELECT max(cast(substr(date,1,10) AS DATE)) FROM tournaments"
+            ).fetchone()[0]
+            if (
+                corpus_max is None
+                or target.effective_data_until != corpus_max + dt.timedelta(days=1)
+            ):
+                raise ValueError(
+                    "current target effective cutoff must be one day after the frozen corpus maximum"
+                )
         superarchetypes = None if not include_superarchetypes else read_superarchetype_members(con)
         blob = compute_blob(
             con, field_since=effective_since, ground_n=ground_n, top_k=top_k,
             cover_min=cover_min, min_row_share=min_row_share,
             regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
             benchmark_validation=benchmark_validation_payload(benchmark_summary_path),
-            data_until=data_until,
+            data_until=requested_until,
+            ban_events=ban_events,
         )
+        if target is not None:
+            authority_payload = _authority_payload(blob)
+            before = canonical_json(authority_payload)
+            clock = AnalysisClock(
+                data_until=target.effective_data_until,
+                knowledge_as_of=target.knowledge_as_of,
+                knowledge_mode="retrospective-current-model",
+            )
+            parent_interval = build_interval_adaptive_matrix(
+                con,
+                clock=clock,
+                certificate_run_id=target.certificate_run_id,
+                min_row_share=min_row_share,
+                until=target.effective_data_until.isoformat(),
+                ban_events=ban_events,
+            )
+            camp_interval = None
+            if parents:
+                camp_interval = build_interval_adaptive_matrix(
+                    con,
+                    clock=clock,
+                    certificate_run_id=target.certificate_run_id,
+                    min_row_share=min_row_share,
+                    until=target.effective_data_until.isoformat(),
+                    split_variants=parents,
+                    ban_events=ban_events,
+                )
+            amplification = None
+            if target.amplification_run_id is not None:
+                amplification = read_amplification_run(con, target.amplification_run_id)
+                if amplification is None:
+                    raise ValueError(
+                        f"amplification run not found: {target.amplification_run_id}"
+                    )
+            parent_corpus_id = build_interval_evidence_corpus(parent_interval).corpus_id
+            camp_corpus_id = (
+                build_interval_evidence_corpus(camp_interval).corpus_id
+                if camp_interval is not None
+                else None
+            )
+            parent_amplification = (
+                amplification
+                if amplification is not None
+                and amplification.corpus.corpus_id == parent_corpus_id
+                else None
+            )
+            camp_amplification = (
+                amplification
+                if amplification is not None
+                and amplification.corpus.corpus_id == camp_corpus_id
+                else None
+            )
+            if amplification is not None and parent_amplification is None \
+                    and camp_amplification is None:
+                raise ValueError(
+                    "amplification run corpus differs from both exact report interval corpora"
+                )
+            parent_attachment = build_report_evidence(
+                parent_interval,
+                parent_amplification,
+                authority_payload=authority_payload,
+            )
+            camp_attachment = (
+                build_report_evidence(
+                    camp_interval,
+                    camp_amplification,
+                    authority_payload=authority_payload,
+                )
+                if camp_interval is not None
+                else None
+            )
+            primary_attachment = (
+                camp_attachment if camp_amplification is not None else parent_attachment
+            )
+            assert primary_attachment is not None
+            parent_pairs = tuple(
+                parent_attachment.model_dump(mode="json")["pairs"].values()
+            )
+            camp_pairs = (
+                tuple(camp_attachment.model_dump(mode="json")["pairs"].values())
+                if camp_attachment is not None
+                else ()
+            )
+            for row in [*blob["arch"], *blob["camps"]]:
+                source_pairs = camp_pairs if row in blob["camps"] else parent_pairs
+                row_pairs = tuple(
+                    pair for pair in source_pairs if pair["subject"] == row["subject"]
+                )
+                row_reasons = tuple(
+                    dict.fromkeys(reason for pair in row_pairs for reason in pair["reasons"])
+                )
+                row["diagnostic_evidence"] = {
+                    "authority": "diagnostic-only",
+                    "status": (
+                        camp_attachment.status
+                        if row in blob["camps"] and camp_attachment is not None
+                        else parent_attachment.status
+                    ) if row_pairs else "not-assessed",
+                    "reasons": row_reasons
+                    if row_pairs
+                    else ("no exact interval pair is available for this report row",),
+                    "pairs": row_pairs,
+                }
+            blob["evidence"] = primary_attachment.model_dump(mode="json")
+            blob["report_target"] = target.model_dump(mode="json")
+            interval_digest = _digest_rows(
+                {
+                    "parent": parent_attachment.interval_corpus_sha256,
+                    "camp": camp_attachment.interval_corpus_sha256
+                    if camp_attachment is not None
+                    else None,
+                }
+            )
+            blob["meta"]["evidence_audit"] = {
+                "authority_payload_sha256": primary_attachment.authority_payload_sha256,
+                "interval_corpus_sha256": interval_digest,
+                "parent_interval_corpus_sha256": parent_attachment.interval_corpus_sha256,
+                "camp_interval_corpus_sha256": camp_attachment.interval_corpus_sha256
+                if camp_attachment is not None
+                else None,
+                "certificate_run_id": primary_attachment.certificate_run_id,
+                "amplification_run_id": primary_attachment.amplification_run_id,
+                "status": primary_attachment.status,
+                "reasons": primary_attachment.reasons,
+            }
+            blob["meta"]["target_data_audit"] = _report_data_audit(
+                con,
+                requested_until=requested_until,
+                effective_until=effective_until,
+                field_since=effective_since,
+                recent_since=blob["meta"]["current_4wk"],
+                interval_sha256=interval_digest,
+            ).model_dump(mode="json")
+            if canonical_json(_authority_payload(blob)) != before:
+                raise RuntimeError("diagnostic attachment changed ranking authority bytes")
     finally:
         con.close()
 
     template = TEMPLATE_PATH.read_text()
     assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
-    rendered = template.replace("__D_BLOB__", json.dumps(blob, ensure_ascii=False), 1)
+    rendered = template.replace("__D_BLOB__", _json_for_script(blob), 1)
     _atomic_write_text(out_path, rendered)
     return blob
 
 
+def _parse_aware_datetime(value: str) -> dt.datetime:
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("knowledge-as-of must include a timezone offset")
+    return parsed
+
+
+def _cli_target(args) -> ReportTarget | None:
+    requested = any(
+        (
+            args.data_until,
+            args.knowledge_as_of,
+            args.certificate_run_id,
+            args.amplification_run_id,
+            args.target_id,
+            args.target_label,
+        )
+    )
+    if not requested:
+        return None
+    con = duckdb.connect(str(args.db), read_only=True)
+    try:
+        run = (
+            read_amplification_run(con, args.amplification_run_id)
+            if args.amplification_run_id
+            else None
+        )
+        if args.amplification_run_id and run is None:
+            raise ValueError(f"amplification run not found: {args.amplification_run_id}")
+        if args.data_until:
+            effective = dt.date.fromisoformat(args.data_until)
+            mode = "retrospective-current-model"
+        elif run is not None:
+            effective = run.corpus.clock.data_until
+            mode = "current"
+        else:
+            maximum = con.execute(
+                "SELECT max(cast(substr(date,1,10) AS DATE)) FROM tournaments"
+            ).fetchone()[0]
+            if maximum is None:
+                raise ValueError("current target requires a non-empty tournament corpus")
+            effective = maximum + dt.timedelta(days=1)
+            mode = "current"
+    finally:
+        con.close()
+    if run is not None and run.corpus.clock.data_until != effective:
+        raise ValueError("requested target cutoff differs from the exact amplification run")
+    knowledge = (
+        _parse_aware_datetime(args.knowledge_as_of)
+        if args.knowledge_as_of
+        else run.corpus.clock.knowledge_as_of
+        if run is not None
+        else None
+    )
+    if knowledge is None:
+        raise ValueError("typed report generation requires --knowledge-as-of")
+    boundary, cards = target_regime(effective)
+    same_day_cards = tuple(card for when, card, _reason in BAN_EVENTS if when == effective)
+    label = args.target_label or (
+        "Current"
+        if mode == "current"
+        else f"Before {', '.join(same_day_cards) if same_day_cards else effective.isoformat()} · {effective.isoformat()}"
+    )
+    return ReportTarget(
+        target_id=args.target_id
+        or ("current" if mode == "current" else f"before-{effective.isoformat()}"),
+        label=label,
+        mode=mode,
+        mode_label="Current" if mode == "current" else "Today's model",
+        data_until=effective if mode != "current" else None,
+        effective_data_until=effective,
+        knowledge_as_of=knowledge,
+        field_since=boundary,
+        regime_card=cards[0],
+        certificate_run_id=args.certificate_run_id
+        or (run.corpus.certificate_run_id if run is not None else None),
+        amplification_run_id=args.amplification_run_id,
+    )
+
+
 def main() -> None:
-    latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", default=str(DUCKDB_PATH))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
-    ap.add_argument("--field-since", default=latest_ban[0].isoformat(),
-                    help="field-window start (default: latest confirmed ban event date)")
+    ap.add_argument("--field-since", default=None,
+                    help="legacy field-window override (typed targets derive their confirmed regime)")
     ap.add_argument("--ground-n", type=int, default=8)
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--cover-min", type=float, default=0.8)
@@ -1442,15 +1837,30 @@ def main() -> None:
                     help="omit the optional internal superarchetype registry input")
     ap.add_argument("--benchmark-summary", default=None,
                     help="reviewed benchmark summary JSON exposed on the page")
+    ap.add_argument("--data-until", default=None,
+                    help="exclusive retrospective cutoff; emits a Today's model target")
+    ap.add_argument("--knowledge-as-of", default=None,
+                    help="timezone-aware knowledge/configuration clock for a typed target")
+    ap.add_argument("--certificate-run-id", default=None,
+                    help="exact recurrent-era certificate run for interval evidence")
+    ap.add_argument("--amplification-run-id", default=None,
+                    help="exact amplification run; never resolved by latest-run lookup")
+    ap.add_argument("--target-id", default=None,
+                    help="filesystem-safe target id (default: current or before-YYYY-MM-DD)")
+    ap.add_argument("--target-label", default=None,
+                    help="visible report-target label")
     args = ap.parse_args()
 
     out = Path(args.out)
+    target = _cli_target(args)
     blob = generate_ranking(
-        db_path=Path(args.db), out_path=out, field_since=args.field_since,
+        db_path=Path(args.db), out_path=out,
+        field_since=None if target is not None else args.field_since,
         ground_n=args.ground_n, top_k=args.top_k, cover_min=args.cover_min,
         min_row_share=args.min_row_share,
         include_superarchetypes=not args.no_superarchetypes,
         benchmark_summary_path=Path(args.benchmark_summary) if args.benchmark_summary else None,
+        target=target,
     )
     print(f"wrote {out}: field={blob['meta']['field_decks']} decks since "
           f"{blob['meta']['field_since']}, corpus_max={blob['meta']['corpus_max']}, "
