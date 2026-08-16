@@ -46,8 +46,6 @@ def test_selection_excludes_gap_and_keeps_pair_component_constant():
 
 
 def test_views_partition_ids_and_reject_prior_overlap():
-    source_a = EligibilitySourceRef(source="certified-history", entity="a", certificate_id="c")
-    source_b = EligibilitySourceRef(source="certified-history", entity="b", certificate_id="d")
     rows = tuple(SelectedMatch(ResolvedMatch(mid, mid, date(2020, 2, 1), "online", "a", "b", "p", "q", True), "certified-expanded", "pair", "a", "b", ("c",), ("d",)) for mid in ("m1", "m2"))
     current = (SelectedMatch(rows[0].match, "current-only", "pair", "a", "b", ("c",), ("d",)),)
     views = build_evidence_views("a", "b", (*current, *rows), clock=_clock())
