@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-discovery]
@@ -736,3 +736,21 @@ def certification_run_ids(
 - Receiver judgment: the approved research and implemented discovery boundary support the selected
   conservative sample-split design; the standard independent feature review remains required after
   implementation.
+
+## Review findings
+
+- Effective weight: `standard`; one same-harness fresh-context independent pass reviewed the frozen
+  `6122716` snapshot on 2026-08-16. Closure requires verification of the named fix set only, not a
+  second independent pass.
+- Blocker story: `epic-recurrent-stable-era-evidence-certification-review-corrections`.
+- Required corrections: coherent high-dimensional discrepancy smoothing; complete and authoritative
+  semantic-gap vetoes; a real frozen-family whole-event bootstrap preserving multiplicity and
+  context variation; HHI/equivalent observation-weighted support; checked-in hash-bound control
+  evidence and honest power semantics; and hash-bound immutable run status/reasons.
+- Important findings absorbed into the current-cycle correction set: cutoff-filter future semantic
+  facts, include unavailable format truth in run status, and add adversarial tests for every
+  reproduced failure. Receiver judgment treats these as necessary cutoff/status integrity work,
+  not deferrable debt.
+- Rejected: partition atomicity, outcome firewall, parent-only scope, candidate-profile authority
+  cap, empty runs, exact-id reads, and UTC knowledge availability behaved as intended. No foundation,
+  security, UI, or async finding was confirmed.
