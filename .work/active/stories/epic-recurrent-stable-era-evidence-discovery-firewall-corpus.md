@@ -25,3 +25,20 @@ field available to the discovery core.
 See `epic-recurrent-stable-era-evidence-discovery` Unit 1 and its acceptance criteria.
 
 Review weight remains `standard` at the parent feature boundary.
+
+## Implementation notes
+
+- Execution capability: delegated standard implementation owner; this checkpoint is a bounded
+  source-adapter/model contract and was implemented directly without nested delegation.
+- Review weight: standard from the parent feature/project default; child checkpoints close directly.
+- Files changed: `src/legacy_engine/analytics/eras/discovery.py`,
+  `src/legacy_engine/analytics/eras/discovery_source.py`, `src/legacy_engine/config.py`,
+  `src/legacy_engine/data/eras/discovery-v1.json`,
+  `tests/analytics/eras/test_discovery_source.py`.
+- Tests added/removed: source cutoff, board ordering, closed-model, and missing-outcome-table
+  tests covering the firewall interface.
+- Simplification: the source adapter is a single bounded projection seam; no outcome-bearing
+  compatibility type or query was introduced.
+- Discrepancies from design: none; the source adapter is exported through a thin dedicated module
+  while the typed implementation remains colocated with the pure core contracts.
+- Adjacent issues parked: none.

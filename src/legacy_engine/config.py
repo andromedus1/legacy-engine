@@ -33,6 +33,8 @@ DERIVED_SUPERARCHETYPES_PATH = DATA_DIR / "superarchetypes" / "derived.json"
 
 # Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
 PACKAGE_DATA_DIR = Path(__file__).parent / "data"
+ERAS_DIR = PACKAGE_DATA_DIR / "eras"
+DISCOVERY_CALIBRATION_PATH = ERAS_DIR / "discovery-v1.json"
 VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
 VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
 COLOR_SPLITS_DIR = PACKAGE_DATA_DIR / "color_splits"
