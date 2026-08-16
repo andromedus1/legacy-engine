@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: []
@@ -49,3 +49,32 @@ the immutable diagnostic artifacts promised by the parent feature.
 
 Created from the single standard independent review on 2026-08-16. Once the named fix set is green,
 the parent closes administratively without another independent pass.
+
+## Implementation evidence
+
+- Replaced all raw-rate scaffolds with component partial pooling, composition-kernel donors,
+  frozen strategic-family ladders, and deterministic skew low-rank ranks 1/2/4. Physical matches
+  are consumed once, target/reverse donor leakage is excluded, and directed reverse predictions,
+  intervals, and ablations are complement-derived.
+- Closed the profile and public package contracts around typed method ids/specs, collision-free
+  string pair keys, exact corpus/clock/certificate/structure/baseline identities, typed candidate
+  failures, explicit all-case versus served state, and diagnostic-only authority.
+- Added deterministic whole-event refit schedules and retained aligned draw values, fit identities,
+  origin injection, effective-support/concentration gates, current/history/borrowed decomposition,
+  leave-target-out ablations, and non-additive remainder reporting.
+- Added content-addressed exact-id storage with read/write validation of the corpus rows, both direct
+  baseline views, common universes, audit, replay plan, aligned draw series, method registry, and
+  outer run. Typed `MatchupCell` round-trips without degrading to an untyped dictionary.
+- Added 619 lines under `tests/analytics/amplification/` covering a real selected-ledger run,
+  estimator hypotheses, negative transfer and sparse refusals, leakage and reverse duplication,
+  discriminated profiles, origin replay, complement parity, authority, and nested tampering.
+
+## Verification
+
+- `uv run pytest -q tests/analytics/amplification tests/analytics/eras/test_interval_consumption.py`
+  — 44 passed.
+- Broader match-results, matchup, ranking-measurement, interval, certification, and era-store
+  regression selection — 340 passed.
+- `uv run ruff check` over changed production and amplification-test paths — passed.
+- `.venv/bin/python -m compileall -q src/legacy_engine tests/analytics/amplification` — passed.
+- `git diff --check` — passed. Pre-existing `uv.lock` modifications were excluded.

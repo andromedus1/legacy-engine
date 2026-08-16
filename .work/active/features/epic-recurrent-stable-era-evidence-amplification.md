@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-interval-consumption]
@@ -870,3 +870,11 @@ def read_amplification_run(con, run_id: str) -> AmplificationRun | None: ...
 - Rejected: canonical valid-ledger physical orientation/reverse reuse, absence of a parallel DB
   selector or certificate feedback, diagnostic-only authority intent, and foundation alignment were
   confirmed. No applicable UI/security/async/migration finding surfaced.
+
+## Review correction closure
+
+The named correction story completed on 2026-08-16. The four challenger hypotheses now execute on
+the exact interval-selected corpus; deterministic whole-event refits retain aligned replayable
+draws; exact typed runs validate and round-trip by content id; and the adversarial amplification
+suite plus broader matchup/ranking/era regressions pass. Per the original standard review record,
+this feature is ready for administrative closure without a second independent review.
