@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration-publication-contract
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-best-call-integration
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -37,3 +37,11 @@ typed refusals, run/corpus/clock validation, and authority-payload immutability.
 Implement `tests/advisory/test_best_call_evidence.py` with exact-run happy paths, no-run status,
 every mismatch/refusal, gaps, one-sided certificates, camps, reverse pairs, prior overlap,
 duplicates, hostile strings, JSON round-trip, stable order, and authority mutation attacks.
+
+## Implementation evidence
+
+- Added `advisory.best_call_evidence` typed projection with direct current/expanded/added views,
+  six fixed challenger slots, diagnostic-only authority, exact corpus/authority validation, and
+  explicit no-run `not-assessed` state.
+- Verification: package import and Ruff pass. Interval component projection remains conservative
+  until the historical-target story wires entity-eligibility component reconciliation.
