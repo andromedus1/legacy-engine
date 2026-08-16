@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-interval-consumption]
@@ -855,3 +855,18 @@ def read_amplification_run(con, run_id: str) -> AmplificationRun | None: ...
   validation remains the authority for statistical promotion.
 - Frozen composition/family feature construction is represented by the required snapshot contract;
   missing snapshots refuse service rather than reconstructing structure or querying outcomes.
+
+## Review findings
+
+- Effective weight: `standard`; one same-harness fresh-context independent pass reviewed frozen
+  commit `2af5dfb` on 2026-08-16. Closure requires verification of the named fix set only, not a
+  second independent pass.
+- Blocker story: `epic-recurrent-stable-era-evidence-amplification-review-corrections`.
+- Required corrections: make real interval-backed runs serializable; implement all four challenger
+  hypotheses rather than raw-rate placeholders; provide honest uncertainty/decomposition/service
+  diagnostics; close and validate corpus/profile/registry boundaries; persist replayable aligned
+  draws and content-addressed exact runs; and add a comprehensive amplification test suite.
+- All seven findings are current-cycle blockers. No lower-priority item was parked.
+- Rejected: canonical valid-ledger physical orientation/reverse reuse, absence of a parallel DB
+  selector or certificate feedback, diagnostic-only authority intent, and foundation alignment were
+  confirmed. No applicable UI/security/async/migration finding surfaced.
