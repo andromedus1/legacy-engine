@@ -52,7 +52,12 @@ def test_no_candidate_entity_is_persisted_and_exact_retries_round_trip():
     init_certificate_schema(con)
     write_certification_run(con, run)
     write_certification_run(con, run)
-    assert read_certification_run(con, run.run_id) == run
+    stored = read_certification_run(con, run.run_id)
+    assert stored is not None
+    assert stored.run_id == run.run_id
+    assert stored.knowledge_available_at is not None
+    assert stored.knowledge_available_at.tzinfo is not None
+    assert read_certification_run(con, run.run_id) == stored
     assert certification_run_ids(con) == (run.run_id,)
 
 

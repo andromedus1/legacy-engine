@@ -54,9 +54,12 @@ files, and compileall as specified by the parent feature.
   path and there is no latest/status substitute.
 - Discrepancies from design: the run composes semantic facts into source boundaries only when the
   discovery manifest recorded a non-empty boundary catalog; independent pending monitor facts do
-  not mutate an otherwise empty discovery source identity.
+  not mutate an otherwise empty discovery source identity. The exact ledger envelope now also
+  stores immutable UTC `knowledge_available_at` metadata separately from content identity so
+  as-known-then consumers can distinguish availability from certification evidence.
 - Adjacent issues parked: none.
 
 ## Verification evidence
 
-- `.venv/bin/pytest -q tests/analytics/eras/test_certification_run.py` — 3 passed.
+- `.venv/bin/pytest -q tests/analytics/eras/test_certification_run.py` — 3 passed, including UTC
+  availability timestamp round-trip/idempotence.

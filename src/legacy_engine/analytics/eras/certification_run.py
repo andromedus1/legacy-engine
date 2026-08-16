@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Literal
 
 import duckdb
@@ -125,6 +125,19 @@ class CertificationRun(OutcomeFreeModel):
     status: CertificationRunStatus
     reasons: tuple[CertificationRunReason, ...]
     results: tuple[EntityCertificationResult, ...]
+    # Persistence availability is envelope metadata, not analytical content:
+    # it is assigned once when the immutable row first lands and is excluded
+    # from run_id/results_sha256 so deterministic retries retain one identity.
+    knowledge_available_at: datetime | None = None
+
+    @field_validator("knowledge_available_at")
+    @classmethod
+    def _knowledge_utc(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("knowledge_available_at must be timezone-aware UTC")
+        return value.astimezone(UTC)
 
 
 def _as_boundary(fact: SemanticFact) -> DiscoveryBoundary:

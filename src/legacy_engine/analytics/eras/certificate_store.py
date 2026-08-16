@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 
 import duckdb
 
@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS era_certification_runs (
     results_json VARCHAR NOT NULL,
     results_sha256 VARCHAR NOT NULL,
     status VARCHAR NOT NULL,
-    reasons_json VARCHAR NOT NULL
+    reasons_json VARCHAR NOT NULL,
+    knowledge_available_at VARCHAR NOT NULL
 )
 """
 
@@ -45,18 +46,22 @@ def write_certification_run(con: duckdb.DuckDBPyConnection, run: CertificationRu
     """Insert an immutable run; exact-byte retries are idempotent."""
 
     manifest_json, results_json, reasons_json = _payloads(run)
+    knowledge_available_at = run.knowledge_available_at or datetime.now(UTC)
+    knowledge_text = knowledge_available_at.astimezone(UTC).isoformat()
     init_certificate_schema(con)
     try:
         existing = con.execute(
-            "SELECT manifest_json, results_json, results_sha256, status, reasons_json FROM era_certification_runs WHERE run_id = ?",
+            "SELECT manifest_json, results_json, results_sha256, status, reasons_json, knowledge_available_at FROM era_certification_runs WHERE run_id = ?",
             [run.run_id],
         ).fetchone()
     except duckdb.CatalogException:
         existing = None
-    expected = (manifest_json, results_json, run.results_sha256, run.status, reasons_json)
     if existing is not None:
-        if tuple(existing) != expected:
+        expected_without_knowledge = (manifest_json, results_json, run.results_sha256, run.status, reasons_json)
+        if tuple(existing[:5]) != expected_without_knowledge:
             raise ValueError(f"immutable certification run collision for run_id {run.run_id}")
+        if run.knowledge_available_at is not None and existing[5] != knowledge_text:
+            raise ValueError(f"immutable certification knowledge timestamp collision for run_id {run.run_id}")
         return
     try:
         con.execute("BEGIN")
@@ -64,12 +69,12 @@ def write_certification_run(con: duckdb.DuckDBPyConnection, run: CertificationRu
             """
             INSERT INTO era_certification_runs (
                 run_id, as_of, discovery_run_id, calibration_profile_id,
-                manifest_json, results_json, results_sha256, status, reasons_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                manifest_json, results_json, results_sha256, status, reasons_json, knowledge_available_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [run.run_id, run.manifest.certification_as_of, run.manifest.discovery_run_id,
              run.manifest.calibration_profile_id, manifest_json, results_json,
-             run.results_sha256, run.status, reasons_json],
+             run.results_sha256, run.status, reasons_json, knowledge_text],
         )
         con.execute("COMMIT")
     except Exception:
@@ -85,14 +90,14 @@ def read_certification_run(con: duckdb.DuckDBPyConnection, run_id: str) -> Certi
 
     try:
         row = con.execute(
-            "SELECT run_id, manifest_json, results_json, results_sha256, status, reasons_json FROM era_certification_runs WHERE run_id = ?",
+            "SELECT run_id, manifest_json, results_json, results_sha256, status, reasons_json, knowledge_available_at FROM era_certification_runs WHERE run_id = ?",
             [run_id],
         ).fetchone()
     except duckdb.CatalogException:
         return None
     if row is None:
         return None
-    stored_id, manifest_json, results_json, results_sha256, status, reasons_json = row
+    stored_id, manifest_json, results_json, results_sha256, status, reasons_json, knowledge_text = row
     try:
         manifest_payload = json.loads(manifest_json)
         results_payload = json.loads(results_json)
@@ -110,6 +115,7 @@ def read_certification_run(con: duckdb.DuckDBPyConnection, run_id: str) -> Certi
     return CertificationRun.model_validate({
         "run_id": stored_id, "manifest": manifest_payload, "results_sha256": results_sha256,
         "status": status, "reasons": reasons_payload, "results": results_payload,
+        "knowledge_available_at": knowledge_text,
     })
 
 
