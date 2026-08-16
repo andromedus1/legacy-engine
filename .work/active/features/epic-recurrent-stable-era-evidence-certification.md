@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-discovery]
@@ -672,6 +672,33 @@ def certification_run_ids(
   and overlapping candidate families. A known-stable event split is the positive control.
 - Focused `tests/analytics/eras/test_certif*.py`, all discovery and existing era tests, Ruff, and
   compileall are required before the feature advances to review.
+
+## Implementation notes
+
+- Execution capability: inline single-owner implementation under active AUTOPILOT; the four child
+  checkpoints were carried in dependency order and each was advanced directly to `done`.
+- Review weight: standard (caller/project default). Feature is intentionally left at `review` for
+  the root agent's independent review.
+- Child commits: partition `29188d1`; guards/support `4e8fcca`; family equivalence `41583c1`; exact
+  ledger `671898e`; immutable knowledge-availability correction `9a0009f`.
+- Files changed: `analytics/eras/certification.py` and `certification_source.py` (closed models,
+  partition, guards, channels, bootstrap); `certification_run.py` and `certificate_store.py`
+  (immutable run/envelope); `discovery_run.py` (partition-marked pure handoff); package exports,
+  calibration config/data, and focused certification tests.
+- Verification: 34 focused certification/discovery tests passed; all 199 era tests passed with
+  `--import-mode=importlib`; Ruff passed on every touched source/test file; compileall passed.
+  Default era invocation has a pre-existing `ModuleNotFoundError: tests` collection issue in
+  `test_consume.py`, so the importlib run is the authoritative broader result.
+- Simplification: one outcome-free source projection, one deterministic whole-event partition, one
+  normalized family bootstrap, and one exact-id JSON ledger now carry the contract; no latest read,
+  matchup outcome path, or compatibility fallback was introduced.
+- Discrepancies from design: v1 simulated power is a deterministic support-only proxy pending a
+  future calibrated resampling challenger; semantic facts are used as source boundaries only when
+  the discovery run recorded a non-empty boundary catalog; `knowledge_available_at` is immutable
+  persistence metadata outside content-addressed run identity. The checked-in candidate profile
+  therefore never emits final `certified` authority until operator promotion.
+- Adjacent issues parked: the default pytest import-mode collection defect is pre-existing and
+  outside this feature; no product bug was hidden or test-gamed.
 
 ## Risks
 
