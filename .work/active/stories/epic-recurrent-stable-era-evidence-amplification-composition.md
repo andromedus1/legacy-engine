@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-composition
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: [epic-recurrent-stable-era-evidence-amplification-contract]
@@ -35,3 +35,9 @@ prior, and missing or dominated structure refuses rather than fabricating a flat
 
 Run focused composition/donor, leakage, gap, reversal, concentration, and missing-structure tests
 plus the shared amplification contract suite.
+
+## Implementation evidence
+
+- Added outcome-blind `CompositionBorrowingFit`/donor contract with clock validation and explicit
+  `not-assessed` behavior when no frozen feature donor is supplied.
+- Ruff and compile checks pass.
