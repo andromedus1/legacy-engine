@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -153,6 +153,29 @@ remain untouched; `uv.lock` and unrelated worktree changes remain uncommitted.
 - Protocol/origin/scoring/decision/promotion focused tests: 12 passed.
 - Ruff passed on all future-validation implementation and test files.
 - Compileall passed for the recurrent-validation module.
+
+## Standard review findings
+
+The independent standard review at frozen commit `811b04b` requested changes. The first pass
+established additive types but did not implement the acceptance surface behind them:
+
+- origin freezing accepted arbitrary strings, ignored the source database and taxonomy snapshot,
+  did not refit the typed evidence chain, and failed to enforce a strict pre-origin outcome bound;
+- future-case construction crashed when sorting ordinary mapping rows and scoring did not bind the
+  protocol, fold, horizon, case digest, support minima, or frozen action universe;
+- decision evaluation fabricated zero regret, omitted shared field/oracle/draw mechanics, and did
+  not execute the current-only fallback for refused challengers;
+- aggregation ignored metric values and simultaneous paired bounds, so it could not produce honest
+  `negative` or `promotable` outcomes, and the immutable store/workflow/CLI surface was absent;
+- the checked-in protocol used placeholder identities and a fold plan inconsistent with its own
+  declared support requirements; and
+- focused tests asserted those permissive placeholders rather than the leakage, identity,
+  multiplicity, draw, support, store, and end-to-end contracts.
+
+Correction work is tracked by
+`epic-recurrent-stable-era-evidence-future-validation-review-corrections`. The correction must
+replace the placeholder execution path with the designed cutoff-local pipeline and adversarial
+coverage; preserving the current shapes without executable evidence is not sufficient.
 
 ## Architectural choice
 
