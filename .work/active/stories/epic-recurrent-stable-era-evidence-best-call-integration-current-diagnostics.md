@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration-current-diagnostics
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, ui, testing]
 parent: epic-recurrent-stable-era-evidence-best-call-integration
 depends_on: [epic-recurrent-stable-era-evidence-best-call-integration-publication-contract]
@@ -38,3 +38,11 @@ Extend `tests/test_refresh_best_call_ranking.py` with generator, blob, DOM, and 
 all direct views, all six challengers, every service state, camp borrowing, thin/concentrated data,
 hostile content, fixed registry order, unchanged authority bytes, and output preservation on a bad
 requested run.
+
+## Implementation evidence
+
+- The typed publication contract is available through `build_report_evidence`; it preserves all
+  direct views and fixed registry entries, separates served from all-case/refusal state, and carries
+  the authority digest without entering ranking calculations.
+- Existing template authority remains unchanged; rendering integration is intentionally deferred to
+  the page-composition story so the legacy no-request path remains byte-stable.
