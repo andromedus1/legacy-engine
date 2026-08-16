@@ -218,6 +218,45 @@ class OriginDecisionEvaluation(LegacyEngineModel):
     reasons: tuple[str, ...] = ()
 
 
+PromotionStatus = Literal["promotable", "negative", "inconclusive", "support-censored", "invalid"]
+
+
+class GateClause(LegacyEngineModel):
+    clause_id: str
+    comparator_id: EvidenceEstimatorId
+    metric: str
+    estimate: float | None
+    lower_bound: float | None
+    upper_bound: float | None
+    threshold: float
+    status: Literal["pass", "fail", "inconclusive", "censored", "invalid"]
+    reasons: tuple[str, ...] = ()
+
+
+class PromotionAssessment(LegacyEngineModel):
+    protocol_sha256: str
+    candidate_id: EvidenceEstimatorId
+    comparator_ids: tuple[EvidenceEstimatorId, ...]
+    origin_evaluation_ids: tuple[str, ...]
+    clauses: tuple[GateClause, ...]
+    useful_coverage: bool | None
+    predictive_non_degradation: bool | None
+    interval_non_degradation: bool | None
+    decision_non_degradation: bool | None
+    status: PromotionStatus
+    authority: Literal["evidence-only"] = "evidence-only"
+    reasons: tuple[str, ...] = ()
+
+
+class OperatorPromotionProposal(LegacyEngineModel):
+    proposal_id: str
+    candidate_id: EvidenceEstimatorId
+    candidate_config_sha256: str
+    assessment_sha256: str
+    target_config_version: str
+    authority: Literal["operator-review-required"] = "operator-review-required"
+
+
 def load_recurrent_protocol(path: Path | str) -> RecurrentBenchmarkProtocol:
     payload = json.loads(Path(path).read_text())
     return RecurrentBenchmarkProtocol.model_validate(payload)
@@ -326,9 +365,34 @@ def evaluate_recurrent_decisions(origin: FrozenRecurrentOrigin, cases: FutureCas
     return OriginDecisionEvaluation(fold_id=origin.manifest.fold.fold_id, field_mass_sha256=cases.field_mass_sha256, action_universe_sha256=content_sha256(origin.action_universe), evaluations=tuple(evaluations), status=status)
 
 
+def aggregate_recurrent_validation(evaluations: tuple[OriginPredictiveEvaluation, ...], *, protocol: RecurrentBenchmarkProtocol, candidate_id: EvidenceEstimatorId, comparator_ids: tuple[EvidenceEstimatorId, ...] = ("current-only-v1",)) -> tuple[PromotionAssessment, ...]:
+    assessments: list[PromotionAssessment] = []
+    for comparator in comparator_ids:
+        clauses: list[GateClause] = []
+        candidate_metrics = [m for evaluation in evaluations for m in evaluation.metrics if m.estimator_id == candidate_id]
+        comparator_metrics = [m for evaluation in evaluations for m in evaluation.metrics if m.estimator_id == comparator]
+        invalid = any(m.status == "invalid" for m in (*candidate_metrics, *comparator_metrics))
+        censored = any(m.status == "support-censored" for m in (*candidate_metrics, *comparator_metrics))
+        if invalid:
+            status: PromotionStatus = "invalid"
+        elif censored or len(evaluations) < protocol.support.min_origins:
+            status = "support-censored"
+        else:
+            status = "inconclusive"
+        clauses.append(GateClause(clause_id="predictive-support", comparator_id=comparator, metric="log_loss", estimate=None, lower_bound=None, upper_bound=None, threshold=protocol.margins.max_log_loss_delta, status="invalid" if invalid else "censored" if censored else "inconclusive"))
+        assessments.append(PromotionAssessment(protocol_sha256=recurrent_protocol_sha256(protocol), candidate_id=candidate_id, comparator_ids=(comparator,), origin_evaluation_ids=tuple(str(index) for index, _ in enumerate(evaluations)), clauses=tuple(clauses), useful_coverage=None, predictive_non_degradation=None, interval_non_degradation=None, decision_non_degradation=None, status=status, reasons=("evidence requires supported multi-origin margins",)))
+    return tuple(assessments)
+
+
+def build_operator_proposal(assessment: PromotionAssessment, *, target_config_version: str) -> OperatorPromotionProposal:
+    if assessment.status != "promotable":
+        raise ValueError("only promotable evidence may produce an operator proposal")
+    return OperatorPromotionProposal(proposal_id=content_sha256({"assessment": assessment.model_dump(mode="json"), "target": target_config_version}), candidate_id=assessment.candidate_id, candidate_config_sha256=content_sha256(assessment.candidate_id), assessment_sha256=content_sha256(assessment.model_dump(mode="json")), target_config_version=target_config_version)
+
+
 __all__ = [
     "DIRECT_ESTIMATOR_IDS", "EVIDENCE_ESTIMATOR_REGISTRY", "EvidenceEstimatorId",
     "PromotionMargins", "RecurrentEvaluationSupport", "RecurrentBenchmarkFold",
     "RecurrentBenchmarkProtocol", "load_recurrent_protocol", "recurrent_protocol_sha256",
-    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin", "FutureCaseManifest", "PredictiveMetrics", "OriginPredictiveEvaluation", "build_future_case_manifest", "evaluate_recurrent_predictions", "DecisionEvaluation", "OriginDecisionEvaluation", "evaluate_recurrent_decisions",
+    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin", "FutureCaseManifest", "PredictiveMetrics", "OriginPredictiveEvaluation", "build_future_case_manifest", "evaluate_recurrent_predictions", "DecisionEvaluation", "OriginDecisionEvaluation", "evaluate_recurrent_decisions", "GateClause", "PromotionAssessment", "OperatorPromotionProposal", "aggregate_recurrent_validation", "build_operator_proposal",
 ]

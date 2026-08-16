@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation-promotion-gate
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-future-validation
 depends_on:
@@ -20,6 +20,17 @@ updated: 2026-08-16
 Apply the preregistered simultaneous useful-coverage and non-degradation conjunction, emit exhaustive
 promotable/negative/inconclusive/support-censored/invalid assessments, persist an immutable evidence
 bundle, and allow only an inert operator-review proposal for an exact promotable candidate.
+
+## Implementation notes
+
+- Added evidence-only `GateClause`, `PromotionAssessment`, and inert operator proposal contracts.
+- Aggregate status preserves invalid/support-censored precedence and refuses proposals for any
+  non-promotable result; no active configuration or winner selector exists.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/advisory/test_recurrent_validation_promotion.py` — 2 passed.
+- `uv run ruff check src/legacy_engine/advisory/recurrent_validation.py tests/advisory/test_recurrent_validation_promotion.py` — passed.
 
 ## Implementation
 

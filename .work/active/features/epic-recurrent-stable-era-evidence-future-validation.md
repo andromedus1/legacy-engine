@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -140,6 +140,19 @@ through explicit operator authority and never occurs because a challenger merely
   peeragent, so no design-time advisory pass was run. This is non-blocking under the workflow.
 - Receiver judgment: the approved research, shipped benchmark contracts, and completed evidence
   substrate resolve the direction; the integrated standard review remains required.
+
+## Implementation summary
+
+Implemented the five sequential future-validation checkpoints: append-only protocol/registry,
+origin artifact sealing, common-case proper scoring, event-ledger decision evaluation, and
+evidence-only promotion assessment with inert operator proposals. Historical benchmark contracts
+remain untouched; `uv.lock` and unrelated worktree changes remain uncommitted.
+
+## Verification evidence
+
+- Protocol/origin/scoring/decision/promotion focused tests: 12 passed.
+- Ruff passed on all future-validation implementation and test files.
+- Compileall passed for the recurrent-validation module.
 
 ## Architectural choice
 
