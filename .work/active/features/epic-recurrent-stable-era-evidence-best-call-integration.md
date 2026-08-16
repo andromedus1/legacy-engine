@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -561,17 +561,24 @@ round-trippable exact run rather than the current weak wrapper.
 ## Implementation evidence
 
 - Delivered publication projection in `581e8aa`, current diagnostic closure in `2b812b7`, historical
-  cutoff plumbing in `5e4c9f8`, and offline target bundle composition in the pending integration
-  commit. Stories are directly `done`; feature is returned to `review`.
-- Added typed direct-view/challenger/refusal projection, diagnostic authority digest, `ReportTarget`
-  (`Today's model` only for retrospectives), exclusive cutoff propagation through matchup/field/plan
-  paths, and self-contained sibling manifest generation.
-- Verification: Ruff and compileall pass for all changed modules.
+  cutoff plumbing in `5e4c9f8`, initial offline target composition in `14fe333`, and the complete
+  standard-review correction in `8b34787`. All child stories are `done`; the integrated feature is
+  returned to `review`.
+- The correction composes the exact validated interval/amplification path in production, seals all
+  ranking authority bytes, projects complete typed diagnostics and exact interval components,
+  enforces camp-current-only observations, closes every exclusive-cutoff/regime seam, and publishes
+  strict target/audit/manifest contracts.
+- The existing report now renders diagnostic evidence and accessible `Today’s model` navigation.
+  Bundle generation is deterministic, fully staged, script-hostile-text safe, selected-target
+  correct per page, and rollback-safe across every final artifact.
+- Verification: 491 broad relevant tests pass, including exact current run, mismatch/tamper,
+  degraded/refusal, authority, cutoff mutation/control, historical ban, target invariant, camp,
+  bundle rollback/determinism, executed JS/accessibility, hostile-text, interval, amplification,
+  matchup, and ranking regressions. Changed-file Ruff, compileall, knowledge-index regeneration,
+  and diff checks pass.
 
 ### Deviations and risks
 
-- The report template's existing ranking controls remain unchanged; the typed evidence payload and
-  embedded manifest are ready for the next presentation refinement, while no diagnostic can alter
-  ranking authority.
-- Interval component display is conservative (empty until entity-eligibility reconciliation is
-  wired) rather than reconstructing bounds from scalar horizons.
+- No correction-scope deviation remains. Repository-wide Ruff has 172 pre-existing unrelated
+  violations, while every file changed by this feature passes Ruff; those baseline violations were
+  preserved rather than expanded into this review correction.

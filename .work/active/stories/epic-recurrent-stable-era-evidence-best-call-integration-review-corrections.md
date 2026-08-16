@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, ui, testing]
 parent: epic-recurrent-stable-era-evidence-best-call-integration
 depends_on:
@@ -50,3 +50,27 @@ acceptance tests and runbook updates.
 - Invalid evidence fails before publication; valid degraded or unavailable evidence renders typed
   reasons; bundle failure preserves every prior canonical artifact.
 - Existing ranking, matchup, camp, interval, and amplification regression suites remain green.
+
+## Implementation evidence
+
+- Production correction committed in `8b34787`. `generate_ranking` now composes exact parent and
+  camp interval corpora, loads only the requested amplification id through the public validated
+  boundary, matches exact corpus/clock/certificate/profile/registry/baseline identities, projects
+  all typed direct/challenger diagnostics, and seals the complete mature ranking authority payload
+  before and after attachment. Camps use the exact multi-split ledger and remain current-only.
+- Exclusive cutoffs now bind report SQL, transition/recent/camp shares, adaptive/fallback/strict
+  matrices, plans, ranking ledgers, interval selection, ban horizons, and affectedness. Strict
+  `ReportTarget`, section audit, and manifest models reject contradictory clocks, regimes, hrefs,
+  availability states, digests, and current/retrospective semantics.
+- The existing page renders visible diagnostic-only direct views, exact half-open components,
+  concentration/prior/digest provenance, all six challenger states, fit/support/borrowing/ablation
+  details, refused/degraded reasons, and accessible `Today’s model` target navigation. Embedded data
+  and manifests escape script-hostile text.
+- Bundle publication stages every page and per-page selected manifest before replacement, publishes
+  historical siblings first/current last, removes wall-clock nondeterminism, and restores every
+  last-good artifact even when a fault is injected after an atomic rename.
+- Regression evidence: `491 passed in 25.78s` across amplification, eras/interval consumption,
+  matchup/multi-split camps, field advice, ranking generation/template, projection, and bundle tests;
+  changed-file Ruff, `compileall -q src scripts`, knowledge-index lint/regeneration, and
+  `git diff --check` pass. Repository-wide Ruff still reports 172 unrelated baseline violations in
+  legacy files outside this correction; no new violation occurs in the changed-file check.
