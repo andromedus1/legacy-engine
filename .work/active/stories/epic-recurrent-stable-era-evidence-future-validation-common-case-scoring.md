@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation-common-case-scoring
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-future-validation
 depends_on: [epic-recurrent-stable-era-evidence-future-validation-origin-refit]
@@ -35,3 +35,15 @@ exclusions.
 
 Implement the scoring and future-case suites named by Unit 3 with hand-computed metrics, outcome
 swaps, refusal attacks, event-block predictive intervals, novel labels, and thin-support cases.
+
+## Implementation notes
+
+- Added estimator-independent future-case manifests with stable match/event/deck and field-mass
+  digests.
+- Added all-case log-loss/Brier evaluation that treats missing candidate probabilities as invalid
+  rather than deleting difficult cases, while keeping served coverage separate.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/advisory/test_recurrent_validation_scoring.py` — 2 passed.
+- `uv run ruff check src/legacy_engine/advisory/recurrent_validation.py tests/advisory/test_recurrent_validation_scoring.py` — passed.

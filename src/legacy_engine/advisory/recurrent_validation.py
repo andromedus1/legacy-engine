@@ -149,6 +149,48 @@ class FrozenRecurrentOrigin(LegacyEngineModel):
     code_commit: str
 
 
+class FutureCaseManifest(LegacyEngineModel):
+    fold_id: str
+    eligible_match_ids: tuple[str, ...]
+    eligible_event_ids: tuple[str, ...]
+    eligible_deck_ids: tuple[str, ...]
+    case_sha256: str
+    field_mass_sha256: str
+    exclusions: dict[str, int] = {}
+
+
+class PredictiveMetrics(LegacyEngineModel):
+    estimator_id: EvidenceEstimatorId
+    common_matches: int
+    common_events: int
+    log_loss: float | None
+    brier: float | None
+    calibration_intercept: float | None = None
+    calibration_slope: float | None = None
+    cumulative_calibration_error: float | None = None
+    interval_coverage: float | None = None
+    interval_mean_width: float | None = None
+    interval_score: float | None = None
+    served_match_coverage: float
+    served_event_coverage: float
+    served_field_coverage: float
+    refusal_counts: dict[str, int] = {}
+    imputation_counts: dict[str, int] = {}
+    evidence_concentration: dict[str, float | None] = {}
+    status: Literal["complete", "support-censored", "invalid"]
+    reasons: tuple[str, ...] = ()
+
+
+class OriginPredictiveEvaluation(LegacyEngineModel):
+    protocol_sha256: str
+    origin_predictions_sha256: str
+    future_cases: FutureCaseManifest
+    metrics: tuple[PredictiveMetrics, ...]
+    paired_event_differences: dict[str, dict[str, tuple[float, ...]]] = {}
+    status: Literal["complete", "support-censored", "invalid"]
+    reasons: tuple[str, ...] = ()
+
+
 def load_recurrent_protocol(path: Path | str) -> RecurrentBenchmarkProtocol:
     payload = json.loads(Path(path).read_text())
     return RecurrentBenchmarkProtocol.model_validate(payload)
@@ -200,9 +242,46 @@ def refit_and_freeze_origin(source_db, *, protocol, fold, taxonomy_snapshot=None
     return freeze_origin(protocol, fold, stage_artifacts=artifacts or {})
 
 
+def build_future_case_manifest(fold_id: str, rows, *, exclusions: dict[str, int] | None = None) -> FutureCaseManifest:
+    eligible = tuple(sorted(row for row in rows if row.get("eligible", True)))
+    match_ids = tuple(str(row["match_id"]) for row in eligible)
+    event_ids = tuple(sorted({str(row["event_id"]) for row in eligible}))
+    deck_ids = tuple(sorted({str(value) for row in eligible for value in (row.get("subject_deck_id"), row.get("opponent_deck_id")) if value is not None}))
+    return FutureCaseManifest(
+        fold_id=fold_id, eligible_match_ids=match_ids, eligible_event_ids=event_ids,
+        eligible_deck_ids=deck_ids, case_sha256=content_sha256(match_ids),
+        field_mass_sha256=content_sha256({str(row["match_id"]): row.get("field_mass", 0.0) for row in eligible}),
+        exclusions=exclusions or {},
+    )
+
+
+def evaluate_recurrent_predictions(origin: FrozenRecurrentOrigin, cases: FutureCaseManifest, *, protocol: RecurrentBenchmarkProtocol, outcomes) -> OriginPredictiveEvaluation:
+    by_id = {str(row["match_id"]): row for row in outcomes if str(row["match_id"]) in cases.eligible_match_ids}
+    metrics: list[PredictiveMetrics] = []
+    for estimator in protocol.estimator_ids:
+        predictions = {(p.subject, p.opponent): p for p in origin.predictions if p.estimator_id == estimator}
+        values: list[tuple[float, int, str]] = []
+        invalid = False
+        for row in by_id.values():
+            prediction = predictions.get((str(row["subject"]), str(row["opponent"])))
+            if prediction is None or prediction.probability is None:
+                invalid = True
+                continue
+            values.append((min(1 - protocol.log_clip_epsilon, max(protocol.log_clip_epsilon, prediction.probability)), int(bool(row["subject_won"])), str(row["event_id"])))
+        if invalid or len(values) != len(by_id):
+            metrics.append(PredictiveMetrics(estimator_id=estimator, common_matches=len(values), common_events=len({v[2] for v in values}), log_loss=None, brier=None, served_match_coverage=0.0, served_event_coverage=0.0, served_field_coverage=0.0, status="invalid", reasons=("missing-all-case-prediction",)))
+            continue
+        log_loss = sum(-(y * __import__("math").log(p) + (1 - y) * __import__("math").log(1 - p)) for p, y, _ in values) / len(values)
+        brier = sum((p - y) ** 2 for p, y, _ in values) / len(values)
+        served = [p for p in origin.predictions if p.estimator_id == estimator and p.served]
+        metrics.append(PredictiveMetrics(estimator_id=estimator, common_matches=len(values), common_events=len({v[2] for v in values}), log_loss=log_loss, brier=brier, served_match_coverage=len(served) / max(1, len(predictions)), served_event_coverage=0.0, served_field_coverage=0.0, status="complete"))
+    status = "invalid" if any(metric.status == "invalid" for metric in metrics) else "complete"
+    return OriginPredictiveEvaluation(protocol_sha256=recurrent_protocol_sha256(protocol), origin_predictions_sha256=origin.predictions_sha256, future_cases=cases, metrics=tuple(metrics), status=status)
+
+
 __all__ = [
     "DIRECT_ESTIMATOR_IDS", "EVIDENCE_ESTIMATOR_REGISTRY", "EvidenceEstimatorId",
     "PromotionMargins", "RecurrentEvaluationSupport", "RecurrentBenchmarkFold",
     "RecurrentBenchmarkProtocol", "load_recurrent_protocol", "recurrent_protocol_sha256",
-    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin",
+    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin", "FutureCaseManifest", "PredictiveMetrics", "OriginPredictiveEvaluation", "build_future_case_manifest", "evaluate_recurrent_predictions",
 ]
