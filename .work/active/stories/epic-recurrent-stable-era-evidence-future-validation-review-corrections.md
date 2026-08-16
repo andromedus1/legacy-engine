@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-future-validation
 depends_on:
@@ -51,3 +51,56 @@ adversarial tests described by the parent feature.
   from complete clause ledgers, and only a promotable exact assessment can yield an inert proposal.
 - Existing benchmark artifacts remain byte-interpretable and the broader recurrent/amplification/
   ranking regressions stay green.
+
+## Implementation record
+
+- **Execution capability:** current frontier implementation; the change spans temporal leakage
+  boundaries, immutable evidence identities, predictive/decision uncertainty, and operator
+  authority.
+- **Review weight:** standard, inherited from the parent feature. The correction closes the
+  independent review blockers; the integrated feature returns to `stage: review` for verification.
+- **Primary implementation:** `advisory/recurrent_validation.py` now owns closed typed protocol,
+  stage-chain, forecast/draw, future-case, predictive, decision, promotion, proposal, and bundle
+  contracts. `workflows/recurrent_validation.py` supplies the honest injected refit orchestrator,
+  cutoff snapshot construction, and content-addressed origin/evaluation/bundle/proposal stores.
+- **Operator surface:** `advise recurrent-validation plan|freeze|evaluate|aggregate|proposal`
+  exposes the artifact lifecycle without `run`, `latest`, apply, winner selection, or active-config
+  mutation.
+- **Immutable inputs:** added a preregistered future parent benchmark plan and a self-consistent
+  recurrent protocol bound to its exact protocol, fold, B&R, taxonomy, calibration, interval,
+  structure, and amplification hashes. Historical v1 benchmark artifacts and registries were not
+  modified.
+- **Identity hardening:** sealed origins, future-case manifests, predictive/decision branches,
+  candidate configs, aligned draws, evaluations, and validation bundles revalidate their derived
+  identities. Invented support, divergent field mass, branch mixing, and artifact collisions fail
+  closed.
+- **Simplification:** one estimator-independent future-case ledger feeds both evidence branches;
+  one frozen registry drives prediction grids, assessments, and bundle validation; one injected
+  executor protocol isolates the repository from a speculative generic benchmark framework.
+- **Design discrepancy:** the originally checked-in placeholder/backdated protocol could not
+  honestly preregister future evidence. The correction adds a new parent protocol whose six folds
+  begin after registration, rather than weakening registration or minimum-origin checks.
+- **Adjacent test debt repaired:** normalized the repository's mixed `tests.*` and sibling-module
+  fixture imports so the full suite collects without changing production behavior.
+
+## Verification evidence
+
+- Recurrent correction suite: `35 passed`.
+- Recurrent plus interval/amplification integration slice: `66 passed`.
+- Full repository suite: `3982 passed, 1 skipped`.
+- Adjacent matchup/ranking/advisory CLI regression slice: `505 passed`.
+- Ruff: all correction source/tests pass; `cli.py` passes with only the repository's existing
+  `F821,F541` baseline ignored.
+- Compileall: recurrent advisory/workflow and CLI modules pass.
+- Knowledge-index regeneration: `0 errors`; six pre-existing advisory warnings remain.
+- Mandatory documentation re-audit after fixes: `0 Critical, 0 High`; report at
+  `doc-review-report.md`.
+
+## Commits
+
+- `03df4d5` — cutoff-safe recurrent origin refit and typed contracts.
+- `805467e` — adversarial scoring, decision, promotion, and store gates.
+- `1d4c106` — content-addressed workflow and CLI surface.
+- `1867707` — exact sealed/evaluation/bundle identity enforcement.
+- `d54fed3`, `7635d7c` — honest shared test-package collection.
+- `4f0a43b`, `d5202f7` — documentation alignment, index regeneration, and doc-review closure.
