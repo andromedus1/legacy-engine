@@ -12,14 +12,14 @@ decisions:
   - "Four analytical pillars — Meta & Performance, Deck Mechanics (goldfish), Deck Generation, and Meta Attack/Advisory (the Legacy-specific differentiator: matchup positioning, sideboard recommender, what-to-play)."
   - "Sibling-of-edh-engine: reuse its 3-data-layer → pillar architecture, deck-as-data model, goldfish/mana/mulligan engines wherever the domain overlaps; diverge only where Legacy demands it."
   - "Key architectural delta: an explicit archetype-parser layer (no commander to key on) — labels decklists into the community taxonomy."
-  - "MVP arc = ingestion + meta analytics + advisory + deck generation (consensus baseline, field-tuning mode 2, export) shipped together; goldfish simulation and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation come in later pillars."
+  - "Current shipped arc = ingestion + meta analytics + advisory + deck generation (consensus, field tuning, export, gap discovery, and deck doctor); goldfish simulation and goldfish-validated candidate evaluation remain deferred Deck Mechanics work."
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
   - "Per-entity stable eras: every per-archetype/per-camp statistic uses the entity's own detected and certified set of compatible time intervals, not just one global ban regime or monotone suffix; bans and releases nominate disturbances, confirmed affectedness remains a hard boundary, and every windowed figure names the admitted intervals and evidence provenance."
   - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. Superarchetypes expose pooled strategy-family evidence with labeled provenance and intra-cluster flags; they remain an exploratory navigation/explanation layer while archetype-level Best Call stays decision-authoritative until the future-only benchmark passes."
   - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). maintainer-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
-updated: 2026-08-13
+updated: 2026-08-16
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -105,7 +105,8 @@ a config swap, not a rewrite.
 
 ## Non-goals (for now)
 - Not an interactive deck-building *editor* GUI, and not a web app yet — a hosted web UI is deferred pending its own research. The engine **does** model the user's personal collection and own decks as a first-class *local* layer (so advice is buildable and actionable from what you actually own), but it stays CLI-first analytics, not a deckbuilding editor.
-- Not a full rules-correct 4-player game engine — Legacy is 1v1 and the goldfish track ships first.
+- Not a full rules-correct game engine — Legacy is 1v1, and goldfish simulation remains a deferred
+  Deck Mechanics track while the observed-data generation and advisory surfaces are already built.
 - Not Vintage, Modern, or other formats (though the card/data layer is largely format-agnostic).
 - Not live/real-time during events — all external data is pre-fetched and cached.
 
@@ -113,8 +114,8 @@ a config swap, not a rewrite.
 | Document | Purpose |
 |----------|---------|
 | [SPEC.md](SPEC.md) | What the system does — capabilities, domain entities, NFRs |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | High-level modules and data flow (detailed design comes from /architecture after research) |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current detailed module map, data flow, and implementation boundaries |
 | [PRINCIPLES.md](PRINCIPLES.md) | Decision heuristics specific to this project |
-| [research-plan.md](research-plan.md) | Research to run before /architecture firms up |
+| [research-plan.md](research-plan.md) | Current research posture, completed grounding, and deferred refresh work |
 | [briefs/legacy-foundations.md](briefs/legacy-foundations.md) | Rules, London mulligan, format constraints |
 | [briefs/legacy-metagame.md](briefs/legacy-metagame.md) | 2026 meta, archetypes, data sources, how-to-attack |

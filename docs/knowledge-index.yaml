@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-16T23:31:18Z'
+generated_at: '2026-08-16T23:45:19Z'
 generated_from: frontmatter
 total_docs: 32
 documents:
@@ -8,7 +8,7 @@ documents:
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-08-13'
+  updated: '2026-08-16'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four
@@ -35,7 +35,7 @@ documents:
   title: 'Vision: legacy-engine'
   type: north-star
   kind: planning
-  updated: '2026-08-13'
+  updated: '2026-08-16'
   consumer_hint: Read first — the why and what of legacy-engine. Vision, problem,
     principles pointer, and the four-pillar domain model for the Legacy analytics
     platform.
@@ -50,15 +50,14 @@ documents:
   title: 'Research Plan: legacy-engine'
   type: research-plan
   kind: planning
-  updated: '2026-05-29'
-  consumer_hint: Read to know what research must run before /architecture, and what's
-    deferred per-pillar. The routing plan for /research, /deep-research, and /brief
-    invocations.
+  updated: '2026-08-16'
+  consumer_hint: Read to understand which research grounds the current architecture
+    and which deferred questions still require a fresh brief before implementation.
 - path: docs/SPEC.md
   title: 'Spec: legacy-engine'
   type: spec
   kind: planning
-  updated: '2026-08-13'
+  updated: '2026-08-16'
   consumer_hint: Read when scoping what to build — the capabilities, domain entities,
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).

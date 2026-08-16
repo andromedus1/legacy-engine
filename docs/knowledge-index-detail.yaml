@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-16T23:31:18Z'
+generated_at: '2026-08-16T23:45:19Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -108,12 +108,17 @@ documents:
       and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
       gate. Empty/absent registry is byte-identical to today (gated-additive).'
     - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
-      as the current/fallback projection. The intended recurrent-era extension separates
-      outcome-free candidate discovery from independent equivalence certification,
-      persists versioned EraCertificates over disjoint half-open intervals, and lets
-      matchup consumption intersect subject and opponent interval sets before estimation.
-      Confirmed affectedness is a semantic veto; expanded evidence remains distinct
-      from current-only evidence and requires future-only validation before promotion.'
+      as the current/fallback projection. The built recurrent validation surface freezes
+      cutoff-safe recurrent origins from a hash-bound parent benchmark plan, validates
+      typed refit stages and full forecast grids, evaluates predictive + decision
+      evidence on a shared future ledger, aggregates exact promotion assessments,
+      and can emit only inert operator-review proposals. The intended recurrent-era
+      serving extension still separates outcome-free candidate discovery from independent
+      equivalence certification, persists versioned EraCertificates over disjoint
+      half-open intervals, and lets matchup consumption intersect subject and opponent
+      interval sets before estimation. Confirmed affectedness is a semantic veto;
+      expanded evidence remains distinct from current-only evidence and requires future-only
+      validation before promotion.'
     - 'FORMAT MONITOR: the scheduled refresh consumes current Scryfall gzipped JSONL,
       diffs Legacy legalities, strictly parses WotC Legacy attribution, and combines
       the existing set scan with actual new-card ingest evidence. Machine state is
@@ -320,10 +325,10 @@ documents:
       only where Legacy demands it.'
     - 'Key architectural delta: an explicit archetype-parser layer (no commander to
       key on) — labels decklists into the community taxonomy.'
-    - MVP arc = ingestion + meta analytics + advisory + deck generation (consensus
-      baseline, field-tuning mode 2, export) shipped together; goldfish simulation
-      and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation
-      come in later pillars.
+    - Current shipped arc = ingestion + meta analytics + advisory + deck generation
+      (consensus, field tuning, export, gap discovery, and deck doctor); goldfish
+      simulation and goldfish-validated candidate evaluation remain deferred Deck
+      Mechanics work.
     - Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and
       matchups are first-class, unlike edh-engine's 4-player goldfish framing.
     - Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped
@@ -395,34 +400,30 @@ documents:
     - slug: docs/ARCHITECTURE.md
       relationship: parallel-to
   docs/research-plan.md:
-    summary: 'Research routing plan for legacy-engine. Two grounding briefs are already
-      done (legacy-foundations,
+    summary: 'Current research posture for legacy-engine. The pre-architecture ingestion,
+      taxonomy, format,
 
-      legacy-metagame). One load-bearing /research remains before /architecture: the
-      fbettega-cache +
+      metagame, and advisory-method grounding is complete and reflected in the shipped
+      architecture.
 
-      MTGOFormatData data contracts (the ingestion + archetype-parser layer). Advisory
-      statistics is a
+      New briefs are required only for still-deferred work or when a consequential
+      assumption needs a
 
-      smaller /research; Scryfall is reuse-from-edh-engine (no research). Goldfish
-      and generation research
-
-      are deferred to their pillars.
+      fresh external check.
 
       '
     decisions:
-    - Two grounding briefs are DONE (legacy-foundations, legacy-metagame) — they cover
-      rules, mulligan, constraints, meta, archetypes, data sources, and how-to-attack.
-    - 'One load-bearing /research before /architecture: the fbettega cache JSON schema
-      + MTGOFormatData rule schema + parser port strategy (the ingestion + archetype-parser
-      data contracts).'
-    - Advisory statistics is a focused /research (win-rate CI method, sample-size
-      gating, sideboard set-cover formulation) — can run before or alongside /architecture.
+    - 'Pre-architecture grounding is complete: format/metagame briefs, the ingestion-archetype
+      campaign, and advisory methods now support the current architecture.'
+    - The canonical ingestion/archetype research root is docs/briefs/ingestion-archetype-contracts/parent.md
+      with its specialist child briefs.
+    - Future consequential modeling work receives a fresh bounded brief before design
+      rather than relying on this routing record.
     - Scryfall card-data ingestion needs NO research — port edh-engine's scryfall.py
       directly.
     - Goldfish-pillar research (mana-solver port, straight-London mulligan adaptation,
-      clock calibration) is deferred to the Deck Mechanics pillar; rules grounding
-      already exists in legacy-foundations.
+      clock calibration, and candidate validation) remains deferred to the Deck Mechanics
+      pillar.
     related:
     - slug: docs/ARCHITECTURE.md
       relationship: depends-on
@@ -457,10 +458,12 @@ documents:
       meta-% / matchup matrix / per-card win-rate / subgroup split / venue divergence
       / new-card speculation), the advisory layer (positioning + maindeck-aware sideboard
       + what-to-play + field-read report + collection-aware acquire + refresh + primer),
-      player-strength + history, and all deck generation modes 1+2+3+export (consensus
-      baseline with --variant/--players/--strong, field-tuned decklist, gap-discovery,
-      deck doctor), the archetype-sweep backtest (advise sweep), and data-driven subarchetype
-      resolution (discover run|list|apply|promote + opt-in variant overlays).
+      future-only validation surfaces (advise benchmark, advise recurrent-validation,
+      and the benchmark-scoped player-effect diagnostic), player-strength + history,
+      and all deck generation modes 1+2+3+export (consensus baseline with --variant/--players/--strong,
+      field-tuned decklist, gap-discovery, deck doctor), the archetype-sweep backtest
+      (advise sweep), and data-driven subarchetype resolution (discover run|list|apply|promote
+      + opt-in variant overlays).
     - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); goldfish-validated
       candidate-validation remains deferred until goldfish/ ships. Gap-discovery (mode
       3) itself is built.
@@ -490,11 +493,15 @@ documents:
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
     - 'STABLE ERAS: the built detector persists per-entity boundaries and stable_since
-      fallbacks; the intended recurrent-era contract certifies a union of compatible
-      historical intervals with outcome-free discovery, affectedness/context/support
-      guards, and pairwise subject/opponent intersection. Current-only evidence remains
-      the fallback, and expanded evidence cannot become authoritative without future-only
-      validation.'
+      fallbacks; the recurrent validation surface now freezes cutoff-safe recurrent
+      origins against the hash-bound parent benchmark plan, scores current-only /
+      contiguous-era / recurrent-expanded evidence plus additive amplification methods
+      on a common future ledger, aggregates exact promotion assessments, and can write
+      only inert operator-review proposals. The intended serving-time recurrent-era
+      contract still certifies a union of compatible historical intervals with outcome-free
+      discovery, affectedness/context/support guards, and pairwise subject/opponent
+      intersection. Current-only evidence remains the fallback, and expanded evidence
+      cannot become authoritative without future-only validation.'
     - 'SUPERARCHETYPES: a third taxonomy level ABOVE parent archetype — strategy clusters
       derived from staple-stripped maindeck core sets (Jaccard + average-linkage agglomerative,
       AU-bootstrap cut) with a curated override layer, persisted as a registry by
