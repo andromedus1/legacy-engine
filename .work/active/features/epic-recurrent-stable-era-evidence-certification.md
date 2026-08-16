@@ -696,6 +696,15 @@ def certification_run_ids(
 - Adjacent issues parked: the default pytest import-mode collection defect is pre-existing and
   outside this feature; no product bug was hidden or test-gamed.
 
+## Review correction evidence
+
+- Receiver-confirmed standard-review correction story `epic-recurrent-stable-era-evidence-certification-review-corrections`
+  completed in `a8f513e` and is `stage: done`.
+- The correction removes the unexecuted power/safely-inside authority fields, binds the checked-in
+  outcome-blind control fixture digest, and hash-binds run status/reasons in addition to manifest and
+  results. It also closes the semantic-gap, monitor-authority, cutoff, family-bootstrap, support-HHI,
+  union-smoothing, and store-tamper findings with adversarial tests.
+
 ## Risks
 
 - **Discovery/certification partition gap:** the shipped discovery run lacks the independent split

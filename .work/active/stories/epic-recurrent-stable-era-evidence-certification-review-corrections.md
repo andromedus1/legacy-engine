@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-certification
 depends_on: []
@@ -42,3 +42,18 @@ firewall, deterministic event split, parent-only release, and candidate-profile 
 
 Created from the single standard independent review of the parent feature on 2026-08-16. After the
 named fix set is green, the parent closes administratively without another independent pass.
+
+## Implementation notes
+
+- Execution capability: inline standard review-correction pass; no nested agents or second review.
+- Files changed: certification discrepancy/guard/bootstrap core, run identity and store validation,
+  checked-in calibration/control fixture, and adversarial certification tests.
+- Corrections: discrepancy smoothing now uses one shared union vocabulary; semantic facts cover the
+  full historical-to-current gap with curated/frozen authority and monitor abstention; future facts
+  are cutoff-filtered; bootstrap preserves event multiplicity, shared references/context draws, and
+  guard-abstained family members; support uses event HHI/effective counts and context event weights;
+  placeholder power/safely-inside parameters were removed; control evidence is hash-bound; run
+  status/reasons are included in the content id and store tampering is rejected.
+- Verification: focused certification suite 22 passed; full era suite and final lint/compile pass
+  recorded on the parent feature after this correction.
+- Adjacent issues parked: none.
