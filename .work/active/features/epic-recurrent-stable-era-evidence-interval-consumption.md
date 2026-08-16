@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -585,6 +585,10 @@ Implemented the interval-consumption seam across four sequential checkpoints:
 - Rejected: endpoint clock predicates are correct; current ranking authority was not silently
   promoted; supplied hierarchy-prior overlap checks catch current/added reuse. No foundation or
   applicable security finding was confirmed.
+- Root fix verification: `bba488d` resolves orientation/component/export defects, but the commit adds
+  no tests and does not yet prove or implement the exact-certificate current component, independent
+  current/expanded/added aggregation, multi-split/hierarchy integration, or the full production
+  call-site contract. The named correction set remains open.
 
 ## Correction evidence
 

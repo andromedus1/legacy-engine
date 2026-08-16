@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification-review-corrections
 kind: story
-stage: done
+stage: implementing
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-certification
 depends_on: []
@@ -57,3 +57,7 @@ named fix set is green, the parent closes administratively without another indep
 - Verification: focused certification suite 22 passed; full era suite and final lint/compile pass
   recorded on the parent feature after this correction.
 - Adjacent issues parked: none.
+- Root fix verification reopened this story: exact regressions are still required for the reproduced
+  30/60-card high-dimensional false reunion, event-bootstrap multiplicity and context/shared-
+  reference draws, HHI-concentrated event support, post-cutoff fact identity invariance, and the
+  complete checked-in control manifest. Legacy green suites do not prove those corrections.

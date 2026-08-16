@@ -758,3 +758,7 @@ def certification_run_ids(
 - Rejected: partition atomicity, outcome firewall, parent-only scope, candidate-profile authority
   cap, empty runs, exact-id reads, and UTC knowledge availability behaved as intended. No foundation,
   security, UI, or async finding was confirmed.
+- Root fix verification: code-level corrections and 202 era tests are green, but administrative
+  closure remains blocked until exact adversarial regressions cover high-dimensional smoothing,
+  bootstrap multiplicity/context/shared-reference behavior, concentrated HHI support, future-fact
+  identity invariance, and the checked-in control manifest.

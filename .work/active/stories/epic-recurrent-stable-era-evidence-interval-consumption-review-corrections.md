@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption-review-corrections
 kind: story
-stage: done
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: []
@@ -64,3 +64,11 @@ named fix set is green, the parent closes administratively without another indep
 
 Certification-owned files were intentionally excluded from this checkpoint; their worker changes
 remain uncommitted in the shared worktree.
+
+## Root verification gap
+
+Commit `bba488d` fixed pair orientation, stable ids, interval component ids, open-start provenance,
+and exports, but added no tests. It did not close the exact-certificate current/reference authority,
+independent per-view aggregation, multi-split/hierarchy wiring, typed scalar refusal provenance, or
+production call-site acceptance criteria. Those named items and their adversarial tests remain in
+scope before the parent can return to review.
