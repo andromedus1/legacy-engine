@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -185,6 +185,16 @@ Correction work is tracked by
 `epic-recurrent-stable-era-evidence-future-validation-review-corrections`. The correction must
 replace the placeholder execution path with the designed cutoff-local pipeline and adversarial
 coverage; preserving the current shapes without executable evidence is not sufficient.
+
+## Review resolution
+
+Approved after correction. The replacement now executes and seals the cutoff-local typed stage
+chain, binds canonical cases and aligned draws, scores proper predictive and whole-event decision
+evidence, evaluates all five gate statuses from complete clauses, and exposes only content-addressed
+evaluation artifacts plus inert operator proposals. Root reran the combined corrected publication
+and recurrent acceptance suite (`95 passed in 9.71s`); the correction owner additionally verified
+the full repository (`3,982 passed, 1 skipped`). Every named standard-review blocker has a direct
+regression, and the standard lifecycle requires no second independent implementation review.
 
 ## Review correction resolution
 
