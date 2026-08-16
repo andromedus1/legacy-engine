@@ -20,7 +20,7 @@ from legacy_engine.workflows.recurrent_validation import (
     OriginStageRequest,
     refit_and_freeze_origin,
 )
-from advisory.recurrent_validation_helpers import (
+from tests.advisory.recurrent_validation_helpers import (
     base_protocol,
     forecast,
     origin,

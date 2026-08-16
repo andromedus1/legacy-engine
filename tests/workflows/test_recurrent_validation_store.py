@@ -14,7 +14,7 @@ from legacy_engine.workflows.recurrent_validation import (
     plan_recurrent_validation,
     write_operator_proposal,
 )
-from advisory.recurrent_validation_helpers import (
+from tests.advisory.recurrent_validation_helpers import (
     base_protocol,
     future_rows,
     origin,

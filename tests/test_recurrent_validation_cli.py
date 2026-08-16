@@ -13,7 +13,7 @@ from legacy_engine.advisory.recurrent_validation import GateClause, PromotionAss
 from legacy_engine.cli import main
 from legacy_engine.ingestion import store
 from legacy_engine.workflows.ranking_benchmark import build_origin_snapshot
-from advisory.recurrent_validation_helpers import (
+from tests.advisory.recurrent_validation_helpers import (
     BASE_PROTOCOL_PATH,
     base_protocol,
     forecast,

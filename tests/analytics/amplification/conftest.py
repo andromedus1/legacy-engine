@@ -12,7 +12,7 @@ from legacy_engine.analytics.amplification import (
 )
 from legacy_engine.analytics.eras.certificate_store import write_certification_run
 from legacy_engine.analytics.matchup import build_interval_adaptive_matrix
-from analytics.eras.test_interval_consumption import _clock, _matrix_db, _run
+from tests.analytics.eras.test_interval_consumption import _clock, _matrix_db, _run
 
 
 @pytest.fixture
