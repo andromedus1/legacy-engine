@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: []
@@ -606,3 +606,20 @@ def discovery_run_ids(
   boundaries, while only hard boundaries change `contract_epoch` or refuse comparison; this keeps
   legality evidence inspectable without turning it into a blanket reset.
 - Adjacent issues parked: none.
+
+## Review findings
+
+- Effective weight: `standard`; one same-harness fresh-context independent pass completed on
+  2026-08-16. Closure requires verification of the named fix set only, not another independent
+  pass.
+- Blocker story: `epic-recurrent-stable-era-evidence-discovery-review-corrections`.
+- Required corrections: preserve exact hard-boundary epochs; replace incoherent probability-scale
+  smoothing; make the persisted v1 method/calibration match the executed segmentation (including
+  subject share); pre-index the current corpus instead of nested full scans; enforce independent
+  historical-duration support; and add the adversarial tests that exposed these failures.
+- Important findings absorbed into the blocker story: historical bucket support and accurate
+  verification coverage. They are current-contract work, so receiver judgment elevates them into
+  the fix set rather than parking misleading follow-up debt.
+- Nits absorbed: remove unused imports and align the database-adapter module comment.
+- Rejected: the pre-existing `uv.lock` change is out of scope; no foundation drift or applicable
+  security finding was confirmed.
