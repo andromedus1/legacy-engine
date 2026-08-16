@@ -626,10 +626,10 @@ def _hard_epoch(boundaries: Sequence[DiscoveryBoundary], start: date) -> str:
     return "epoch:" + (relevant[-1] if relevant else "initial")
 
 
-def _crossed_hard_boundaries(
+def _crossed_boundaries(
     boundaries: Sequence[DiscoveryBoundary], start: date, end: date
 ) -> tuple[str, ...]:
-    return tuple(b.boundary_id for b in boundaries if b.hard and start < b.effective_on < end)
+    return tuple(b.boundary_id for b in boundaries if start < b.effective_on < end)
 
 
 def _feature_signature(
@@ -713,7 +713,7 @@ def _make_segment(
             "side": _card_vector(deck, "side", all_cards).round(12).tolist(),
         })
     vector_digest = payload_sha256(vectors_payload)
-    crossed = _crossed_hard_boundaries(corpus.semantic_boundaries, start, end)
+    crossed = _crossed_boundaries(corpus.semantic_boundaries, start, end)
     segment_payload = {
         "entity": entity,
         "start": start.isoformat(),
@@ -839,7 +839,7 @@ def compare_segment_fingerprints(
 
     comparison_id = "comparison-" + payload_sha256({"left": left.segment_id, "right": right.segment_id})[:24]
     reasons: list[DiscoveryReason] = []
-    if left.contract_epoch != right.contract_epoch or left.crossed_boundary_ids or right.crossed_boundary_ids:
+    if left.contract_epoch != right.contract_epoch:
         return SegmentComparison(
             comparison_id=comparison_id,
             left_segment_id=left.segment_id,

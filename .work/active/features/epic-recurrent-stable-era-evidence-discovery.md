@@ -602,4 +602,7 @@ def discovery_run_ids(
   guard behind the versioned contract, with no mutable fit state; future-effective semantic
   boundaries are cutoff-filtered so they cannot perturb earlier identities. No unrelated files were
   changed; pre-existing `uv.lock` remains dirty and unstaged.
+- Post-checkpoint hardening: `crossed_boundary_ids` now records both hard and non-hard semantic
+  boundaries, while only hard boundaries change `contract_epoch` or refuse comparison; this keeps
+  legality evidence inspectable without turning it into a blanket reset.
 - Adjacent issues parked: none.
