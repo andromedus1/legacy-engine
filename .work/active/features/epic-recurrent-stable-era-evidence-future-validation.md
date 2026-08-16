@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -143,16 +143,25 @@ through explicit operator authority and never occurs because a challenger merely
 
 ## Implementation summary
 
-Implemented the five sequential future-validation checkpoints: append-only protocol/registry,
-origin artifact sealing, common-case proper scoring, event-ledger decision evaluation, and
-evidence-only promotion assessment with inert operator proposals. Historical benchmark contracts
-remain untouched; `uv.lock` and unrelated worktree changes remain uncommitted.
+Implemented and corrected the complete future-validation lifecycle: append-only exact protocol and
+registry; cutoff-built snapshots with an injected typed discovery/certification/interval/structure/
+amplification refit chain; sealed common forecast/draw grids; a canonical estimator-independent
+future-case and field-mass ledger; proper predictive and whole-event decision evidence; simultaneous
+five-status promotion assessment; content-addressed origin/evaluation/bundle/proposal storage; and
+the `advise recurrent-validation plan|freeze|evaluate|aggregate|proposal` CLI. Historical benchmark
+contracts remain untouched, proposals remain inert, and `uv.lock` remains unrelated/uncommitted.
 
 ## Verification evidence
 
-- Protocol/origin/scoring/decision/promotion focused tests: 12 passed.
-- Ruff passed on all future-validation implementation and test files.
-- Compileall passed for the recurrent-validation module.
+- Recurrent correction suite: 35 passed.
+- Recurrent plus interval/amplification integration slice: 66 passed.
+- Adjacent matchup/ranking/advisory CLI regression slice: 505 passed.
+- Full repository suite: 3982 passed, 1 skipped.
+- Ruff passed on all future-validation implementation/test files; the additive CLI surface passes
+  with only the repository's existing `F821,F541` baseline ignored.
+- Compileall passed for recurrent advisory/workflow and CLI modules.
+- Knowledge-index regeneration completed with 0 errors, and the mandatory fresh documentation
+  re-audit returned 0 Critical / 0 High.
 
 ## Standard review findings
 
@@ -176,6 +185,25 @@ Correction work is tracked by
 `epic-recurrent-stable-era-evidence-future-validation-review-corrections`. The correction must
 replace the placeholder execution path with the designed cutoff-local pipeline and adversarial
 coverage; preserving the current shapes without executable evidence is not sufficient.
+
+## Review correction resolution
+
+The correction story is complete. Every standard-review blocker now has an executable boundary and
+direct adversarial regression coverage:
+
+- origin freezing builds a real cutoff DuckDB or seals outputs from the explicit typed executor
+  contract, and validates the complete clock/config/input/output/outcome/pair/draw chain;
+- common future rows, exclusions, support ids, field mass, protocol/fold/horizon/action identities,
+  and evaluation branches are canonical and fail closed on drift;
+- predictive proper scores and posterior-predictive event intervals remain separate from service,
+  while decision replay charges refusal through the frozen current-only action and bootstraps whole
+  event blocks;
+- every useful-coverage and non-degradation clause is value-bound under the frozen simultaneous
+  family and yields exactly promotable/negative/inconclusive/support-censored/invalid;
+- immutable artifact paths have no mutable alias or actuator, and only an exact all-pass assessment
+  can create an operator-review-required proposal; and
+- the new preregistered future protocol is internally feasible and exactly bound to an additive
+  parent plan, with the historical v1 benchmark contract unchanged.
 
 ## Architectural choice
 
@@ -310,13 +338,13 @@ def recurrent_protocol_sha256(protocol: RecurrentBenchmarkProtocol) -> str: ...
 
 **Acceptance criteria**:
 
-- [ ] The recurrent protocol enumerates all three direct comparators and every exact amplification
+- [x] The recurrent protocol enumerates all three direct comparators and every exact amplification
   method once; order and content are hash-bound and cannot be inferred from completed results.
-- [ ] Historical benchmark protocols, registries, frozen predictions, results, and checksums retain
+- [x] Historical benchmark protocols, registries, frozen predictions, results, and checksums retain
   byte-identical golden behavior after the new protocol is installed.
-- [ ] Unknown methods/keys, duplicate ids, invalid margins, late registration, overlapping horizons,
+- [x] Unknown methods/keys, duplicate ids, invalid margins, late registration, overlapping horizons,
   hash drift, or a mismatched base fold plan fail before any origin is built.
-- [ ] No protocol/result type exposes `winner`, `best`, `promoted`, active-config path, or current-
+- [x] No protocol/result type exposes `winner`, `best`, `promoted`, active-config path, or current-
   corpus selection.
 
 ### Unit 2: Cutoff-safe chained refit and sealed origin forecast
@@ -413,17 +441,17 @@ def refit_and_freeze_origin(
 
 **Acceptance criteria**:
 
-- [ ] Changing any event, outcome, deck, label, ban, certificate, structure, or profile after the
+- [x] Changing any event, outcome, deck, label, ban, certificate, structure, or profile after the
   origin leaves the sealed forecast byte-identical; injecting it into a stage causes a clock/hash
   failure rather than a changed forecast.
-- [ ] Discovery accesses no outcome field; certification, interval, and amplification see only
+- [x] Discovery accesses no outcome field; certification, interval, and amplification see only
   outcomes with event date `< data_until`; `knowledge_as_of` independently rejects later facts.
-- [ ] All candidates share exact action/pair/corpus/baseline digests. Camps remain current-only,
+- [x] All candidates share exact action/pair/corpus/baseline digests. Camps remain current-only,
   recurrent gaps stay excluded, both pair sides govern history, and admitted rows never re-enter a
   prior or donor likelihood.
-- [ ] Each amplified fit retains jointly replayable aligned draws. Missing/corrupt draw artifacts or
+- [x] Each amplified fit retains jointly replayable aligned draws. Missing/corrupt draw artifacts or
   all-case probabilities mark that candidate/origin invalid without deleting its forecast cases.
-- [ ] No current-corpus or outer-holdout outcome can select rank, bandwidth, prior strength,
+- [x] No current-corpus or outer-holdout outcome can select rank, bandwidth, prior strength,
   thresholds, candidate membership, or active configuration.
 
 ### Unit 3: Common-case proper scores, calibration, intervals, and coverage
@@ -509,15 +537,15 @@ def evaluate_recurrent_predictions(
 
 **Acceptance criteria**:
 
-- [ ] Swapping future outcomes changes scores but not origin predictions, case membership, service,
+- [x] Swapping future outcomes changes scores but not origin predictions, case membership, service,
   evidence decompositions, intervals, or thresholds.
-- [ ] Every estimator has the same common match/event ids and denominator; refusing difficult cases
+- [x] Every estimator has the same common match/event ids and denominator; refusing difficult cases
   cannot improve the primary all-case score by shrinking its case set.
-- [ ] Log loss, Brier, calibration, interval coverage/width/score, risk-coverage, exclusion counts,
+- [x] Log loss, Brier, calibration, interval coverage/width/score, risk-coverage, exclusion counts,
   and support censoring match deterministic hand-computed fixtures and whole-event resamples.
-- [ ] Empty/thin calibration, interval, or subgroup support yields typed nulls/reasons. It never
+- [x] Empty/thin calibration, interval, or subgroup support yields typed nulls/reasons. It never
   becomes zero, pass, or a dropped required row.
-- [ ] A future novel/unclassified/unresolved case is excluded once for every estimator and remains in
+- [x] A future novel/unclassified/unresolved case is excluded once for every estimator and remains in
   the field/exclusion denominator; candidate-specific missing output invalidates the candidate.
 
 ### Unit 4: Frozen decision policy and paired event-block regret
@@ -577,15 +605,15 @@ def evaluate_recurrent_decisions(
 
 **Acceptance criteria**:
 
-- [ ] All estimators face identical actions, future events, field mass, oracle draws, and tie rules;
+- [x] All estimators face identical actions, future events, field mass, oracle draws, and tie rules;
   reversing input order cannot change a recommendation or regret distribution.
-- [ ] A refused amplified recommendation pays the current-only fallback result and retains its reason;
+- [x] A refused amplified recommendation pays the current-only fallback result and retains its reason;
   refusing every difficult cell cannot create zero regret or a promotion advantage.
-- [ ] Duplicating matches within one event cannot create independent support or narrow paired bounds
+- [x] Duplicating matches within one event cannot create independent support or narrow paired bounds
   as if they were separate events.
-- [ ] Practical ties, unstable or under-supported oracles, missing actions, and invalid joint draws
+- [x] Practical ties, unstable or under-supported oracles, missing actions, and invalid joint draws
   yield the exact censor with null regret rather than a forced winner.
-- [ ] A fixture can improve log loss while worsening regret, proving the two gates remain independent.
+- [x] A fixture can improve log loss while worsening regret, proving the two gates remain independent.
 
 ### Unit 5: Aggregate status, immutable evidence bundle, and operator-only proposal
 
@@ -665,18 +693,18 @@ def write_recurrent_validation_bundle(path: Path, bundle: "ValidationBundle") ->
 
 **Acceptance criteria**:
 
-- [ ] Useful served event and field coverage must clear their lower-bound margins while every
+- [x] Useful served event and field coverage must clear their lower-bound margins while every
   required predictive/calibration/interval/regret upper bound is non-degrading; more nominal history
   or narrower intervals alone cannot pass.
-- [ ] Negative, inconclusive, support-censored, and invalid fixtures produce their exact statuses and
+- [x] Negative, inconclusive, support-censored, and invalid fixtures produce their exact statuses and
   complete clause ledgers. None emits a proposal or a production/config mutation.
-- [ ] Simultaneous bounds, status, and artifact bytes are deterministic under input/candidate order;
+- [x] Simultaneous bounds, status, and artifact bytes are deterministic under input/candidate order;
   adding a registered candidate cannot silently leave the multiplicity correction unchanged.
-- [ ] A candidate that wins on the current corpus, in-sample fit, or one outer fold cannot alter its
+- [x] A candidate that wins on the current corpus, in-sample fit, or one outer fold cannot alter its
   registry/config or self-promote; outer outcomes are consumed exactly once by the aggregate gate.
-- [ ] Only an exact `promotable` assessment can create an operator-review proposal, and even that
+- [x] Only an exact `promotable` assessment can create an operator-review proposal, and even that
   proposal cannot change active configuration without a separately authorized versioned workflow.
-- [ ] Existing v1 benchmark artifacts remain readable and unchanged after full recurrent-validation
+- [x] Existing v1 benchmark artifacts remain readable and unchanged after full recurrent-validation
   CLI integration.
 
 ## Implementation order
