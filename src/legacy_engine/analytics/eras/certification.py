@@ -573,9 +573,6 @@ def evaluate_context_overlap(
 ) -> ContextOverlapEvidence:
     old = _decks_unique(candidate.candidate_context_decks)
     ref = _decks_unique(candidate.reference_context_decks)
-    vocab = sorted({deck.parent_archetype.casefold() for deck in (*old, *ref)} |
-                   {deck.source.casefold() for deck in (*old, *ref)})
-    vocabulary_sha256 = payload_sha256(tuple(vocab))
     # Context vocabulary is the cross-product of field parent and source.  A
     # category absent in the candidate gets only smoothing mass, making its
     # stabilized reference weight visible rather than silently clipping it.
@@ -584,6 +581,7 @@ def evaluate_context_overlap(
     old_labels = [labels(deck) for deck in old]
     ref_labels = [labels(deck) for deck in ref]
     vocabulary = sorted(set(old_labels) | set(ref_labels))
+    vocabulary_sha256 = payload_sha256(tuple(vocabulary))
     old_count = {label: old_labels.count(label) for label in vocabulary}
     ref_count = {label: ref_labels.count(label) for label in vocabulary}
     smoothing = calibration.context_smoothing
