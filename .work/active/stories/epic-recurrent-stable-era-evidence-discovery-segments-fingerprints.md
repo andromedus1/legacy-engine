@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery-segments-fingerprints
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-discovery
 depends_on: [epic-recurrent-stable-era-evidence-discovery-firewall-corpus]
@@ -25,3 +25,24 @@ reference segment.
 See `epic-recurrent-stable-era-evidence-discovery` Unit 2 and its acceptance criteria.
 
 Review weight remains `standard` at the parent feature boundary.
+
+## Implementation notes
+
+- Execution capability: delegated standard implementation owner; pure segmentation, fingerprint,
+  channel comparison, support refusals, and complete-link nomination were implemented against the
+  closed corpus contract without nested delegation.
+- Review weight: standard from the parent feature/project default; child checkpoints close directly.
+- Files changed: `src/legacy_engine/analytics/eras/discovery.py`,
+  `tests/analytics/eras/test_discovery.py`.
+- Tests added/removed: deterministic recurrence, sideboard/mixture channels, hard-contract epochs,
+  and parent-only entity tests.
+- Simplification: the v1 detector is deterministic and keeps the seed as a forward-compatible
+  contract input without introducing an unnecessary random state layer.
+- Discrepancies from design: the inspectable boundary detector uses a weighted local PELT-style
+  gain guard rather than an external mutable fit object; hard boundaries remain structural even
+  when they create thin segments, which then receive explicit support refusals.
+- Adjacent issues parked: none.
+
+## Completion evidence
+
+- Focused verification: `.venv/bin/pytest -q tests/analytics/eras/test_discovery*.py` — 11 passed.

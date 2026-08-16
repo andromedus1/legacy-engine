@@ -786,7 +786,10 @@ def segment_parent_archetype(
                 continue
             neighborhood = local_scores[max(0, index - 2):min(len(local_scores), index + 1)]
             baseline = float(np.median(neighborhood)) if neighborhood else 0.0
-            if score > max(0.08, baseline + calibration.pelt_penalty * 0.10):
+            # ``score`` is the weighted sum of channels (main is weighted .40
+            # in the checked-in calibration), so the decision floor is kept in
+            # weighted units rather than compared to an individual JS value.
+            if score > max(0.025, baseline + calibration.pelt_penalty * 0.02):
                 boundaries.add(index)
     # Hard semantic boundaries are exact, inclusive for the new interval.
     for boundary in corpus.semantic_boundaries:
@@ -794,7 +797,10 @@ def segment_parent_archetype(
             continue
         if first < boundary.effective_on < final:
             index = max(0, min(len(starts), (boundary.effective_on - first).days // calibration.bucket_days))
-            if min_size <= index <= len(starts) - min_size:
+            # A semantic boundary is structural even when it leaves a thin
+            # side.  The resulting segment remains in the evidence ledger and
+            # receives the normal support-floor refusal downstream.
+            if 0 < index < len(starts):
                 boundaries.add(index)
 
     cuts = [0] + sorted(boundaries) + [len(starts)]
@@ -903,6 +909,15 @@ def discover_recurrent_states(
     for entity in entities:
         subject_count = sum(deck.parent_archetype == entity for deck in corpus.decks)
         if subject_count < calibration.min_subject_decks:
+            # Keep an explicit typed refusal in the fleet result.  The entity
+            # is not segmented (the subject floor is structural), but dropping
+            # it would make a thin current state indistinguishable from a
+            # caller that never requested this corpus.
+            results.append(EntityDiscoveryResult(
+                entity=entity, status="degraded", reference_segment_id=None,
+                segments=(), comparisons=(), candidate=None,
+                reasons=("insufficient-subject-decks",),
+            ))
             continue
         segments = segment_parent_archetype(corpus, entity, calibration, seed=seed)
         if not segments:
