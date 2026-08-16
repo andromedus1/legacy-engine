@@ -1,9 +1,11 @@
 from datetime import date
+import json
 
 import duckdb
 import pytest
 
 from legacy_engine.analytics.eras.certification import load_certification_calibration
+from legacy_engine.analytics.eras.certification import SemanticFact
 from legacy_engine.analytics.eras.certification_run import run_recurrent_certification
 from legacy_engine.analytics.eras.certificate_store import (
     certification_run_ids,
@@ -94,3 +96,29 @@ def test_direct_status_or_reason_tampering_is_hash_bound():
     con.execute("UPDATE era_certification_runs SET status = 'complete' WHERE run_id = ?", [run.run_id])
     with pytest.raises(ValueError, match="hash mismatch"):
         read_certification_run(con, run.run_id)
+
+
+def test_post_cutoff_semantic_fact_cannot_change_run_identity():
+    con = _db()
+    discovery = run_recurrent_discovery(con, as_of=date(2026, 1, 31), taxonomy_version="t", legality_version="l",
+                                        calibration=_discovery_calibration())
+    calibration = load_certification_calibration(CERTIFICATION_CALIBRATION_PATH)
+    baseline = run_recurrent_certification(con, discovery_run_id=discovery.run_id, calibration=calibration,
+                                           semantic_facts=(), format_observation_sha256=None)
+    future = SemanticFact(fact_id="future", kind="taxonomy", state="confirmed", effective_on=date(2026, 2, 1),
+                          affected_entities=("X",), source="frozen-contract", evidence_sha256="7" * 64, detail="future")
+    with_future = run_recurrent_certification(con, discovery_run_id=discovery.run_id, calibration=calibration,
+                                              semantic_facts=(future,), format_observation_sha256=None)
+    assert with_future.run_id == baseline.run_id
+    assert with_future.results_sha256 == baseline.results_sha256
+
+
+def test_checked_in_control_manifest_is_schema_valid_and_digest_bound():
+    calibration = load_certification_calibration(CERTIFICATION_CALIBRATION_PATH)
+    controls_path = CERTIFICATION_CALIBRATION_PATH.with_name("certification-controls-v1.json")
+    manifest = json.loads(controls_path.read_text())
+    assert manifest["schema"] == "recurrent-certification-controls-v1"
+    assert manifest["outcome_free"] is True
+    assert {control["expected"] for control in manifest["controls"]} == {"certified", "rejected", "inconclusive"}
+    assert all(control["id"] and control["channels"] is not None for control in manifest["controls"])
+    assert calibration.control_evidence_sha256

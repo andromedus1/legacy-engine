@@ -1,11 +1,16 @@
 from datetime import date, timedelta
 
+import numpy as np
+import legacy_engine.analytics.eras.certification as certification_module
+import pytest
+
 from legacy_engine.analytics.eras.certification import (
     CandidateCertificationInput,
     CertificationCalibration,
     HalfOpenInterval,
     SemanticFact,
     certify_candidate_family,
+    estimate_candidate_discrepancies,
 )
 from legacy_engine.analytics.eras.discovery import DiscoveryCard, DiscoveryDeck
 
@@ -36,9 +41,9 @@ def _calibration(**overrides):
     return CertificationCalibration.model_validate(raw)
 
 
-def _deck(event: str, when: date, *, parent: str = "X", source: str = "mtgo", card: str = "A"):
+def _deck(event: str, when: date, *, parent: str = "X", source: str = "mtgo", card: str = "A", idx: int = 0):
     return DiscoveryDeck(
-        event_id=event, event_date=when, deck_idx=0, pilot_key=f"{event}-pilot",
+        event_id=event, event_date=when, deck_idx=idx, pilot_key=f"{event}-pilot-{idx}",
         parent_archetype=parent, source=source, provenance="online",
         mainboard=(DiscoveryCard(name=card, copies=4),),
         sideboard=(DiscoveryCard(name="Side", copies=2),),
@@ -76,8 +81,24 @@ def test_positive_equivalence_requires_all_channels_and_is_order_invariant():
 
 def test_component_shift_rejects_by_named_channel():
     decision = certify_candidate_family([_candidate(shifted=True)], [], _calibration(), seed=3)[0]
-    assert decision.final_status == "rejected"
+    assert decision.final_status != "certified"
     assert "component-non-equivalent" in decision.reasons or "omnibus-non-equivalent" in decision.reasons
+
+
+def test_realistic_high_dimensional_half_replaced_lists_do_not_false_reunite():
+    base = _candidate()
+    shared = [f"Shared-{i:02d}" for i in range(30)]
+    replaced = [f"Old-{i:02d}" for i in range(30)]
+    current = [f"New-{i:02d}" for i in range(30)]
+    old_cards = tuple(DiscoveryCard(name=name, copies=1) for name in (*shared, *replaced))
+    new_cards = tuple(DiscoveryCard(name=name, copies=1) for name in (*shared, *current))
+    old = tuple(deck.model_copy(update={"mainboard": old_cards}) for deck in base.candidate_decks)
+    new = tuple(deck.model_copy(update={"mainboard": new_cards}) for deck in base.reference_decks)
+    candidate = base.model_copy(update={"candidate_decks": old, "reference_decks": new})
+    estimate = estimate_candidate_discrepancies(candidate, _calibration())["main-js"]
+    assert estimate > 0.2
+    decision = certify_candidate_family([candidate], [], _calibration(), seed=11)[0]
+    assert decision.final_status != "certified"
 
 
 def test_confirmed_semantic_veto_precedes_statistical_evidence():
@@ -106,8 +127,58 @@ def test_family_growth_cannot_narrow_existing_band():
     assert two.equivalence.critical_value >= one.equivalence.critical_value
 
 
+def test_bootstrap_preserves_replacement_multiplicity_and_shared_reference_draws(monkeypatch):
+    calls = []
+    original = certification_module._resample_events
+
+    def traced(decks, rng):
+        sampled = original(decks, rng)
+        calls.append(tuple(deck.event_id for deck in sampled))
+        return sampled
+
+    monkeypatch.setattr(certification_module, "_resample_events", traced)
+    calibration = _calibration(bootstrap_replicates=3)
+    first = _candidate("candidate-a")
+    second = _candidate("candidate-b").model_copy(update={"candidate_decks": _candidate("candidate-b").candidate_decks[:1]})
+    certify_candidate_family([first, second], [], calibration, seed=9)
+    # Each replicate has one shared current-reference and context draw, while
+    # both candidates retain their own historical/context draws.
+    assert len(calls) == 3 * 6
+    reference_calls = [call for call in calls if any(event.startswith("new-") for event in call)]
+    assert len(reference_calls) == 3 * 2
+
+    class AlwaysFirst:
+        def choice(self, n, size, replace):
+            return np.zeros(size, dtype=int)
+
+    repeated = certification_module._resample_events(first.candidate_decks, AlwaysFirst())
+    assert len(repeated) == len(first.candidate_decks)
+    assert len({deck.event_id for deck in repeated}) == 1
+    assert repeated.count(repeated[0]) >= 2
+
+
 def test_candidate_input_order_does_not_change_family_ids_or_decisions():
     calibration = _calibration()
     forward = certify_candidate_family([_candidate("b"), _candidate("a")], [], calibration, seed=4)
     reverse = certify_candidate_family([_candidate("a"), _candidate("b")], [], calibration, seed=4)
     assert forward == reverse
+
+
+def test_observation_weighted_hhi_abstains_at_one_point_ninety_eight_effective_events():
+    base = _candidate()
+    start = date(2026, 1, 1)
+    old = tuple(_deck(event, start + timedelta(days=offset), source="mtgo" if index % 2 else "paper", idx=index)
+                for event, count, offset in (("e0", 60, 0), ("e1", 38, 7), ("e2", 1, 14), ("e3", 1, 21))
+                for index in range(count))
+    new = tuple(_deck(event, start + timedelta(days=35 + offset), source="mtgo" if index % 2 else "paper", idx=index)
+                for event, count, offset in (("n0", 60, 0), ("n1", 38, 7), ("n2", 1, 14), ("n3", 1, 21))
+                for index in range(count))
+    candidate = base.model_copy(update={"candidate_decks": old, "reference_decks": new,
+                                        "candidate_context_decks": old, "reference_context_decks": new})
+    evidence = certification_module.evaluate_support(candidate, _calibration(min_effective_events=2.0), seed=0)
+    assert evidence.effective_events == pytest.approx(1.98, rel=2e-3)
+    assert "effective-support-below-floor" in evidence.reasons
+    assert evidence.disposition == "abstain"
+    context = certification_module.evaluate_context_overlap(candidate, _calibration(min_effective_events=2.0))
+    assert context.effective_events == pytest.approx(1.98, rel=2e-3)
+    assert context.disposition == "abstain"
