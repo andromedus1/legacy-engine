@@ -254,7 +254,7 @@ def run_recurrent_certification(
     run_reasons: list[CertificationRunReason] = []
     if not candidates:
         run_reasons.append("no-recurrent-candidates")
-    elif all(certificate.status != "certified" for certificate in all_certificates):
+    elif all_certificates and all(certificate.status == "inconclusive" for certificate in all_certificates):
         run_reasons.append("all-inconclusive")
     if any("pending-format-truth" in result.reasons for result in results):
         run_reasons.append("format-truth-unresolved")
