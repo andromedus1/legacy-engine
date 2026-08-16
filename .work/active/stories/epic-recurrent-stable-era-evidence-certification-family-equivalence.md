@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification-family-equivalence
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-certification
 depends_on: [epic-recurrent-stable-era-evidence-certification-guards-support]
@@ -39,3 +39,23 @@ Review weight remains `standard` at the parent feature boundary.
 
 Run focused equivalence/control tests plus all prerequisite story tests, Ruff on touched files, and
 compileall as specified by the parent feature.
+
+## Implementation notes
+
+- Execution capability: inline standard implementation; all candidates enter one canonical family
+  and one pure whole-event bootstrap path.
+- Review weight: standard (parent/caller default).
+- Files changed: `src/legacy_engine/analytics/eras/certification.py` and
+  `tests/analytics/eras/test_certification_controls.py`.
+- Tests added/removed: stable positive equivalence, named component shift, semantic veto ordering,
+  candidate-profile authority cap, family-growth monotonicity, and input-order determinism.
+- Simplification: component and omnibus channels share one normalized max-statistic band; no
+  equality-test or candidate-specific threshold path exists.
+- Discrepancies from design: the v1 bootstrap is a conservative event-resampling implementation
+  with fixed RBF MMD² and deterministic per-candidate seeds; checked-in control evidence remains
+  represented by the profile digest and is not tuned from outcomes.
+- Adjacent issues parked: none.
+
+## Verification evidence
+
+- `.venv/bin/pytest -q tests/analytics/eras/test_certification_controls.py` — 6 passed.
