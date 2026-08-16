@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery-firewall-corpus
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-discovery
 depends_on: []
@@ -42,3 +42,10 @@ Review weight remains `standard` at the parent feature boundary.
 - Discrepancies from design: none; the source adapter is exported through a thin dedicated module
   while the typed implementation remains colocated with the pure core contracts.
 - Adjacent issues parked: none.
+
+## Completion evidence
+
+- Focused verification: `.venv/bin/pytest -q tests/analytics/eras/test_discovery_source.py` — 4 passed.
+- Lifecycle correction: the implementation checkpoint commit was created before this direct child
+  transition was recorded; this metadata-only follow-up preserves the required `done` state without
+  rewriting the implementation history.
