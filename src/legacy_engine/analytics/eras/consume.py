@@ -37,6 +37,7 @@ from pydantic import model_validator
 
 from legacy_engine.analytics.eras.store import StoredEntityEras, read_entity_eras
 from legacy_engine.models.base import LegacyEngineModel
+from legacy_engine.models.matchup import MatchupCell
 
 KnowledgeMode = Literal["retrospective-current-model", "as-known-then"]
 EligibilitySource = Literal["current-reference", "certified-history", "scalar-current", "camp-current-only"]
@@ -119,7 +120,7 @@ class PriorEvidenceAudit(LegacyEngineModel):
 
 class MatchupEvidenceView(LegacyEngineModel):
     kind: Literal["current-only", "certified-expanded", "added-history"]
-    cell: object | None = None
+    cell: MatchupCell | None = None
     match_ids: tuple[str, ...]
     pair_component_ids: tuple[str, ...]
     certificate_ids: tuple[str, ...]

@@ -1,38 +1,65 @@
-"""Construction of the one-and-only amplification evidence corpus."""
+"""Construction and validation of the one-and-only amplification corpus."""
 
 from __future__ import annotations
 
+import copy
 import json
 from hashlib import sha256
-from legacy_engine.analytics.match_results import SelectedOutcomeLedger
+
+from legacy_engine.analytics.match_results import (
+    SelectedOutcomeLedger,
+    selected_outcome_ledger_digest,
+    selected_rows_for_pair,
+)
 from legacy_engine.analytics.matchup import IntervalAdaptiveMatrix
 from legacy_engine.analytics.eras.consume import MatchupEvidenceView
+
 from .models import DirectBaseline, EligibleOutcome, IntervalEvidenceCorpus
 
 
-def _digest(value: object) -> str:
-    return sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
+def canonical_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def digest(value: object) -> str:
+    return sha256(canonical_json(value).encode()).hexdigest()
+
+
+def pair_key(subject: str, opponent: str) -> str:
+    """Collision-free JSON key which retains the directed typed pair identity."""
+    return json.dumps([subject, opponent], ensure_ascii=False, separators=(",", ":"))
+
+
+def pair_from_key(value: str) -> tuple[str, str]:
+    pair = json.loads(value)
+    if (
+        not isinstance(pair, list)
+        or len(pair) != 2
+        or not all(isinstance(x, str) for x in pair)
+    ):
+        raise ValueError(f"invalid directed pair key: {value!r}")
+    return pair[0], pair[1]
 
 
 def _view_digest(view: MatchupEvidenceView) -> str:
-    return _digest(view.model_dump(mode="json"))
+    return digest(view.model_dump(mode="json"))
 
 
 def build_direct_baselines(
     interval: IntervalAdaptiveMatrix,
-) -> dict[tuple[str, str], DirectBaseline]:
-    """Copy interval cells and bind their serialized bytes before any fit runs."""
-    return {
-        pair: DirectBaseline(
-            current_only=views.current_only,
-            certified_expanded=views.certified_expanded,
-            current_sha256=_view_digest(views.current_only),
-            expanded_sha256=_view_digest(views.certified_expanded),
+) -> dict[str, DirectBaseline]:
+    """Deep-copy both exact interval views and bind both serialized identities."""
+    baselines: dict[str, DirectBaseline] = {}
+    for (subject, opponent), views in sorted(interval.evidence.items()):
+        current = copy.deepcopy(views.current_only)
+        expanded = copy.deepcopy(views.certified_expanded)
+        baselines[pair_key(subject, opponent)] = DirectBaseline(
+            current_only=current,
+            certified_expanded=expanded,
+            current_sha256=_view_digest(current),
+            expanded_sha256=_view_digest(expanded),
         )
-        for pair, views in interval.evidence.items()
-    }
+    return baselines
 
 
 def _rows(ledger: SelectedOutcomeLedger) -> tuple[EligibleOutcome, ...]:
@@ -56,7 +83,7 @@ def _rows(ledger: SelectedOutcomeLedger) -> tuple[EligibleOutcome, ...]:
         outcomes.append(
             EligibleOutcome(
                 match_id=match.match_id,
-                unordered_pair_id=f"{match.subject}::{match.opponent}",
+                unordered_pair_id=pair_key(match.subject, match.opponent),
                 subject=match.subject,
                 opponent=match.opponent,
                 subject_won=match.subject_won,
@@ -76,21 +103,58 @@ def _rows(ledger: SelectedOutcomeLedger) -> tuple[EligibleOutcome, ...]:
     return tuple(
         sorted(
             outcomes,
-            key=lambda item: (
-                item.subject,
-                item.opponent,
-                item.event_date,
-                item.event_id,
-                item.match_id,
-            ),
+            key=lambda x: (x.subject, x.opponent, x.event_date, x.event_id, x.match_id),
         )
     )
+
+
+def _validate_wrapper(interval: IntervalAdaptiveMatrix) -> None:
+    ledger = interval.selected_outcomes
+    if selected_outcome_ledger_digest(ledger) != ledger.content_sha256:
+        raise ValueError("selected outcome ledger content digest mismatch")
+    if interval.clock != ledger.clock:
+        raise ValueError("interval and ledger analysis clocks differ")
+    if interval.certificate_run_id != ledger.certificate_run_id:
+        raise ValueError("interval and ledger certificate identities differ")
+    for pair, views in interval.evidence.items():
+        if views.clock != ledger.clock:
+            raise ValueError(f"evidence clock differs for {pair!r}")
+        selected = selected_rows_for_pair(ledger, *pair)
+        by_view = {
+            "current-only": tuple(
+                sorted(r.match.match_id for r in selected if r.view == "current-only")
+            ),
+            "certified-expanded": tuple(
+                sorted(
+                    r.match.match_id for r in selected if r.view == "certified-expanded"
+                )
+            ),
+        }
+        if tuple(sorted(views.current_only.match_ids)) != by_view["current-only"]:
+            raise ValueError(
+                f"current evidence membership differs from ledger for {pair!r}"
+            )
+        if (
+            tuple(sorted(views.certified_expanded.match_ids))
+            != by_view["certified-expanded"]
+        ):
+            raise ValueError(
+                f"expanded evidence membership differs from ledger for {pair!r}"
+            )
+        expected_added = set(by_view["certified-expanded"]) - set(
+            by_view["current-only"]
+        )
+        if set(views.added_history.match_ids) != expected_added:
+            raise ValueError(
+                f"added-history evidence membership differs from ledger for {pair!r}"
+            )
 
 
 def build_interval_evidence_corpus(
     interval: IntervalAdaptiveMatrix,
 ) -> IntervalEvidenceCorpus:
-    """Adapt the canonical selected-row ledger; aggregate-only matrices are rejected."""
+    """Adapt a verified selected-row ledger; aggregate-only or altered wrappers refuse."""
+    _validate_wrapper(interval)
     ledger = interval.selected_outcomes
     outcomes = _rows(ledger)
     entities = tuple(
@@ -99,21 +163,30 @@ def build_interval_evidence_corpus(
             | set(ledger.entity_eligibility)
         )
     )
-    eligibility = {
-        key: value for key, value in sorted(ledger.entity_eligibility.items())
-    }
     row_payload = [row.model_dump(mode="json") for row in outcomes]
+    source_payload = [
+        {
+            "match_id": row.match_id,
+            "provenance": row.provenance,
+            "subject_certificate_ids": row.subject_certificate_ids,
+            "opponent_certificate_ids": row.opponent_certificate_ids,
+        }
+        for row in outcomes
+    ]
     return IntervalEvidenceCorpus(
         corpus_id=ledger.content_sha256,
         clock=ledger.clock,
         certificate_run_id=ledger.certificate_run_id,
         entities=entities,
         outcomes=outcomes,
-        pair_evidence_sha256=_digest(row_payload),
-        entity_eligibility_sha256=_digest(
-            {key: value.model_dump(mode="json") for key, value in eligibility.items()}
+        pair_evidence_sha256=digest(row_payload),
+        entity_eligibility_sha256=digest(
+            {
+                k: v.model_dump(mode="json")
+                for k, v in sorted(ledger.entity_eligibility.items())
+            }
         ),
-        source_rows_sha256=_digest(row_payload),
+        source_rows_sha256=digest(source_payload),
     )
 
 

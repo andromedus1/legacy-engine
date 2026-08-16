@@ -950,6 +950,16 @@ def _ledger_digest_payload(
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def selected_outcome_ledger_digest(ledger: SelectedOutcomeLedger) -> str:
+    """Recompute the canonical content identity of a selected-outcome ledger."""
+    return _ledger_digest_payload(
+        ledger.rows,
+        ledger.clock,
+        ledger.entity_eligibility,
+        ledger.certificate_run_id,
+    )
+
+
 def build_selected_outcome_ledger(
     con: duckdb.DuckDBPyConnection,
     *,

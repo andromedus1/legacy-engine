@@ -1,0 +1,1 @@
+"""Amplification challenger contract tests."""
