@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence
 kind: epic
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing, ui]
 parent: null
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-credible-window-utility, feature-ranking-future-only-benchmark]
@@ -162,3 +162,23 @@ does not wait for promotion and validation never depends on presentation code.
 - No new screen mock is required at epic design: the report extends the existing generated page's
   dropdown, chip, disclosure, and audit patterns. Feature design should mock only if the historical
   target composition proves materially ambiguous.
+
+## Implementation summary
+
+All six child features are complete and individually reviewed:
+
+- outcome-firewalled weekly segmentation and recurrent candidate discovery;
+- independent event-partitioned positive-equivalence certification with immutable exact artifacts;
+- provenance-preserving disjoint interval selection and current/expanded/added evidence views;
+- six transparent structured-borrowing challengers with aligned draw and decomposition ledgers;
+- diagnostic-only Best Call publication plus cutoff-exact retrospective `Today’s model` bundles;
+  and
+- preregistered cutoff-local future validation with proper scores, event-block regret, exhaustive
+  promotion statuses, content-addressed artifacts, and no automatic promotion actuator.
+
+The standard feature reviews found and drove substantial corrections rather than rubber-stamping
+the first implementations: exact change-point boundaries and distribution metrics, certification
+bootstrap/semantic integrity, canonical one-orientation interval ledgers, real challenger fits,
+complete report composition/cutoff safety, and executable future-validation gates. The final full
+repository verification is `3,982 passed, 1 skipped`; the combined corrected acceptance surface is
+`95 passed`. Only the pre-existing uncommitted `uv.lock` remains outside the epic.
