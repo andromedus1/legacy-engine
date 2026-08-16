@@ -256,7 +256,7 @@ def run_recurrent_certification(
         run_reasons.append("no-recurrent-candidates")
     elif all_certificates and all(certificate.status == "inconclusive" for certificate in all_certificates):
         run_reasons.append("all-inconclusive")
-    if any("pending-format-truth" in result.reasons for result in results):
+    if any("pending-format-truth" in decision.reasons for decision in decisions):
         run_reasons.append("format-truth-unresolved")
     status: CertificationRunStatus = "degraded" if run_reasons else "complete"
     return CertificationRun(
