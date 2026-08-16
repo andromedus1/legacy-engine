@@ -1,0 +1,15 @@
+{
+  "profile_id": "amplification-diagnostic-v1",
+  "authority": "diagnostic-only",
+  "bootstrap_replicates": 100,
+  "seed": 1729,
+  "service_gates": {},
+  "method_specs": [
+    {"method_id": "component-hierarchical-v1", "parameters": {}},
+    {"method_id": "composition-kernel-v1", "parameters": {}},
+    {"method_id": "strategic-family-ladder-v1", "parameters": {}},
+    {"method_id": "skew-low-rank-r1-v1", "parameters": {"rank": 1}},
+    {"method_id": "skew-low-rank-r2-v1", "parameters": {"rank": 2}},
+    {"method_id": "skew-low-rank-r4-v1", "parameters": {"rank": 4}}
+  ]
+}

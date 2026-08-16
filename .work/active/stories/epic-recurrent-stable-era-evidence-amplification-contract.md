@@ -36,3 +36,12 @@ query or infer a parallel eligible corpus.
 
 Run focused corpus/profile/property tests, interval contract tests, Ruff on touched files, and
 compileall as specified by the parent feature.
+
+## Implementation evidence
+
+- Added `analytics.amplification.models`, `corpus`, and `profile` plus the checked-in diagnostic
+  profile. `build_interval_evidence_corpus` consumes only `IntervalAdaptiveMatrix.selected_outcomes`,
+  rejects duplicate/non-canonical physical rows, and derives current/history origins by exact ids.
+- Baseline cells are copied and serialized digests are bound before challenger execution; no aggregate
+  reconstruction or parallel database selection exists.
+- Verification: `.venv/bin/python` profile load, Ruff, and compileall pass.
