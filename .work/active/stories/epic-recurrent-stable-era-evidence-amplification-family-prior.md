@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-family-prior
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: [epic-recurrent-stable-era-evidence-amplification-contract]
@@ -35,3 +35,9 @@ inherit only structural family relation, never parent history or certificate aut
 
 Run focused family ladder, assigned-member, camp, leave-out, heterogeneity, and concentration tests
 plus existing superarchetype chain coverage.
+
+## Implementation evidence
+
+- Added typed family ladder rung/fit contracts and a diagnostic-only adapter over canonical rows.
+  Postdated structure snapshots fail fast; absent frozen family support is refused explicitly.
+- Ruff and compile checks pass.
