@@ -1,25 +1,148 @@
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
+from legacy_engine.advisory.ranking_benchmark import content_sha256
 from legacy_engine.advisory.recurrent_validation import (
-    PromotionAssessment,
     aggregate_recurrent_validation,
+    build_future_case_manifest,
     build_operator_proposal,
-    load_recurrent_protocol,
+    evaluate_recurrent_decisions,
+    evaluate_recurrent_predictions,
 )
+from .recurrent_validation_helpers import future_rows, origin, protocol
 
 
-def test_unsupported_evidence_is_censored_not_promotable():
-    protocol = load_recurrent_protocol(Path("src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json"))
-    assessments = aggregate_recurrent_validation((), protocol=protocol, candidate_id="recurrent-expanded-v1")
-    assert assessments[0].status == "support-censored"
-    assert assessments[0].authority == "evidence-only"
+def _complete_evidence(value, *, change: tuple[str, tuple[float, ...]] | None = None):
+    frozen = origin(value)
+    cases = build_future_case_manifest(
+        frozen,
+        future_rows(value),
+        protocol=value,
+        future_field_counts={"a": 1, "b": 1},
+    )
+    predictive = evaluate_recurrent_predictions(frozen, cases, protocol=value)
+    decision = evaluate_recurrent_decisions(frozen, cases, protocol=value)
+    vectors = {}
+    regrets = {}
+    for comparator in ("current-only-v1", "contiguous-era-v1"):
+        key = f"recurrent-expanded-v1|{comparator}"
+        vectors[key] = {
+            "served_field_coverage": (0.10, 0.10),
+            "served_event_coverage": (0.10, 0.10),
+            "log_loss": (-0.01, -0.01),
+            "brier": (-0.01, -0.01),
+            "calibration": (-0.01, -0.01),
+            "interval_coverage": (1.0, 1.0),
+            "interval_score": (-0.01, -0.01),
+        }
+        regrets[key] = {"regret": (-0.01, -0.01)}
+        if change is not None:
+            metric, values = change
+            if metric == "regret":
+                regrets[key][metric] = values
+            else:
+                vectors[key][metric] = values
+    predictive = predictive.model_copy(
+        update={"paired_event_differences": vectors, "status": "complete", "reasons": ()}
+    )
+    decision = decision.model_copy(
+        update={"paired_regret_differences": regrets, "status": "complete", "reasons": ()}
+    )
+    return frozen, predictive, decision
 
 
-def test_operator_proposal_is_inert_and_requires_promotable_status():
-    assessment = PromotionAssessment(protocol_sha256="0" * 64, candidate_id="recurrent-expanded-v1", comparator_ids=("current-only-v1",), origin_evaluation_ids=(), clauses=(), useful_coverage=True, predictive_non_degradation=True, interval_non_degradation=True, decision_non_degradation=True, status="promotable")
-    proposal = build_operator_proposal(assessment, target_config_version="future-v2")
+def _assess(value, *, change=None, predictive_status="complete"):
+    frozen, predictive, decision = _complete_evidence(value, change=change)
+    predictive = predictive.model_copy(update={"status": predictive_status})
+    return aggregate_recurrent_validation(
+        [predictive],
+        [decision],
+        protocol=value,
+        candidate_id="recurrent-expanded-v1",
+        candidate_config_sha256=frozen.candidate_config_sha256["recurrent-expanded-v1"],
+    )
+
+
+def test_all_five_statuses_come_from_complete_value_bound_clause_ledgers():
+    value = protocol(small=True)
+    promotable = _assess(value)
+    negative = _assess(value, change=("log_loss", (0.10, 0.10)))
+    inconclusive = _assess(value, change=("log_loss", (-0.10, 0.10)))
+    censored = _assess(value, predictive_status="support-censored")
+    invalid = _assess(value, predictive_status="invalid")
+    assert [item.status for item in (promotable, negative, inconclusive, censored, invalid)] == [
+        "promotable", "negative", "inconclusive", "support-censored", "invalid"
+    ]
+    assert all(len(item.clauses) == 16 for item in (
+        promotable, negative, inconclusive, censored, invalid
+    ))
+    assert promotable.useful_coverage is True
+    assert promotable.predictive_non_degradation is True
+    assert promotable.interval_non_degradation is True
+    assert promotable.decision_non_degradation is True
+    assert negative.predictive_non_degradation is False
+
+
+def test_simultaneous_family_bound_is_stricter_than_an_uncorrected_metric_bound():
+    value = protocol(small=True)
+    # The isolated 5% upper quantile is zero, but the preregistered family-wide tail sees the
+    # adverse replicate and therefore cannot declare non-degradation.
+    assessment = _assess(value, change=("log_loss", (0.0,) * 99 + (0.10,)))
+    clauses = [clause for clause in assessment.clauses if clause.metric == "log_loss"]
+    assert assessment.status == "inconclusive"
+    assert all(clause.status == "inconclusive" for clause in clauses)
+    assert all(clause.upper_bound > value.margins.max_log_loss_delta for clause in clauses)
+
+
+def test_negative_decision_evidence_cannot_be_hidden_by_predictive_gains():
+    value = protocol(small=True)
+    assessment = _assess(value, change=("regret", (0.20, 0.20)))
+    assert assessment.status == "negative"
+    assert assessment.predictive_non_degradation is True
+    assert assessment.decision_non_degradation is False
+    assert any(clause.metric == "regret" and clause.status == "fail" for clause in assessment.clauses)
+
+
+def test_only_exact_promotable_assessment_creates_an_inert_proposal():
+    value = protocol(small=True)
+    assessment = _assess(value)
+    proposal = build_operator_proposal(assessment, target_config_version="recurrent-production-v2")
+    assert proposal.protocol_sha256 == assessment.protocol_sha256
+    assert proposal.candidate_config_sha256 == assessment.candidate_config_sha256
     assert proposal.authority == "operator-review-required"
-    with pytest.raises(ValueError, match="promotable"):
-        build_operator_proposal(assessment.model_copy(update={"status": "negative"}), target_config_version="future-v2")
+    assert len(proposal.proposal_id) == 64
+    with pytest.raises(ValueError, match="exact promotable"):
+        build_operator_proposal(
+            assessment.model_copy(update={"status": "negative"}),
+            target_config_version="recurrent-production-v2",
+        )
+    with pytest.raises(ValueError, match="exact promotable"):
+        build_operator_proposal(
+            assessment.model_copy(update={"clauses": ()}),
+            target_config_version="recurrent-production-v2",
+        )
+
+
+def test_outer_outcomes_are_consumed_once_and_candidate_config_is_exact():
+    value = protocol(small=True)
+    frozen, predictive, decision = _complete_evidence(value)
+    with pytest.raises(ValueError, match="exactly once"):
+        aggregate_recurrent_validation(
+            [predictive, predictive],
+            [decision],
+            protocol=value,
+            candidate_id="recurrent-expanded-v1",
+            candidate_config_sha256=frozen.candidate_config_sha256["recurrent-expanded-v1"],
+        )
+    with pytest.raises(ValueError, match="non-placeholder"):
+        aggregate_recurrent_validation(
+            [predictive],
+            [decision],
+            protocol=value,
+            candidate_id="recurrent-expanded-v1",
+            candidate_config_sha256="0" * 64,
+        )
+    assert frozen.candidate_config_sha256["recurrent-expanded-v1"] == content_sha256({
+        "config": "recurrent-expanded-v1"
+    })
