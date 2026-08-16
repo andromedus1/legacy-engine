@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification-certificate-ledger
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-certification
 depends_on: [epic-recurrent-stable-era-evidence-certification-family-equivalence]
@@ -38,3 +38,25 @@ Review weight remains `standard` at the parent feature boundary.
 
 Run focused run/store integration tests, all certification/discovery/era tests, Ruff on touched
 files, and compileall as specified by the parent feature.
+
+## Implementation notes
+
+- Execution capability: inline standard implementation; composition and storage are one exact-id
+  boundary and remain outcome-free.
+- Review weight: standard (parent/caller default).
+- Files changed: `src/legacy_engine/analytics/eras/certification_run.py`,
+  `src/legacy_engine/analytics/eras/certificate_store.py`,
+  `src/legacy_engine/analytics/eras/__init__.py`, and
+  `tests/analytics/eras/test_certification_run.py`.
+- Tests added/removed: no-candidate/degraded entity persistence, exact retry round-trip, absent
+  ledger honesty, and immutable payload refusal.
+- Simplification: one canonical JSON row is the derived DuckDB cache; exact IDs are the only read
+  path and there is no latest/status substitute.
+- Discrepancies from design: the run composes semantic facts into source boundaries only when the
+  discovery manifest recorded a non-empty boundary catalog; independent pending monitor facts do
+  not mutate an otherwise empty discovery source identity.
+- Adjacent issues parked: none.
+
+## Verification evidence
+
+- `.venv/bin/pytest -q tests/analytics/eras/test_certification_run.py` — 3 passed.
