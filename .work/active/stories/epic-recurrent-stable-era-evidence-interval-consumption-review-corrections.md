@@ -53,12 +53,15 @@ named fix set is green, the parent closes administratively without another indep
   populating typed evidence views while preserving the existing current matrix as authority.
 - Exported interval authority and evidence contracts from `analytics.eras`; scalar projection remains
   unavailable for disjoint sets.
+- Added adversarial regression coverage for open-start provenance, excluded gaps, stable
+  component-level selection, exact id partition, concentration, and prior overlap.
 
 ## Verification evidence
 
 - `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_consume.py tests/test_match_results.py tests/test_matchup.py tests/test_matchup_multi_split.py` — 199 passed.
 - `uv run ruff check src/legacy_engine/analytics/eras/consume.py src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py src/legacy_engine/analytics/eras/__init__.py` — passed.
 - `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py` — passed.
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_interval_consumption.py` — 3 passed.
 
 ## Coordination
 

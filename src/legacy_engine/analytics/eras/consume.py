@@ -499,24 +499,34 @@ def build_entity_eligibility(
     if requested_since is not None and (current_start is None or requested_since > current_start):
         current_start = requested_since
     current_source: EligibilitySource = "camp-current-only" if is_camp else "scalar-current"
-    current_ref = EligibilitySourceRef(source=current_source, entity=entity)
-    current = (EligibilityAtom(
-        component_id=_atom_id(current_start, clock.data_until, (current_ref,)),
-        start=current_start, end=clock.data_until, sources=(current_ref,),
-    ),) if current_start is None or current_start < clock.data_until else ()
     reasons: list[str] = []
+    current_segment: str | None = None
+    run = None
+    result = None
+    if certificate_run_id is not None and not is_camp:
+        run = read_certification_run(con, certificate_run_id)
+        result = next((item for item in run.results if item.entity == entity), None) if run else None
+        if result is not None and result.reference_interval is not None and result.reference_segment_id:
+            current_start = max(result.reference_interval.start, requested_since) if requested_since else result.reference_interval.start
+            current_segment = result.reference_segment_id
+        elif result is not None:
+            reasons.append("current-reference-missing")
+    current_ref = EligibilitySourceRef(source="current-reference" if current_segment else current_source, entity=entity, segment_id=current_segment, certificate_run_id=certificate_run_id if current_segment else None)
+    current = (EligibilityAtom(component_id=_atom_id(current_start, clock.data_until, (current_ref,)), start=current_start, end=clock.data_until, sources=(current_ref,)),) if current_start is None or current_start < clock.data_until else ()
     expanded: list[EligibilityAtom] = list(current)
     if is_camp:
         reasons.append("camp-current-only")
     elif certificate_run_id is None:
         reasons.append("no-certificate-run")
     else:
-        run = read_certification_run(con, certificate_run_id)
-        result = next((item for item in run.results if item.entity == entity), None) if run else None
+        run = run or read_certification_run(con, certificate_run_id)
+        result = result or (next((item for item in run.results if item.entity == entity), None) if run else None)
         if run is None:
             reasons.append("certificate-run-not-found")
         elif run.status not in ("complete", "degraded"):
             reasons.append("certificate-run-not-final")
+        elif run.manifest.calibration_profile_id.endswith("-candidate"):
+            reasons.append("unpromoted-calibration-profile")
         elif result is None:
             reasons.append("certificate-result-not-found")
         elif run.knowledge_available_at is None:
@@ -524,7 +534,15 @@ def build_entity_eligibility(
         elif run.knowledge_available_at > clock.knowledge_as_of:
             reasons.append("knowledge-available-after-knowledge_as_of")
         else:
+            certificate_ids: set[str] = set()
             for cert in result.certificates:
+                if cert.certificate_id in certificate_ids:
+                    reasons.append(f"certificate-{cert.certificate_id}-duplicate")
+                    continue
+                certificate_ids.add(cert.certificate_id)
+                if cert.calibration_profile_id != run.manifest.calibration_profile_id:
+                    reasons.append(f"certificate-{cert.certificate_id}-profile-mismatch")
+                    continue
                 if cert.status != "certified":
                     reasons.append(f"certificate-{cert.certificate_id}-status-{cert.status}")
                     continue
@@ -634,7 +652,12 @@ def build_evidence_views(
         status: Literal["available", "thin", "concentrated", "abstained"] = "available" if selected else "thin"
         if concentration.max_event_share is not None and concentration.max_event_share >= 0.8:
             status = "concentrated"
-        return MatchupEvidenceView(kind=kind, cell=cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(prior_ids) if prior_ids else None, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
+        view_cell = cell
+        if kind != "current-only":
+            from legacy_engine.analytics.matchup import build_cell
+            wins = sum(1 for row in selected if row.match.subject_won)
+            view_cell = build_cell(subject, opponent, wins, len(selected), prior_source="hierarchy-only")
+        return MatchupEvidenceView(kind=kind, cell=view_cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(prior_ids) if prior_ids else None, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
     return MatchupEvidenceViews(subject=subject, opponent=opponent, clock=clock, current_only=view("current-only", current, "pre-disturbance"), certified_expanded=view("certified-expanded", expanded, "hierarchy-only"), added_history=view("added-history", added, "hierarchy-only"))
 
 

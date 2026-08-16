@@ -839,12 +839,19 @@ class IntervalAdaptiveMatrix:
     audit_preamble: tuple[str, ...] = ()
 
 
-def scalar_interval_projection(atoms: tuple[object, ...]) -> str | None:
+@dataclass(frozen=True)
+class ScalarProjection:
+    value: str | None
+    refused: bool
+    reason: str
+
+
+def scalar_interval_projection(atoms: tuple[object, ...]) -> ScalarProjection:
     """Losslessly project only a single interval; disjoint sets refuse widening."""
     if len(atoms) != 1:
-        return None
+        return ScalarProjection(value=None, refused=True, reason="disjoint-intervals-not-scalar")
     atom = atoms[0]
-    return atom.start.isoformat() if atom.start is not None else None
+    return ScalarProjection(value=atom.start.isoformat() if atom.start is not None else None, refused=False, reason="single-current-component")
 
 
 def _base_archetype(label: str, split_variant: str | None) -> str:
@@ -1460,10 +1467,18 @@ def build_interval_adaptive_matrix(
     current-only values remain byte-compatible. Certificate-backed diagnostic views are additive
     and are populated by callers using the resolved-match/evidence seams.
     """
-    current = build_adaptive_matrix(
-        con, provenance=provenance, split_variant=split_variant,
-        **existing_matrix_options,
-    )
+    if split_variants is not None:
+        current = build_multi_split_adaptive(
+            con, parents=tuple(split_variants), provenance=provenance,
+            **existing_matrix_options,
+        )
+        current_matrix = current.multi
+    else:
+        current = build_adaptive_matrix(
+            con, provenance=provenance, split_variant=split_variant,
+            **existing_matrix_options,
+        )
+        current_matrix = current.matrix
     from legacy_engine.analytics.eras.consume import (
         build_entity_eligibility, build_evidence_views, intersect_pair_eligibility,
     )
@@ -1474,7 +1489,7 @@ def build_interval_adaptive_matrix(
         con, provenance=provenance, split_variant=split_variant,
     )
     evidence: dict[tuple[str, str], object] = {}
-    entities = tuple(current.matrix.archetypes)
+    entities = tuple(current_matrix.archetypes) if hasattr(current_matrix, "archetypes") else tuple(sorted({*current_matrix.subjects, *current_matrix.opponents}))
     eligibilities = {
         entity: build_entity_eligibility(
             con, entity, clock=clock, certificate_run_id=certificate_run_id,
@@ -1491,7 +1506,7 @@ def build_interval_adaptive_matrix(
             )
             evidence[(subject, opponent)] = build_evidence_views(
                 subject, opponent, selected, clock=clock,
-                cell=current.matrix.cells.get((subject, opponent)),
+                cell=current_matrix.cells.get((subject, opponent)),
             )
     audit = tuple(current.audit_preamble)
     audit = (*audit, "// interval authority: resolved match selection populated evidence views")

@@ -596,3 +596,6 @@ The named review correction is complete in `epic-recurrent-stable-era-evidence-i
 production interval-matrix calls now resolve exact directed rows and populate typed evidence,
 component identity is interval-level, open-start provenance is isolated, and public interval APIs
 are exported. Current matrix/ranking authority remains unchanged.
+
+Correction verification additionally covers gap exclusion, stable component concentration, exact
+match-id partition, and prior-overlap refusal in `tests/analytics/eras/test_interval_consumption.py`.
