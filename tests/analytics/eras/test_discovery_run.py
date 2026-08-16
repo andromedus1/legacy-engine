@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
 import duckdb
-import pytest
 
 from legacy_engine.analytics.eras.discovery import DiscoveryCalibration
 from legacy_engine.analytics.eras.discovery_run import (
@@ -17,7 +16,7 @@ from legacy_engine.analytics.eras.discovery_store import (
 def _calibration():
     return DiscoveryCalibration.model_validate({
         "calibration_id": "ledger-test-v1",
-        "method_id": "segment-fingerprint-complete-link-v1",
+        "method_id": "segment-fingerprint-complete-link-v2",
         "bucket_days": 7,
         "min_segment_buckets": 3,
         "min_segment_decks": 3,
