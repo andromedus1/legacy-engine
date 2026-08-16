@@ -26,6 +26,7 @@ number.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from collections import Counter
 from datetime import UTC, date, datetime
 from hashlib import sha256
 import json
@@ -109,6 +110,9 @@ class PriorEvidenceAudit(LegacyEngineModel):
     policy: Literal["pre-disturbance", "hierarchy-only"]
     observation_match_ids_sha256: str
     prior_match_ids_sha256: str | None
+    prior_match_ids: tuple[str, ...] = ()
+    prior_mean: float = 0.5
+    prior_source: str = "marginal (leave-cell-out)"
     overlap_n: int
     reason: str
 
@@ -504,8 +508,13 @@ def build_entity_eligibility(
     run = None
     result = None
     current_end = clock.data_until
+    run_invalid = False
     if certificate_run_id is not None and not is_camp:
-        run = read_certification_run(con, certificate_run_id)
+        try:
+            run = read_certification_run(con, certificate_run_id)
+        except ValueError:
+            run = None
+            run_invalid = True
         result = next((item for item in run.results if item.entity == entity), None) if run else None
         valid_envelope = bool(
             run is not None
@@ -529,9 +538,14 @@ def build_entity_eligibility(
     elif certificate_run_id is None:
         reasons.append("no-certificate-run")
     else:
-        run = run or read_certification_run(con, certificate_run_id)
+        if run_invalid:
+            reasons.append("certificate-run-invalid")
+        elif run is None:
+            run = read_certification_run(con, certificate_run_id)
         result = result or (next((item for item in run.results if item.entity == entity), None) if run else None)
-        if run is None:
+        if run_invalid:
+            pass
+        elif run is None:
             reasons.append("certificate-run-not-found")
         elif run.status not in ("complete", "degraded"):
             reasons.append("certificate-run-not-final")
@@ -544,20 +558,38 @@ def build_entity_eligibility(
         elif run.knowledge_available_at > clock.knowledge_as_of:
             reasons.append("knowledge-available-after-knowledge_as_of")
         else:
-            certificate_ids: set[str] = set()
+            certificate_counts = Counter(cert.certificate_id for cert in result.certificates)
             for cert in result.certificates:
-                if cert.certificate_id in certificate_ids:
+                if certificate_counts[cert.certificate_id] > 1:
                     reasons.append(f"certificate-{cert.certificate_id}-duplicate")
                     continue
-                certificate_ids.add(cert.certificate_id)
                 if cert.calibration_profile_id != run.manifest.calibration_profile_id:
                     reasons.append(f"certificate-{cert.certificate_id}-profile-mismatch")
+                    continue
+                if cert.feature_schema_version != run.manifest.feature_schema_version:
+                    reasons.append(f"certificate-{cert.certificate_id}-schema-mismatch")
                     continue
                 if cert.status != "certified":
                     reasons.append(f"certificate-{cert.certificate_id}-status-{cert.status}")
                     continue
+                if (
+                    cert.semantic.disposition != "pass"
+                    or cert.support.disposition != "pass"
+                    or cert.context_overlap.disposition != "pass"
+                    or cert.equivalence is None
+                    or cert.equivalence.disposition != "pass"
+                ):
+                    reasons.append(f"certificate-{cert.certificate_id}-guard-mismatch")
+                    continue
                 if cert.entity != entity or cert.discovery_run_id != run.manifest.discovery_run_id:
                     reasons.append(f"certificate-{cert.certificate_id}-identity-mismatch")
+                    continue
+                if (
+                    cert.reference_segment_id != result.reference_segment_id
+                    or cert.reference_interval != result.reference_interval
+                    or cert.certification_as_of != run.manifest.certification_as_of
+                ):
+                    reasons.append(f"certificate-{cert.certificate_id}-reference-mismatch")
                     continue
                 if clock.knowledge_mode == "as-known-then" and cert.certification_as_of > clock.knowledge_as_of.date():
                     reasons.append(f"certificate-{cert.certificate_id}-future-source-evidence")
@@ -633,25 +665,99 @@ def _concentration(rows: Sequence[object]) -> EvidenceConcentration:
     )
 
 
+def _view_rows(kind: str, rows: Sequence[object]) -> tuple[object, ...]:
+    current_ids = {
+        row.match.match_id for row in rows if row.view == "current-only"
+    }
+    if kind == "current-only":
+        return tuple(row for row in rows if row.view == "current-only")
+    if kind == "certified-expanded":
+        return tuple(row for row in rows if row.view == "certified-expanded")
+    return tuple(
+        row for row in rows
+        if row.view == "certified-expanded" and row.match.match_id not in current_ids
+    )
+
+
+def _view_local_prior(
+    subject: str,
+    opponent: str,
+    observations: Sequence[object],
+    hierarchy_rows: Sequence[object],
+    *,
+    camp_parent: Mapping[str, str],
+) -> tuple[float, str, tuple[str, ...]]:
+    """Build the normal matchup hierarchy after removing this cell's own physical rows.
+
+    The caller supplies rows already restricted to one exact evidence view.  Match ids in the
+    target cell are removed before either the subject marginal or a camp's leave-camp-out parent
+    cell is assembled, making the prior independent of the observations it regularizes.
+    """
+    from legacy_engine.analytics.matchup import beta_binomial_shrink, beta_binomial_shrink_to
+
+    observation_ids = {row.match.match_id for row in observations}
+    eligible = tuple(
+        row for row in hierarchy_rows if row.match.match_id not in observation_ids
+    )
+    subject_rows = tuple(row for row in eligible if row.match.subject == subject)
+    parent = camp_parent.get(subject)
+    if parent is None:
+        wins = sum(row.match.subject_won for row in subject_rows)
+        return (
+            beta_binomial_shrink(wins, len(subject_rows)),
+            "marginal (leave-cell-out)",
+            tuple(sorted({row.match.match_id for row in subject_rows})),
+        )
+
+    siblings = {camp for camp, sibling_parent in camp_parent.items() if sibling_parent == parent}
+    parent_rows = tuple(row for row in eligible if row.match.subject in siblings)
+    parent_wins = sum(row.match.subject_won for row in parent_rows)
+    parent_prior = beta_binomial_shrink(parent_wins, len(parent_rows))
+    lco_rows = tuple(
+        row for row in parent_rows
+        if row.match.subject != subject and camp_parent.get(row.match.opponent, row.match.opponent) == opponent
+    )
+    if lco_rows:
+        lco_wins = sum(row.match.subject_won for row in lco_rows)
+        return (
+            beta_binomial_shrink_to(
+                lco_wins, len(lco_rows), prior_mean=parent_prior,
+            ),
+            "parent cell (leave-camp-out, leave-cell-out)",
+            tuple(sorted({row.match.match_id for row in parent_rows})),
+        )
+    wins = sum(row.match.subject_won for row in subject_rows)
+    return (
+        beta_binomial_shrink(wins, len(subject_rows)),
+        "marginal (leave-cell-out)",
+        tuple(sorted({row.match.match_id for row in subject_rows})),
+    )
+
+
 def build_evidence_views(
     subject: str, opponent: str, rows: Sequence[object], *, clock: AnalysisClock,
-    prior_match_ids: Sequence[str] = (), reasons: Sequence[str] = (), cell: object | None = None,
+    hierarchy_rows: Sequence[object] | None = None,
+    camp_parent: Mapping[str, str] | None = None,
+    prior_match_ids: Sequence[str] = (),
+    reasons: Sequence[str] = (),
 ) -> MatchupEvidenceViews:
-    """Build exact current/expanded/added views from selected match ids."""
-    current = tuple(row for row in rows if row.view == "current-only")
-    expanded = tuple(row for row in rows if row.view == "certified-expanded")
+    """Build exact views and their leave-cell-out hierarchy from one selected-row ledger."""
+    current = _view_rows("current-only", rows)
+    expanded = _view_rows("certified-expanded", rows)
     current_ids = {row.match.match_id for row in current}
     expanded_ids = {row.match.match_id for row in expanded}
     if not current_ids <= expanded_ids:
         raise ValueError("current evidence must be a subset of expanded evidence")
-    added = tuple(row for row in expanded if row.match.match_id not in current_ids)
+    added = _view_rows("added-history", rows)
     if len({row.match.match_id for row in added}) != len(added):
         raise ValueError("added evidence contains duplicate match ids")
-    prior_ids = tuple(prior_match_ids)
+    external_prior_ids = tuple(prior_match_ids)
+    hierarchy_corpus = tuple(hierarchy_rows if hierarchy_rows is not None else rows)
+    camp_map = camp_parent or {}
     def view(kind: Literal["current-only", "certified-expanded", "added-history"], selected: Sequence[object], policy: Literal["pre-disturbance", "hierarchy-only"]) -> MatchupEvidenceView:
         ids = tuple(row.match.match_id for row in selected)
-        overlap = len(set(ids) & set(prior_ids))
-        if policy == "hierarchy-only" and overlap:
+        external_overlap = len(set(ids) & set(external_prior_ids))
+        if policy == "hierarchy-only" and external_overlap:
             raise ValueError("admitted observations overlap hierarchy prior")
         local_reasons = list(reasons)
         if not selected:
@@ -664,16 +770,20 @@ def build_evidence_views(
             status = "concentrated"
         from legacy_engine.analytics.matchup import build_cell
         wins = sum(1 for row in selected if row.match.subject_won)
-        # View-local hierarchy seed: derive the prior from this view's own selected
-        # observations.  It is intentionally never borrowed from the full/current corpus.
-        local_prior = wins / len(selected) if selected else 0.5
+        local_hierarchy = _view_rows(kind, hierarchy_corpus)
+        local_prior, prior_source, local_prior_ids = _view_local_prior(
+            subject, opponent, selected, local_hierarchy, camp_parent=camp_map,
+        )
+        overlap = len(set(ids) & set(local_prior_ids))
+        if overlap:
+            raise ValueError("admitted observations overlap view-local hierarchy prior")
         view_cell = build_cell(
             subject, opponent, wins, len(selected),
             prior_mean=local_prior,
-            prior_source="view-local-pre-disturbance" if policy == "pre-disturbance" else "view-local-hierarchy",
+            prior_source=prior_source,
         )
-        return MatchupEvidenceView(kind=kind, cell=view_cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(prior_ids) if prior_ids else None, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
-    return MatchupEvidenceViews(subject=subject, opponent=opponent, clock=clock, current_only=view("current-only", current, "pre-disturbance"), certified_expanded=view("certified-expanded", expanded, "hierarchy-only"), added_history=view("added-history", added, "hierarchy-only"))
+        return MatchupEvidenceView(kind=kind, cell=view_cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(local_prior_ids) if local_prior_ids else None, prior_match_ids=local_prior_ids, prior_mean=local_prior, prior_source=prior_source, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
+    return MatchupEvidenceViews(subject=subject, opponent=opponent, clock=clock, current_only=view("current-only", current, "hierarchy-only"), certified_expanded=view("certified-expanded", expanded, "hierarchy-only"), added_history=view("added-history", added, "hierarchy-only"))
 
 
 def resolve_field_era(

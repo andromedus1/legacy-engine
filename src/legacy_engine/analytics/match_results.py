@@ -12,7 +12,7 @@ downstream consumers.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping, Sequence
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
@@ -235,6 +235,24 @@ class SelectedMatch:
     opponent_certificate_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class SelectedOutcomeLedger:
+    """Canonical, digest-bound interval-selected outcomes in one physical orientation.
+
+    ``rows`` contains each unordered matchup only in the lexicographically canonical subject /
+    opponent orientation.  ``selected_rows_for_pair`` supplies the directed reverse without a
+    second database selection or a second physical copy.  The exact eligibility envelopes and
+    analysis clock travel with the rows so downstream estimators can verify the selection rather
+    than reconstructing it from aggregates.
+    """
+
+    rows: tuple[SelectedMatch, ...]
+    clock: "AnalysisClock"
+    entity_eligibility: Mapping[str, "EntityEligibility"]
+    certificate_run_id: str | None
+    content_sha256: str
+
+
 # ---------------------------------------------------------------------------
 # Per-card win-rate record types (Unit 1 of epic-deck-generation-per-card-value)
 # ---------------------------------------------------------------------------
@@ -377,7 +395,8 @@ uniq_decks AS (
 _JOIN_SQL = f"""
 WITH
 {_DUP_UNIQ_CTE}
-SELECT t.provenance, t.id, CAST(t.date AS VARCHAR), r.player1, r.player2, r.result,
+SELECT t.provenance, t.id, CAST(t.date AS VARCHAR), r.match_idx,
+       r.player1, r.player2, r.result,
        d1.archetype AS arch1, d2.archetype AS arch2,
        d1.variant AS var1, d2.variant AS var2,
        (du1.norm IS NOT NULL) AS amb1,
@@ -454,7 +473,7 @@ def compute_match_results(
         _JOIN_SQL, [provenance, provenance, since, since, until, until]
     ).fetchall()
 
-    for _prov, event_id, event_date, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
+    for _prov, event_id, event_date, _match_idx, _p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
         cov.total_pairings += 1
         orig1, orig2 = arch1, arch2
         arch1 = _split_set_label(arch1, var1, split_set)
@@ -787,7 +806,7 @@ def resolve_match_records(
     split_set = frozenset((split_variant,)) if split_variant else frozenset(split_variants or ())
     rows = con.execute(_JOIN_SQL, [provenance, provenance, since, since, until, until]).fetchall()
     pending: list[tuple] = []
-    for prov, event_id, event_date, p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
+    for prov, event_id, event_date, match_idx, p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
         if not p2 or amb1 or amb2 or arch1 is None or arch2 is None:
             continue
         outcome = parse_match_result(result)
@@ -796,7 +815,13 @@ def resolve_match_records(
         label1 = _split_set_label(arch1, var1, split_set)
         label2 = _split_set_label(arch2, var2, split_set)
         p1_won = outcome.winner == "p1"
+        physical_players = tuple(sorted((normalize_player(p1), normalize_player(p2))))
+        physical_id = "match-" + sha256(
+            "|".join(map(str, (event_id, match_idx, *physical_players))).encode()
+        ).hexdigest()[:32]
         if subject is not None or opponent is not None:
+            if subject is None or opponent is None:
+                raise ValueError("subject and opponent must be supplied together")
             if (label1, label2) == (subject, opponent):
                 pass
             elif (label1, label2) == (opponent, subject):
@@ -805,14 +830,9 @@ def resolve_match_records(
                 p1_won = not p1_won
             else:
                 continue
-        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), normalize_player(p1), normalize_player(p2), label1, label2, p1_won))
-    counts: Counter[tuple] = Counter()
+        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), match_idx, normalize_player(p1), normalize_player(p2), label1, label2, p1_won, physical_id))
     records: list[ResolvedMatch] = []
-    for prov, event_id, event_date, p1, p2, label1, label2, p1_won in sorted(pending):
-        key = (event_id, p1, p2, label1, label2)
-        ordinal = counts[key]
-        counts[key] += 1
-        match_id = "match-" + sha256(("|".join(map(str, (*key, ordinal)))).encode()).hexdigest()[:32]
+    for prov, event_id, event_date, _match_idx, p1, p2, label1, label2, p1_won, match_id in sorted(pending):
         records.append(ResolvedMatch(match_id=match_id, event_id=event_id, event_date=event_date, provenance=prov, subject=label1, opponent=label2, subject_player_id=p1 or None, opponent_player_id=p2 or None, subject_won=p1_won, mirror=label1 == label2))
     return tuple(records)
 
@@ -821,7 +841,22 @@ def intersect_pair_eligibility(subject: EntityEligibility, opponent: EntityEligi
     from legacy_engine.analytics.eras.consume import intersect_atoms
     if subject.clock != opponent.clock:
         raise ValueError("subject and opponent analysis clocks must match")
-    return PairEligibility(subject=subject.entity, opponent=opponent.entity, current=intersect_atoms(subject.current, opponent.current, data_until=subject.clock.data_until), expanded=intersect_atoms(subject.expanded, opponent.expanded, data_until=subject.clock.data_until), clock=subject.clock)
+    current = intersect_atoms(
+        subject.current, opponent.current, data_until=subject.clock.data_until,
+    )
+    camp_current_only = any(
+        source.source == "camp-current-only"
+        for eligibility in (subject, opponent)
+        for atom in eligibility.current
+        for source in atom.sources
+    )
+    expanded = current if camp_current_only else intersect_atoms(
+        subject.expanded, opponent.expanded, data_until=subject.clock.data_until,
+    )
+    return PairEligibility(
+        subject=subject.entity, opponent=opponent.entity,
+        current=current, expanded=expanded, clock=subject.clock,
+    )
 
 
 def select_pair_matches(records: tuple[ResolvedMatch, ...], pair: PairEligibility) -> tuple[SelectedMatch, ...]:
@@ -843,3 +878,118 @@ def select_pair_matches(records: tuple[ResolvedMatch, ...], pair: PairEligibilit
             selected.append(SelectedMatch(match=record, view=view, pair_component_id=atom.component_id, subject_component_id=subject_segments[0] if subject_segments else atom.component_id, opponent_component_id=opponent_segments[0] if opponent_segments else atom.component_id, subject_certificate_ids=subject_certs, opponent_certificate_ids=opponent_certs))
             seen.add(record.match_id)
     return tuple(selected)
+
+
+def _reverse_selected(row: SelectedMatch) -> SelectedMatch:
+    match = row.match
+    return SelectedMatch(
+        match=ResolvedMatch(
+            match_id=match.match_id,
+            event_id=match.event_id,
+            event_date=match.event_date,
+            provenance=match.provenance,
+            subject=match.opponent,
+            opponent=match.subject,
+            subject_player_id=match.opponent_player_id,
+            opponent_player_id=match.subject_player_id,
+            subject_won=not match.subject_won,
+            mirror=match.mirror,
+        ),
+        view=row.view,
+        pair_component_id=row.pair_component_id,
+        subject_component_id=row.opponent_component_id,
+        opponent_component_id=row.subject_component_id,
+        subject_certificate_ids=row.opponent_certificate_ids,
+        opponent_certificate_ids=row.subject_certificate_ids,
+    )
+
+
+def selected_rows_for_pair(
+    ledger: SelectedOutcomeLedger, subject: str, opponent: str,
+) -> tuple[SelectedMatch, ...]:
+    """Return one directed pair from the canonical physical ledger."""
+    if subject == opponent:
+        return ()
+    canonical = (subject, opponent) if subject < opponent else (opponent, subject)
+    rows = tuple(
+        row for row in ledger.rows
+        if (row.match.subject, row.match.opponent) == canonical
+    )
+    return rows if canonical == (subject, opponent) else tuple(_reverse_selected(row) for row in rows)
+
+
+def _ledger_digest_payload(
+    rows: Sequence[SelectedMatch], clock: "AnalysisClock",
+    entity_eligibility: Mapping[str, "EntityEligibility"], certificate_run_id: str | None,
+) -> str:
+    import json
+
+    payload = {
+        "clock": clock.model_dump(mode="json"),
+        "certificate_run_id": certificate_run_id,
+        "entity_eligibility": {
+            entity: eligibility.model_dump(mode="json")
+            for entity, eligibility in sorted(entity_eligibility.items())
+        },
+        "rows": [
+            {
+                "match": {
+                    **row.match.__dict__,
+                    "event_date": row.match.event_date.isoformat(),
+                },
+                "view": row.view,
+                "pair_component_id": row.pair_component_id,
+                "subject_component_id": row.subject_component_id,
+                "opponent_component_id": row.opponent_component_id,
+                "subject_certificate_ids": row.subject_certificate_ids,
+                "opponent_certificate_ids": row.opponent_certificate_ids,
+            }
+            for row in rows
+        ],
+    }
+    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def build_selected_outcome_ledger(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    pair_keys: Collection[tuple[str, str]],
+    entity_eligibility: Mapping[str, "EntityEligibility"],
+    clock: "AnalysisClock",
+    certificate_run_id: str | None = None,
+    provenance: str | None = None,
+    split_variant: str | None = None,
+    split_variants: Collection[str] | None = None,
+) -> SelectedOutcomeLedger:
+    """Select exact interval outcomes once per unordered pair and bind them to a digest."""
+    canonical_pairs = sorted({tuple(sorted(pair)) for pair in pair_keys if pair[0] != pair[1]})
+    selected: list[SelectedMatch] = []
+    for subject, opponent in canonical_pairs:
+        records = resolve_match_records(
+            con,
+            provenance=provenance,
+            until=clock.data_until.isoformat(),
+            split_variant=split_variant,
+            split_variants=split_variants,
+            subject=subject,
+            opponent=opponent,
+        )
+        pair = intersect_pair_eligibility(
+            entity_eligibility[subject], entity_eligibility[opponent],
+        )
+        selected.extend(select_pair_matches(records, pair))
+    rows = tuple(sorted(
+        selected,
+        key=lambda row: (
+            row.match.subject, row.match.opponent, row.view,
+            row.match.event_date, row.match.event_id, row.match.match_id,
+        ),
+    ))
+    digest = _ledger_digest_payload(rows, clock, entity_eligibility, certificate_run_id)
+    return SelectedOutcomeLedger(
+        rows=rows,
+        clock=clock,
+        entity_eligibility=dict(entity_eligibility),
+        certificate_run_id=certificate_run_id,
+        content_sha256=digest,
+    )

@@ -119,6 +119,11 @@ from legacy_engine.analytics.eras.consume import (
     intersect_atoms,
     normalize_atoms,
 )
+from legacy_engine.analytics.match_results import (
+    SelectedOutcomeLedger,
+    build_selected_outcome_ledger,
+    selected_rows_for_pair,
+)
 
 __all__ = [
     "Bucket",
@@ -216,4 +221,7 @@ __all__ = [
     "intersect_atoms",
     "build_entity_eligibility",
     "build_evidence_views",
+    "SelectedOutcomeLedger",
+    "build_selected_outcome_ledger",
+    "selected_rows_for_pair",
 ]

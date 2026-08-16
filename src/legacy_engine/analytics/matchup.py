@@ -33,8 +33,12 @@ from legacy_engine.models.matchup import CellConcentration, MatchupCell
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
-    from legacy_engine.analytics.eras.consume import EraHorizon
-    from legacy_engine.analytics.match_results import MatchResults
+    from legacy_engine.analytics.eras.consume import (
+        AnalysisClock,
+        EraHorizon,
+        MatchupEvidenceViews,
+    )
+    from legacy_engine.analytics.match_results import MatchResults, SelectedOutcomeLedger
     from legacy_engine.analytics.superarchetype.aggregate import ImputedCell, PooledCell
     from legacy_engine.analytics.superarchetype.chain import LadderEntry
     from legacy_engine.analytics.superarchetype.registry import SuperarchetypeRegistry
@@ -832,9 +836,10 @@ class AdaptiveMatrix:
 class IntervalAdaptiveMatrix:
     """Interval-authority wrapper; ``current`` remains ranking-authoritative."""
 
-    current: AdaptiveMatrix
-    evidence: dict[tuple[str, str], object]
-    clock: object
+    current: AdaptiveMatrix | AdaptiveMultiSplitMatrix
+    evidence: "dict[tuple[str, str], MatchupEvidenceViews]"
+    clock: "AnalysisClock"
+    selected_outcomes: "SelectedOutcomeLedger"
     certificate_run_id: str | None = None
     audit_preamble: tuple[str, ...] = ()
 
@@ -1467,9 +1472,10 @@ def build_interval_adaptive_matrix(
     current-only values remain byte-compatible. Certificate-backed diagnostic views are additive
     and are populated by callers using the resolved-match/evidence seams.
     """
-    if split_variants is not None:
+    split_parents = tuple(split_variants) if split_variants is not None else None
+    if split_parents is not None:
         current = build_multi_split_adaptive(
-            con, parents=tuple(split_variants), provenance=provenance,
+            con, parents=split_parents, provenance=provenance,
             **existing_matrix_options,
         )
         current_matrix = current.multi
@@ -1481,35 +1487,55 @@ def build_interval_adaptive_matrix(
         current_matrix = current.matrix
     from legacy_engine.analytics.eras.consume import build_entity_eligibility, build_evidence_views
     from legacy_engine.analytics.match_results import (
-        intersect_pair_eligibility, resolve_match_records, select_pair_matches,
+        build_selected_outcome_ledger, selected_rows_for_pair,
     )
-    records = resolve_match_records(
-        con, provenance=provenance, split_variant=split_variant,
-        split_variants=split_variants,
-    )
-    evidence: dict[tuple[str, str], object] = {}
+    evidence = {}
     entities = tuple(current_matrix.archetypes) if hasattr(current_matrix, "archetypes") else tuple(sorted({*current_matrix.subjects, *current_matrix.opponents}))
+    camp_parent = (
+        dict(current_matrix.camp_parent)
+        if hasattr(current_matrix, "camp_parent")
+        else {
+            entity: split_variant
+            for entity in entities
+            if split_variant is not None and entity.startswith(f"{split_variant} [")
+        }
+    )
     eligibilities = {
         entity: build_entity_eligibility(
             con, entity, clock=clock, certificate_run_id=certificate_run_id,
-            requested_since=requested_since,
+            requested_since=requested_since, camp_parent=camp_parent,
         ) for entity in entities
     }
-    for subject in entities:
-        for opponent in entities:
-            if subject == opponent:
-                continue
-            pair = intersect_pair_eligibility(eligibilities[subject], eligibilities[opponent])
-            selected = select_pair_matches(
-                tuple(record for record in records if (record.subject, record.opponent) == (subject, opponent)), pair,
-            )
-            evidence[(subject, opponent)] = build_evidence_views(
-                subject, opponent, selected, clock=clock,
-                cell=current_matrix.cells.get((subject, opponent)),
-            )
+    pair_keys = tuple(key for key in current_matrix.cells if key[0] != key[1])
+    ledger = build_selected_outcome_ledger(
+        con,
+        pair_keys=pair_keys,
+        entity_eligibility=eligibilities,
+        clock=clock,
+        certificate_run_id=certificate_run_id,
+        provenance=provenance,
+        split_variant=split_variant,
+        split_variants=split_parents,
+    )
+    directed_rows = tuple(
+        row
+        for subject, opponent in pair_keys
+        for row in selected_rows_for_pair(ledger, subject, opponent)
+    )
+    for subject, opponent in pair_keys:
+        selected = selected_rows_for_pair(ledger, subject, opponent)
+        evidence[(subject, opponent)] = build_evidence_views(
+            subject,
+            opponent,
+            selected,
+            clock=clock,
+            hierarchy_rows=directed_rows,
+            camp_parent=camp_parent,
+            reasons=(*eligibilities[subject].reasons, *eligibilities[opponent].reasons),
+        )
     audit = tuple(current.audit_preamble)
     audit = (*audit, "// interval authority: resolved match selection populated evidence views")
     return IntervalAdaptiveMatrix(
-        current=current, evidence=evidence, clock=clock,
+        current=current, evidence=evidence, clock=clock, selected_outcomes=ledger,
         certificate_run_id=certificate_run_id, audit_preamble=audit,
     )
