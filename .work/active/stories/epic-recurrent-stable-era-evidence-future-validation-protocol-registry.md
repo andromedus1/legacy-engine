@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation-protocol-registry
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-future-validation
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -34,3 +34,17 @@ registry, closed-schema/hash checks, and byte-identical historical benchmark art
 
 Implement `tests/advisory/test_recurrent_validation_protocol.py` with registry/order, invalid
 protocol, immutable hash, registration-time, fold-boundary, and shipped-v1 golden cases.
+
+## Implementation notes
+
+- Added additive `recurrent_validation` protocol contracts with a closed schema, exact direct plus
+  amplification registry, digest-bound configuration fields, two-clock folds, support thresholds,
+  and promotion margins.
+- Added immutable shipped `recurrent-evidence-future-v1` protocol artifact without modifying the
+  historical benchmark protocol or estimator registry.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/advisory/test_recurrent_validation_protocol.py` — 3 passed.
+- `uv run ruff check src/legacy_engine/advisory/recurrent_validation.py tests/advisory/test_recurrent_validation_protocol.py` — passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/advisory/recurrent_validation.py` — passed.

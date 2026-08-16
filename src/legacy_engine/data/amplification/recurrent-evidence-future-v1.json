@@ -1,0 +1,19 @@
+{
+  "protocol_id": "recurrent-evidence-future-v1",
+  "registered_at": "2026-08-16T00:00:00Z",
+  "authority": "evaluation-only",
+  "replay_mode": "retrospective-policy-replay",
+  "base_benchmark_protocol_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "estimator_ids": ["current-only-v1", "contiguous-era-v1", "recurrent-expanded-v1", "component-hierarchical-v1", "composition-kernel-v1", "strategic-family-ladder-v1", "skew-low-rank-r1-v1", "skew-low-rank-r2-v1", "skew-low-rank-r4-v1"],
+  "discovery_calibration_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "certification_calibration_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "amplification_profile_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "structure_policy_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "folds": [{"fold_id": "origin-2026-01", "data_until": "2026-01-01", "knowledge_as_of": "2026-01-01T00:00:00Z", "evaluation_until": "2026-02-01", "regime_id": "baseline"}],
+  "log_clip_epsilon": 0.000001,
+  "interval_level": 0.95,
+  "bootstrap_draws": 2000,
+  "seed": 730021,
+  "support": {"min_common_matches": 250, "min_events": 10, "min_event_dates": 4, "min_origins": 6, "min_regimes": 2, "min_calibration_matches": 500, "min_supported_actions": 5, "min_action_matches": 8, "min_future_field_coverage": 0.8},
+  "margins": {"alpha": 0.05, "min_served_field_coverage_gain": 0.05, "min_served_event_coverage_gain": 0.05, "max_log_loss_delta": 0.02, "max_brier_delta": 0.02, "max_calibration_delta": 0.05, "min_interval_coverage": 0.9, "max_interval_score_delta": 0.05, "max_regret_delta": 0.05}
+}
