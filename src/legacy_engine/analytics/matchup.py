@@ -1487,6 +1487,7 @@ def build_interval_adaptive_matrix(
     )
     records = resolve_match_records(
         con, provenance=provenance, split_variant=split_variant,
+        split_variants=split_variants,
     )
     evidence: dict[tuple[str, str], object] = {}
     entities = tuple(current_matrix.archetypes) if hasattr(current_matrix, "archetypes") else tuple(sorted({*current_matrix.subjects, *current_matrix.opponents}))
@@ -1511,6 +1512,6 @@ def build_interval_adaptive_matrix(
     audit = tuple(current.audit_preamble)
     audit = (*audit, "// interval authority: resolved match selection populated evidence views")
     return IntervalAdaptiveMatrix(
-        current=current, evidence={}, clock=clock,
+        current=current, evidence=evidence, clock=clock,
         certificate_run_id=certificate_run_id, audit_preamble=audit,
     )

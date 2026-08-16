@@ -41,7 +41,9 @@ def test_selection_excludes_gap_and_keeps_pair_component_constant():
     pair = PairEligibility("a", "b", subject, subject, _clock())
     rows = tuple(ResolvedMatch(f"m{i}", "e", event_date, "online", "a", "b", None, None, True) for i, event_date in enumerate((date(2020, 1, 2), date(2020, 1, 15), date(2020, 2, 15), date(2020, 3, 2))))
     selected = select_pair_matches(rows, pair)
-    assert [row.match.match_id for row in selected] == ["m0", "m1", "m3"] * 2
+    assert [row.match.match_id for row in selected if row.view == "current-only"] == ["m0", "m1", "m3"]
+    assert [row.match.match_id for row in selected if row.view == "certified-expanded"] == ["m0", "m1", "m3"]
+    assert len({row.match.match_id for row in selected if row.view == "current-only"}) == 3
     assert selected[0].pair_component_id == selected[1].pair_component_id
 
 
@@ -52,5 +54,8 @@ def test_views_partition_ids_and_reject_prior_overlap():
     assert set(views.current_only.match_ids) == {"m1"}
     assert set(views.added_history.match_ids) == {"m2"}
     assert views.certified_expanded.concentration.raw_n == 2
+    assert views.current_only.cell.n == 1
+    assert views.certified_expanded.cell.n == 2
+    assert views.added_history.cell.n == 1
     with pytest.raises(ValueError, match="prior"):
         build_evidence_views("a", "b", (*current, *rows), clock=_clock(), prior_match_ids=("m2",))
