@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification
 kind: feature
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-discovery]
@@ -763,3 +763,23 @@ def certification_run_ids(
   closure remains blocked until exact adversarial regressions cover high-dimensional smoothing,
   bootstrap multiplicity/context/shared-reference behavior, concentrated HHI support, future-fact
   identity invariance, and the checked-in control manifest.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none; cutoff/status/test findings were absorbed into the named current-cycle fix.
+**Nits**: none.
+**Rejected**: partition atomicity, outcome firewall, parent-only scope, candidate-profile authority
+cap, empty runs, exact-id reads, and UTC knowledge availability were confirmed sound; no foundation
+or applicable security issue was found.
+
+**Notes**: Standard-weight deep feature review used one same-harness fresh-context pass over frozen
+snapshot `6122716`. The receiver accepted six material findings and fixed them in `a8f513e`, then
+required exact reproduction tests before closure. Commits `17934d6` and `6bf670b` add the missing
+high-dimensional smoothing, event-bootstrap multiplicity/context/shared-reference, concentrated HHI,
+future-fact cutoff, control-manifest, and store-tamper regressions. Root verification passed all 27
+focused certification tests and Ruff; the worker's isolated full era run passed 210 tests with
+importlib mode and compileall. Per standard policy, no second independent pass was commissioned.
+UI/accessibility, network/auth, async, and deployed migration lenses were inapplicable.
