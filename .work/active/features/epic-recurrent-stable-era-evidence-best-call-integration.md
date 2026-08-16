@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, ui]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -582,3 +582,11 @@ round-trippable exact run rather than the current weak wrapper.
 - No correction-scope deviation remains. Repository-wide Ruff has 172 pre-existing unrelated
   violations, while every file changed by this feature passes Ruff; those baseline violations were
   preserved rather than expanded into this review correction.
+
+## Review resolution
+
+Approved after correction. Root verification reran the exact publication, target/bundle,
+post-cutoff invariance, recurrent-validation handoff, and generated-ranking suites together:
+`95 passed in 9.71s`. The named standard-review blockers are exercised by direct regressions, the
+authoritative ranking remains sealed from diagnostics, and no second independent review pass was
+required by the standard lifecycle.
