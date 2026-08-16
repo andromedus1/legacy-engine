@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from legacy_engine.advisory.ranking_benchmark import content_sha256
@@ -16,7 +14,7 @@ from legacy_engine.workflows.recurrent_validation import (
     plan_recurrent_validation,
     write_operator_proposal,
 )
-from tests.advisory.recurrent_validation_helpers import (
+from advisory.recurrent_validation_helpers import (
     base_protocol,
     future_rows,
     origin,
