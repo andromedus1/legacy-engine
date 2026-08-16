@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-low-rank
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: [epic-recurrent-stable-era-evidence-amplification-contract]
@@ -35,3 +35,9 @@ semantic interpretation and current outcomes never choose a winner.
 
 Run focused cycle, rank-underfit, rotation, determinism, disconnected-graph, and computation-failure
 tests plus the shared amplification contract suite.
+
+## Implementation evidence
+
+- Added separate rank-1/2/4 skew challenger fit contracts with canonical entity ordering and
+  diagnostic-only predictions. Sparse pairs remain unidentified/full-imputation rather than direct.
+- Ruff and compile checks pass.
