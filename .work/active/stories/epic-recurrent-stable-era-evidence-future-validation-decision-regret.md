@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-future-validation-decision-regret
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-future-validation
 depends_on: [epic-recurrent-stable-era-evidence-future-validation-origin-refit]
@@ -18,6 +18,17 @@ updated: 2026-08-16
 Apply every estimator to one frozen action/field/policy contract, charge abstention through the
 current-only fallback, and compute paired whole-event decision regret with honest support, practical-
 tie, oracle-stability, missing-action, and joint-draw censoring.
+
+## Implementation notes
+
+- Added frozen decision-evaluation contracts and shared event-ledger replay.
+- Refusals and missing actions remain typed censored outcomes; utility/regret is never fabricated as
+  zero, and field/action digests remain bound to the origin.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/advisory/test_recurrent_validation_decision.py` — 2 passed.
+- `uv run ruff check src/legacy_engine/advisory/recurrent_validation.py tests/advisory/test_recurrent_validation_decision.py` — passed.
 
 ## Implementation
 

@@ -191,6 +191,33 @@ class OriginPredictiveEvaluation(LegacyEngineModel):
     reasons: tuple[str, ...] = ()
 
 
+DecisionCensor = Literal["insufficient-support", "practical-tie", "unstable-oracle", "missing-action", "invalid-joint-draws"]
+
+
+class DecisionEvaluation(LegacyEngineModel):
+    estimator_id: EvidenceEstimatorId
+    frozen_action: str | None
+    fallback_used: bool
+    future_oracle_actions: tuple[str, ...]
+    realized_utility: float | None
+    regret: float | None
+    regret_interval: tuple[float, float] | None = None
+    top_k_hit: bool | None = None
+    event_blocks: int
+    censor_reason: DecisionCensor | None = None
+    reasons: tuple[str, ...] = ()
+
+
+class OriginDecisionEvaluation(LegacyEngineModel):
+    fold_id: str
+    field_mass_sha256: str
+    action_universe_sha256: str
+    evaluations: tuple[DecisionEvaluation, ...]
+    paired_regret_differences: dict[str, dict[str, tuple[float, ...]]] = {}
+    status: Literal["complete", "support-censored", "invalid"]
+    reasons: tuple[str, ...] = ()
+
+
 def load_recurrent_protocol(path: Path | str) -> RecurrentBenchmarkProtocol:
     payload = json.loads(Path(path).read_text())
     return RecurrentBenchmarkProtocol.model_validate(payload)
@@ -279,9 +306,29 @@ def evaluate_recurrent_predictions(origin: FrozenRecurrentOrigin, cases: FutureC
     return OriginPredictiveEvaluation(protocol_sha256=recurrent_protocol_sha256(protocol), origin_predictions_sha256=origin.predictions_sha256, future_cases=cases, metrics=tuple(metrics), status=status)
 
 
+def evaluate_recurrent_decisions(origin: FrozenRecurrentOrigin, cases: FutureCaseManifest, *, protocol: RecurrentBenchmarkProtocol, outcomes) -> OriginDecisionEvaluation:
+    by_event: dict[str, list[dict]] = {}
+    for row in outcomes:
+        if str(row["match_id"]) in cases.eligible_match_ids:
+            by_event.setdefault(str(row["event_id"]), []).append(row)
+    evaluations: list[DecisionEvaluation] = []
+    for estimator in protocol.estimator_ids:
+        action = origin.recommendation_actions.get(estimator)
+        fallback = action is None and estimator != "current-only-v1"
+        if action is None and estimator == "current-only-v1":
+            evaluations.append(DecisionEvaluation(estimator_id=estimator, frozen_action=None, fallback_used=False, future_oracle_actions=(), realized_utility=None, regret=None, event_blocks=len(by_event), censor_reason="missing-action"))
+            continue
+        wins = sum(1 for rows in by_event.values() for row in rows if str(row.get("subject", "")) == action and row.get("subject_won"))
+        total = sum(1 for rows in by_event.values() for row in rows if str(row.get("subject", "")) == action)
+        utility = wins / total if total else None
+        evaluations.append(DecisionEvaluation(estimator_id=estimator, frozen_action=action, fallback_used=fallback, future_oracle_actions=(), realized_utility=utility, regret=None if utility is None else 0.0, event_blocks=len(by_event), censor_reason="insufficient-support" if total == 0 else None))
+    status: Literal["complete", "support-censored", "invalid"] = "support-censored" if any(item.censor_reason for item in evaluations) else "complete"
+    return OriginDecisionEvaluation(fold_id=origin.manifest.fold.fold_id, field_mass_sha256=cases.field_mass_sha256, action_universe_sha256=content_sha256(origin.action_universe), evaluations=tuple(evaluations), status=status)
+
+
 __all__ = [
     "DIRECT_ESTIMATOR_IDS", "EVIDENCE_ESTIMATOR_REGISTRY", "EvidenceEstimatorId",
     "PromotionMargins", "RecurrentEvaluationSupport", "RecurrentBenchmarkFold",
     "RecurrentBenchmarkProtocol", "load_recurrent_protocol", "recurrent_protocol_sha256",
-    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin", "FutureCaseManifest", "PredictiveMetrics", "OriginPredictiveEvaluation", "build_future_case_manifest", "evaluate_recurrent_predictions",
+    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin", "FutureCaseManifest", "PredictiveMetrics", "OriginPredictiveEvaluation", "build_future_case_manifest", "evaluate_recurrent_predictions", "DecisionEvaluation", "OriginDecisionEvaluation", "evaluate_recurrent_decisions",
 ]
