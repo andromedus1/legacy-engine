@@ -23,9 +23,6 @@ def _calibration(**overrides):
         "partition": {"plan_id": "p", "salt": "s", "modulus": 2, "discovery_buckets": [0]},
         "family_alpha": 0.05,
         "bootstrap_replicates": 9,
-        "power_replicates": 9,
-        "safely_inside_ratio": 0.8,
-        "target_power": 0.5,
         "min_candidate_events": 3,
         "min_reference_events": 3,
         "min_time_buckets": 2,
@@ -84,6 +81,24 @@ def test_pending_monitor_fact_abstains_and_is_not_a_veto():
     assert evidence.disposition == "abstain"
     assert evidence.confirmed_veto_ids == ()
     assert evidence.unresolved_fact_ids == ("monitor-1",)
+
+
+def test_gap_fact_and_monitor_authority_are_handled_strictly():
+    candidate = _candidate()
+    gap_fact = SemanticFact(fact_id="gap", kind="taxonomy", state="confirmed", effective_on=date(2026, 1, 28),
+                            affected_entities=("X",), source="frozen-contract", evidence_sha256="5" * 64, detail="gap")
+    assert evaluate_semantic_guards(candidate, [gap_fact]).disposition == "reject"
+    monitor_confirmed = gap_fact.model_copy(update={"fact_id": "monitor-confirmed", "source": "format-monitor"})
+    monitor_evidence = evaluate_semantic_guards(candidate, [monitor_confirmed])
+    assert monitor_evidence.disposition == "abstain"
+    assert monitor_evidence.confirmed_veto_ids == ()
+
+
+def test_unavailable_monitor_truth_has_named_reason():
+    fact = SemanticFact(fact_id="monitor-unavailable", kind="legality", state="unavailable", effective_on=date(2026, 1, 28),
+                        affected_entities=("X",), source="format-monitor", evidence_sha256="6" * 64, detail="unavailable")
+    evidence = evaluate_semantic_guards(_candidate(), [fact])
+    assert evidence.reasons == ("format-truth-unavailable",)
 
 
 def test_duplicate_deck_rows_cannot_buy_event_support():

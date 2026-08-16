@@ -79,3 +79,18 @@ def test_mutating_same_id_payload_refuses_collision():
     write_certification_run(con, run)
     with pytest.raises(ValueError, match="manifest digest"):
         write_certification_run(con, run.model_copy(update={"manifest": run.manifest.model_copy(update={"seed": 4})}))
+
+
+def test_direct_status_or_reason_tampering_is_hash_bound():
+    con = _db()
+    discovery = run_recurrent_discovery(con, as_of=date(2026, 1, 31), taxonomy_version="t", legality_version="l",
+                                        calibration=_discovery_calibration())
+    run = run_recurrent_certification(
+        con, discovery_run_id=discovery.run_id,
+        calibration=load_certification_calibration(CERTIFICATION_CALIBRATION_PATH),
+        semantic_facts=(), format_observation_sha256=None,
+    )
+    write_certification_run(con, run)
+    con.execute("UPDATE era_certification_runs SET status = 'complete' WHERE run_id = ?", [run.run_id])
+    with pytest.raises(ValueError, match="hash mismatch"):
+        read_certification_run(con, run.run_id)

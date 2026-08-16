@@ -1,0 +1,13 @@
+{
+  "schema": "recurrent-certification-controls-v1",
+  "outcome_free": true,
+  "controls": [
+    {"id": "stable-positive", "expected": "certified", "channels": ["main-js", "side-js", "mixture-energy", "field-js", "source-js", "omnibus-mmd2"]},
+    {"id": "main-shift", "expected": "rejected", "channels": ["main-js"]},
+    {"id": "side-shift", "expected": "rejected", "channels": ["side-js"]},
+    {"id": "mixture-shift", "expected": "rejected", "channels": ["mixture-energy"]},
+    {"id": "context-shift", "expected": "inconclusive", "channels": ["field-js", "source-js"]},
+    {"id": "semantic-veto", "expected": "rejected", "channels": []},
+    {"id": "one-event-duplication", "expected": "inconclusive", "channels": []}
+  ]
+}

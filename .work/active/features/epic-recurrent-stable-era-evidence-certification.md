@@ -187,9 +187,6 @@ class CertificationCalibration(OutcomeFreeModel):
     partition: EventPartitionPlan
     family_alpha: float
     bootstrap_replicates: int
-    power_replicates: int
-    safely_inside_ratio: float
-    target_power: float
     min_candidate_events: int
     min_reference_events: int
     min_time_buckets: int
@@ -296,7 +293,6 @@ CertificationReason = Literal[
     "effective-support-below-floor",
     "event-concentration",
     "source-concentration",
-    "power-below-target",
     "context-overlap-failed",
     "equivalence-straddles-margin",
     "component-non-equivalent",
@@ -348,7 +344,6 @@ class SupportEvidence(OutcomeFreeModel):
     effective_events: float
     max_event_share: float | None
     max_source_share: float | None
-    simulated_power: float | None
     reasons: tuple[CertificationReason, ...]
 
 class ContextOverlapEvidence(OutcomeFreeModel):

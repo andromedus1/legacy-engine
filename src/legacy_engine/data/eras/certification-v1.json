@@ -3,7 +3,7 @@
   "profile_state": "candidate",
   "method_id": "cluster-bootstrap-equivalence-v1",
   "feature_schema_version": "recurrent-certification-features-v1",
-  "control_evidence_sha256": "8c7c4f8e0f2a1bb8e3a2af7e90d7d5e1e0c4bb5d3f5a1e14b4c7f9c3a2d8e6f1",
+  "control_evidence_sha256": "1cf08751bbdec27b7f53a9342d3b802838f6b679d8254a10ec3ab1dda8aefa77",
   "partition": {
     "plan_id": "recurrent-certification-events-v1",
     "salt": "legacy-engine-recurrent-certification-v1",
@@ -12,9 +12,6 @@
   },
   "family_alpha": 0.05,
   "bootstrap_replicates": 399,
-  "power_replicates": 199,
-  "safely_inside_ratio": 0.8,
-  "target_power": 0.8,
   "min_candidate_events": 3,
   "min_reference_events": 3,
   "min_time_buckets": 3,

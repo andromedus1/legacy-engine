@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 import duckdb
 
 from legacy_engine.analytics.eras.certification import payload_sha256
-from legacy_engine.analytics.eras.certification_run import CertificationRun
+from legacy_engine.analytics.eras.certification_run import CertificationRun, certification_run_identity
 from legacy_engine.analytics.eras.discovery import canonical_json
 
 CERTIFICATION_RUNS_DDL = """
@@ -35,7 +35,8 @@ def _payloads(run: CertificationRun) -> tuple[str, str, str]:
     manifest_json = canonical_json(run.manifest)
     results_json = canonical_json([result.model_dump(mode="json") for result in run.results])
     reasons_json = canonical_json(list(run.reasons))
-    if payload_sha256(json.loads(manifest_json)) != run.run_id:
+    expected_id = certification_run_identity(run.manifest, run.status, run.reasons)
+    if expected_id != run.run_id:
         raise ValueError(f"certification run {run.run_id} does not match its manifest digest")
     if payload_sha256(json.loads(results_json)) != run.results_sha256:
         raise ValueError(f"certification run {run.run_id} has an invalid results_sha256")
@@ -110,7 +111,10 @@ def read_certification_run(con: duckdb.DuckDBPyConnection, run_id: str) -> Certi
         or canonical_json(reasons_payload) != reasons_json
     ):
         raise ValueError(f"noncanonical certification ledger JSON for run_id {run_id}")
-    if payload_sha256(manifest_payload) != stored_id or payload_sha256(results_payload) != results_sha256:
+    from legacy_engine.analytics.eras.certification_run import CertificationManifest
+    if certification_run_identity(
+        CertificationManifest.model_validate(manifest_payload), status, tuple(reasons_payload),
+    ) != stored_id or payload_sha256(results_payload) != results_sha256:
         raise ValueError(f"certification ledger hash mismatch for run_id {run_id}")
     return CertificationRun.model_validate({
         "run_id": stored_id, "manifest": manifest_payload, "results_sha256": results_sha256,

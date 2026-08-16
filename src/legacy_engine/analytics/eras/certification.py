@@ -108,9 +108,6 @@ class CertificationCalibration(OutcomeFreeModel):
     partition: EventPartitionPlan
     family_alpha: float = Field(gt=0, lt=1)
     bootstrap_replicates: int = Field(gt=0)
-    power_replicates: int = Field(gt=0)
-    safely_inside_ratio: float = Field(gt=0, lt=1)
-    target_power: float = Field(gt=0, le=1)
     min_candidate_events: int = Field(gt=0)
     min_reference_events: int = Field(gt=0)
     min_time_buckets: int = Field(gt=0)
@@ -145,8 +142,6 @@ class CertificationCalibration(OutcomeFreeModel):
         for name, value in self.model_dump().items():
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"calibration {name} must be finite")
-        if self.safely_inside_ratio >= 1:
-            raise ValueError("safely_inside_ratio must be less than one")
         return self
 
 
@@ -163,7 +158,7 @@ CertificationReason = Literal[
     "taxonomy-incompatible", "source-contract-incompatible", "pending-format-truth",
     "format-truth-unavailable", "insufficient-candidate-events", "insufficient-reference-events",
     "insufficient-time-buckets", "effective-support-below-floor", "event-concentration",
-    "source-concentration", "power-below-target", "context-overlap-failed",
+    "source-concentration", "context-overlap-failed",
     "equivalence-straddles-margin", "component-non-equivalent", "omnibus-non-equivalent",
 ]
 SemanticFactState = Literal["confirmed", "pending", "unavailable"]
@@ -238,7 +233,6 @@ class SupportEvidence(OutcomeFreeModel):
     effective_events: float = Field(ge=0)
     max_event_share: float | None = Field(default=None, ge=0, le=1)
     max_source_share: float | None = Field(default=None, ge=0, le=1)
-    simulated_power: float | None = Field(default=None, ge=0, le=1)
     reasons: tuple[CertificationReason, ...]
 
 
@@ -299,6 +293,7 @@ def _event_ids_sha256(event_ids: Sequence[str]) -> str:
 
 def load_certification_calibration(path: Path | str) -> CertificationCalibration:
     import json
+    import hashlib
 
     calibration_path = Path(path)
     try:
@@ -308,7 +303,17 @@ def load_certification_calibration(path: Path | str) -> CertificationCalibration
     if not isinstance(raw, dict):
         raise ValueError(f"invalid certification calibration {calibration_path}: expected object")
     try:
-        return CertificationCalibration.model_validate(raw)
+        calibration = CertificationCalibration.model_validate(raw)
+        controls_path = calibration_path.with_name("certification-controls-v1.json")
+        if not controls_path.exists():
+            raise ValueError(f"checked-in control fixture missing beside {calibration_path}")
+        observed = hashlib.sha256(controls_path.read_bytes()).hexdigest()
+        if observed != calibration.control_evidence_sha256:
+            raise ValueError(
+                f"control evidence digest mismatch: profile names {calibration.control_evidence_sha256}, "
+                f"checked-in controls hash to {observed}"
+            )
+        return calibration
     except Exception as exc:
         raise ValueError(f"invalid certification calibration {calibration_path}: {exc}") from exc
 
@@ -443,12 +448,11 @@ def build_candidate_inputs(
 
 
 def _fact_crosses(candidate: CandidateCertificationInput, fact: SemanticFact) -> bool:
-    # A fact is relevant if it became effective inside either compared
-    # interval.  Future facts do not contaminate a historical cutoff.
-    return (
-        candidate.historical_interval.start <= fact.effective_on < candidate.historical_interval.end
-        or candidate.reference_interval.start <= fact.effective_on < candidate.reference_interval.end
-    )
+    # A semantic boundary anywhere from the historical start through the
+    # current endpoint breaks the reunion.  This includes the excluded gap
+    # between non-contiguous intervals, not only facts observed in either
+    # sample.
+    return candidate.historical_interval.start <= fact.effective_on < candidate.reference_interval.end
 
 
 def evaluate_semantic_guards(
@@ -469,12 +473,13 @@ def evaluate_semantic_guards(
     for fact in crossed:
         if candidate.entity not in fact.affected_entities and "*" not in fact.affected_entities:
             continue
-        if fact.state == "confirmed":
+        authoritative = fact.source in {"curated-ban-ledger", "frozen-contract"}
+        if fact.state == "confirmed" and authoritative:
             vetoes.append(fact.fact_id)
             reasons.append(reason_by_kind[fact.kind])
         else:
             unresolved.append(fact.fact_id)
-            reasons.append("pending-format-truth" if fact.state == "pending" else "format-truth-unavailable")
+            reasons.append("pending-format-truth" if fact.state in {"pending", "confirmed"} else "format-truth-unavailable")
     reasons = list(dict.fromkeys(reasons))
     disposition: GateDisposition = "reject" if vetoes else ("abstain" if unresolved else "pass")
     return SemanticGuardEvidence(
@@ -486,7 +491,7 @@ def evaluate_semantic_guards(
     )
 
 
-def _event_stats(decks: Sequence[DiscoveryDeck]) -> tuple[int, float | None, float | None]:
+def _event_stats(decks: Sequence[DiscoveryDeck]) -> tuple[int, float | None, float | None, float]:
     unique = _decks_unique(decks)
     by_event: dict[str, set[tuple[str, int]]] = {}
     by_source: dict[str, set[tuple[str, int]]] = {}
@@ -495,11 +500,14 @@ def _event_stats(decks: Sequence[DiscoveryDeck]) -> tuple[int, float | None, flo
         by_event.setdefault(deck.event_id, set()).add(key)
         by_source.setdefault(deck.source.casefold(), set()).add(key)
     events = len(by_event)
-    total = len(unique)
+    weights = [float(len(keys)) for keys in by_event.values()]
+    total = sum(weights)
+    effective = (total * total / sum(weight * weight for weight in weights)) if weights else 0.0
     return (
         events,
-        max((len(keys) / total for keys in by_event.values()), default=None),
-        max((len(keys) / total for keys in by_source.values()), default=None),
+        max((weight / total for weight in weights), default=None),
+        max((len(keys) / len(unique) for keys in by_source.values()), default=None),
+        effective,
     )
 
 
@@ -512,15 +520,15 @@ def evaluate_support(
     del seed  # power is deterministic from frozen support in certification v1
     old = _decks_unique(candidate.candidate_decks)
     ref = _decks_unique(candidate.reference_decks)
-    candidate_events, candidate_event_share, candidate_source_share = _event_stats(old)
-    reference_events, reference_event_share, reference_source_share = _event_stats(ref)
+    candidate_events, candidate_event_share, candidate_source_share, candidate_effective = _event_stats(old)
+    reference_events, reference_event_share, reference_source_share, reference_effective = _event_stats(ref)
     time_buckets = len({
         deck.event_date - timedelta(days=deck.event_date.isoweekday() - 1)
         for deck in (*old, *ref)
     })
     # Whole-event effective support.  Duplicated deck rows are removed before
     # this calculation, so publishing a duplicate cannot manufacture power.
-    effective_events = float(min(candidate_events, reference_events))
+    effective_events = float(min(candidate_effective, reference_effective))
     reasons: list[CertificationReason] = []
     if candidate_events < calibration.min_candidate_events:
         reasons.append("insufficient-candidate-events")
@@ -538,14 +546,6 @@ def evaluate_support(
         reasons.append("source-concentration")
     if reference_source_share is not None and reference_source_share > calibration.max_source_share:
         reasons.append("source-concentration")
-    simulated_power: float | None = None
-    if not reasons:
-        # Conservative support-only power proxy: no observed discrepancy or
-        # outcome enters it.  A profile can still force abstention by setting
-        # a target above the support implied by its declared floor.
-        simulated_power = min(1.0, effective_events / max(calibration.min_effective_events * 2.0, 1.0))
-        if simulated_power < calibration.target_power:
-            reasons.append("power-below-target")
     return SupportEvidence(
         disposition="abstain" if reasons else "pass",
         candidate_decks=len(old), reference_decks=len(ref),
@@ -553,7 +553,6 @@ def evaluate_support(
         time_buckets=time_buckets, effective_events=effective_events,
         max_event_share=max(candidate_event_share or 0.0, reference_event_share or 0.0) if old or ref else None,
         max_source_share=max(candidate_source_share or 0.0, reference_source_share or 0.0) if old or ref else None,
-        simulated_power=simulated_power,
         reasons=tuple(dict.fromkeys(reasons)),
     )
 
@@ -589,8 +588,15 @@ def evaluate_context_overlap(
     ref_den = len(ref_labels) + smoothing * len(vocabulary)
     old_prob = {label: (old_count[label] + smoothing) / old_den if old_den else 0.0 for label in vocabulary}
     ref_prob = {label: (ref_count[label] + smoothing) / ref_den if ref_den else 0.0 for label in vocabulary}
-    weights = [ref_prob[label] / old_prob[label] for label in vocabulary if old_prob[label] > 0]
     unsupported = sum(ref_prob[label] for label in vocabulary if old_count[label] == 0)
+    ref_by_event: dict[str, list[str]] = {}
+    for deck in ref:
+        ref_by_event.setdefault(deck.event_id, []).append(labels(deck))
+    # Context overlap is event-weighted as well: a large event contributes one
+    # cluster weight, while repeated deck rows cannot manufacture effective
+    # independent support.
+    weights = [sum(ref_prob.get(label, 0.0) / old_prob.get(label, 1.0) for label in labels_for_event)
+               for labels_for_event in ref_by_event.values()]
     sum_weights = sum(weights)
     effective = (sum_weights * sum_weights / sum(weight * weight for weight in weights)) if weights else 0.0
     max_weight = max(weights, default=None)
@@ -612,25 +618,23 @@ def evaluate_context_overlap(
 
 
 def _mass(decks: Sequence[DiscoveryDeck], board: Literal["main", "side"], smoothing: float) -> dict[str, float]:
+    """Return raw board counts; smoothing happens once in ``_js``."""
     counts: dict[str, float] = {}
-    total = 0.0
-    for deck in _decks_unique(decks):
+    for deck in decks:
         cards = deck.mainboard if board == "main" else deck.sideboard
         for card in cards:
             key = card.name.casefold()
             counts[key] = counts.get(key, 0.0) + card.copies
-            total += card.copies
-    keys = sorted(counts)
-    if not keys:
-        return {}
-    denominator = total + smoothing * len(keys)
-    return {key: (counts.get(key, 0.0) + smoothing) / denominator for key in keys}
+    return counts
 
 
 def _js(left: dict[str, float], right: dict[str, float], smoothing: float) -> float:
     if not left or not right:
         return float("nan")
     names = sorted(set(left) | set(right))
+    # The same union vocabulary and one pseudocount per category are used for
+    # both samples.  Smoothing each side's local vocabulary before union would
+    # make the result depend on the arbitrary feature dimension.
     p = np.array([left.get(name, 0.0) + smoothing for name in names], dtype=float)
     q = np.array([right.get(name, 0.0) + smoothing for name in names], dtype=float)
     p /= p.sum()
@@ -640,7 +644,7 @@ def _js(left: dict[str, float], right: dict[str, float], smoothing: float) -> fl
 
 
 def _energy(left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck]) -> float:
-    decks = (*_decks_unique(left), *_decks_unique(right))
+    decks = (*left, *right)
     vocabulary = sorted({card.name.casefold() for deck in decks for card in (*deck.mainboard, *deck.sideboard)})
     if not vocabulary or not left or not right:
         return float("nan")
@@ -653,8 +657,8 @@ def _energy(left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck]) -> fl
             values.extend((lookup.get(name, 0) / board_total if board_total else 0.0) for name in vocabulary)
         return np.asarray(values, dtype=float)
 
-    x = np.asarray([vector(deck) for deck in _decks_unique(left)])
-    y = np.asarray([vector(deck) for deck in _decks_unique(right)])
+    x = np.asarray([vector(deck) for deck in left])
+    y = np.asarray([vector(deck) for deck in right])
     cross = np.linalg.norm(x[:, None, :] - y[None, :, :], axis=2).mean()
     within_x = np.linalg.norm(x[:, None, :] - x[None, :, :], axis=2).mean()
     within_y = np.linalg.norm(y[:, None, :] - y[None, :, :], axis=2).mean()
@@ -662,16 +666,12 @@ def _energy(left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck]) -> fl
 
 
 def _context_mass(decks: Sequence[DiscoveryDeck], key: Literal["parent_archetype", "source"], smoothing: float) -> dict[str, float]:
-    values = [getattr(deck, key).casefold() for deck in _decks_unique(decks)]
-    keys = sorted(set(values))
-    if not keys:
-        return {}
-    denominator = len(values) + smoothing * len(keys)
-    return {value: (values.count(value) + smoothing) / denominator for value in keys}
+    values = [getattr(deck, key).casefold() for deck in decks]
+    return {value: values.count(value) for value in set(values)}
 
 
 def _mmd2(left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck], bandwidth: float) -> float:
-    decks = (*_decks_unique(left), *_decks_unique(right))
+    decks = (*left, *right)
     vocabulary = sorted({card.name.casefold() for deck in decks for card in (*deck.mainboard, *deck.sideboard)})
     if not vocabulary or not left or not right:
         return float("nan")
@@ -684,8 +684,8 @@ def _mmd2(left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck], bandwid
             values.extend((lookup.get(name, 0) / total if total else 0.0) for name in vocabulary)
         return np.asarray(values, dtype=float)
 
-    x = np.asarray([vector(deck) for deck in _decks_unique(left)])
-    y = np.asarray([vector(deck) for deck in _decks_unique(right)])
+    x = np.asarray([vector(deck) for deck in left])
+    y = np.asarray([vector(deck) for deck in right])
 
     def kernel(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         distance = np.sum((a[:, None, :] - b[None, :, :]) ** 2, axis=2)
@@ -727,7 +727,7 @@ _MARGIN_FIELD: dict[EquivalenceChannel, str] = {
 
 def _resample_events(decks: Sequence[DiscoveryDeck], rng: np.random.Generator) -> tuple[DiscoveryDeck, ...]:
     groups: dict[str, list[DiscoveryDeck]] = {}
-    for deck in _decks_unique(decks):
+    for deck in decks:
         groups.setdefault(deck.event_id, []).append(deck)
     if not groups:
         return ()
@@ -757,26 +757,39 @@ def certify_candidate_family(
         support = evaluate_support(candidate, calibration, seed=seed)
         context = evaluate_context_overlap(candidate, calibration)
         guards.append((candidate, semantic, support, context))
-        if semantic.disposition == "pass" and support.disposition == "pass" and context.disposition == "pass":
-            estimates[candidate.historical_segment_id] = estimate_candidate_discrepancies(candidate, calibration)
+        # The simultaneous family is frozen before guards are applied.  Even
+        # an abstaining member contributes its channels to the max statistic;
+        # removing it adaptively would make multiplicity look safer than it is.
+        estimates[candidate.historical_segment_id] = estimate_candidate_discrepancies(candidate, calibration)
 
     # Build a single max-statistic distribution over every eligible candidate
     # and channel.  Canonical candidate ids seed independent resampling, so
     # changing input order cannot alter any evidence.
     maxima: list[float] = []
+    reference_by_segment = {}
+    context_reference_by_segment = {}
+    for candidate in ordered:
+        reference_by_segment.setdefault(candidate.reference_segment_id, candidate.reference_decks)
+        context_reference_by_segment.setdefault(candidate.reference_segment_id, candidate.reference_context_decks)
     for replicate in range(calibration.bootstrap_replicates):
         maximum = 0.0
+        shared_reference: dict[str, tuple[DiscoveryDeck, ...]] = {}
+        shared_context_reference: dict[str, tuple[DiscoveryDeck, ...]] = {}
         for candidate, semantic, support, context in guards:
             key = candidate.historical_segment_id
-            if key not in estimates:
-                continue
             local_seed = int.from_bytes(hashlib.sha256(
                 f"{seed}:{candidate.candidate_id}:{key}:{replicate}".encode("utf-8")
             ).digest()[:8], "big")
             rng = np.random.default_rng(local_seed)
+            reference_key = candidate.reference_segment_id
+            if reference_key not in shared_reference:
+                shared_reference[reference_key] = _resample_events(reference_by_segment[reference_key], rng)
+                shared_context_reference[reference_key] = _resample_events(context_reference_by_segment[reference_key], rng)
             sampled = candidate.model_copy(update={
                 "candidate_decks": _resample_events(candidate.candidate_decks, rng),
-                "reference_decks": _resample_events(candidate.reference_decks, rng),
+                "reference_decks": shared_reference[reference_key],
+                "candidate_context_decks": _resample_events(candidate.candidate_context_decks, rng),
+                "reference_context_decks": shared_context_reference[reference_key],
             })
             observed = estimates[key]
             boot = estimate_candidate_discrepancies(sampled, calibration)

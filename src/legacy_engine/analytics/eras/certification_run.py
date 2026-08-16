@@ -28,13 +28,26 @@ from legacy_engine.analytics.eras.discovery_store import read_discovery_run
 from pydantic import field_validator, model_validator
 
 CertificationRunStatus = Literal["complete", "degraded"]
-CertificationRunReason = Literal["no-recurrent-candidates", "all-inconclusive", "format-truth-unresolved"]
+CertificationRunReason = Literal[
+    "no-recurrent-candidates", "all-inconclusive", "format-truth-unresolved", "format-truth-unavailable"
+]
 
 CERTIFICATION_FEATURE_ALLOWLIST = (
     "deck.mainboard", "deck.parent_archetype", "deck.pilot_key", "deck.sideboard",
     "event.date", "event.provenance", "event.source", "format.semantic_fact",
     "legality.version", "partition.event_id", "reference.context", "taxonomy.version",
 )
+
+
+def certification_run_identity(manifest: "CertificationManifest", status: CertificationRunStatus,
+                               reasons: Sequence[CertificationRunReason]) -> str:
+    """Content id for the complete decision envelope, including disposition."""
+
+    return payload_sha256({
+        "manifest": manifest.model_dump(mode="json"),
+        "status": status,
+        "reasons": tuple(reasons),
+    })
 
 
 class EraCertificate(OutcomeFreeModel):
@@ -172,6 +185,10 @@ def run_recurrent_certification(
     discovery_run = read_discovery_run(con, discovery_run_id)
     if discovery_run is None:
         raise ValueError(f"discovery run {discovery_run_id!r} not found")
+    semantic_facts = tuple(sorted(
+        (fact for fact in semantic_facts if fact.effective_on <= discovery_run.manifest.as_of),
+        key=lambda fact: fact.fact_id,
+    ))
     # Semantic facts are an independent certification snapshot.  Only reuse
     # them as source boundaries when the discovery run itself recorded a
     # non-empty boundary catalog; pending monitor observations must not alter
@@ -191,6 +208,17 @@ def run_recurrent_certification(
     )
     candidates = build_candidate_inputs(discovery_run, corpus)
     decisions = certify_candidate_family(candidates, semantic_facts, calibration, seed=seed)
+    decision_statuses = [decision.final_status for decision in decisions]
+    run_reasons: list[CertificationRunReason] = []
+    if not candidates:
+        run_reasons.append("no-recurrent-candidates")
+    elif decision_statuses and all(status == "inconclusive" for status in decision_statuses):
+        run_reasons.append("all-inconclusive")
+    if any("pending-format-truth" in decision.reasons for decision in decisions):
+        run_reasons.append("format-truth-unresolved")
+    if any("format-truth-unavailable" in decision.reasons for decision in decisions):
+        run_reasons.append("format-truth-unavailable")
+    status: CertificationRunStatus = "degraded" if run_reasons else "complete"
     decision_by_entity: dict[str, list[CandidateDecision]] = {}
     for decision in decisions:
         decision_by_entity.setdefault(decision.candidate.entity, []).append(decision)
@@ -209,7 +237,7 @@ def run_recurrent_certification(
         outcome_feature_allowlist=CERTIFICATION_FEATURE_ALLOWLIST,
         seed=seed,
     )
-    run_id = payload_sha256(manifest.model_dump(mode="json"))
+    run_id = certification_run_identity(manifest, status, run_reasons)
     results: list[EntityCertificationResult] = []
     for result in sorted(discovery_run.results, key=lambda item: item.entity):
         reference = segments.get(result.reference_segment_id) if result.reference_segment_id else None
@@ -250,15 +278,6 @@ def run_recurrent_certification(
         ))
     results_payload = [result.model_dump(mode="json") for result in results]
     results_sha256 = payload_sha256(results_payload)
-    all_certificates = [certificate for result in results for certificate in result.certificates]
-    run_reasons: list[CertificationRunReason] = []
-    if not candidates:
-        run_reasons.append("no-recurrent-candidates")
-    elif all_certificates and all(certificate.status == "inconclusive" for certificate in all_certificates):
-        run_reasons.append("all-inconclusive")
-    if any("pending-format-truth" in decision.reasons for decision in decisions):
-        run_reasons.append("format-truth-unresolved")
-    status: CertificationRunStatus = "degraded" if run_reasons else "complete"
     return CertificationRun(
         run_id=run_id,
         manifest=manifest,
@@ -271,5 +290,5 @@ def run_recurrent_certification(
 
 __all__ = [
     "CERTIFICATION_FEATURE_ALLOWLIST", "EraCertificate", "EntityCertificationResult",
-    "CertificationManifest", "CertificationRun", "run_recurrent_certification",
+    "CertificationManifest", "CertificationRun", "certification_run_identity", "run_recurrent_certification",
 ]
