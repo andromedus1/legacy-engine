@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -567,3 +567,21 @@ Implemented the interval-consumption seam across four sequential checkpoints:
   new interval wrapper; certificate-backed matrix population is exposed through the resolved-match
   and evidence-view seams for the next consumer integration. Current-only values remain unchanged.
 - `uv.lock` was pre-existing dirty state and was intentionally not staged or modified.
+
+## Review findings
+
+- Effective weight: `standard`; one same-harness fresh-context independent pass reviewed frozen
+  commit `7ab3ded` on 2026-08-16. Closure requires verification of the named fix set only, not a
+  second independent pass.
+- Blocker story: `epic-recurrent-stable-era-evidence-interval-consumption-review-corrections`.
+- Required corrections: replace the parallel scalar wrapper with real interval-driven production
+  consumption; filter and orient exact requested pairs; preserve interval-level component identity;
+  repair open-start normalization; let the exact certificate govern the current component; compute
+  three independently aggregated views; and add adversarial integration/parity tests that exercise
+  every new public contract.
+- Important findings absorbed into the current-cycle correction set: stable outcome-independent
+  match identity, explicit scalar-projection refusal provenance, and package exports. Receiver
+  judgment treats these as boundary integrity, not deferrable cleanup.
+- Rejected: endpoint clock predicates are correct; current ranking authority was not silently
+  promoted; supplied hierarchy-prior overlap checks catch current/added reuse. No foundation or
+  applicable security finding was confirmed.
