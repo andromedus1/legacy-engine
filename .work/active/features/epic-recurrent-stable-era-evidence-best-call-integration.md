@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -537,3 +537,21 @@ nonexistent rows on another.
 The order intentionally proves the current diagnostic consumer before adding historical targets.
 The feature remains blocked on amplification's review correction until Unit 1 can consume a typed,
 round-trippable exact run rather than the current weak wrapper.
+
+## Implementation evidence
+
+- Delivered publication projection in `581e8aa`, current diagnostic closure in `2b812b7`, historical
+  cutoff plumbing in `5e4c9f8`, and offline target bundle composition in the pending integration
+  commit. Stories are directly `done`; feature is returned to `review`.
+- Added typed direct-view/challenger/refusal projection, diagnostic authority digest, `ReportTarget`
+  (`Today's model` only for retrospectives), exclusive cutoff propagation through matchup/field/plan
+  paths, and self-contained sibling manifest generation.
+- Verification: Ruff and compileall pass for all changed modules.
+
+### Deviations and risks
+
+- The report template's existing ranking controls remain unchanged; the typed evidence payload and
+  embedded manifest are ready for the next presentation refinement, while no diagnostic can alter
+  ranking authority.
+- Interval component display is conservative (empty until entity-eligibility reconciliation is
+  wired) rather than reconstructing bounds from scalar horizons.

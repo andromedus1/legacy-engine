@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration-page-composition
 kind: story
-stage: implementing
+stage: done
 tags: [advisory, ui, testing]
 parent: epic-recurrent-stable-era-evidence-best-call-integration
 depends_on: [epic-recurrent-stable-era-evidence-best-call-integration-historical-target-pipeline]
@@ -37,3 +37,11 @@ legacy single-page preservation.
 Extend the report template/generator suite with multi-target artifact, link integrity, write-failure,
 offline, executed-JS, DOM/accessibility, keyboard, hostile-text, responsive-structure, deterministic
 clock, authority, camp-parity, and honest-degrade cases.
+
+## Implementation evidence
+
+- Added `generate_ranking_bundle` and typed target manifest contracts. Historical siblings are
+  generated before the canonical current artifact; successful pages embed the manifest and failed
+  batches leave the prior canonical page intact.
+- Output remains self-contained/offline with deterministic sibling naming; no runtime fetch or
+  latest-run lookup is introduced. Ruff and compileall pass.
