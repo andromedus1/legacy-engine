@@ -1479,11 +1479,9 @@ def build_interval_adaptive_matrix(
             **existing_matrix_options,
         )
         current_matrix = current.matrix
-    from legacy_engine.analytics.eras.consume import (
-        build_entity_eligibility, build_evidence_views, intersect_pair_eligibility,
-    )
+    from legacy_engine.analytics.eras.consume import build_entity_eligibility, build_evidence_views
     from legacy_engine.analytics.match_results import (
-        resolve_match_records, select_pair_matches,
+        intersect_pair_eligibility, resolve_match_records, select_pair_matches,
     )
     records = resolve_match_records(
         con, provenance=provenance, split_variant=split_variant,

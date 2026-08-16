@@ -58,6 +58,8 @@ named fix set is green, the parent closes administratively without another indep
 - Current, expanded, and added views now independently build W-L-n cells from selected rows;
   invalid/future certificate envelopes cannot alter the scalar current component, and returned
   interval matrix evidence is populated for parent and multi-split labels.
+- Added explicit returned-evidence and DB-backed unavailable-certificate regression tests, plus
+  typed scalar refusal assertions.
 
 ## Verification evidence
 
@@ -66,6 +68,7 @@ named fix set is green, the parent closes administratively without another indep
 - `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py` — passed.
 - `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_interval_consumption.py` — 3 passed.
 - `uv run ruff check src/legacy_engine/analytics/eras/consume.py src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py tests/analytics/eras/test_interval_consumption.py` — passed.
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_interval_consumption.py` — 6 passed.
 
 ## Coordination
 

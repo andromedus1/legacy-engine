@@ -664,9 +664,13 @@ def build_evidence_views(
             status = "concentrated"
         from legacy_engine.analytics.matchup import build_cell
         wins = sum(1 for row in selected if row.match.subject_won)
+        # View-local hierarchy seed: derive the prior from this view's own selected
+        # observations.  It is intentionally never borrowed from the full/current corpus.
+        local_prior = wins / len(selected) if selected else 0.5
         view_cell = build_cell(
             subject, opponent, wins, len(selected),
-            prior_source="pre-disturbance" if policy == "pre-disturbance" else "hierarchy-only",
+            prior_mean=local_prior,
+            prior_source="view-local-pre-disturbance" if policy == "pre-disturbance" else "view-local-hierarchy",
         )
         return MatchupEvidenceView(kind=kind, cell=view_cell, match_ids=ids, pair_component_ids=tuple(row.pair_component_id for row in selected), certificate_ids=tuple(sorted({certificate for row in selected for certificate in (*row.subject_certificate_ids, *row.opponent_certificate_ids)})), concentration=concentration, prior=PriorEvidenceAudit(policy=policy, observation_match_ids_sha256=_digest_ids(ids), prior_match_ids_sha256=_digest_ids(prior_ids) if prior_ids else None, overlap_n=overlap, reason="; ".join(local_reasons) if local_reasons else "exact selected evidence"), status=status, reasons=tuple(dict.fromkeys(local_reasons)))
     return MatchupEvidenceViews(subject=subject, opponent=opponent, clock=clock, current_only=view("current-only", current, "pre-disturbance"), certified_expanded=view("certified-expanded", expanded, "hierarchy-only"), added_history=view("added-history", added, "hierarchy-only"))
