@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery
 kind: feature
-stage: review
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: []
@@ -633,3 +633,23 @@ def discovery_run_ids(
 - The executed segmentation now uses `ruptures.KernelCPD(kernel="cosine")` with the versioned v2
   calibration and hard-boundary span limits. Focused discovery tests: 15 passed. Full era suite:
   184 passed. Discovery-owned Ruff and compileall checks passed.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none; the historical-duration and verification findings were absorbed into the
+named current-cycle correction set.
+**Nits**: resolved in `4249eaf`.
+**Rejected**: the pre-existing `uv.lock` change was outside feature scope; no foundation drift or
+applicable security finding was confirmed.
+
+**Notes**: Standard-weight deep feature review used one same-harness fresh-context pass. The pass
+requested changes for exact hard-date epochs, smoothing, executed-method fidelity, and fleet
+complexity. Commit `4249eaf` corrected the full named set and added adversarial coverage. Receiver
+verification after the fix: 12 isolated discovery/source tests passed, the full era suite passed
+184 tests, Ruff passed, compileall passed, and the recorded representative indexed run processed
+8,280 decks across 12 parents and 138 weeks in 0.193 seconds. Per standard review policy, closure is
+administrative after fix verification; no second independent pass was run. UI/accessibility and
+async/cancellation lenses were not applicable.
