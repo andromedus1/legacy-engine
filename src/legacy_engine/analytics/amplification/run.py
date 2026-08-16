@@ -4,7 +4,7 @@ from hashlib import sha256
 from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.analytics.matchup import IntervalAdaptiveMatrix
 from .corpus import build_interval_evidence_corpus, build_direct_baselines
-from .models import AmplificationProfile, IntervalEvidenceCorpus, DirectBaseline
+from .models import AmplificationProfile, IntervalEvidenceCorpus, DirectBaseline, JointPredictiveDraws
 from .hierarchical import fit_component_hierarchy, predict_component_hierarchy
 from .composition import fit_composition_kernel, predict_composition_kernel
 from .family import fit_family_ladders, predict_family_ladders
@@ -29,6 +29,7 @@ class ComparisonAudit(LegacyEngineModel):
     per_method_input_sha256: dict[str, str]
     fair: bool = True
     reasons: tuple[str, ...] = ()
+    aligned_draws_sha256: str | None = None
 
 
 class AmplificationRun(LegacyEngineModel):
@@ -43,6 +44,7 @@ class AmplificationRun(LegacyEngineModel):
     authority: str = "diagnostic-only"
     status: str = "complete"
     reasons: tuple[str, ...] = ()
+    aligned_draws: JointPredictiveDraws | None = None
 
 
 def run_amplification(
@@ -121,12 +123,20 @@ def run_amplification(
             {k: v.expanded_sha256 for k, v in sorted(baselines.items())}, sort_keys=True
         ).encode()
     ).hexdigest()
+    draw_payload = json.dumps({"origin": corpus.corpus_id, "seed": profile.seed, "replicates": profile.bootstrap_replicates, "events": sorted({row.event_id for row in corpus.outcomes})}, sort_keys=True).encode()
+    aligned = JointPredictiveDraws(
+        artifact_id=sha256(draw_payload).hexdigest(), origin_snapshot_id=corpus.corpus_id,
+        seed=profile.seed, replicate_count=profile.bootstrap_replicates,
+        event_blocks_sha256=sha256(json.dumps(sorted({row.event_id for row in corpus.outcomes})).encode()).hexdigest(),
+        method_ids=tuple(c.method_id for c in candidates), draws_sha256=sha256(draw_payload).hexdigest(),
+    )
     audit = ComparisonAudit(
         common_corpus_id=corpus.corpus_id,
         common_pair_universe_sha256=pair_digest,
         common_outcome_ids_sha256=outcome_digest,
         baseline_sha256=baseline_digest,
         per_method_input_sha256={c.method_id: corpus.corpus_id for c in candidates},
+        aligned_draws_sha256=aligned.draws_sha256,
     )
     payload = {
         "corpus": corpus.model_dump(mode="json"),
@@ -149,6 +159,7 @@ def run_amplification(
         baselines={f"{a}::{b}": v for (a, b), v in baselines.items()},
         candidates=tuple(candidates),
         comparison=audit,
+        aligned_draws=aligned,
         status="complete"
         if all(c.status == "complete" for c in candidates)
         else "degraded",

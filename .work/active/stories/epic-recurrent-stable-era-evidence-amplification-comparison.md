@@ -46,3 +46,6 @@ compileall, and the representative exact-run round trip specified by the parent 
   All candidates share one corpus, pair universe, outcome digest, and baseline digest; failures are
   retained as degraded results and authority is permanently `diagnostic-only`.
 - No latest/best/winner/promotion selector or parallel outcome query exists. Ruff and compileall pass.
+- The run carries an origin-frozen `JointPredictiveDraws` replay identity and aligned digest for
+  paired downstream action/regret intervals; all-case predictions remain present independently of
+  served/refused state.

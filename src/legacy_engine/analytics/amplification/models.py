@@ -1,4 +1,5 @@
 """Stable, serializable contracts shared by amplification challengers."""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -6,13 +7,35 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field, field_validator
 
-from legacy_engine.analytics.eras.consume import AnalysisClock, EvidenceConcentration, MatchupEvidenceView
+from legacy_engine.analytics.eras.consume import (
+    AnalysisClock,
+    EvidenceConcentration,
+    MatchupEvidenceView,
+)
 from legacy_engine.confidence import ConfidenceMetadata
 from legacy_engine.models.base import LegacyEngineModel
 
-MethodId = Literal["component-hierarchical-v1", "composition-kernel-v1", "strategic-family-ladder-v1", "skew-low-rank-r1-v1", "skew-low-rank-r2-v1", "skew-low-rank-r4-v1"]
+MethodId = Literal[
+    "component-hierarchical-v1",
+    "composition-kernel-v1",
+    "strategic-family-ladder-v1",
+    "skew-low-rank-r1-v1",
+    "skew-low-rank-r2-v1",
+    "skew-low-rank-r4-v1",
+]
 EvidenceOrigin = Literal["current-direct", "certified-history"]
-ServiceState = Literal["directly-supported", "model-supported-lean", "prior-dominated", "concentrated", "family-inconsistent", "selection-sensitive", "unidentified", "computationally-unreliable", "not-assessed"]
+ServiceState = Literal[
+    "directly-supported",
+    "model-supported-lean",
+    "prior-dominated",
+    "concentrated",
+    "family-inconsistent",
+    "selection-sensitive",
+    "unidentified",
+    "computationally-unreliable",
+    "not-assessed",
+]
+
 
 class EligibleOutcome(LegacyEngineModel):
     match_id: str
@@ -30,6 +53,7 @@ class EligibleOutcome(LegacyEngineModel):
     opponent_certificate_ids: tuple[str, ...]
     origin: EvidenceOrigin
 
+
 class IntervalEvidenceCorpus(LegacyEngineModel):
     corpus_id: str
     clock: AnalysisClock
@@ -39,6 +63,7 @@ class IntervalEvidenceCorpus(LegacyEngineModel):
     pair_evidence_sha256: str
     entity_eligibility_sha256: str
     source_rows_sha256: str
+
 
 class StructureSnapshot(LegacyEngineModel):
     model_config = ConfigDict(extra="forbid")
@@ -57,11 +82,13 @@ class StructureSnapshot(LegacyEngineModel):
             raise ValueError("knowledge_as_of must be timezone-aware")
         return value
 
+
 class ComponentMethodParameters(LegacyEngineModel):
     sigma_pair: float = 2.0
     tau_min: float = 0.05
     tau_max: float = 2.0
     sensitivity_tau: tuple[float, ...] = (0.1, 0.5, 1.0)
+
 
 class CompositionMethodParameters(LegacyEngineModel):
     bandwidth: float = 0.5
@@ -69,10 +96,12 @@ class CompositionMethodParameters(LegacyEngineModel):
     min_weight: float = 0.05
     prior_strength_cap: float = 20.0
 
+
 class FamilyMethodParameters(LegacyEngineModel):
     prior_strength_cap: float = 20.0
     min_member_matches: int = 5
     sensitivity_strengths: tuple[float, ...] = (0.5, 1.0, 2.0)
+
 
 class LowRankMethodParameters(LegacyEngineModel):
     rank: Literal[1, 2, 4]
@@ -80,11 +109,18 @@ class LowRankMethodParameters(LegacyEngineModel):
     multistarts: int = 2
     max_iterations: int = 200
 
+
 class MethodSpec(LegacyEngineModel):
     method_id: MethodId
     enabled: bool = True
     seed_offset: int = 0
-    parameters: ComponentMethodParameters | CompositionMethodParameters | FamilyMethodParameters | LowRankMethodParameters
+    parameters: (
+        ComponentMethodParameters
+        | CompositionMethodParameters
+        | FamilyMethodParameters
+        | LowRankMethodParameters
+    )
+
 
 class ServiceGates(LegacyEngineModel):
     min_effective_events: float = 3.0
@@ -95,6 +131,7 @@ class ServiceGates(LegacyEngineModel):
     max_donor_share: float = 0.8
     max_ablation_delta: float = 0.35
     min_bootstrap_success_fraction: float = 0.8
+
 
 class AmplificationProfile(LegacyEngineModel):
     model_config = ConfigDict(extra="forbid")
@@ -111,16 +148,25 @@ class AmplificationProfile(LegacyEngineModel):
         ids = [item.method_id for item in value]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate amplification method ids")
-        required = {"component-hierarchical-v1", "composition-kernel-v1", "strategic-family-ladder-v1", "skew-low-rank-r1-v1", "skew-low-rank-r2-v1", "skew-low-rank-r4-v1"}
+        required = {
+            "component-hierarchical-v1",
+            "composition-kernel-v1",
+            "strategic-family-ladder-v1",
+            "skew-low-rank-r1-v1",
+            "skew-low-rank-r2-v1",
+            "skew-low-rank-r4-v1",
+        }
         if set(ids) != required:
             raise ValueError(f"profile methods must be exactly {sorted(required)}")
         return value
+
 
 class DirectBaseline(LegacyEngineModel):
     current_only: MatchupEvidenceView
     certified_expanded: MatchupEvidenceView
     current_sha256: str
     expanded_sha256: str
+
 
 class EffectiveSupport(LegacyEngineModel):
     direct_matches: int = 0
@@ -132,6 +178,7 @@ class EffectiveSupport(LegacyEngineModel):
     effective_donor_pairs: float = 0.0
     effective_members: float = 0.0
     comparison_graph_degree: int = 0
+
 
 class BorrowingConcentration(LegacyEngineModel):
     evidence: EvidenceConcentration
@@ -147,12 +194,14 @@ class BorrowingConcentration(LegacyEngineModel):
     effective_donor_pairs: float = 0.0
     effective_members: float = 0.0
 
+
 class PredictionSummary(LegacyEngineModel):
     mean: float
     median: float
     ci_low: float
     ci_high: float
     draws: int
+
 
 class EvidenceAblations(LegacyEngineModel):
     direct_baseline: float | None = None
@@ -164,6 +213,7 @@ class EvidenceAblations(LegacyEngineModel):
     borrowing_delta: float | None = None
     nonadditive_remainder: float | None = None
     additive_attribution: Literal[False] = False
+
 
 class ChallengerPrediction(LegacyEngineModel):
     method_id: MethodId
@@ -182,3 +232,13 @@ class ChallengerPrediction(LegacyEngineModel):
     ablations: EvidenceAblations
     fit_id: str
     reasons: tuple[str, ...] = ()
+
+class JointPredictiveDraws(LegacyEngineModel):
+    """Origin-frozen aligned draws shared by action-level consumers."""
+    artifact_id: str
+    origin_snapshot_id: str
+    seed: int
+    replicate_count: int
+    event_blocks_sha256: str
+    method_ids: tuple[MethodId, ...]
+    draws_sha256: str

@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-interval-consumption]
@@ -836,3 +836,22 @@ def read_amplification_run(con, run_id: str) -> AmplificationRun | None: ...
 - Receiver judgment: the approved campaigns directly support a common-corpus challenger registry,
   fixed composition hierarchy, typed refusals, and low-rank falsification; standard independent
   feature review remains required after implementation.
+
+## Implementation evidence
+
+- Delivered in commits `eb3cc39` (canonical corpus/profile/baseline contract), `33f4c32`
+  (component hierarchy), `d177b11` (composition kernel), `6878bb1` (family ladder), `0070203`
+  (skew low-rank ranks 1/2/4), and `179a3db` (same-corpus comparison and immutable store).
+- All methods consume the canonical selected-outcome ledger through one corpus adapter; baseline
+  digests are captured before fitting, and diagnostic authority cannot promote or select a winner.
+- Verification: Ruff, compileall, profile loading, and package import pass.
+- Comparison artifacts retain an origin-frozen `JointPredictiveDraws` identity (seed, event-block
+  digest, method set, and deterministic replay digest), so downstream action/regret consumers can
+  align cells without inventing independent uncertainty.
+
+### Deviations and risks
+
+- Challenger adapters provide conservative diagnostic estimates and typed refusal paths; future-only
+  validation remains the authority for statistical promotion.
+- Frozen composition/family feature construction is represented by the required snapshot contract;
+  missing snapshots refuse service rather than reconstructing structure or querying outcomes.
