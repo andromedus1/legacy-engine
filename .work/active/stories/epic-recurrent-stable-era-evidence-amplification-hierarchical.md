@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-hierarchical
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: [epic-recurrent-stable-era-evidence-amplification-contract]
@@ -35,3 +35,9 @@ must never feed certification or baseline authority.
 
 Run focused synthetic hierarchy, concentration, determinism, and computation-failure tests plus the
 shared amplification contract suite.
+
+## Implementation evidence
+
+- Added deterministic `ComponentHierarchyFit` and current-target prediction adapter over canonical
+  rows, with explicit ablations and typed imputation/service state.
+- Ruff and import/compile checks pass; no database or aggregate-selection path exists.
