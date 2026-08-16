@@ -3214,6 +3214,233 @@ def advise_benchmark_run(
         click.echo(f"// ⚠ {reason}")
 
 
+@advise.group("recurrent-validation")
+def advise_recurrent_validation() -> None:
+    """Plan, seal, evaluate, and assess recurrent evidence without promotion authority."""
+
+
+@advise_recurrent_validation.command("plan")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_plan(
+    protocol_path: str,
+    base_protocol: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Validate and store the immutable protocol and exact parent-plan binding."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import plan_recurrent_validation
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    digest = plan_recurrent_validation(protocol, base, artifact_root=Path(artifact_root))
+    click.echo(f"// recurrent protocol: {protocol.protocol_id}; sha256={digest}")
+    click.echo(f"// origins={len(protocol.folds)}; authority={protocol.authority}")
+
+
+@advise_recurrent_validation.command("freeze")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--fold", "fold_id", required=True)
+@click.option("--snapshot-db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--snapshot-manifest", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--stages", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--forecast", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--code-commit", required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_freeze(
+    protocol_path: str,
+    base_protocol: str,
+    fold_id: str,
+    snapshot_db: str,
+    snapshot_manifest: str,
+    stages: str,
+    forecast: str,
+    code_commit: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Seal a typed refit chain and its full aligned forecast grid."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, SnapshotManifest, content_sha256,
+    )
+    from legacy_engine.advisory.recurrent_validation import (
+        OriginForecastPayload, RefitStageArtifact, load_recurrent_protocol,
+        recurrent_protocol_sha256,
+    )
+    from legacy_engine.workflows.recurrent_validation import seal_and_store_recurrent_origin
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    try:
+        fold = next(item for item in protocol.folds if item.fold_id == fold_id)
+        base_fold = next(item for item in base.planned_folds if item.fold_id == fold_id)
+    except StopIteration as exc:
+        raise click.ClickException(f"fold {fold_id!r} is not registered") from exc
+    manifest = SnapshotManifest.model_validate_json(Path(snapshot_manifest).read_bytes())
+    if manifest.protocol_hash != recurrent_protocol_sha256(protocol) or manifest.fold != base_fold:
+        raise click.ClickException("snapshot manifest protocol or fold differs from recurrent plan")
+    if manifest.max_training_event_date and manifest.max_training_event_date >= fold.data_until:
+        raise click.ClickException("snapshot contains an outcome at or after the exclusive origin")
+    stage_payload = json.loads(Path(stages).read_text(encoding="utf-8"))
+    if isinstance(stage_payload, dict):
+        stage_payload = stage_payload.get("stages")
+    if not isinstance(stage_payload, list):
+        raise click.ClickException("stages artifact must be a JSON list or {'stages': [...]} object")
+    stage_artifacts = tuple(RefitStageArtifact.model_validate(item) for item in stage_payload)
+    frozen_forecast = OriginForecastPayload.model_validate_json(Path(forecast).read_bytes())
+    artifact = seal_and_store_recurrent_origin(
+        Path(snapshot_db),
+        protocol=protocol,
+        fold=fold,
+        snapshot_manifest_sha256=content_sha256(manifest.model_dump(mode="json")),
+        stages=stage_artifacts,
+        forecast=frozen_forecast,
+        artifact_root=Path(artifact_root),
+        code_commit=code_commit,
+    )
+    click.echo(
+        f"// recurrent origin: {fold.fold_id}; artifact={artifact.artifact_sha256}; "
+        f"predictions={artifact.origin.predictions_sha256}"
+    )
+
+
+@advise_recurrent_validation.command("evaluate")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--origin", "origin_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--cases", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--field-counts", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_evaluate(
+    protocol_path: str,
+    base_protocol: str,
+    origin_path: str,
+    cases: str,
+    field_counts: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Build the common future ledger and evaluate predictive and decision evidence."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import (
+        FrozenOriginArtifact, evaluate_recurrent_origin,
+    )
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    frozen = FrozenOriginArtifact.model_validate_json(Path(origin_path).read_bytes())
+    case_rows = json.loads(Path(cases).read_text(encoding="utf-8"))
+    counts = json.loads(Path(field_counts).read_text(encoding="utf-8"))
+    if not isinstance(case_rows, list) or not isinstance(counts, dict):
+        raise click.ClickException("cases must be a list and field counts must be an object")
+    artifact = evaluate_recurrent_origin(
+        frozen.origin,
+        case_rows,
+        protocol=protocol,
+        future_field_counts=counts,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(
+        f"// recurrent evaluation: artifact={artifact.artifact_sha256}; "
+        f"predictive={artifact.predictive.status}; decision={artifact.decision.status}"
+    )
+
+
+@advise_recurrent_validation.command("aggregate")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--origin", "origin_paths", type=click.Path(exists=True, dir_okay=False), multiple=True, required=True)
+@click.option("--evaluation", "evaluation_paths", type=click.Path(exists=True, dir_okay=False), multiple=True, required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_aggregate(
+    protocol_path: str,
+    base_protocol: str,
+    origin_paths: tuple[str, ...],
+    evaluation_paths: tuple[str, ...],
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Evaluate every frozen challenger conjunction and write one immutable bundle."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import (
+        FrozenOriginArtifact, OriginEvaluationArtifact, aggregate_recurrent_evidence,
+    )
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    origins = tuple(
+        FrozenOriginArtifact.model_validate_json(Path(path).read_bytes()).origin
+        for path in origin_paths
+    )
+    evaluations = tuple(
+        OriginEvaluationArtifact.model_validate_json(Path(path).read_bytes())
+        for path in evaluation_paths
+    )
+    bundle, digest = aggregate_recurrent_evidence(
+        protocol,
+        origins,
+        evaluations,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(f"// recurrent bundle: sha256={digest}; assessments={len(bundle.assessments)}")
+    for assessment in bundle.assessments:
+        click.echo(f"// {assessment.candidate_id}: {assessment.status}")
+
+
+@advise_recurrent_validation.command("proposal")
+@click.option("--assessment", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--target-config-version", required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_proposal(
+    assessment: str,
+    target_config_version: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Write an inert operator-review proposal from an exact promotable assessment."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.recurrent_validation import PromotionAssessment
+    from legacy_engine.workflows.recurrent_validation import write_operator_proposal
+
+    value = PromotionAssessment.model_validate_json(Path(assessment).read_bytes())
+    proposal = write_operator_proposal(
+        value,
+        target_config_version=target_config_version,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(
+        f"// operator review required: proposal={proposal.proposal_id}; "
+        f"candidate={proposal.candidate_id}"
+    )
+
+
 @advise_benchmark.group("player-effect")
 def advise_benchmark_player_effect() -> None:
     """Experimental, production-neutral player identity sensitivity."""

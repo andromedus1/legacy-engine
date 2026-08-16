@@ -140,6 +140,53 @@ def plan_recurrent_validation(
     return digest
 
 
+def seal_and_store_recurrent_origin(
+    snapshot_db: Path,
+    *,
+    protocol: RecurrentBenchmarkProtocol,
+    fold: RecurrentBenchmarkFold,
+    snapshot_manifest_sha256: str,
+    stages: Sequence[RefitStageArtifact],
+    forecast: OriginForecastPayload,
+    artifact_root: Path,
+    code_commit: str,
+) -> FrozenOriginArtifact:
+    """Seal validated stage outputs and store their exact source snapshot."""
+    origin = seal_recurrent_origin(
+        protocol,
+        fold,
+        snapshot_manifest_sha256=snapshot_manifest_sha256,
+        stages=stages,
+        forecast=forecast,
+        code_commit=code_commit,
+    )
+    origin_digest = content_sha256(origin.model_dump(mode="json"))
+    directory = artifact_root / "origins" / origin_digest
+    snapshot_path = directory / "snapshot.duckdb"
+    if snapshot_path.exists():
+        if _file_sha256(snapshot_path) != _file_sha256(snapshot_db):
+            raise FileExistsError(f"refusing divergent origin snapshot collision: {snapshot_path}")
+    else:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(snapshot_db, snapshot_path)
+    snapshot_file_sha = _file_sha256(snapshot_path)
+    artifact = FrozenOriginArtifact(
+        artifact_sha256="0" * 64,
+        snapshot_manifest_sha256=snapshot_manifest_sha256,
+        snapshot_file_sha256=snapshot_file_sha,
+        origin=origin,
+    )
+    artifact = artifact.model_copy(
+        update={
+            "artifact_sha256": content_sha256(
+                artifact.model_dump(mode="json", exclude={"artifact_sha256"})
+            )
+        }
+    )
+    atomic_write_canonical(directory / "origin.json", artifact)
+    return artifact
+
+
 def refit_and_freeze_origin(
     source_db: Path,
     *,
@@ -203,39 +250,16 @@ def refit_and_freeze_origin(
             fold=fold,
             stages=tuple(stages),
         )
-        origin = seal_recurrent_origin(
-            protocol,
-            fold,
+        return seal_and_store_recurrent_origin(
+            temporary_snapshot,
+            protocol=protocol,
+            fold=fold,
             snapshot_manifest_sha256=snapshot_sha,
             stages=stages,
             forecast=forecast,
+            artifact_root=artifact_root,
             code_commit=code_commit or _code_commit(),
         )
-        origin_digest = content_sha256(origin.model_dump(mode="json"))
-        directory = artifact_root / "origins" / origin_digest
-        snapshot_path = directory / "snapshot.duckdb"
-        if snapshot_path.exists():
-            if _file_sha256(snapshot_path) != _file_sha256(temporary_snapshot):
-                raise FileExistsError(f"refusing divergent origin snapshot collision: {snapshot_path}")
-        else:
-            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(temporary_snapshot, snapshot_path)
-        snapshot_file_sha = _file_sha256(snapshot_path)
-        artifact = FrozenOriginArtifact(
-            artifact_sha256="0" * 64,
-            snapshot_manifest_sha256=snapshot_sha,
-            snapshot_file_sha256=snapshot_file_sha,
-            origin=origin,
-        )
-        artifact = artifact.model_copy(
-            update={
-                "artifact_sha256": content_sha256(
-                    artifact.model_dump(mode="json", exclude={"artifact_sha256"})
-                )
-            }
-        )
-        atomic_write_canonical(directory / "origin.json", artifact)
-        return artifact
 
 
 def evaluate_recurrent_origin(
@@ -337,6 +361,7 @@ __all__ = [
     "FrozenOriginArtifact",
     "OriginEvaluationArtifact",
     "plan_recurrent_validation",
+    "seal_and_store_recurrent_origin",
     "refit_and_freeze_origin",
     "evaluate_recurrent_origin",
     "aggregate_recurrent_evidence",
