@@ -1,6 +1,15 @@
 ## Unreleased
 
 ### Features
+- **Future-only recurrent evidence validation** — new `advise recurrent-validation`
+  `plan|freeze|evaluate|aggregate|proposal` lifecycle for cutoff-safe recurrent-era challengers.
+  `plan` validates `src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json`
+  against the exact parent benchmark protocol and stores it content-addressed; `freeze` seals one
+  recurrent origin from a cutoff snapshot, typed five-stage refit artifacts, and a full aligned
+  forecast grid; `evaluate` scores predictive and decision evidence on a common future ledger;
+  `aggregate` writes immutable bundle assessments across the direct recurrent and additive
+  amplification estimators; `proposal` emits only an inert operator-review artifact. There is no
+  auto-apply path, no `latest` alias, and the historical parent benchmark v1 remains unchanged.
 - **Colour-split archetype layer** — a curated, tracked registry
   (`src/legacy_engine/data/color_splits/legacy.json`) carves one parent archetype label into
   mutually exclusive children keyed on the colours its **mainboard nonland** cards actually cast.

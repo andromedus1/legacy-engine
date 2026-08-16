@@ -62,6 +62,7 @@ pillar remains deferred:
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
 | Sideboard-scorer backtest (`advise backtest` — recommended vs top-finisher boards) | ✅ built |
 | Archetype-sweep backtest (`advise sweep` — batch divergence mining across all archetypes) | ✅ built |
+| Future-only recurrent evidence validation (`advise recurrent-validation plan|freeze|evaluate|aggregate|proposal` — cutoff-safe, evaluation-only, no auto-apply) | ✅ built |
 | Data-driven subarchetype discovery (`discover run|list|apply|promote` — HDBSCAN camps, three-gate validated incl. temporal Gate C, era-default pools, staged→promoted) | ✅ built |
 | Variant overlays, opt-in (`report matchups --split-variant` · `report cards --conditioned [--variant]` · `report subgroup --winrates`) | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
@@ -186,6 +187,12 @@ legacy-engine advise refresh     --deck my.txt   # per-venue tuned maindeck + si
 legacy-engine advise acquire     --collection binder.txt --archetype "Dimir Tempo"  # priced buy list
 legacy-engine advise backtest --archetype "Dimir Tempo" --field field.txt  # scorer's board vs top-finisher boards (empirical anchor, never pass/fail)
 legacy-engine advise sweep --field field.txt                    # batch backtest EVERY archetype; ranked scorer-vs-winners divergence clusters
+legacy-engine advise benchmark plan --db data/legacy.duckdb --protocol-id recurrent-parent-future-v1 --created-at 2026-08-16T00:00:00Z --first-cutoff 2025-01-01 --until 2026-08-01 --out benchmark.json
+legacy-engine advise recurrent-validation plan --protocol src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json --base-protocol benchmark.json --artifact-root data/recurrent-validation
+legacy-engine advise recurrent-validation freeze --protocol src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json --base-protocol benchmark.json --fold fold-001 --snapshot-db artifacts/fold-001.duckdb --snapshot-manifest artifacts/fold-001.manifest.json --stages artifacts/fold-001.stages.json --forecast artifacts/fold-001.forecast.json --code-commit $(git rev-parse HEAD) --artifact-root data/recurrent-validation
+legacy-engine advise recurrent-validation evaluate --protocol src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json --base-protocol benchmark.json --origin data/recurrent-validation/origins/<digest>/origin.json --cases artifacts/fold-001.cases.json --field-counts artifacts/fold-001.field-counts.json --artifact-root data/recurrent-validation
+legacy-engine advise recurrent-validation aggregate --protocol src/legacy_engine/data/amplification/recurrent-evidence-future-v1.json --base-protocol benchmark.json --origin data/recurrent-validation/origins/<digest>/origin.json --evaluation data/recurrent-validation/evaluations/<digest>.json --artifact-root data/recurrent-validation
+legacy-engine advise recurrent-validation proposal --assessment assessment.json --target-config-version recurrent-expanded-v1 --artifact-root data/recurrent-validation
 legacy-engine discover run --archetype "Doomsday"               # cluster a parent into camps within its stable era (HDBSCAN, three-gate validated incl. temporal Gate C), stage as candidate
 legacy-engine discover run --archetype "Doomsday" --all-pool    # cluster the full corpus instead; %current stays anchored to the era
 legacy-engine discover apply --archetype "Doomsday"             # apply a staged split to decks.variant (labeled-speculative overlay)
@@ -198,6 +205,7 @@ legacy-engine report subgroup --archetype "Doomsday" --signature "Murktide Regen
 # --my-deck NAME loads a saved UserDeck; --field FILE supplies a custom field
 # --collection FILE enables owned/acquire annotations; --budget N caps the acquire plan
 # --provenance online|paper is available on all advise leaves (and report matchups/meta)
+# recurrent validation is evaluation-only: no `run`, no `latest`, and no auto-apply/promote command
 
 # Player identity and strength
 legacy-engine identify suggest          # candidate alias clusters (identity dedup)
