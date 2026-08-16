@@ -33,10 +33,12 @@ Use `/research-pipeline:knowledge-index` for the current schema and lint contrac
 ## Build process
 Follow the global methodology at `~/dev/skills-v2/plugins/research-pipeline/docs/build-process.md`. Project knowledge lives under `docs/`:
 
-- `docs/architecture/` — north star, conventions, roadmap
+- `docs/VISION.md`, `docs/SPEC.md`, `docs/ARCHITECTURE.md`, `docs/PRINCIPLES.md` — the live foundation docs
+- `docs/research-plan.md` — research routing and background context
 - `docs/briefs/` — domain briefs from `/research` and `/brief`
 - `docs/designs/` — phase implementation specs from `/design`
 - `docs/programs/` — `/research-program` output
+- `.work/` — delivery substrate for active, backlog, and release-bound work items
 
 Parent `CLAUDE.md` files ship the pipeline and shared key rules — do not duplicate them here. This file is for project-specific context only.
 
