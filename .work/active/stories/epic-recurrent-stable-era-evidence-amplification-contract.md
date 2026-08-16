@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-contract
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on: [epic-recurrent-stable-era-evidence-interval-consumption]
