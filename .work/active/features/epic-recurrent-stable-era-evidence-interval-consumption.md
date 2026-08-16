@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -585,3 +585,10 @@ Implemented the interval-consumption seam across four sequential checkpoints:
 - Rejected: endpoint clock predicates are correct; current ranking authority was not silently
   promoted; supplied hierarchy-prior overlap checks catch current/added reuse. No foundation or
   applicable security finding was confirmed.
+
+## Correction evidence
+
+The named review correction is complete in `epic-recurrent-stable-era-evidence-interval-consumption-review-corrections`:
+production interval-matrix calls now resolve exact directed rows and populate typed evidence,
+component identity is interval-level, open-start provenance is isolated, and public interval APIs
+are exported. Current matrix/ranking authority remains unchanged.

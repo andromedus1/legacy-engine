@@ -159,7 +159,7 @@ def normalize_atoms(atoms: tuple[EligibilityAtom, ...]) -> tuple[EligibilityAtom
         covering_by_key = {
             _source_key(source): source
             for atom in atoms
-            if (atom.start is None or atom.start <= (start or atom.end)) and atom.end >= end
+            if (atom.start is None or (start is not None and atom.start <= start)) and atom.end >= end
             for source in atom.sources
         }
         covering = tuple(covering_by_key[key] for key in sorted(covering_by_key))

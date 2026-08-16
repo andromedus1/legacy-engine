@@ -779,6 +779,7 @@ def resolve_match_records(
     con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
     since: str | None = None, until: str | None = None,
     split_variant: str | None = None, split_variants: Collection[str] | None = None,
+    subject: str | None = None, opponent: str | None = None,
 ) -> tuple[ResolvedMatch, ...]:
     """Resolve decisive pairings once, retaining stable identity for pure selection."""
     if split_variant is not None and split_variants is not None:
@@ -792,11 +793,23 @@ def resolve_match_records(
         outcome = parse_match_result(result)
         if outcome is None or outcome.winner is None:
             continue
-        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), normalize_player(p1), normalize_player(p2), _split_set_label(arch1, var1, split_set), _split_set_label(arch2, var2, split_set), outcome.winner == "p1"))
+        label1 = _split_set_label(arch1, var1, split_set)
+        label2 = _split_set_label(arch2, var2, split_set)
+        p1_won = outcome.winner == "p1"
+        if subject is not None or opponent is not None:
+            if (label1, label2) == (subject, opponent):
+                pass
+            elif (label1, label2) == (opponent, subject):
+                label1, label2 = label2, label1
+                p1, p2 = p2, p1
+                p1_won = not p1_won
+            else:
+                continue
+        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), normalize_player(p1), normalize_player(p2), label1, label2, p1_won))
     counts: Counter[tuple] = Counter()
     records: list[ResolvedMatch] = []
     for prov, event_id, event_date, p1, p2, label1, label2, p1_won in sorted(pending):
-        key = (event_id, p1, p2, label1, label2, p1_won)
+        key = (event_id, p1, p2, label1, label2)
         ordinal = counts[key]
         counts[key] += 1
         match_id = "match-" + sha256(("|".join(map(str, (*key, ordinal)))).encode()).hexdigest()[:32]
@@ -827,6 +840,6 @@ def select_pair_matches(records: tuple[ResolvedMatch, ...], pair: PairEligibilit
             opponent_segments = tuple(sorted({s.segment_id for s in sources if s.entity == pair.opponent and s.segment_id}))
             subject_certs = tuple(sorted({s.certificate_id for s in sources if s.entity == pair.subject and s.certificate_id}))
             opponent_certs = tuple(sorted({s.certificate_id for s in sources if s.entity == pair.opponent and s.certificate_id}))
-            selected.append(SelectedMatch(match=record, view=view, pair_component_id="pair-" + sha256((atom.component_id + record.match_id).encode()).hexdigest()[:32], subject_component_id=subject_segments[0] if subject_segments else atom.component_id, opponent_component_id=opponent_segments[0] if opponent_segments else atom.component_id, subject_certificate_ids=subject_certs, opponent_certificate_ids=opponent_certs))
+            selected.append(SelectedMatch(match=record, view=view, pair_component_id=atom.component_id, subject_component_id=subject_segments[0] if subject_segments else atom.component_id, opponent_component_id=opponent_segments[0] if opponent_segments else atom.component_id, subject_certificate_ids=subject_certs, opponent_certificate_ids=opponent_certs))
             seen.add(record.match_id)
     return tuple(selected)

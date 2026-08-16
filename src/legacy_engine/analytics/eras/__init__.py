@@ -105,6 +105,20 @@ from legacy_engine.analytics.eras.certificate_store import (
     read_certification_run,
     write_certification_run,
 )
+from legacy_engine.analytics.eras.consume import (
+    AnalysisClock,
+    EligibilityAtom,
+    EligibilitySourceRef,
+    EntityEligibility,
+    EvidenceConcentration,
+    MatchupEvidenceView,
+    MatchupEvidenceViews,
+    PriorEvidenceAudit,
+    build_entity_eligibility,
+    build_evidence_views,
+    intersect_atoms,
+    normalize_atoms,
+)
 
 __all__ = [
     "Bucket",
@@ -190,4 +204,16 @@ __all__ = [
     "write_certification_run",
     "read_certification_run",
     "certification_run_ids",
+    "AnalysisClock",
+    "EligibilityAtom",
+    "EligibilitySourceRef",
+    "EntityEligibility",
+    "EvidenceConcentration",
+    "PriorEvidenceAudit",
+    "MatchupEvidenceView",
+    "MatchupEvidenceViews",
+    "normalize_atoms",
+    "intersect_atoms",
+    "build_entity_eligibility",
+    "build_evidence_views",
 ]

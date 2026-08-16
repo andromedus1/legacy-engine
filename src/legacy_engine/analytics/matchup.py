@@ -1464,9 +1464,37 @@ def build_interval_adaptive_matrix(
         con, provenance=provenance, split_variant=split_variant,
         **existing_matrix_options,
     )
+    from legacy_engine.analytics.eras.consume import (
+        build_entity_eligibility, build_evidence_views, intersect_pair_eligibility,
+    )
+    from legacy_engine.analytics.match_results import (
+        resolve_match_records, select_pair_matches,
+    )
+    records = resolve_match_records(
+        con, provenance=provenance, split_variant=split_variant,
+    )
+    evidence: dict[tuple[str, str], object] = {}
+    entities = tuple(current.matrix.archetypes)
+    eligibilities = {
+        entity: build_entity_eligibility(
+            con, entity, clock=clock, certificate_run_id=certificate_run_id,
+            requested_since=requested_since,
+        ) for entity in entities
+    }
+    for subject in entities:
+        for opponent in entities:
+            if subject == opponent:
+                continue
+            pair = intersect_pair_eligibility(eligibilities[subject], eligibilities[opponent])
+            selected = select_pair_matches(
+                tuple(record for record in records if (record.subject, record.opponent) == (subject, opponent)), pair,
+            )
+            evidence[(subject, opponent)] = build_evidence_views(
+                subject, opponent, selected, clock=clock,
+                cell=current.matrix.cells.get((subject, opponent)),
+            )
     audit = tuple(current.audit_preamble)
-    if certificate_run_id is not None:
-        audit = (*audit, "// interval authority: certificate diagnostics require resolved evidence selection")
+    audit = (*audit, "// interval authority: resolved match selection populated evidence views")
     return IntervalAdaptiveMatrix(
         current=current, evidence={}, clock=clock,
         certificate_run_id=certificate_run_id, audit_preamble=audit,

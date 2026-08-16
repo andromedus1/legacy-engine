@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: []
@@ -42,3 +42,25 @@ evidence authority promised by the parent feature.
 
 Created from the single standard independent review of the parent feature on 2026-08-16. After this
 named fix set is green, the parent closes administratively without another independent pass.
+
+## Implementation notes
+
+- Corrected open-start sweep coverage so later finite intervals cannot borrow provenance before
+  their own start.
+- Resolved records now support exact directed-pair filtering, reverse orientation normalization,
+  and outcome-independent canonical ids; selected rows retain the actual interval component id.
+- The interval adaptive matrix now resolves and selects records for every production current cell,
+  populating typed evidence views while preserving the existing current matrix as authority.
+- Exported interval authority and evidence contracts from `analytics.eras`; scalar projection remains
+  unavailable for disjoint sets.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_consume.py tests/test_match_results.py tests/test_matchup.py tests/test_matchup_multi_split.py` — 199 passed.
+- `uv run ruff check src/legacy_engine/analytics/eras/consume.py src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py src/legacy_engine/analytics/eras/__init__.py` — passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras src/legacy_engine/analytics/match_results.py src/legacy_engine/analytics/matchup.py` — passed.
+
+## Coordination
+
+Certification-owned files were intentionally excluded from this checkpoint; their worker changes
+remain uncommitted in the shared worktree.
