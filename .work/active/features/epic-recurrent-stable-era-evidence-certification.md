@@ -680,7 +680,8 @@ def certification_run_ids(
 - Review weight: standard (caller/project default). Feature is intentionally left at `review` for
   the root agent's independent review.
 - Child commits: partition `29188d1`; guards/support `4e8fcca`; family equivalence `41583c1`; exact
-  ledger `671898e`; immutable knowledge-availability correction `9a0009f`.
+  ledger `671898e`; immutable knowledge-availability correction `9a0009f`; discovery result digest
+  boundary fix `9825a7c`.
 - Files changed: `analytics/eras/certification.py` and `certification_source.py` (closed models,
   partition, guards, channels, bootstrap); `certification_run.py` and `certificate_store.py`
   (immutable run/envelope); `discovery_run.py` (partition-marked pure handoff); package exports,
