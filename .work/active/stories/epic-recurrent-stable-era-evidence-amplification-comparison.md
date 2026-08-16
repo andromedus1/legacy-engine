@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification-comparison
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-amplification
 depends_on:
@@ -39,3 +39,10 @@ scoring and nested model choice belong to the dependent validation feature.
 
 Run focused composition/store/fairness/failure tests, all amplification and interval suites, Ruff,
 compileall, and the representative exact-run round trip specified by the parent feature.
+
+## Implementation evidence
+
+- Added `run_amplification`, typed candidate/comparison manifests, and immutable exact-id store.
+  All candidates share one corpus, pair universe, outcome digest, and baseline digest; failures are
+  retained as degraded results and authority is permanently `diagnostic-only`.
+- No latest/best/winner/promotion selector or parallel outcome query exists. Ruff and compileall pass.
