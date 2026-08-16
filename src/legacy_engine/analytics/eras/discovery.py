@@ -12,11 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
+from bisect import bisect_right
 
 import duckdb
 import numpy as np
@@ -33,6 +35,8 @@ DiscoveryReason = Literal[
     "insufficient-reference-events",
     "insufficient-historical-decks",
     "insufficient-historical-events",
+    "insufficient-historical-duration",
+    "insufficient-reference-duration",
     "main-shift",
     "sideboard-shift",
     "mixed-configuration",
@@ -42,6 +46,8 @@ DiscoveryReason = Literal[
     "complete-link-conflict",
     "no-historical-segment",
 ]
+
+_MIXTURE_SAMPLE_MAX = 64
 
 
 class OutcomeFreeModel(LegacyEngineModel):
@@ -152,7 +158,7 @@ class SegmentationWeights(OutcomeFreeModel):
 
 class DiscoveryCalibration(OutcomeFreeModel):
     calibration_id: str
-    method_id: Literal["segment-fingerprint-complete-link-v1"]
+    method_id: Literal["segment-fingerprint-complete-link-v2"]
     bucket_days: int = Field(gt=0)
     min_segment_buckets: int = Field(gt=0)
     min_segment_decks: int = Field(gt=0)
@@ -368,7 +374,11 @@ def load_outcome_free_corpus(
             else:
                 raise ValueError(f"invalid board {board!r} for deck {key!r}")
             copies = int(copies)
-            if copies <= 0:
+            # Ingested corpora may retain a zero-count placeholder row; it is
+            # structurally absent and cannot contribute to a fingerprint.
+            if copies == 0:
+                continue
+            if copies < 0:
                 raise ValueError(f"card copies must be positive for deck {key!r}: {copies}")
             card_name = " ".join(str(name).split())
             if not card_name:
@@ -525,6 +535,68 @@ def _deck_id(deck: DiscoveryDeck) -> str:
     return f"{deck.event_id}:{deck.deck_idx}"
 
 
+@dataclass(frozen=True)
+class _DiscoveryIndex:
+    """One-pass corpus index shared by fleet discovery and pair comparison."""
+
+    all_labeled: tuple[DiscoveryDeck, ...]
+    by_entity: dict[str, tuple[DiscoveryDeck, ...]]
+    entity_buckets: dict[str, dict[date, tuple[DiscoveryDeck, ...]]]
+    field_buckets: dict[date, tuple[DiscoveryDeck, ...]]
+    starts: tuple[date, ...]
+    final: date
+    vocabulary: tuple[str, ...]
+    deck_by_id: dict[str, DiscoveryDeck]
+
+
+def _build_discovery_index(corpus: OutcomeFreeCorpus, calibration: DiscoveryCalibration) -> _DiscoveryIndex:
+    if not corpus.decks:
+        return _DiscoveryIndex((), {}, {}, {}, (), corpus.as_of + timedelta(days=1), (), {})
+    final = corpus.as_of + timedelta(days=1)
+    first = _week_start(min(deck.event_date for deck in corpus.decks))
+    starts: set[date] = set()
+    cursor = first
+    while cursor < final:
+        starts.add(cursor)
+        cursor += timedelta(days=calibration.bucket_days)
+    starts.update(
+        boundary.effective_on
+        for boundary in corpus.semantic_boundaries
+        if boundary.hard and first < boundary.effective_on < final
+    )
+    ordered_starts = tuple(sorted(starts))
+    all_labeled = tuple(deck for deck in corpus.decks if _is_subject_label(deck.parent_archetype))
+    by_entity_lists: dict[str, list[DiscoveryDeck]] = {}
+    entity_bucket_lists: dict[str, dict[date, list[DiscoveryDeck]]] = {}
+    field_bucket_lists: dict[date, list[DiscoveryDeck]] = {start: [] for start in ordered_starts}
+    for deck in all_labeled:
+        by_entity_lists.setdefault(deck.parent_archetype, []).append(deck)
+        position = bisect_right(ordered_starts, deck.event_date) - 1
+        if position < 0:
+            continue
+        bucket = ordered_starts[position]
+        entity_bucket_lists.setdefault(deck.parent_archetype, {}).setdefault(bucket, []).append(deck)
+        field_bucket_lists.setdefault(bucket, []).append(deck)
+    vocabulary = tuple(sorted({
+        card.name.casefold()
+        for deck in corpus.decks
+        for card in (*deck.mainboard, *deck.sideboard)
+    }))
+    return _DiscoveryIndex(
+        all_labeled=all_labeled,
+        by_entity={entity: tuple(decks) for entity, decks in by_entity_lists.items()},
+        entity_buckets={
+            entity: {start: tuple(decks) for start, decks in buckets.items()}
+            for entity, buckets in entity_bucket_lists.items()
+        },
+        field_buckets={start: tuple(decks) for start, decks in field_bucket_lists.items()},
+        starts=ordered_starts,
+        final=final,
+        vocabulary=vocabulary,
+        deck_by_id={_deck_id(deck): deck for deck in corpus.decks},
+    )
+
+
 def _card_vector(deck: DiscoveryDeck, board: str, vocabulary: tuple[str, ...]) -> np.ndarray:
     cards = deck.mainboard if board == "main" else deck.sideboard
     values = {card.name.casefold(): card.copies for card in cards}
@@ -573,8 +645,19 @@ def _js_distance(left: Sequence[NamedMass], right: Sequence[NamedMass], alpha: f
     if not left or not right:
         return None
     names = sorted(set(v.key for v in left) | {v.key for v in right})
-    p = np.array([_distribution_map(left).get(name, alpha) for name in names], dtype=float)
-    q = np.array([_distribution_map(right).get(name, alpha) for name in names], dtype=float)
+    if not (set(v.key for v in left) & set(v.key for v in right)):
+        # A wholly disjoint support is a structural shift, not a near-match
+        # whose score should be rescued by pseudocounts.  Keep this explicit
+        # guard alongside union smoothing so all shipped channels reject it.
+        return 1.0
+    left_map = _distribution_map(left)
+    right_map = _distribution_map(right)
+    # Add the same pseudocount to every category in the *union* before
+    # normalizing.  Smoothing a missing category to a probability after local
+    # normalization is not coherent and made disjoint distributions look too
+    # close at alpha=.5.
+    p = np.array([left_map.get(name, 0.0) + alpha for name in names], dtype=float)
+    q = np.array([right_map.get(name, 0.0) + alpha for name in names], dtype=float)
     p /= p.sum()
     q /= q.sum()
     midpoint = (p + q) / 2.0
@@ -598,15 +681,22 @@ def _mixture_energy(
     corpus: OutcomeFreeCorpus,
     left: SegmentFingerprint,
     right: SegmentFingerprint,
+    index: _DiscoveryIndex | None = None,
 ) -> float | None:
-    by_id = {_deck_id(deck): deck for deck in corpus.decks}
-    all_cards = tuple(sorted({card.name.casefold() for deck in corpus.decks for card in (*deck.mainboard, *deck.sideboard)}))
+    by_id = index.deck_by_id if index is not None else {_deck_id(deck): deck for deck in corpus.decks}
+    all_cards = index.vocabulary if index is not None else tuple(sorted({
+        card.name.casefold() for deck in corpus.decks for card in (*deck.mainboard, *deck.sideboard)
+    }))
     if not all_cards or not left.deck_ids or not right.deck_ids:
         return None
 
     def vectors(ids: Sequence[str]) -> np.ndarray:
         out = []
-        for deck_id in ids:
+        selected_ids = tuple(sorted(ids))
+        if len(selected_ids) > _MIXTURE_SAMPLE_MAX:
+            positions = np.linspace(0, len(selected_ids) - 1, _MIXTURE_SAMPLE_MAX, dtype=int)
+            selected_ids = tuple(selected_ids[position] for position in positions)
+        for deck_id in selected_ids:
             deck = by_id[deck_id]
             out.append(np.concatenate((_card_vector(deck, "main", all_cards), _card_vector(deck, "side", all_cards))))
         return np.asarray(out, dtype=float)
@@ -637,7 +727,7 @@ def _feature_signature(
     field_decks: Sequence[DiscoveryDeck],
     entity: str,
     calibration: DiscoveryCalibration,
-) -> tuple[np.ndarray, tuple[NamedMass, ...], tuple[NamedMass, ...], tuple[NamedMass, ...], tuple[NamedMass, ...]]:
+) -> tuple[np.ndarray, tuple[NamedMass, ...], tuple[NamedMass, ...], tuple[NamedMass, ...], tuple[NamedMass, ...], float]:
     vocab = tuple(sorted({card.name.casefold() for deck in field_decks for card in (*deck.mainboard, *deck.sideboard)}))
     main = _board_distribution(decks, "main", calibration.smoothing_alpha)
     side = _board_distribution(decks, "side", calibration.smoothing_alpha)
@@ -652,15 +742,15 @@ def _feature_signature(
     field_vec = np.array([_distribution_map(field).get(name, 0.0) for name in sorted({v.key for v in field})], dtype=float)
     source_vec = np.array([_distribution_map(source).get(name, 0.0) for name in sorted({v.key for v in source})], dtype=float)
     vector = np.concatenate((main_vec, side_vec, field_vec, source_vec, np.array([subject_share])))
-    return vector, main, side, field, source
+    return vector, main, side, field, source, subject_share
 
 
 def _segment_distance_for_weeks(
     left: Sequence[DiscoveryDeck], right: Sequence[DiscoveryDeck], field_left: Sequence[DiscoveryDeck], field_right: Sequence[DiscoveryDeck],
     entity: str, calibration: DiscoveryCalibration,
 ) -> float:
-    _, left_main, left_side, left_field, left_source = _feature_signature(left, field_left, entity, calibration)
-    _, right_main, right_side, right_field, right_source = _feature_signature(right, field_right, entity, calibration)
+    _, left_main, left_side, left_field, left_source, left_share = _feature_signature(left, field_left, entity, calibration)
+    _, right_main, right_side, right_field, right_source, right_share = _feature_signature(right, field_right, entity, calibration)
     channels = (
         (_js_distance(left_main, right_main, calibration.smoothing_alpha), calibration.weights.main),
         (_js_distance(left_side, right_side, calibration.smoothing_alpha), calibration.weights.side),
@@ -668,7 +758,55 @@ def _segment_distance_for_weeks(
         (_js_distance(left_source, right_source, calibration.smoothing_alpha), calibration.weights.source),
     )
     score = sum((value or 0.0) * weight for value, weight in channels)
+    score += abs(left_share - right_share) * calibration.weights.subject_share
     return float(score)
+
+
+def _kernel_breaks(
+    bucket_subject: Sequence[Sequence[DiscoveryDeck]],
+    bucket_field: Sequence[Sequence[DiscoveryDeck]],
+    starts: Sequence[date],
+    boundaries: Sequence[DiscoveryBoundary],
+    entity: str,
+    calibration: DiscoveryCalibration,
+    vocabulary: tuple[str, ...],
+) -> set[int]:
+    """Run the calibrated cosine-kernel PELT method on fixed bucket features."""
+
+    import ruptures as rpt
+
+    labels = tuple(sorted({deck.parent_archetype.casefold() for bucket in bucket_field for deck in bucket if _is_subject_label(deck.parent_archetype) and deck.parent_archetype != entity}))
+    sources = tuple(sorted({deck.source.casefold() for bucket in bucket_subject for deck in bucket}))
+    matrix: list[np.ndarray] = []
+    for decks, field_decks in zip(bucket_subject, bucket_field):
+        _, main, side, field, source, share = _feature_signature(decks, field_decks, entity, calibration)
+        main_map, side_map = _distribution_map(main), _distribution_map(side)
+        field_map, source_map = _distribution_map(field), _distribution_map(source)
+        values = (
+            [main_map.get(key, 0.0) * math.sqrt(calibration.weights.main) for key in vocabulary]
+            + [side_map.get(key, 0.0) * math.sqrt(calibration.weights.side) for key in vocabulary]
+            + [field_map.get(key, 0.0) * math.sqrt(calibration.weights.field) for key in labels]
+            + [source_map.get(key, 0.0) * math.sqrt(calibration.weights.source) for key in sources]
+            + [share * math.sqrt(calibration.weights.subject_share)]
+        )
+        matrix.append(np.asarray(values, dtype=float))
+    if len(matrix) < 2 * calibration.min_segment_buckets:
+        return set()
+    values = np.asarray(matrix)
+    hard_indices = {index for index, start in enumerate(starts) if any(boundary.hard and boundary.effective_on == start for boundary in boundaries)}
+    spans = [0] + sorted(hard_indices) + [len(starts)]
+    found: set[int] = set()
+    for span_start, span_end in zip(spans, spans[1:]):
+        if span_end - span_start < 2 * calibration.min_segment_buckets:
+            continue
+        algo = rpt.KernelCPD(kernel="cosine", min_size=calibration.min_segment_buckets)
+        algo.fit(values[span_start:span_end])
+        try:
+            breaks = algo.predict(pen=calibration.pelt_penalty)
+        except (rpt.NotEnoughPoints, ValueError):
+            continue
+        found.update(span_start + point for point in breaks[:-1])
+    return found
 
 
 def _make_segment(
@@ -680,6 +818,7 @@ def _make_segment(
     bucket_decks: Sequence[Sequence[DiscoveryDeck]],
     all_bucket_decks: Sequence[Sequence[DiscoveryDeck]],
     calibration: DiscoveryCalibration,
+    index: _DiscoveryIndex,
 ) -> SegmentFingerprint:
     decks = [deck for bucket in bucket_decks for deck in bucket]
     field_decks = [deck for bucket in all_bucket_decks for deck in bucket]
@@ -705,12 +844,11 @@ def _make_segment(
         missing_bucket_fraction=(sum(not bucket for bucket in bucket_decks) / len(bucket_decks)) if bucket_decks else 1.0,
     )
     vectors_payload = []
-    all_cards = tuple(sorted({card.name.casefold() for deck in corpus.decks for card in (*deck.mainboard, *deck.sideboard)}))
     for deck in sorted(decks, key=lambda d: (d.event_date, d.event_id, d.deck_idx)):
         vectors_payload.append({
             "id": _deck_id(deck),
-            "main": _card_vector(deck, "main", all_cards).round(12).tolist(),
-            "side": _card_vector(deck, "side", all_cards).round(12).tolist(),
+            "main": [(card.name.casefold(), card.copies) for card in deck.mainboard],
+            "side": [(card.name.casefold(), card.copies) for card in deck.sideboard],
         })
     vector_digest = payload_sha256(vectors_payload)
     crossed = _crossed_boundaries(corpus.semantic_boundaries, start, end)
@@ -748,72 +886,46 @@ def segment_parent_archetype(
     calibration: DiscoveryCalibration,
     *,
     seed: int = 0,
+    _index: _DiscoveryIndex | None = None,
 ) -> tuple[SegmentFingerprint, ...]:
     """Build deterministic weekly fingerprints for one parent archetype."""
 
     del seed  # The v1 method is deterministic; retained in the contract for future challengers.
     if not _is_subject_label(entity):
         return ()
-    subject = [deck for deck in corpus.decks if deck.parent_archetype == entity]
+    index = _index or _build_discovery_index(corpus, calibration)
+    subject = index.by_entity.get(entity, ())
     if len(subject) < calibration.min_subject_decks:
         return ()
-    all_labeled = [deck for deck in corpus.decks if _is_subject_label(deck.parent_archetype)]
+    all_labeled = index.all_labeled
     if not all_labeled:
         return ()
-    first = _week_start(min(deck.event_date for deck in corpus.decks))
-    final = corpus.as_of + timedelta(days=1)
-    # Calendar buckets are never extended past the explicit cutoff.  The final
-    # bucket is consequently the current reference interval ending at as_of+1.
-    starts: list[date] = []
-    cursor = first
-    while cursor < final:
-        starts.append(cursor)
-        cursor += timedelta(days=calibration.bucket_days)
-    bucket_subject = [
-        [deck for deck in subject if start <= deck.event_date < min(start + timedelta(days=calibration.bucket_days), final)]
-        for start in starts
-    ]
-    bucket_field = [
-        [deck for deck in all_labeled if start <= deck.event_date < min(start + timedelta(days=calibration.bucket_days), final)]
-        for start in starts
-    ]
+    starts = list(index.starts)
+    final = index.final
+    # Calendar buckets are split at exact hard semantic dates.  A midweek
+    # boundary therefore creates a partial bucket instead of being rounded
+    # down to the preceding Monday.
+    subject_buckets = index.entity_buckets.get(entity, {})
+    bucket_subject = [list(subject_buckets.get(start, ())) for start in starts]
+    bucket_field = [list(index.field_buckets.get(start, ())) for start in starts]
     if not starts:
         return ()
 
-    # A small dynamic boundary detector.  The score is the weighted change in
-    # channel distributions at a prospective cut.  PELT's penalty is applied
-    # as a minimum gain over the local neighboring score, which avoids
-    # over-segmenting sparse weekly noise while remaining fully reproducible.
-    boundaries: set[int] = set()
-    min_size = calibration.min_segment_buckets
-    if len(starts) >= 2 * min_size:
-        local_scores = []
-        for index in range(1, len(starts)):
-            local_scores.append(_segment_distance_for_weeks(
-                bucket_subject[index - 1], bucket_subject[index],
-                bucket_field[index - 1], bucket_field[index], entity, calibration,
-            ))
-        for index, score in enumerate(local_scores, start=1):
-            if index < min_size or len(starts) - index < min_size:
-                continue
-            neighborhood = local_scores[max(0, index - 2):min(len(local_scores), index + 1)]
-            baseline = float(np.median(neighborhood)) if neighborhood else 0.0
-            # ``score`` is the weighted sum of channels (main is weighted .40
-            # in the checked-in calibration), so the decision floor is kept in
-            # weighted units rather than compared to an individual JS value.
-            if score > max(0.025, baseline + calibration.pelt_penalty * 0.02):
-                boundaries.add(index)
-    # Hard semantic boundaries are exact, inclusive for the new interval.
-    for boundary in corpus.semantic_boundaries:
-        if not boundary.hard:
-            continue
-        if first < boundary.effective_on < final:
-            index = max(0, min(len(starts), (boundary.effective_on - first).days // calibration.bucket_days))
-            # A semantic boundary is structural even when it leaves a thin
-            # side.  The resulting segment remains in the evidence ledger and
-            # receives the normal support-floor refusal downstream.
-            if 0 < index < len(starts):
-                boundaries.add(index)
+    # Hard semantic boundaries are exact, inclusive for the new interval; the
+    # kernel fitter receives them as structural span limits.
+    boundaries = _kernel_breaks(
+        bucket_subject, bucket_field, starts, corpus.semantic_boundaries,
+        entity, calibration, tuple(sorted({
+            card.name.casefold()
+            for deck in subject
+            for card in (*deck.mainboard, *deck.sideboard)
+        })),
+    )
+    boundaries.update(
+        starts.index(boundary.effective_on)
+        for boundary in corpus.semantic_boundaries
+        if boundary.hard and boundary.effective_on in starts
+    )
 
     cuts = [0] + sorted(boundaries) + [len(starts)]
     segments: list[SegmentFingerprint] = []
@@ -824,7 +936,7 @@ def segment_parent_archetype(
         end = final if end_index == len(starts) else starts[end_index]
         segments.append(_make_segment(
             corpus, entity, start, end, end == final,
-            bucket_subject[start_index:end_index], bucket_field[start_index:end_index], calibration,
+            bucket_subject[start_index:end_index], bucket_field[start_index:end_index], calibration, index,
         ))
     return tuple(segments)
 
@@ -834,6 +946,8 @@ def compare_segment_fingerprints(
     left: SegmentFingerprint,
     right: SegmentFingerprint,
     calibration: DiscoveryCalibration,
+    *,
+    _index: _DiscoveryIndex | None = None,
 ) -> SegmentComparison:
     """Compare two fingerprints and retain all channel-level refusal reasons."""
 
@@ -852,11 +966,14 @@ def compare_segment_fingerprints(
         reasons.append("insufficient-historical-decks")
     if left.support.events < calibration.min_segment_events or right.support.events < calibration.min_segment_events:
         reasons.append("insufficient-historical-events")
+    duration_floor = calibration.min_segment_buckets * calibration.bucket_days
+    if (left.end - left.start).days < duration_floor or (right.end - right.start).days < duration_floor:
+        reasons.append("insufficient-historical-duration")
     main = _js_distance(left.main_slots, right.main_slots, calibration.smoothing_alpha)
     side = _js_distance(left.side_slots, right.side_slots, calibration.smoothing_alpha)
     field = _js_distance(left.field_context, right.field_context, calibration.smoothing_alpha)
     source = _js_distance(left.source_mix, right.source_mix, calibration.smoothing_alpha)
-    mixture = _mixture_energy(corpus, left, right)
+    mixture = _mixture_energy(corpus, left, right, _index)
     if main is None:
         reasons.append("main-shift")
     if side is None:
@@ -916,10 +1033,11 @@ def discover_recurrent_states(
 ) -> tuple[EntityDiscoveryResult, ...]:
     """Nominate complete-link historical groups for every eligible parent."""
 
-    entities = sorted({deck.parent_archetype for deck in corpus.decks if _is_subject_label(deck.parent_archetype)})
+    index = _build_discovery_index(corpus, calibration)
+    entities = sorted(index.by_entity)
     results: list[EntityDiscoveryResult] = []
     for entity in entities:
-        subject_count = sum(deck.parent_archetype == entity for deck in corpus.decks)
+        subject_count = len(index.by_entity[entity])
         if subject_count < calibration.min_subject_decks:
             # Keep an explicit typed refusal in the fleet result.  The entity
             # is not segmented (the subject floor is structural), but dropping
@@ -931,7 +1049,7 @@ def discover_recurrent_states(
                 reasons=("insufficient-subject-decks",),
             ))
             continue
-        segments = segment_parent_archetype(corpus, entity, calibration, seed=seed)
+        segments = segment_parent_archetype(corpus, entity, calibration, seed=seed, _index=index)
         if not segments:
             results.append(EntityDiscoveryResult(
                 entity=entity, status="degraded", reference_segment_id=None,
@@ -954,11 +1072,13 @@ def discover_recurrent_states(
             current_reasons.append("insufficient-reference-decks")
         if reference.support.events < calibration.min_segment_events:
             current_reasons.append("insufficient-reference-events")
+        if (reference.end - reference.start).days < calibration.min_segment_buckets * calibration.bucket_days:
+            current_reasons.append("insufficient-reference-duration")
         comparisons: list[SegmentComparison] = []
         historical = [segment for segment in segments if not segment.reference]
         direct: list[tuple[SegmentFingerprint, SegmentComparison]] = []
         for candidate in historical:
-            comparison = compare_segment_fingerprints(corpus, reference, candidate, calibration)
+            comparison = compare_segment_fingerprints(corpus, reference, candidate, calibration, _index=index)
             comparisons.append(comparison)
             if comparison.compatible and candidate.support.decks >= calibration.min_segment_decks and candidate.support.events >= calibration.min_segment_events:
                 direct.append((candidate, comparison))
@@ -968,7 +1088,7 @@ def discover_recurrent_states(
         for candidate, direct_comparison in direct:
             conflict = False
             for admitted in group:
-                pair = compare_segment_fingerprints(corpus, admitted, candidate, calibration)
+                pair = compare_segment_fingerprints(corpus, admitted, candidate, calibration, _index=index)
                 comparisons.append(pair)
                 if not pair.compatible:
                     conflict = True

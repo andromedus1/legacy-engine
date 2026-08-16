@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing, perf]
 parent: epic-recurrent-stable-era-evidence-discovery
 depends_on: []
@@ -40,3 +40,21 @@ certification or outcome-bearing analysis.
 
 Created from the single standard independent review of the parent feature on 2026-08-16. Once this
 named fix set is green, the parent closes administratively without a second independent pass.
+
+## Implementation notes
+
+- Files changed: `src/legacy_engine/analytics/eras/discovery.py`,
+  `src/legacy_engine/analytics/eras/discovery_source.py`,
+  `src/legacy_engine/data/eras/discovery-v1.json`, and focused discovery tests.
+- Corrected exact hard-boundary bucket starts/epochs, union-vocabulary smoothing with explicit
+  disjoint-support rejection, subject-share participation, historical duration floors, and a
+  shared one-pass corpus index for fleet eligibility/buckets/vocabulary.
+- Replaced the heuristic boundary detector with declared
+  `ruptures.KernelCPD(kernel="cosine")`, versioned as
+  `segment-fingerprint-complete-link-v2` with `recurrent-segment-fingerprint-v2` calibration.
+- Verification: focused discovery tests — 15 passed; full `PYTHONPATH=. .venv/bin/pytest -q
+  tests/analytics/eras` — 184 passed; discovery-owned Ruff and compileall checks passed; the
+  indexed synthetic corpus check completed successfully. The pre-existing `uv.lock` remains
+  untouched.
+- Adjacent shared-file issue: certification partition edits remain uncommitted in
+  `discovery_run.py`; this correction does not stage or alter those hunks.

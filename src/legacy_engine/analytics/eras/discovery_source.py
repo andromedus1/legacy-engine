@@ -1,10 +1,4 @@
-"""DuckDB adapter for the outcome-free recurrent discovery corpus.
-
-The implementation lives next to the frozen contracts in ``discovery.py`` so
-the adapter and core share no duplicate schema.  This module is deliberately a
-small import seam: consumers can depend on a source-specific path while the
-core still receives only ``OutcomeFreeCorpus``.
-"""
+"""Import seam for the DuckDB-to-outcome-free discovery corpus adapter."""
 
 from legacy_engine.analytics.eras.discovery import load_outcome_free_corpus
 

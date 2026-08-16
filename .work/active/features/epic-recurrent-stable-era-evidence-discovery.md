@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: []
@@ -623,3 +623,13 @@ def discovery_run_ids(
 - Nits absorbed: remove unused imports and align the database-adapter module comment.
 - Rejected: the pre-existing `uv.lock` change is out of scope; no foundation drift or applicable
   security finding was confirmed.
+
+## Review correction summary
+
+- The standard-review correction story is complete: exact mid-bucket hard boundaries now create
+  exact partial intervals and incompatible epochs; JS channels use coherent union smoothing and
+  reject disjoint support; subject-share is weighted; historical duration floors are enforced; and
+  the fleet path uses a shared pre-index.
+- The executed segmentation now uses `ruptures.KernelCPD(kernel="cosine")` with the versioned v2
+  calibration and hard-boundary span limits. Focused discovery tests: 15 passed. Full era suite:
+  184 passed. Discovery-owned Ruff and compileall checks passed.

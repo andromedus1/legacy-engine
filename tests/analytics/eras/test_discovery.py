@@ -10,12 +10,13 @@ from legacy_engine.analytics.eras.discovery import (
     discover_recurrent_states,
     segment_parent_archetype,
 )
+import legacy_engine.analytics.eras.discovery as discovery_module
 
 
 def _calibration(**overrides):
     raw = {
         "calibration_id": "test-v1",
-        "method_id": "segment-fingerprint-complete-link-v1",
+        "method_id": "segment-fingerprint-complete-link-v2",
         "bucket_days": 7,
         "min_segment_buckets": 3,
         "min_segment_decks": 3,
@@ -97,6 +98,56 @@ def test_hard_boundary_forces_an_epoch_and_refusal():
     comparison = compare_segment_fingerprints(corpus, segments[0], segments[-1], _calibration())
     assert comparison.compatible is False
     assert comparison.reasons == ("contract-incompatible",)
+
+
+def test_mid_bucket_hard_boundary_is_exact_and_changes_epoch():
+    boundary = DiscoveryBoundary(
+        boundary_id="taxonomy-midweek", effective_on=date(2026, 2, 4),
+        kind="taxonomy", hard=True, detail="midweek taxonomy release",
+    )
+    segments = segment_parent_archetype(_recurrence_corpus((boundary,)), "X", _calibration())
+    after = next(segment for segment in segments if segment.start == date(2026, 2, 4))
+    before = next(segment for segment in segments if segment.end == date(2026, 2, 4))
+    assert before.contract_epoch == "epoch:initial"
+    assert after.contract_epoch == "epoch:taxonomy-midweek"
+    assert before.end == after.start == date(2026, 2, 4)
+
+
+def test_disjoint_field_and_source_support_is_rejected():
+    corpus = _recurrence_corpus()
+    segments = segment_parent_archetype(corpus, "X", _calibration())
+    right = segments[-1].model_copy(update={
+        "field_context": (discovery_module.NamedMass(key="different-field", mass=1.0),),
+        "source_mix": (discovery_module.NamedMass(key="different-source", mass=1.0),),
+    })
+    comparison = compare_segment_fingerprints(corpus, segments[-1], right, _calibration())
+    assert comparison.compatible is False
+    assert "field-shift" in comparison.reasons
+    assert "source-shift" in comparison.reasons
+    assert comparison.distances is not None
+    assert comparison.distances.field_js == 1.0
+    assert comparison.distances.source_js == 1.0
+
+
+def test_subject_share_participates_in_boundary_score():
+    calibration = _calibration()
+    when = date(2026, 1, 5)
+    left = [_deck(f"left-{idx}", when, "X", "A", idx) for idx in range(3)]
+    left += [_deck("left-other", when, "Other", "Other")]
+    right = [_deck(f"right-{idx}", when, "X", "A", idx) for idx in range(9)]
+    right += [_deck("right-other", when, "Other", "Other")]
+    score = discovery_module._segment_distance_for_weeks(
+        left[:3], right[:9], left, right, "X", calibration,
+    )
+    assert score >= abs((3 / 4) - (9 / 10)) * calibration.weights.subject_share
+
+
+def test_historical_duration_floor_is_explicit():
+    corpus = _recurrence_corpus()
+    segments = segment_parent_archetype(corpus, "X", _calibration())
+    thin = segments[0].model_copy(update={"end": segments[0].start + timedelta(days=2)})
+    comparison = compare_segment_fingerprints(corpus, segments[-1], thin, _calibration())
+    assert "insufficient-historical-duration" in comparison.reasons
 
 
 def test_unknown_and_conflict_labels_are_not_entities():

@@ -4,7 +4,6 @@ import duckdb
 import pytest
 
 from legacy_engine.analytics.eras.discovery import (
-    DiscoveryCalibration,
     DiscoveryDeck,
     load_discovery_calibration,
     load_outcome_free_corpus,
@@ -39,7 +38,7 @@ def _source_db() -> duckdb.DuckDBPyConnection:
 
 def test_calibration_is_checked_in_and_typed():
     calibration = load_discovery_calibration(DISCOVERY_CALIBRATION_PATH)
-    assert calibration.calibration_id == "recurrent-segment-fingerprint-v1"
+    assert calibration.calibration_id == "recurrent-segment-fingerprint-v2"
     assert calibration.weights.model_dump() == {
         "main": 0.4, "side": 0.25, "field": 0.2, "source": 0.1, "subject_share": 0.05,
     }

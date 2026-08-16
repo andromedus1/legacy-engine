@@ -1,6 +1,6 @@
 {
-  "calibration_id": "recurrent-segment-fingerprint-v1",
-  "method_id": "segment-fingerprint-complete-link-v1",
+  "calibration_id": "recurrent-segment-fingerprint-v2",
+  "method_id": "segment-fingerprint-complete-link-v2",
   "bucket_days": 7,
   "min_segment_buckets": 3,
   "min_segment_decks": 30,
