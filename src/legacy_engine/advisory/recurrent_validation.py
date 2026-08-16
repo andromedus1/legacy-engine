@@ -95,6 +95,60 @@ class RecurrentBenchmarkProtocol(LegacyEngineModel):
         return self
 
 
+class OriginRefitManifest(LegacyEngineModel):
+    fold: RecurrentBenchmarkFold
+    snapshot_manifest_sha256: str
+    replay_mode: ReplayMode
+    discovery_run_id: str
+    certification_run_id: str
+    interval_corpus_id: str
+    amplification_run_id: str
+    structure_snapshot_id: str
+    stage_input_sha256: dict[str, str]
+    stage_config_sha256: dict[str, str]
+    max_outcome_date: str
+    outcome_ids_sha256: str
+    outcome_columns_accessed_by_discovery: tuple[()] = ()
+    status: Literal["complete", "not-evaluable", "invalid"]
+    reasons: tuple[str, ...] = ()
+
+
+class FrozenEvidencePrediction(LegacyEngineModel):
+    estimator_id: EvidenceEstimatorId
+    subject: str
+    opponent: str
+    probability: float | None
+    interval: tuple[float, float] | None = None
+    draw_artifact_sha256: str | None = None
+    served: bool
+    fallback_estimator_id: Literal["current-only-v1"] | None = None
+    evidence_kind: Literal["current-only", "contiguous-era", "certified-expanded", "amplified"]
+    current_match_ids_sha256: str
+    historical_match_ids_sha256: str | None = None
+    borrowed_match_ids_sha256: str | None = None
+    imputation: Literal["none", "partial", "full"]
+    fit_id: str
+    reasons: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _probability(self) -> "FrozenEvidencePrediction":
+        if self.probability is not None and not 0 <= self.probability <= 1:
+            raise ValueError("probability must be in [0,1]")
+        return self
+
+
+class FrozenRecurrentOrigin(LegacyEngineModel):
+    protocol_sha256: str
+    manifest: OriginRefitManifest
+    action_universe: tuple[str, ...]
+    field_shares: dict[str, float]
+    predictions: tuple[FrozenEvidencePrediction, ...]
+    recommendation_actions: dict[EvidenceEstimatorId, str | None]
+    common_pair_universe_sha256: str
+    predictions_sha256: str
+    code_commit: str
+
+
 def load_recurrent_protocol(path: Path | str) -> RecurrentBenchmarkProtocol:
     payload = json.loads(Path(path).read_text())
     return RecurrentBenchmarkProtocol.model_validate(payload)
@@ -104,8 +158,51 @@ def recurrent_protocol_sha256(protocol: RecurrentBenchmarkProtocol) -> str:
     return content_sha256(protocol.model_dump(mode="json"))
 
 
+def freeze_origin(
+    protocol: RecurrentBenchmarkProtocol,
+    fold: RecurrentBenchmarkFold,
+    *,
+    stage_artifacts: dict[str, str],
+    action_universe: tuple[str, ...] = (),
+    field_shares: dict[str, float] | None = None,
+    predictions: tuple[FrozenEvidencePrediction, ...] = (),
+    code_commit: str = "unknown",
+) -> FrozenRecurrentOrigin:
+    """Seal an injected, origin-refit stage bundle without consulting latest state."""
+    if fold not in protocol.folds:
+        raise ValueError("fold is not registered in protocol")
+    required = ("snapshot", "discovery", "certification", "interval", "amplification", "structure")
+    missing = [name for name in required if name not in stage_artifacts]
+    status: Literal["complete", "not-evaluable", "invalid"] = "complete" if not missing else "not-evaluable"
+    reasons = (f"missing stage artifacts: {','.join(missing)}",) if missing else ()
+    manifest = OriginRefitManifest(
+        fold=fold, snapshot_manifest_sha256=stage_artifacts.get("snapshot", ""),
+        replay_mode=protocol.replay_mode, discovery_run_id=stage_artifacts.get("discovery", ""),
+        certification_run_id=stage_artifacts.get("certification", ""), interval_corpus_id=stage_artifacts.get("interval", ""),
+        amplification_run_id=stage_artifacts.get("amplification", ""), structure_snapshot_id=stage_artifacts.get("structure", ""),
+        stage_input_sha256=dict(stage_artifacts), stage_config_sha256={}, max_outcome_date=fold.data_until,
+        outcome_ids_sha256=content_sha256(()), status=status, reasons=reasons,
+    )
+    pairs = tuple(sorted({f"{p.subject}:{p.opponent}" for p in predictions}))
+    return FrozenRecurrentOrigin(
+        protocol_sha256=recurrent_protocol_sha256(protocol), manifest=manifest,
+        action_universe=action_universe, field_shares=field_shares or {}, predictions=predictions,
+        recommendation_actions={}, common_pair_universe_sha256=content_sha256(pairs),
+        predictions_sha256=content_sha256([p.model_dump(mode="json") for p in predictions]), code_commit=code_commit,
+    )
+
+
+def refit_and_freeze_origin(source_db, *, protocol, fold, taxonomy_snapshot=None, knowledge_inputs=None):
+    """Boundary adapter for workflows; production callers inject stage artifacts explicitly."""
+    artifacts = getattr(knowledge_inputs, "stage_artifacts", None) if knowledge_inputs is not None else None
+    if artifacts is None and isinstance(knowledge_inputs, dict):
+        artifacts = knowledge_inputs.get("stage_artifacts")
+    return freeze_origin(protocol, fold, stage_artifacts=artifacts or {})
+
+
 __all__ = [
     "DIRECT_ESTIMATOR_IDS", "EVIDENCE_ESTIMATOR_REGISTRY", "EvidenceEstimatorId",
     "PromotionMargins", "RecurrentEvaluationSupport", "RecurrentBenchmarkFold",
     "RecurrentBenchmarkProtocol", "load_recurrent_protocol", "recurrent_protocol_sha256",
+    "OriginRefitManifest", "FrozenEvidencePrediction", "FrozenRecurrentOrigin", "freeze_origin", "refit_and_freeze_origin",
 ]
