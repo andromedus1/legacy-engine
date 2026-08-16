@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence
 kind: epic
-stage: drafting
+stage: implementing
 tags: [analytics, advisory, testing, ui]
 parent: null
 depends_on: [feature-ranking-measurement-integrity, feature-ranking-credible-window-utility, feature-ranking-future-only-benchmark]
@@ -114,3 +114,51 @@ views, and two-clock historical reporting. Its adversarial verification is appro
 - No hosted service or multi-screen application; this remains a local generated-report capability.
 - Child-to-parent reconstruction from surviving camps is related but remains separately parked unless
   epic design proves it is a necessary certificate-consumption case.
+
+## Decomposition
+
+The epic is split by evidence capability rather than technical layer. Outcome-firewalled discovery
+produces candidates for independent certification; certified interval sets become the single
+eligibility seam; structured amplification then challenges the direct-evidence estimator. The report
+and future-only benchmark consume those shared contracts independently, so diagnostic publication
+does not wait for promotion and validation never depends on presentation code.
+
+### Child features
+
+- `epic-recurrent-stable-era-evidence-discovery` — build outcome-firewalled segment fingerprints and
+  nominate recurrent parent-archetype states — depends on: `[]`
+- `epic-recurrent-stable-era-evidence-certification` — independently certify, reject, or abstain on
+  nominated reunions and persist versioned certificate artifacts — depends on:
+  `[epic-recurrent-stable-era-evidence-discovery]`
+- `epic-recurrent-stable-era-evidence-interval-consumption` — intersect subject/opponent interval
+  unions exactly and expose current, expanded, and added-history evidence — depends on:
+  `[epic-recurrent-stable-era-evidence-certification]`
+- `epic-recurrent-stable-era-evidence-amplification` — evaluate transparent hierarchical,
+  composition-aware, multi-resolution, and low-rank borrowing challengers — depends on:
+  `[epic-recurrent-stable-era-evidence-interval-consumption]`
+- `epic-recurrent-stable-era-evidence-best-call-integration` — publish decomposed diagnostic evidence
+  and retrospective `Today’s model` targets in the generated Best Call page — depends on:
+  `[epic-recurrent-stable-era-evidence-amplification]`
+- `epic-recurrent-stable-era-evidence-future-validation` — refit every method at historical cutoffs,
+  compare challengers, and enforce promotion policy — depends on:
+  `[epic-recurrent-stable-era-evidence-amplification]`
+
+### Decomposition risks
+
+- The current series schema carries wins/losses, so the discovery feature must make the outcome
+  firewall structural rather than relying on callers to ignore fields.
+- Sparse independent event partitions may leave most reunion candidates inconclusive. That is an
+  acceptable honest result, but calibration must distinguish an underpowered method from a broken
+  implementation.
+- Exact disjoint intervals invalidate the current one-scan-per-scalar-date batching assumption;
+  interval eligibility must remain exact before any performance optimization is earned.
+- Historical matches admitted as observations cannot also feed the existing pre-disturbance prior.
+  The consumption/amplification boundary must prevent that double count explicitly.
+- Parent certificates cannot be inherited as camp certificates. Camps remain current-only until
+  independently supported.
+- `data_until` must reach ranking construction and certificate lookup, not exist only as a browser
+  filter. `knowledge_as_of` remains a separate future contract and may not be implied by the first
+  retrospective selector.
+- No new screen mock is required at epic design: the report extends the existing generated page's
+  dropdown, chip, disclosure, and audit patterns. Feature design should mock only if the historical
+  target composition proves materially ambiguous.
