@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-amplification
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-interval-consumption]
@@ -878,3 +878,22 @@ the exact interval-selected corpus; deterministic whole-event refits retain alig
 draws; exact typed runs validate and round-trip by content id; and the adversarial amplification
 suite plus broader matchup/ranking/era regressions pass. Per the original standard review record,
 this feature is ready for administrative closure without a second independent review.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none.
+**Nits**: none.
+**Rejected**: canonical orientation/reverse reuse, absence of parallel selection or certificate
+feedback, diagnostic-only authority, and foundation alignment were confirmed sound.
+
+**Notes**: Standard-weight deep feature review used one same-harness fresh-context pass over frozen
+commit `2af5dfb` and found seven material scaffolding/identity/method/test failures. Commit `d4bd79b`
+replaced the scaffolding with real distinct challengers, deterministic event-block refits and aligned
+replay, typed closed profiles/registry, verified immutable corpus/run/store boundaries, honest
+service/decomposition/concentration, and a dedicated adversarial suite; `c5ff046` recorded closure.
+Root verification passed 44 amplification/interval tests and Ruff; the worker's broader regression
+run passed 340 tests plus compileall/diff checks. Per standard policy, no second independent pass was
+run. UI, auth/network, async, and deployed migration lenses were inapplicable.
