@@ -15,8 +15,15 @@ from __future__ import annotations
 from collections.abc import Collection
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
+from hashlib import sha256
 
 import duckdb
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from legacy_engine.analytics.eras.consume import AnalysisClock, EntityEligibility, EligibilityAtom
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +197,42 @@ class MatchResults:
     camp_parent: dict[str, str] = field(default_factory=dict)  # camp label -> parent archetype
     matchup_event_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
     matchup_month_counts: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResolvedMatch:
+    """One deterministic, outcome-resolved pairing before interval selection."""
+
+    match_id: str
+    event_id: str
+    event_date: date
+    provenance: str
+    subject: str
+    opponent: str
+    subject_player_id: str | None
+    opponent_player_id: str | None
+    subject_won: bool
+    mirror: bool = False
+
+
+@dataclass(frozen=True)
+class PairEligibility:
+    subject: str
+    opponent: str
+    current: tuple[EligibilityAtom, ...]
+    expanded: tuple[EligibilityAtom, ...]
+    clock: AnalysisClock
+
+
+@dataclass(frozen=True)
+class SelectedMatch:
+    match: ResolvedMatch
+    view: str
+    pair_component_id: str
+    subject_component_id: str
+    opponent_component_id: str
+    subject_certificate_ids: tuple[str, ...]
+    opponent_certificate_ids: tuple[str, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -730,3 +773,60 @@ def compute_card_winrates(
         coverage=cov,
         provenance=provenance,
     )
+
+
+def resolve_match_records(
+    con: duckdb.DuckDBPyConnection, *, provenance: str | None = None,
+    since: str | None = None, until: str | None = None,
+    split_variant: str | None = None, split_variants: Collection[str] | None = None,
+) -> tuple[ResolvedMatch, ...]:
+    """Resolve decisive pairings once, retaining stable identity for pure selection."""
+    if split_variant is not None and split_variants is not None:
+        raise ValueError("pass split_variant or split_variants, not both")
+    split_set = frozenset((split_variant,)) if split_variant else frozenset(split_variants or ())
+    rows = con.execute(_JOIN_SQL, [provenance, provenance, since, since, until, until]).fetchall()
+    pending: list[tuple] = []
+    for prov, event_id, event_date, p1, p2, result, arch1, arch2, var1, var2, amb1, amb2 in rows:
+        if not p2 or amb1 or amb2 or arch1 is None or arch2 is None:
+            continue
+        outcome = parse_match_result(result)
+        if outcome is None or outcome.winner is None:
+            continue
+        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), normalize_player(p1), normalize_player(p2), _split_set_label(arch1, var1, split_set), _split_set_label(arch2, var2, split_set), outcome.winner == "p1"))
+    counts: Counter[tuple] = Counter()
+    records: list[ResolvedMatch] = []
+    for prov, event_id, event_date, p1, p2, label1, label2, p1_won in sorted(pending):
+        key = (event_id, p1, p2, label1, label2, p1_won)
+        ordinal = counts[key]
+        counts[key] += 1
+        match_id = "match-" + sha256(("|".join(map(str, (*key, ordinal)))).encode()).hexdigest()[:32]
+        records.append(ResolvedMatch(match_id=match_id, event_id=event_id, event_date=event_date, provenance=prov, subject=label1, opponent=label2, subject_player_id=p1 or None, opponent_player_id=p2 or None, subject_won=p1_won, mirror=label1 == label2))
+    return tuple(records)
+
+
+def intersect_pair_eligibility(subject: EntityEligibility, opponent: EntityEligibility) -> PairEligibility:
+    from legacy_engine.analytics.eras.consume import intersect_atoms
+    if subject.clock != opponent.clock:
+        raise ValueError("subject and opponent analysis clocks must match")
+    return PairEligibility(subject=subject.entity, opponent=opponent.entity, current=intersect_atoms(subject.current, opponent.current, data_until=subject.clock.data_until), expanded=intersect_atoms(subject.expanded, opponent.expanded, data_until=subject.clock.data_until), clock=subject.clock)
+
+
+def select_pair_matches(records: tuple[ResolvedMatch, ...], pair: PairEligibility) -> tuple[SelectedMatch, ...]:
+    """Select rows with exact pair membership; each match id appears once per view."""
+    selected: list[SelectedMatch] = []
+    for view, atoms in (("current-only", pair.current), ("certified-expanded", pair.expanded)):
+        seen: set[str] = set()
+        for record in records:
+            if record.match_id in seen:
+                continue
+            atom = next((a for a in atoms if (a.start is None or a.start <= record.event_date) and record.event_date < a.end), None)
+            if atom is None:
+                continue
+            sources = atom.sources
+            subject_segments = tuple(sorted({s.segment_id for s in sources if s.entity == pair.subject and s.segment_id}))
+            opponent_segments = tuple(sorted({s.segment_id for s in sources if s.entity == pair.opponent and s.segment_id}))
+            subject_certs = tuple(sorted({s.certificate_id for s in sources if s.entity == pair.subject and s.certificate_id}))
+            opponent_certs = tuple(sorted({s.certificate_id for s in sources if s.entity == pair.opponent and s.certificate_id}))
+            selected.append(SelectedMatch(match=record, view=view, pair_component_id="pair-" + sha256((atom.component_id + record.match_id).encode()).hexdigest()[:32], subject_component_id=subject_segments[0] if subject_segments else atom.component_id, opponent_component_id=opponent_segments[0] if opponent_segments else atom.component_id, subject_certificate_ids=subject_certs, opponent_certificate_ids=opponent_certs))
+            seen.add(record.match_id)
+    return tuple(selected)
