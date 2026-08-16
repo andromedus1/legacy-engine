@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-matrix-consumption
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: [epic-recurrent-stable-era-evidence-view-decomposition]
@@ -37,3 +37,22 @@ collapse to an earliest-start scalar.
 
 Run focused integration, matchup parity, and ranking replay tests, all era/matchup suites, Ruff on
 touched files, and compileall as specified by the parent feature.
+
+## Implementation notes
+
+- Added `IntervalAdaptiveMatrix` and `build_interval_adaptive_matrix` as the interval-aware
+  compatibility boundary while preserving the established current-only adaptive matrix values.
+- Added explicit `scalar_interval_projection`, which returns a scalar only for one component and
+  refuses disjoint sets rather than widening to an earliest start.
+- Added typed ranking evidence-source metadata with current-only authority semantics.
+
+## Verification evidence
+
+- `PYTHONPATH=. .venv/bin/pytest -q tests/test_matchup.py tests/test_matchup_multi_split.py tests/test_ranking_measurement.py` — 152 passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/matchup.py src/legacy_engine/advisory/ranking_measurement.py` — passed.
+
+## Simplifications/deviations
+
+- Existing adaptive/multi-split internals remain the compatibility implementation in this
+  checkpoint; the wrapper establishes the typed authority and current-only projection while
+  certificate-backed resolved evidence is supplied through the preceding seams.

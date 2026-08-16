@@ -828,6 +828,25 @@ class AdaptiveMatrix:
     audit_preamble: tuple[str, ...] = ()
 
 
+@dataclass
+class IntervalAdaptiveMatrix:
+    """Interval-authority wrapper; ``current`` remains ranking-authoritative."""
+
+    current: AdaptiveMatrix
+    evidence: dict[tuple[str, str], object]
+    clock: object
+    certificate_run_id: str | None = None
+    audit_preamble: tuple[str, ...] = ()
+
+
+def scalar_interval_projection(atoms: tuple[object, ...]) -> str | None:
+    """Losslessly project only a single interval; disjoint sets refuse widening."""
+    if len(atoms) != 1:
+        return None
+    atom = atoms[0]
+    return atom.start.isoformat() if atom.start is not None else None
+
+
 def _base_archetype(label: str, split_variant: str | None) -> str:
     """Strip a variant-camp suffix so a camp label resolves to its parent's ban-affectedness horizon.
 
@@ -1427,4 +1446,28 @@ def build_multi_split_adaptive(
         multi=multi, valid_since=valid_since, cell_windows=cell_windows,
         horizon_meta=horizon_meta, audit_preamble=(*audit_preamble, *sa_audit),
         cluster_cells=cluster_cells, imputed_cells=imputed_cells, ladder=ladder,
+    )
+
+
+def build_interval_adaptive_matrix(
+    con, *, clock, certificate_run_id: str | None = None, provenance: str | None = None,
+    requested_since=None, split_variant: str | None = None,
+    split_variants=None, **existing_matrix_options,
+) -> IntervalAdaptiveMatrix:
+    """Build the compatibility matrix through the interval consumption boundary.
+
+    The no-certificate path deliberately delegates to the mature adaptive builder so its
+    current-only values remain byte-compatible. Certificate-backed diagnostic views are additive
+    and are populated by callers using the resolved-match/evidence seams.
+    """
+    current = build_adaptive_matrix(
+        con, provenance=provenance, split_variant=split_variant,
+        **existing_matrix_options,
+    )
+    audit = tuple(current.audit_preamble)
+    if certificate_run_id is not None:
+        audit = (*audit, "// interval authority: certificate diagnostics require resolved evidence selection")
+    return IntervalAdaptiveMatrix(
+        current=current, evidence={}, clock=clock,
+        certificate_run_id=certificate_run_id, audit_preamble=audit,
     )

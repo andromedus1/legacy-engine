@@ -34,6 +34,14 @@ class RankingCellSource(LegacyEngineModel):
     concentration_warning: str | None = None
 
 
+class RankingEvidenceSource(LegacyEngineModel):
+    """Replay metadata for interval evidence; only current-only is authoritative."""
+
+    kind: Literal["current-only", "certified-expanded", "added-history"]
+    view: object
+    authoritative: bool
+
+
 class RankingCellMeasurement(LegacyEngineModel):
     subject: str
     opponent: str
