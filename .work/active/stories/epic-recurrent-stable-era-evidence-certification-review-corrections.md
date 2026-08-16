@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-certification-review-corrections
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-certification
 depends_on: []
@@ -54,10 +54,21 @@ named fix set is green, the parent closes administratively without another indep
   guard-abstained family members; support uses event HHI/effective counts and context event weights;
   placeholder power/safely-inside parameters were removed; control evidence is hash-bound; run
   status/reasons are included in the content id and store tampering is rejected.
-- Verification: focused certification suite 22 passed; full era suite and final lint/compile pass
-  recorded on the parent feature after this correction.
+- Verification: focused certification suite 27 passed after adding exact reviewer reproductions;
+  full era suite, Ruff, and compileall are rerun for parent closure.
 - Adjacent issues parked: none.
 - Root fix verification reopened this story: exact regressions are still required for the reproduced
   30/60-card high-dimensional false reunion, event-bootstrap multiplicity and context/shared-
   reference draws, HHI-concentrated event support, post-cutoff fact identity invariance, and the
   complete checked-in control manifest. Legacy green suites do not prove those corrections.
+
+## Exact regression evidence
+
+- 30-shared/30-replaced 60-card lists now assert coherent union-smoothed JS above the shipped margin
+  and a non-certified final decision.
+- Bootstrap tests assert replacement multiplicity, candidate/context resampling, shared reference
+  draws across family members, and inclusion of a guard-abstained member in the family calls.
+- `.60/.38/.01/.01` event weights assert approximately `n_eff=1.98` and abstention for both deck
+  support and context support.
+- Future semantic facts are shown not to alter run/result identity; the checked-in control manifest
+  is schema-validated with all three dispositions and its profile digest binding.

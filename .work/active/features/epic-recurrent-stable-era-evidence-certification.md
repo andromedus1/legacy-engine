@@ -704,6 +704,7 @@ def certification_run_ids(
   outcome-blind control fixture digest, and hash-binds run status/reasons in addition to manifest and
   results. It also closes the semantic-gap, monitor-authority, cutoff, family-bootstrap, support-HHI,
   union-smoothing, and store-tamper findings with adversarial tests.
+- Exact reviewer reproductions were added in `17934d6`; the correction story is now `stage: done`.
 
 ## Risks
 
