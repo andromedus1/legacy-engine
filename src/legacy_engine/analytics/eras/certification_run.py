@@ -9,7 +9,6 @@ from typing import Literal
 import duckdb
 
 from legacy_engine.analytics.eras.certification import (
-    CandidateCertificationInput,
     CertificationCalibration,
     CertificationReason,
     CandidateDecision,
@@ -25,9 +24,8 @@ from legacy_engine.analytics.eras.certification import (
     load_certification_corpus,
 )
 from legacy_engine.analytics.eras.discovery import DiscoveryBoundary, DiscoveryStatus, OutcomeFreeModel, payload_sha256
-from legacy_engine.analytics.eras.discovery_run import DiscoveryRun
 from legacy_engine.analytics.eras.discovery_store import read_discovery_run
-from pydantic import Field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 
 CertificationRunStatus = Literal["complete", "degraded"]
 CertificationRunReason = Literal["no-recurrent-candidates", "all-inconclusive", "format-truth-unresolved"]

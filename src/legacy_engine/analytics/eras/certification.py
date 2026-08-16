@@ -19,8 +19,6 @@ import numpy as np
 from pydantic import Field, field_validator, model_validator
 
 from legacy_engine.analytics.eras.discovery import (
-    DiscoveryBoundary,
-    DiscoveryCalibration,
     DiscoveryDeck,
     OutcomeFreeCorpus,
     OutcomeFreeModel,
