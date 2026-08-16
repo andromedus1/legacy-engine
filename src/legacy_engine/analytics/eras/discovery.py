@@ -277,11 +277,21 @@ def load_outcome_free_corpus(
     cannot alter this adapter's behavior.
     """
 
-    boundaries = tuple(sorted(semantic_boundaries, key=lambda b: (b.effective_on, b.boundary_id)))
+    # Semantic vocabulary is cutoff-bound too: a boundary first effective in
+    # the future cannot alter an earlier corpus identity.  Callers may pass a
+    # complete boundary catalog; only facts known by ``as_of`` enter the run.
+    boundaries = tuple(sorted(
+        (boundary for boundary in semantic_boundaries if boundary.effective_on <= as_of),
+        key=lambda b: (b.effective_on, b.boundary_id),
+    ))
     # Validate the supplied boundary models even when an empty corpus is returned.
     for boundary in boundaries:
         if boundary.kind not in ("legality", "taxonomy", "source-contract"):
             raise ValueError(f"invalid boundary kind {boundary.kind!r}")
+    if not isinstance(taxonomy_version, str):
+        raise ValueError(f"taxonomy_version must be a non-empty string (got {taxonomy_version!r})")
+    if not isinstance(legality_version, str):
+        raise ValueError(f"legality_version must be a non-empty string (got {legality_version!r})")
     taxonomy_version = taxonomy_version.strip()
     legality_version = legality_version.strip()
     if not taxonomy_version:
@@ -460,7 +470,9 @@ class SegmentFingerprint(OutcomeFreeModel):
     def _segment_interval(self) -> "SegmentFingerprint":
         if self.end <= self.start:
             raise ValueError("segment end must be after start")
-        if len(self.deck_vectors_sha256) != 64:
+        if len(self.deck_vectors_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in self.deck_vectors_sha256
+        ):
             raise ValueError("deck_vectors_sha256 must be a SHA-256 digest")
         return self
 
