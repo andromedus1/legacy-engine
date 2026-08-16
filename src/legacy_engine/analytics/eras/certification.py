@@ -392,6 +392,10 @@ def build_candidate_inputs(
         for result in discovery_run.results
         for segment in result.segments
     }
+    discovery_event_ids = {event_id for segment in by_segment.values() for event_id in segment.event_ids}
+    leaked_events = discovery_event_ids & {deck.event_id for deck in corpus.decks}
+    if leaked_events:
+        raise ValueError("certification corpus contains discovery-role events")
     inputs: list[CandidateCertificationInput] = []
     for result in discovery_run.results:
         if result.candidate is None or result.status != "candidate":
