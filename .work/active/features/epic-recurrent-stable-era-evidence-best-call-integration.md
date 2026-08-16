@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, ui]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-amplification]
@@ -222,6 +222,26 @@ thread one exclusive cutoff through all of them and prove with post-cutoff mutat
 historical payload byte stays fixed.
 
 ## Required amplification review-correction contract
+
+## Standard review findings
+
+The independent standard review at frozen commit `14fe333` requested changes. The first pass added
+useful projection and cutoff primitives, but it did not compose them into the published report:
+
+- the generator never built interval evidence, loaded an exact amplification run, attached the
+  projection, sealed ranking authority, or rendered any diagnostic evidence/target controls;
+- the projection did not validate the closed amplification run contract, exact clock/certificate/
+  registry/pair identities, degraded state, interval components, or match-set provenance;
+- direct SQL and ban selection remained post-cutoff-leaky, and `ReportTarget` did not enforce its
+  current versus retrospective invariants or publish a target data audit;
+- bundle writes were non-atomic and nondeterministic, historical pages identified as current,
+  unavailable targets could not degrade honestly, and raw JSON permitted `</script>` breakout; and
+- the promised integration, mutation-invariance, tamper, authority, honest-degrade, DOM/accessibility,
+  hostile-text, camp-parity, and runbook verification was absent.
+
+Correction work is tracked by
+`epic-recurrent-stable-era-evidence-best-call-integration-review-corrections`. It must complete the
+production composition and adversarial tests; helper-only implementation is not sufficient.
 
 Implementation blocks until amplification review preserves or corrects these public properties:
 
