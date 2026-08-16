@@ -82,6 +82,11 @@ def load_certification_corpus(
     # object.  The run store performs the same hashes on reads.
     _raise_mismatch("discovery run id", payload_sha256(discovery_run.manifest.model_dump(mode="json")),
                     discovery_run.run_id)
+    _raise_mismatch(
+        "discovery results hash",
+        payload_sha256([result.model_dump(mode="json") for result in discovery_run.results]),
+        discovery_run.results_sha256,
+    )
     return partitioned.certification, partitioned.manifest
 
 
