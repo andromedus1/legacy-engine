@@ -851,8 +851,12 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
 
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
-                 regime_card, parents, superarchetypes=None, benchmark_validation=None):
-    corpus_max = con.execute("select max(substr(date,1,10)) from tournaments").fetchone()[0]
+                 regime_card, parents, superarchetypes=None, benchmark_validation=None,
+                 data_until: str | None = None):
+    date_clause = " where substr(date,1,10) < ?" if data_until else ""
+    corpus_max = con.execute(f"select max(substr(date,1,10)) from tournaments{date_clause}", [data_until] if data_until else []).fetchone()[0]
+    if corpus_max is None:
+        raise ValueError("report target has no tournaments before data_until")
     current_4wk = (dt.date.fromisoformat(corpus_max) - dt.timedelta(days=28)).isoformat()
     corpus_decks, corpus_events = con.execute(
         "select (select count(*) from decks), (select count(*) from tournaments)").fetchone()
@@ -867,10 +871,9 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     transition = build_transition_field(
         con,
         current_ban_since=field_since,
-        until=None,
+        until=data_until,
         affected_since=ban_since,
     )
-    win_rows = list(transition.observed.counts.items())
     field_decks = transition.observed.deck_n
     shares = transition.shares
     recent = dict(con.execute(
@@ -906,7 +909,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
 
     # ── Archetype level ──
     print("building archetype matrices...", flush=True)
-    ad = build_adaptive_matrix(con, min_row_share=min_row_share)
+    ad = build_adaptive_matrix(con, min_row_share=min_row_share, until=data_until)
     rows = ad.matrix.archetypes
     field_opps = sorted((a for a in rows if shares.get(a, 0) > 0),
                         key=lambda a: shares[a], reverse=True)
@@ -916,7 +919,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     fb_by_date = {}
     for d in sorted(fb_dates, key=lambda x: x or ""):
         print(f"  fallback matrix since={d or 'full corpus'}...", flush=True)
-        fb_by_date[d] = build_matrix(con, min_row_share=min_row_share, since=d).cells
+        fb_by_date[d] = build_matrix(con, min_row_share=min_row_share, since=d, until=data_until).cells
     arch_out = []
     arch_used: dict[str, dict] = {}
     strict_arch_cache: dict[str | None, dict] = {}
@@ -935,7 +938,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         )
         if strict_since not in strict_arch_cache:
             strict_arch_cache[strict_since] = build_matrix(
-                con, min_row_share=min_row_share, since=strict_since,
+                con, min_row_share=min_row_share, since=strict_since, until=data_until,
             ).cells
         strict_sources = {
             opp: RankingCellSource(
@@ -980,6 +983,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     msa = build_multi_split_adaptive(
         con, parents=parents, min_row_share=min_row_share, superarchetypes=superarchetypes,
         apply_superarchetype_priors=False,
+        until=data_until,
     )
     camp_parent = msa.multi.camp_parent
     camp_labels = [s for s in msa.multi.subjects if s in camp_parent]
@@ -997,7 +1001,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     for d in sorted(camp_fb_dates, key=lambda x: x or ""):
         print(f"  multi-split fallback since={d or 'full corpus'}...", flush=True)
         camp_fb[d] = build_multi_split_matrix(
-            con, parents=parents, min_row_share=min_row_share, since=d).cells
+            con, parents=parents, min_row_share=min_row_share, since=d, until=data_until).cells
     t_rank = time.perf_counter()
     print(f"  camp matrices: {t_rank - t_camp:.1f}s ({len(camp_labels)} camp rows, "
           f"{len(camp_fb)} ban-scoped fallback windows)", flush=True)
@@ -1024,7 +1028,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
             )
             if strict_since not in strict_camp_cache:
                 strict_camp_cache[strict_since] = build_multi_split_matrix(
-                    con, parents=parents, min_row_share=min_row_share, since=strict_since,
+                    con, parents=parents, min_row_share=min_row_share, since=strict_since, until=data_until,
                 ).cells
             strict_sources = {
                 opp: RankingCellSource(
@@ -1204,7 +1208,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     # Strategic intent is a separate curated semantic layer. Recompute it from
     # decisive match tallies rather than averaging any rendered row statistic.
     plan_registry = load_strategic_plan_registry()
-    plan_matches = compute_match_results(con, since=field_since)
+    plan_matches = compute_match_results(con, since=field_since, until=data_until)
     plan_result = aggregate_strategic_plan_results(
         plan_matches,
         plan_registry,
@@ -1396,6 +1400,7 @@ def generate_ranking(
     min_row_share: float = 0.001,
     include_superarchetypes: bool = True,
     benchmark_summary_path: Path | None = None,
+    data_until: str | None = None,
 ) -> dict:
     """Compute and write the ranking page; the CLI is only argument presentation."""
     latest_ban = max(BAN_EVENTS, key=lambda e: e[0])
@@ -1410,6 +1415,7 @@ def generate_ranking(
             cover_min=cover_min, min_row_share=min_row_share,
             regime_card=regime_card, parents=parents, superarchetypes=superarchetypes,
             benchmark_validation=benchmark_validation_payload(benchmark_summary_path),
+            data_until=data_until,
         )
     finally:
         con.close()

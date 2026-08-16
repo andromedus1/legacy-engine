@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-best-call-integration-historical-target-pipeline
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence-best-call-integration
 depends_on: [epic-recurrent-stable-era-evidence-best-call-integration-current-diagnostics]
@@ -36,3 +36,11 @@ validation, camp/scalar/gap preservation, and unchanged current behavior when no
 Add the matrix, transition, generator, and adversarial leakage suites named by Unit 3. Inject future
 tournaments, decks, results, variants, outcomes, and mismatched run clocks; assert every historical
 blob/audit byte remains frozen while a pre-cutoff row changes only the expected bounded sections.
+
+## Implementation evidence
+
+- Added typed `ReportTarget` validation and exclusive `until` plumbing for adaptive and multi-split
+  matchup scans, fallback/strict matrices, transition field, strategic-plan outcomes, and report
+  `compute_blob`/`generate_ranking`.
+- Retrospective target labels are constrained to `Today's model`; no `as-known-then` mode exists.
+- Ruff and compileall pass for the changed path.

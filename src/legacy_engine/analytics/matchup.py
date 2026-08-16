@@ -881,6 +881,7 @@ def build_adaptive_matrix(
     affect_threshold: float = 0.25,
     split_variant: str | None = None,
     horizons: dict[str, str | None] | None = None,
+    until: str | None = None,
 ) -> AdaptiveMatrix:
     """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
 
@@ -918,7 +919,7 @@ def build_adaptive_matrix(
     cell's window was truncated at an era (not ban-only) boundary — see ``_cross_era_prior``.
     """
     # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
-    full = compute_match_results(con, provenance=provenance, split_variant=split_variant)
+    full = compute_match_results(con, provenance=provenance, split_variant=split_variant, until=until)
     total_matches = full.coverage.decisive_matched
     _denom_base = total_matches + full.coverage.mirror_matches
     denom = 2 * _denom_base if _denom_base > 0 else 1
@@ -950,7 +951,7 @@ def build_adaptive_matrix(
     for s in set(valid_since.values()):
         if s is not None and s not in mr_by_since:
             mr_by_since[s] = compute_match_results(
-                con, provenance=provenance, since=s, split_variant=split_variant,
+                con, provenance=provenance, since=s, until=until, split_variant=split_variant,
             )
 
     # 3b. Hierarchical cell prior inputs (Unit 1), one per distinct since bucket — reuses the
@@ -1112,6 +1113,7 @@ def build_multi_split_adaptive(
     horizons: dict[str, str | None] | None = None,
     superarchetypes: "SuperarchetypeRegistry | None" = None,
     apply_superarchetype_priors: bool = True,
+    until: str | None = None,
 ) -> AdaptiveMultiSplitMatrix:
     """``build_adaptive_matrix`` for every split parent at once — one scan per distinct horizon.
 
@@ -1165,7 +1167,7 @@ def build_multi_split_adaptive(
     """
     # 1. Full maximal scan → subjects/opponents/parents inclusion (stable basis, as in the plain
     #    adaptive builder: only per-cell data sourcing is windowed).
-    full = compute_match_results(con, provenance=provenance, split_variants=parents)
+    full = compute_match_results(con, provenance=provenance, split_variants=parents, until=until)
     subjects, opponents, observed_parents = _multi_split_inclusion(full, min_row_share)
     camp_parent = dict(full.camp_parent)
     entities = sorted(set(subjects) | set(opponents))
@@ -1190,7 +1192,7 @@ def build_multi_split_adaptive(
     for s in set(valid_since.values()):
         if s is not None and s not in mr_by_since:
             mr_by_since[s] = compute_match_results(
-                con, provenance=provenance, since=s, split_variants=parents,
+                con, provenance=provenance, since=s, until=until, split_variants=parents,
             )
 
     # 3b. Per-window pooling + hierarchy inputs, derived from each window's OWN scan (never a wider
@@ -1240,7 +1242,7 @@ def build_multi_split_adaptive(
             # once if no entity horizon already produced it.
             if regime_start is not None and regime_start not in pooled_by_since:
                 regime_mr = compute_match_results(
-                    con, provenance=provenance, since=regime_start, split_variants=parents,
+                    con, provenance=provenance, since=regime_start, until=until, split_variants=parents,
                 )
                 pooled_by_since[regime_start] = _pool_opponent_tallies(
                     regime_mr, regime_mr.camp_parent,
