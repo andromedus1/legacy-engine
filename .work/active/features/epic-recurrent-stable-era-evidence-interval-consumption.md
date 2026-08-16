@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -606,3 +606,24 @@ a canonical digest-bound selected-outcome ledger. Real DuckDB-backed tests exerc
 certificate reads, refusal modes, excluded gaps, reverse orientation, parent/camp/multi-split
 parity, populated evidence, and typed scalar refusal. The feature is returned to `stage: review` for
 root administrative verification under the existing one-review policy.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none; stable match identity, typed scalar refusal, and exports were absorbed into the
+named current-cycle correction.
+**Nits**: none.
+**Rejected**: endpoint clocks and unchanged current ranking authority were confirmed sound; no
+foundation or applicable security issue was found.
+
+**Notes**: Standard-weight deep feature review used one same-harness fresh-context pass over frozen
+commit `7ab3ded`. The receiver rejected the parallel/dead integration and required the full named
+correction set. After two insufficient handoffs, `339407b`/`a8852a6` completed the exact contract:
+canonical digest-bound selected outcomes, one physical orientation, certificate-governed current
+and history, real leave-cell-out view hierarchy, camp/multi-split parity, populated typed matrix
+evidence, scalar refusal, and DB-backed adversarial tests. Root verification passed 239 focused and
+relevant tests plus Ruff; the worker's broader era/ranking run passed 423 tests and compileall. Per
+standard policy, no second independent pass was run. UI, auth/network, async, and deployed migration
+lenses were inapplicable.
