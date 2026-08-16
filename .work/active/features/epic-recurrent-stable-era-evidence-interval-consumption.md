@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-consumption
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -598,8 +598,11 @@ match-id partition, and prior-overlap refusal in `tests/analytics/eras/test_inte
 The follow-up correction validates certificate authority before current-reference adoption,
 independently aggregates all three view cells, and returns populated parent/multi-split evidence.
 
-Root verification remains open: `d968c19` returns the evidence mapping and independent W-L-n
-tallies, but still has only three shallow tests; omits a DB-backed exact-certificate/current test,
-camp/multi-split parity, and a returned-populated-evidence assertion; and labels expanded/added
-`hierarchy-only` while using the flat default prior instead of hierarchy inputs computed from each
-selected view. These named contracts must be implemented and directly exercised before closure.
+Commit `339407b` closes the root verification gap recorded after `d968c19`. Exact-view
+leave-cell-out hierarchy inputs now
+exclude every target-cell match id and publish their audit ids/digest; the production wrapper passes
+explicit camp parents, keeps camp pairs current-only, and returns a concrete typed evidence map plus
+a canonical digest-bound selected-outcome ledger. Real DuckDB-backed tests exercise promoted exact
+certificate reads, refusal modes, excluded gaps, reverse orientation, parent/camp/multi-split
+parity, populated evidence, and typed scalar refusal. The feature is returned to `stage: review` for
+root administrative verification under the existing one-review policy.
