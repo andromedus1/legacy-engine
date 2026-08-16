@@ -9,7 +9,7 @@ release_binding: null
 gate_origin: null
 research_origin: recurrent-era-intervals
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-16
 ---
 
 # Recurrent stable-era evidence — recover compatible history without contamination
@@ -45,6 +45,31 @@ knowledge cutoff and reproducible historical versions of every derived input.
   side by side until future-only validation supports any promotion.
 - **Historical time has two axes:** `data_until` bounds outcomes and `knowledge_as_of` bounds facts,
   classifications, certificates, configuration, and derived state. The UI must never conflate them.
+
+## Design decisions
+
+<!-- captured 2026-08-16 via research-pipeline:epic-design --only-questions -->
+
+- **First certification surface:** certify parent archetypes first; camps remain current-only until
+  their own independent support clears the certificate gates. Parent certificates never silently
+  stand in for camp equivalence.
+- **Delivery priority:** recover and expose useful evidence in the current report before adding the
+  broader retrospective `Today’s model` historical selector; both remain in this epic, with the
+  historical target following the current-report integration.
+- **Primary recurrence method:** begin with the inspectable outcome-firewalled segment/fingerprint
+  method. Sticky-state and other latent-state methods remain explicit benchmark challengers rather
+  than production complexity included by default.
+- **Success objective:** maximize useful coverage subject to non-degradation in future calibration,
+  proper scores, and decision regret. Raw added match count, narrower intervals, and a larger number
+  of grounded labels are not sufficient success criteria.
+- **Automation authority:** deterministic discovery and certification rebuild automatically from
+  objective gates; changing calibration/configuration, confirming format truth, or promoting a
+  methodology remains an operator decision.
+- **Offensive evidence lane:** pair recurrent-history recovery with structured evidence amplification
+  challengers—hierarchical partial pooling, composition-aware borrowing, multi-resolution priors,
+  and low-rank matchup structure—that try to improve future predictions from the same corpus. Every
+  estimate must decompose direct, certified-historical, and structurally borrowed contribution, and
+  only future-only evidence can promote an amplified method.
 
 ## UI surface
 
