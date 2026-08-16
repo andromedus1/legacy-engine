@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-interval-algebra
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence-interval-consumption
 depends_on: [epic-recurrent-stable-era-evidence-certification]
@@ -38,3 +38,24 @@ separate knowledge-availability timestamp for as-known-then expansion; do not re
 
 Run focused interval/certificate-adapter tests, existing certification/era tests, Ruff on touched
 files, and compileall as specified by the parent feature.
+
+## Implementation notes
+
+- Added `AnalysisClock`, `EligibilitySourceRef`, `EligibilityAtom`, and `EntityEligibility` to the
+  shared era consumption seam.
+- Implemented deterministic endpoint sweep normalization and commutative provenance-preserving
+  intersection with exclusive `data_until` clipping.
+- Implemented exact certification-run lookup with immutable availability enforcement, as-known-then
+  source-date validation, retrospective labeling, explicit current reference, and camp current-only
+  fallback. Scalar horizons compile through the same atom authority.
+
+## Verification evidence
+
+- Interval normalization/intersection smoke fixtures passed.
+- `PYTHONPATH=. .venv/bin/pytest -q tests/analytics/eras/test_certification_run.py tests/analytics/eras/test_consume.py` — 26 passed.
+- `PYTHONPATH=. .venv/bin/python -m compileall -q src/legacy_engine/analytics/eras/consume.py` — passed.
+
+## Simplifications/deviations
+
+- The new public interval authority is additive; legacy scalar callers remain unchanged until the
+  selection checkpoint routes them through it.

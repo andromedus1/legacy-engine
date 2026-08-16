@@ -26,11 +26,122 @@ number.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, date, datetime
+from hashlib import sha256
+import json
+from typing import Literal
 
 import duckdb
+from pydantic import model_validator
 
 from legacy_engine.analytics.eras.store import StoredEntityEras, read_entity_eras
 from legacy_engine.models.base import LegacyEngineModel
+
+KnowledgeMode = Literal["retrospective-current-model", "as-known-then"]
+EligibilitySource = Literal["current-reference", "certified-history", "scalar-current", "camp-current-only"]
+
+
+class AnalysisClock(LegacyEngineModel):
+    data_until: date
+    knowledge_as_of: datetime
+    knowledge_mode: KnowledgeMode
+
+    @model_validator(mode="after")
+    def _utc(self) -> "AnalysisClock":
+        if self.knowledge_as_of.tzinfo is None or self.knowledge_as_of.utcoffset() is None:
+            raise ValueError("knowledge_as_of must be timezone-aware")
+        object.__setattr__(self, "knowledge_as_of", self.knowledge_as_of.astimezone(UTC))
+        return self
+
+
+class EligibilitySourceRef(LegacyEngineModel):
+    source: EligibilitySource
+    entity: str
+    segment_id: str | None = None
+    certificate_id: str | None = None
+    certificate_run_id: str | None = None
+
+
+class EligibilityAtom(LegacyEngineModel):
+    component_id: str
+    start: date | None = None
+    end: date
+    sources: tuple[EligibilitySourceRef, ...]
+
+    @model_validator(mode="after")
+    def _bounds(self) -> "EligibilityAtom":
+        if self.end is None or (self.start is not None and self.start >= self.end):
+            raise ValueError("eligibility atom must be non-empty and half-open")
+        if not self.sources:
+            raise ValueError("eligibility atom requires provenance")
+        return self
+
+
+class EntityEligibility(LegacyEngineModel):
+    entity: str
+    current: tuple[EligibilityAtom, ...]
+    expanded: tuple[EligibilityAtom, ...]
+    certificate_run_id: str | None
+    clock: AnalysisClock
+    status: Literal["certified-expanded", "current-only", "abstained"]
+    reasons: tuple[str, ...]
+
+
+def _source_key(source: EligibilitySourceRef) -> str:
+    return json.dumps(source.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+
+
+def _atom_id(start: date | None, end: date, sources: tuple[EligibilitySourceRef, ...]) -> str:
+    payload = f"{start.isoformat() if start else '-inf'}|{end.isoformat()}|" + ";".join(_source_key(s) for s in sources)
+    return "component-" + sha256(payload.encode()).hexdigest()[:32]
+
+
+def normalize_atoms(atoms: tuple[EligibilityAtom, ...]) -> tuple[EligibilityAtom, ...]:
+    """Sweep interval endpoints into disjoint atoms without bridging gaps."""
+    if not atoms:
+        return ()
+    points = {a.start for a in atoms if a.start is not None} | {a.end for a in atoms}
+    ordered = sorted(points)
+    spans: list[tuple[date | None, date]] = []
+    if any(a.start is None for a in atoms):
+        first = ordered[0]
+        spans.append((None, first))
+    spans.extend((left, right) for left, right in zip(ordered, ordered[1:]) if left < right)
+    result: list[EligibilityAtom] = []
+    for start, end in spans:
+        covering_by_key = {
+            _source_key(source): source
+            for atom in atoms
+            if (atom.start is None or atom.start <= (start or atom.end)) and atom.end >= end
+            for source in atom.sources
+        }
+        covering = tuple(covering_by_key[key] for key in sorted(covering_by_key))
+        if not covering:
+            continue
+        candidate = EligibilityAtom(component_id=_atom_id(start, end, covering), start=start, end=end, sources=covering)
+        if result and result[-1].end == start and result[-1].sources == candidate.sources:
+            previous = result.pop()
+            candidate = EligibilityAtom(component_id=_atom_id(previous.start, end, covering), start=previous.start, end=end, sources=covering)
+        result.append(candidate)
+    return tuple(result)
+
+
+def intersect_atoms(left: tuple[EligibilityAtom, ...], right: tuple[EligibilityAtom, ...], *, data_until: date | None = None) -> tuple[EligibilityAtom, ...]:
+    """Intersect two normalized sets, retaining both provenance tuples."""
+    out: list[EligibilityAtom] = []
+    for a in left:
+        for b in right:
+            start = a.start if b.start is None else b.start if a.start is None else max(a.start, b.start)
+            end = min(a.end, b.end)
+            if data_until is not None:
+                end = min(end, data_until)
+            if start is not None and start >= end:
+                continue
+            if start is None and end <= date.min:
+                continue
+            sources = tuple(sorted((*a.sources, *b.sources), key=_source_key))
+            out.append(EligibilityAtom(component_id=_atom_id(start, end, sources), start=start, end=end, sources=sources))
+    return normalize_atoms(tuple(out))
 
 # Field-era self-heal gate (epic design decision): below this many decks in the candidate
 # [field_since, now) window, the detection-derived field era is too thin to trust — degrade back
@@ -316,6 +427,93 @@ def era_horizons(
         audit = ("// eras: no era data — ban-only horizons; run `eras run`",)
 
     return horizons, audit
+
+
+def build_entity_eligibility(
+    con: duckdb.DuckDBPyConnection,
+    entity: str,
+    *,
+    clock: AnalysisClock,
+    certificate_run_id: str | None = None,
+    requested_since: date | None = None,
+    camp_parent: Mapping[str, str] | None = None,
+    provenance: str | None = None,
+) -> EntityEligibility:
+    """Compile scalar horizons and one exact certification run into interval authority."""
+    from legacy_engine.analytics.eras.certificate_store import read_certification_run
+
+    parent = camp_parent.get(entity) if camp_parent else None
+    is_camp = parent is not None
+    horizons, _ = era_horizons(
+        con, [entity], provenance=provenance, camp_parent=camp_parent,
+    )
+    horizon = horizons[entity].since
+    current_start = date.fromisoformat(horizon) if horizon else None
+    if requested_since is not None and (current_start is None or requested_since > current_start):
+        current_start = requested_since
+    current_source: EligibilitySource = "camp-current-only" if is_camp else "scalar-current"
+    current_ref = EligibilitySourceRef(source=current_source, entity=entity)
+    current = (EligibilityAtom(
+        component_id=_atom_id(current_start, clock.data_until, (current_ref,)),
+        start=current_start, end=clock.data_until, sources=(current_ref,),
+    ),) if current_start is None or current_start < clock.data_until else ()
+    reasons: list[str] = []
+    expanded: list[EligibilityAtom] = list(current)
+    if is_camp:
+        reasons.append("camp-current-only")
+    elif certificate_run_id is None:
+        reasons.append("no-certificate-run")
+    else:
+        run = read_certification_run(con, certificate_run_id)
+        result = next((item for item in run.results if item.entity == entity), None) if run else None
+        if run is None:
+            reasons.append("certificate-run-not-found")
+        elif run.status not in ("complete", "degraded"):
+            reasons.append("certificate-run-not-final")
+        elif result is None:
+            reasons.append("certificate-result-not-found")
+        elif run.knowledge_available_at is None:
+            reasons.append("knowledge-provenance-unavailable")
+        elif run.knowledge_available_at > clock.knowledge_as_of:
+            reasons.append("knowledge-available-after-knowledge_as_of")
+        else:
+            for cert in result.certificates:
+                if cert.status != "certified":
+                    reasons.append(f"certificate-{cert.certificate_id}-status-{cert.status}")
+                    continue
+                if cert.entity != entity or cert.discovery_run_id != run.manifest.discovery_run_id:
+                    reasons.append(f"certificate-{cert.certificate_id}-identity-mismatch")
+                    continue
+                if clock.knowledge_mode == "as-known-then" and cert.certification_as_of > clock.knowledge_as_of.date():
+                    reasons.append(f"certificate-{cert.certificate_id}-future-source-evidence")
+                    continue
+                start = cert.historical_interval.start
+                end = min(cert.historical_interval.end, clock.data_until)
+                if requested_since is not None:
+                    start = max(start, requested_since)
+                if start >= end:
+                    continue
+                ref = EligibilitySourceRef(
+                    source="certified-history", entity=entity,
+                    segment_id=cert.historical_segment_id, certificate_id=cert.certificate_id,
+                    certificate_run_id=run.run_id,
+                )
+                expanded.append(EligibilityAtom(
+                    component_id=_atom_id(start, end, (ref,)), start=start, end=end, sources=(ref,),
+                ))
+    expanded_norm = normalize_atoms(tuple(expanded))
+    status: Literal["certified-expanded", "current-only", "abstained"] = (
+        "certified-expanded" if any(any(s.source == "certified-history" for s in atom.sources) for atom in expanded_norm)
+        else "current-only"
+    )
+    if not current:
+        reasons.append("current-reference-empty-at-data_until")
+        status = "abstained"
+    return EntityEligibility(
+        entity=entity, current=current, expanded=expanded_norm,
+        certificate_run_id=certificate_run_id, clock=clock, status=status,
+        reasons=tuple(dict.fromkeys(reasons)),
+    )
 
 
 def resolve_field_era(
