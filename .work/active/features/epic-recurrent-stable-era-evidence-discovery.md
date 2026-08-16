@@ -1,7 +1,7 @@
 ---
 id: epic-recurrent-stable-era-evidence-discovery
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, testing]
 parent: epic-recurrent-stable-era-evidence
 depends_on: []
@@ -578,3 +578,28 @@ def discovery_run_ids(
   recursion. This is non-blocking under the advisory policy.
 - Receiver judgment: research, code, and adversarial invariants support the typed-firewall design;
   the normal standard independent feature review remains required after implementation.
+
+## Implementation summary
+
+- Execution capability: delegated standard implementation owner carrying the three cohesive child
+  checkpoints sequentially; no nested delegation was used.
+- Review weight: standard from the project default; this feature is intentionally handed to the
+  independent standard review lane at `stage: review`.
+- Delivered outcome-free frozen models and a cutoff-bounded DuckDB adapter, deterministic weekly
+  parent segmentation/fingerprints, board/mixture/field/source comparisons, hard-contract epochs,
+  complete-link candidate nomination, and immutable content-addressed run/ledger handoff.
+- Child checkpoints: `firewall-corpus` done, `segments-fingerprints` done, `candidate-ledger` done.
+- Verification: `.venv/bin/pytest -q tests/analytics/eras/test_discovery*.py` — 11 passed;
+  integrated era suite (`test_attribution`, `test_bocpd`, `test_detect`, `test_ensemble`,
+  `test_run`, `test_series`, `test_store`, plus discovery tests) — 153 passed; `.venv/bin/python
+  -m compileall -q src` — passed.
+- Acceptance walk: the corpus models reject outcome/standing/conversion extras; source projection
+  ignores outcome relations and future rows; board identity, field/source context, mixture vectors,
+  support refusals, hard/non-hard contract distinctions, complete-link conflicts, exact manifest and
+  result digests, idempotent retries, collision refusal, multiple cutoffs, and explicit degraded
+  fleets are all covered by the focused/integrated tests.
+- Simplifications/deviations: v1 segmentation is a deterministic weighted local PELT-style gain
+  guard behind the versioned contract, with no mutable fit state; future-effective semantic
+  boundaries are cutoff-filtered so they cannot perturb earlier identities. No unrelated files were
+  changed; pre-existing `uv.lock` remains dirty and unstaged.
+- Adjacent issues parked: none.
