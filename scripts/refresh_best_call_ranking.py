@@ -93,6 +93,7 @@ from legacy_engine.analytics.amplification import (
     build_interval_evidence_corpus,
     read_amplification_run,
 )
+from legacy_engine.analytics.eras.certificate_store import read_certification_run
 from legacy_engine.analytics.eras.consume import AnalysisClock, clamp_pair_window
 from legacy_engine.analytics.matchup import (
     DISPLAY_GATE_N,
@@ -135,6 +136,7 @@ from legacy_engine.advisory.ranking_measurement import (
 )
 from legacy_engine.workflows.decision_refresh import RankingUtilitySummary, validate_ranking_utility
 from legacy_engine.models.matchup import MatchupCell
+from legacy_engine.confidence import tier_for_sample
 
 TEMPLATE_PATH = Path(__file__).parent / "best_call_ranking_template.html"
 DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
@@ -204,10 +206,104 @@ def _authority_payload(blob: dict) -> dict:
     payload.pop("report_target", None)
     for row in [*payload.get("arch", ()), *payload.get("camps", ())]:
         row.pop("diagnostic_evidence", None)
+        row.pop("best_available_estimate", None)
     meta = payload.get("meta", {})
     meta.pop("target_data_audit", None)
     meta.pop("evidence_audit", None)
+    meta.pop("report_utility", None)
     return payload
+
+
+def current_report_target(
+    db_path: Path, *, knowledge_as_of: dt.datetime | None = None,
+) -> ReportTarget:
+    """Resolve one exact current target without a latest-run alias.
+
+    A single amplification artifact at the exact corpus cutoff may provide the full frozen clock.
+    Otherwise a single certification artifact whose as-of equals that cutoff may enrich the direct
+    path.  Multiple exact candidates are ambiguous and fail loudly; absent artifact tables are the
+    normal typed direct-evidence path with ``certificate_run_id=None``.
+    """
+
+    supplied_knowledge = knowledge_as_of or dt.datetime.now(dt.UTC)
+    if supplied_knowledge.tzinfo is None or supplied_knowledge.utcoffset() is None:
+        raise ValueError("current report knowledge clock must be timezone-aware")
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        maximum = con.execute(
+            "SELECT max(cast(substr(date,1,10) AS DATE)) FROM tournaments"
+        ).fetchone()[0]
+        if maximum is None:
+            raise ValueError("current target requires a non-empty tournament corpus")
+        cutoff = maximum + dt.timedelta(days=1)
+        amplification_matches = []
+        try:
+            run_ids = tuple(
+                row[0] for row in con.execute(
+                    "SELECT run_id FROM amplification_runs ORDER BY run_id"
+                ).fetchall()
+            )
+        except duckdb.CatalogException:
+            run_ids = ()
+        for run_id in run_ids:
+            run = read_amplification_run(con, run_id)
+            if run is not None and run.corpus.clock.data_until == cutoff:
+                amplification_matches.append(run)
+        if len(amplification_matches) > 1:
+            raise ValueError(
+                "multiple exact current amplification artifacts; pass an exact run id"
+            )
+        if amplification_matches:
+            amplification = amplification_matches[0]
+            if amplification.corpus.clock.knowledge_as_of > supplied_knowledge:
+                raise ValueError("exact current amplification artifact is not yet knowledge-available")
+            selected_knowledge = amplification.corpus.clock.knowledge_as_of
+            certificate_run_id = amplification.corpus.certificate_run_id
+            amplification_run_id = amplification.run_id
+        else:
+            try:
+                cert_ids = tuple(
+                    row[0] for row in con.execute(
+                        "SELECT run_id FROM era_certification_runs WHERE as_of = ? ORDER BY run_id",
+                        [cutoff],
+                    ).fetchall()
+                )
+            except duckdb.CatalogException:
+                cert_ids = ()
+            certification_matches = []
+            for run_id in cert_ids:
+                run = read_certification_run(con, run_id)
+                if (
+                    run is not None
+                    and run.knowledge_available_at is not None
+                    and run.knowledge_available_at <= supplied_knowledge
+                ):
+                    certification_matches.append(run)
+            if len(certification_matches) > 1:
+                raise ValueError(
+                    "multiple exact current certification artifacts; pass an exact run id"
+                )
+            certificate_run_id = (
+                certification_matches[0].run_id if certification_matches else None
+            )
+            amplification_run_id = None
+            selected_knowledge = supplied_knowledge
+    finally:
+        con.close()
+    boundary, cards = target_regime(cutoff)
+    return ReportTarget(
+        target_id="current",
+        label="Current",
+        mode="current",
+        mode_label="Current",
+        data_until=None,
+        effective_data_until=cutoff,
+        knowledge_as_of=selected_knowledge,
+        field_since=boundary,
+        regime_card=cards[0],
+        certificate_run_id=certificate_run_id,
+        amplification_run_id=amplification_run_id,
+    )
 
 
 def _digest_rows(rows: object) -> str:
@@ -1543,6 +1639,117 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     return blob
 
 
+def _publish_visible_best_estimates(
+    blob: dict, *, parent_attachment, camp_attachment, parent_interval,
+) -> None:
+    """Publish direct useful estimates while keeping them outside ranking authority."""
+
+    attachments = {
+        False: tuple(parent_attachment.model_dump(mode="json")["pairs"].values()),
+        True: (
+            tuple(camp_attachment.model_dump(mode="json")["pairs"].values())
+            if camp_attachment is not None else ()
+        ),
+    }
+    estimated_supported_rows = visible_cells = affected_cells = unaffected_cells = 0
+    for is_camp, rows in ((False, blob["arch"]), (True, blob["camps"])):
+        by_subject: dict[str, dict[str, dict]] = {}
+        for pair in attachments[is_camp]:
+            by_subject.setdefault(pair["subject"], {})[pair["opponent"]] = pair
+        for row in rows:
+            pairs = by_subject.get(row["subject"], {})
+            cells = []
+            for cell in row.get("cells", ()):
+                pair = pairs.get(cell["opp"])
+                if pair is None:
+                    continue
+                direct = pair["best_available_direct"]
+                if direct["n"] > 0 and direct["estimate"] is not None:
+                    cells.append((cell, pair, direct))
+            denominator = sum(float(cell.get("share", 0.0)) for cell in row.get("cells", ()))
+            measured_mass = sum(float(cell.get("share", 0.0)) for cell, _pair, _direct in cells)
+            estimate = (
+                sum(
+                    float(cell.get("share", 0.0)) * float(direct["estimate"])
+                    for cell, _pair, direct in cells
+                ) / measured_mass
+                if measured_mass > 0 else None
+            )
+            direct_n = sum(int(direct["n"]) for _cell, _pair, direct in cells)
+            history_n = sum(int(pair["added_history"]["n"]) for _c, pair, _d in cells)
+            bases = tuple(dict.fromkeys(pair["best_available_basis"] for _c, pair, _d in cells))
+            basis = (
+                "localized-clean-direct" if "localized-clean-direct" in bases
+                else "certified-direct" if "certified-direct" in bases
+                else "current-direct" if "current-direct" in bases
+                else "unavailable"
+            )
+            row["best_available_estimate"] = {
+                "estimate": r4(estimate),
+                "direct_match_n": direct_n,
+                "added_history_n": history_n,
+                "estimated_cells": len(cells),
+                "total_cells": len(row.get("cells", ())),
+                "field_coverage": r4(measured_mass / denominator) if denominator else 0.0,
+                "basis": basis,
+                "bases": list(bases),
+                "confidence": tier_for_sample(direct_n),
+                "proof_grade": bool(row.get("grounded")),
+                "authority": "diagnostic-only",
+            }
+            if not is_camp:
+                visible_cells += len(cells)
+                affected_cells += sum(
+                    pair["best_available_basis"] == "localized-clean-direct"
+                    for _cell, pair, _direct in cells
+                )
+                unaffected_cells += sum(
+                    pair["best_available_basis"] in {"current-direct", "certified-direct"}
+                    for _cell, pair, _direct in cells
+                )
+                if row.get("ranking_evidence", {}).get("eligible") and estimate is not None:
+                    estimated_supported_rows += 1
+
+    current_ids = {
+        row.match.match_id for row in parent_interval.selected_outcomes.rows
+        if row.view == "current-only"
+    }
+    recovered_physical = len({
+        row.match.match_id for row in parent_interval.selected_outcomes.rows
+        if row.view == "certified-expanded" and row.match.match_id not in current_ids
+    })
+    # Some library callers supply a deliberately minimal authority projection
+    # (for example, exact-run composition tests).  The per-row estimate is
+    # still useful there, but a report-level utility statement requires the
+    # generator's complete ranking-utility contract.
+    raw = blob["meta"].get("ranking_utility")
+    if raw is None:
+        return
+    supported = int(raw["supported_rows"])
+    status = (
+        "unavailable" if not supported
+        else "useful" if estimated_supported_rows >= supported
+        else "degraded"
+    )
+    utility = RankingUtilitySummary.model_validate({
+        **raw,
+        "estimated_rows": estimated_supported_rows,
+        "visible_estimate_cells": visible_cells,
+        "localized_history_matches": recovered_physical,
+        "affected_estimate_cells": affected_cells,
+        "unaffected_estimate_cells": unaffected_cells,
+        "status": status,
+        "reasons": (
+            f"{estimated_supported_rows}/{supported} supported rows show a best available direct "
+            f"estimate across {visible_cells} visible matchup cells",
+            f"{raw['grounded_rows']}/{supported} supported rows are proof-grade grounded; proof "
+            "remains separate from diagnostic usefulness",
+        ),
+    })
+    validate_ranking_utility(utility)
+    blob["meta"]["report_utility"] = utility.model_dump(mode="json")
+
+
 def generate_ranking(
     *,
     db_path: Path,
@@ -1701,6 +1908,12 @@ def generate_ranking(
                     else ("no exact interval pair is available for this report row",),
                     "pairs": row_pairs,
                 }
+            _publish_visible_best_estimates(
+                blob,
+                parent_attachment=parent_attachment,
+                camp_attachment=camp_attachment,
+                parent_interval=parent_interval,
+            )
             blob["evidence"] = primary_attachment.model_dump(mode="json")
             blob["report_target"] = target.model_dump(mode="json")
             interval_digest = _digest_rows(
@@ -1761,8 +1974,15 @@ def _cli_target(args) -> ReportTarget | None:
             args.target_label,
         )
     )
-    if not requested:
+    # ``--field-since`` is the explicit legacy/non-target report surface.  A
+    # completely unqualified invocation publishes the current typed target,
+    # while this override preserves generate_ranking(..., field_since=...)
+    # parity for callers that deliberately request the older authority-only
+    # report.
+    if not requested and args.field_since:
         return None
+    if not requested:
+        return current_report_target(Path(args.db))
     con = duckdb.connect(str(args.db), read_only=True)
     try:
         run = (

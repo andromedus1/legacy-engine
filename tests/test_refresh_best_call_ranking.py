@@ -940,6 +940,15 @@ class TestMainEndToEnd:
                 "imputed_share": 0.0, "eligible": True, "reason": None,
             },
             "reconciliation": None, "floor_observability": None, "methodology": {},
+            "best_available_estimate": {
+                "estimate": 0.56, "direct_match_n": 19, "added_history_n": 11,
+                "estimated_cells": 1, "total_cells": 2, "field_coverage": 0.63,
+                "basis": "localized-clean-direct", "confidence": "moderate",
+                "proof_grade": False,
+            },
+        }
+        arch = {
+            **camp, "subject": "Parent", "parent": None, "camp": None,
         }
         blob = {
             "meta": {
@@ -947,7 +956,7 @@ class TestMainEndToEnd:
                 "field_since": "2026-01-01", "field_decks": 100, "corpus_max": "2026-01-31",
                 "regime_card": None, "audit": [],
             },
-            "arch": [], "camps": [camp], "plans": [],
+            "arch": [arch], "camps": [camp], "plans": [],
             "report_target": {
                 "target_id": "before-test", "label": "Before hostile </option>",
                 "mode_label": "Today's model", "data_until": "2026-01-31",
@@ -962,6 +971,10 @@ class TestMainEndToEnd:
     pbest: pbestHtml(D.camps[0]),
     sortValue: CAMP_COLS[5].get(D.camps[0]),
     row: rowHtml(D.camps[0], 0, true),
+    campHeaders: CAMP_COLS.length,
+    campCells: (rowHtml(D.camps[0], 0, true).match(/<td/g) || []).length,
+    archHeaders: COLS.length,
+    archCells: (rowHtml(D.arch[0], 0, false).match(/<td/g) || []).length,
   };
   const tied = {
     subject: "Deck", cells: [
@@ -988,6 +1001,12 @@ class TestMainEndToEnd:
         assert result["initial"]["interactiveN"] == 8
         assert result["initial"]["sortValue"] == pytest.approx(0.2)
         assert result["initial"]["pbest"].startswith("20.0%")
+        assert result["initial"]["campCells"] == result["initial"]["campHeaders"]
+        assert result["initial"]["archCells"] == result["initial"]["archHeaders"]
+        assert "56.0%" in result["initial"]["row"]
+        assert "covered-field estimate" in result["initial"]["row"]
+        assert "clean history + current" in result["initial"]["row"]
+        assert "estimate shown · not proof-grade" in result["initial"]["row"]
         assert result["targetControlHidden"] is False
         assert "Before hostile </option>" in result["targetOption"]
         assert result["targetMode"] == "Today’s model"
@@ -1144,6 +1163,44 @@ class TestMainEndToEnd:
 
 
 class TestEvidenceTargetIntegration:
+    def test_unqualified_cli_builds_typed_direct_evidence_without_artifact_tables(
+        self, tmp_path, monkeypatch
+    ):
+        db_path = tmp_path / "ranking.duckdb"
+        con = store.connect(db_path)
+        _build_fixture(con)
+        con.close()
+        out_path = tmp_path / "current.html"
+        captured = {}
+        original = rbcr.generate_ranking
+
+        def capture(**kwargs):
+            captured["calls"] = captured.get("calls", 0) + 1
+            captured["target"] = kwargs["target"]
+            captured["blob"] = original(**kwargs)
+            return captured["blob"]
+
+        monkeypatch.setattr(rbcr, "generate_ranking", capture)
+        monkeypatch.setattr(rbcr, "staged_split_parents", lambda: sorted(PARENTS))
+        monkeypatch.setattr(sys, "argv", [
+            "refresh_best_call_ranking.py", "--db", str(db_path), "--out", str(out_path),
+            "--ground-n", "3",
+        ])
+
+        rbcr.main()
+
+        target = captured["target"]
+        blob = captured["blob"]
+        assert target is not None
+        assert target.certificate_run_id is None
+        assert target.amplification_run_id is None
+        assert captured["calls"] == 1
+        assert blob["meta"]["report_utility"]["estimated_rows"] > 0
+        assert all("best_available_estimate" in row for row in blob["arch"])
+        rendered = out_path.read_text()
+        assert "direct matchup estimate" in rendered
+        assert "covered-field estimate" in rendered
+
     def test_current_target_attaches_diagnostics_without_changing_authority(
         self, tmp_path
     ):
@@ -1169,6 +1226,8 @@ class TestEvidenceTargetIntegration:
             baseline
         )
         assert attached["evidence"]["status"] == "not-assessed"
+        assert attached["meta"]["report_utility"]["estimated_rows"] > 0
+        assert all("best_available_estimate" in row for row in attached["arch"])
         assert all("diagnostic_evidence" in row for row in attached["arch"])
         assert attached["camps"]
         assert all(

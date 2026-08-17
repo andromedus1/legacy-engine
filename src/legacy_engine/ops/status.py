@@ -229,6 +229,11 @@ def job_status_audit_lines(
             f"// ranking utility: {utility.get('status', 'unknown')} · "
             f"observed={utility.get('observed_field_n', 'n/a')} · "
             f"effective={utility.get('effective_field_n', 'n/a')} · "
+            f"estimates={utility.get('estimated_rows', 'n/a')}/"
+            f"{utility.get('supported_rows', 'n/a')} · "
+            f"proof={utility.get('grounded_rows', 'n/a')}/"
+            f"{utility.get('supported_rows', 'n/a')} · "
+            f"recovered={utility.get('localized_history_matches', 'n/a')} · "
             f"practical={utility.get('practical_call') or 'none'}"
         )
     if status.format_monitor is not None:

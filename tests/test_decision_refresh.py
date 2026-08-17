@@ -13,6 +13,7 @@ from legacy_engine.workflows.decision_refresh import (
     RefreshStepStatus,
     SourceRefreshResult,
     RankingUtilitySummary,
+    DefaultDecisionRefreshPorts,
     decision_refresh_audit_lines,
     run_decision_refresh,
     validate_ranking_utility,
@@ -80,6 +81,35 @@ class RecordingPorts:
 
 
 class TestDecisionRefresh:
+    def test_default_ranking_port_publishes_one_current_typed_target(self, tmp_path, monkeypatch):
+        import scripts.refresh_best_call_ranking as ranking_script
+
+        db_path = tmp_path / "ranking.duckdb"
+        out_path = tmp_path / "ranking.html"
+        target = object()
+        calls = []
+        utility = RankingUtilitySummary(
+            observed_field_n=8, effective_field_n=8, prior_strength=0,
+            affected_clamp_count=1, supported_rows=1, transition_prior_rows=0,
+            grounded_rows=0, estimated_rows=1, visible_estimate_cells=2,
+            localized_history_matches=3, affected_estimate_cells=1,
+            unaffected_estimate_cells=1, practical_call="Tempo", proof_grade_call=None,
+            rendered_shortlist_rows=0, status="useful", practical_ranked_actions=("Tempo",),
+        )
+        monkeypatch.setattr(ranking_script, "current_report_target", lambda path: target)
+
+        def generate_ranking(**kwargs):
+            calls.append(kwargs)
+            return {"meta": {"report_utility": utility.model_dump(mode="json")}}
+
+        monkeypatch.setattr(ranking_script, "generate_ranking", generate_ranking)
+
+        result = DefaultDecisionRefreshPorts().write_ranking(db_path, out_path)
+
+        assert result == utility
+        assert len(calls) == 1
+        assert calls[0] == {"db_path": db_path, "out_path": out_path, "target": target}
+
     def test_usefulness_contract_requires_practical_call_to_lead_status_ranking(self):
         with pytest.raises(ValueError, match="does not lead the practical ranking"):
             validate_ranking_utility(RankingUtilitySummary(
@@ -90,8 +120,8 @@ class TestDecisionRefresh:
                 practical_ranked_actions=("First", "Later"),
             ))
 
-    def test_usefulness_contract_rejects_useful_status_with_ungrounded_support(self):
-        with pytest.raises(ValueError, match="unsupported grounded"):
+    def test_usefulness_contract_rejects_useful_status_without_visible_estimate_support(self):
+        with pytest.raises(ValueError, match="estimate for every supported row"):
             validate_ranking_utility(RankingUtilitySummary(
                 observed_field_n=10, effective_field_n=10, prior_strength=0,
                 affected_clamp_count=0, supported_rows=2, transition_prior_rows=0,

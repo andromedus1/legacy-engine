@@ -129,6 +129,25 @@ class TestStatusAuditLines:
         assert "attempt-1" in lines[1]
         assert "sha256=abc123" in lines[3]
 
+    def test_full_output_separates_visible_estimates_from_proof_and_recovery(self, tmp_path):
+        path = tmp_path / "status.json"
+        utility = {
+            "status": "useful", "observed_field_n": 12, "effective_field_n": 12,
+            "estimated_rows": 4, "supported_rows": 4, "grounded_rows": 1,
+            "localized_history_matches": 37, "practical_call": "Tempo",
+        }
+        write_job_status(path, _status(artifacts=ArtifactIdentity(
+            db_path="/tmp/db.duckdb", ranking_path="/tmp/ranking.html",
+            ranking_written=True, ranking_sha256="abc123", ranking_utility=utility,
+        )))
+
+        lines = job_status_audit_lines(read_job_status(path, now=NOW))
+
+        utility_line = next(line for line in lines if "ranking utility:" in line)
+        assert "estimates=4/4" in utility_line
+        assert "proof=1/4" in utility_line
+        assert "recovered=37" in utility_line
+
     def test_unhealthy_brief_output_names_reason(self, tmp_path):
         path = tmp_path / "status.json"
         write_job_status(path, _status(

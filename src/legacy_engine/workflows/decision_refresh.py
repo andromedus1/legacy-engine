@@ -70,6 +70,11 @@ class RankingUtilitySummary(LegacyEngineModel):
     supported_rows: int
     transition_prior_rows: int
     grounded_rows: int
+    estimated_rows: int = 0
+    visible_estimate_cells: int = 0
+    localized_history_matches: int = 0
+    affected_estimate_cells: int = 0
+    unaffected_estimate_cells: int = 0
     practical_call: str | None
     proof_grade_call: str | None
     # Backward-compatible status field. The dedicated shortlist UI was removed; new
@@ -84,7 +89,9 @@ def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
     """Reject contradictory generation metadata before a ranking artifact is published."""
     for name in (
         "observed_field_n", "effective_field_n", "prior_strength", "affected_clamp_count",
-        "supported_rows", "transition_prior_rows", "grounded_rows", "rendered_shortlist_rows",
+        "supported_rows", "transition_prior_rows", "grounded_rows", "estimated_rows",
+        "visible_estimate_cells", "localized_history_matches", "affected_estimate_cells",
+        "unaffected_estimate_cells", "rendered_shortlist_rows",
     ):
         if getattr(summary, name) < 0:
             raise ValueError(f"ranking utility {name} must be non-negative")
@@ -104,10 +111,11 @@ def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
         raise ValueError("ranking utility practical call does not lead the practical ranking")
     if summary.status == "useful" and summary.practical_call is None:
         raise ValueError("useful ranking utility must publish a practical call")
-    if summary.status == "useful" and summary.grounded_rows < summary.supported_rows:
-        raise ValueError("useful ranking utility cannot have unsupported grounded rows")
-    if summary.status == "degraded" and summary.supported_rows and summary.grounded_rows >= summary.supported_rows:
-        raise ValueError("degraded ranking utility contradicts fully grounded support")
+    useful_rows = max(summary.grounded_rows, summary.estimated_rows)
+    if summary.status == "useful" and useful_rows < summary.supported_rows:
+        raise ValueError("useful ranking utility requires an estimate for every supported row")
+    if summary.status == "degraded" and summary.supported_rows and useful_rows >= summary.supported_rows:
+        raise ValueError("degraded ranking utility contradicts complete visible estimate support")
     if summary.status == "unavailable" and summary.supported_rows:
         raise ValueError("unavailable ranking utility cannot report supported rows")
 
@@ -446,8 +454,14 @@ class DefaultDecisionRefreshPorts:
         )
 
     def write_ranking(self, db_path: Path, out_path: Path) -> RankingUtilitySummary | None:
-        from scripts.refresh_best_call_ranking import generate_ranking
+        from scripts.refresh_best_call_ranking import current_report_target, generate_ranking
 
-        blob = generate_ranking(db_path=db_path, out_path=out_path)
-        utility = blob.get("meta", {}).get("ranking_utility")
+        blob = generate_ranking(
+            db_path=db_path,
+            out_path=out_path,
+            target=current_report_target(db_path),
+        )
+        utility = blob.get("meta", {}).get("report_utility") or blob.get("meta", {}).get(
+            "ranking_utility"
+        )
         return RankingUtilitySummary.model_validate(utility) if utility is not None else None

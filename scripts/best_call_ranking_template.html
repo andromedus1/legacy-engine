@@ -447,6 +447,7 @@ const nParents = new Set(D.camps.map(r => r.parent)).size;
 const validation = M.benchmark_validation || {status:"not-run", artifact_id:null,
   reason:"no benchmark summary artifact supplied to page generation"};
 const productionCall = M.production_recommendation || {chosen_action:null};
+const reportUtility = M.report_utility || null;
 const reportTarget = D.report_target || null;
 const evidenceAudit = M.evidence_audit || null;
 const audit = [
@@ -457,6 +458,7 @@ const audit = [
     + (M.field_events ? ` · ${nf(M.field_events)} events` : "")
     + (M.field_archetypes ? ` · ${M.field_archetypes} archetypes` : ""),
   `// tables: ${D.arch.length} archetypes (${groundedCur} grounded + current) · ${D.camps.length} camps across ${nParents} parents · ${nf(measCells)}/${nf(totCells)} matchup cells measured`,
+  reportUtility ? `// readable estimate utility: ${reportUtility.status} · ${reportUtility.estimated_rows}/${reportUtility.supported_rows} supported rows · ${reportUtility.visible_estimate_cells} visible direct cells · +${reportUtility.localized_history_matches} clean-history matches · proof-grade ${reportUtility.grounded_rows}/${reportUtility.supported_rows}` : null,
   `// current production call: ${productionCall.chosen_action || "unavailable"} · shared grounded/current/Agency ordering`,
   `// future-only validation: ${validation.status} · artifact ${validation.artifact_id || "none"}`
     + (validation.reason ? ` · ${validation.reason}` : ""),
@@ -627,6 +629,18 @@ function floorObservabilityHtml(r) {
   const warning = o.floor_observed ? "" : `<div class="evidence-warn">${escT(o.reason)}</div>`;
   return `<div>${counts}</div>${warning}`;
 }
+function bestEstimateHtml(r) {
+  const e = r.best_available_estimate;
+  if (!e || e.estimate == null) return `<span class="unm">n/a<br>no direct estimate</span>`;
+  const basis = e.basis === "localized-clean-direct" ? "clean history + current" :
+    e.basis === "certified-direct" ? "certified history + current" : "current direct";
+  const proof = e.proof_grade ? "proof-grade" : "estimate shown · not proof-grade";
+  return `<b>${fmtP(e.estimate)}%</b> <small>covered-field estimate</small><br>`+
+    `<span class="chip">${e.direct_match_n} direct · ${e.estimated_cells}/${e.total_cells} cells · `+
+    `${(100*e.field_coverage).toFixed(0)}% field</span><br>`+
+    `<small>${escT(basis)} · +${e.added_history_n} clean-history matches · `+
+    `${escT(e.confidence)} · ${proof}</small>`;
+}
 function rowHtml(r, i, camp) {
   const stale = r.recent_4wk < 5 ? " stale" : "";
   const cls = (r.grounded ? "" : "thin") + stale;
@@ -650,6 +664,7 @@ function rowHtml(r, i, camp) {
     <td>${stabilityHtml(r)}</td>
     <td>${reconciliationHtml(r)}</td>
     ${camp ? `<td>${pbestHtml(r)}</td>` : ""}
+    <td>${bestEstimateHtml(r)}</td>
     <td>${floorTxt}</td>
     <td>${bTxt}</td>
     <td>${metaTxt}</td>
@@ -666,6 +681,7 @@ const COLS = [
   {label:"agency % / posterior lean", get:r => agencyValue(r), dir:-1},
   {label:"rank stability", get:r => (r.methodology || {}).stability?.rank_span, dir:1},
   {label:"adj field WR %", get:r => r.adj, dir:-1},
+  {label:"direct matchup estimate", get:r => (r.best_available_estimate || {}).estimate, dir:-1},
   {label:"worst measured matchup %", get:r => r.floor, dir:-1},
   {label:"blowouts", get:r => r._b.score, dir:1},
   {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
@@ -677,9 +693,9 @@ const COLS = [
 // Camp table adds the cross-camp P(best) column (nulls — candidacy-gated rows — sort last).
 const CAMP_COLS = [...COLS.slice(0, 5),
   {label:"P(best)", get:r => r._interactiveN === D.meta.ground_n ? r.p_best : null, dir:-1},
-  ...COLS.slice(5, 9),
+  ...COLS.slice(5, 10),
   {label:"evidence", get:r => (r.ranking_evidence || {}).stratum || "", dir:1},
-  ...COLS.slice(9)];
+  ...COLS.slice(10)];
 const colsFor = camp => camp ? CAMP_COLS : COLS;
 // Default sort: agency %, descending. Click a header to sort by that column;
 // click again to flip direction. Sorting happens WITHIN each honesty stratum —
@@ -940,7 +956,7 @@ function evidenceDiagnosticsHtml(r) {
   const body = `<div class="diagnostic-boundary"><b>Diagnostic only — ranking authority unchanged.</b> `+
     `These direct and challenger estimates are frozen generated evidence. Browser threshold controls do not recompute, hide, rank, or promote them. `+
     `<span class="chip">${escT(evidence.status)}</span> ${evidence.reasons.map(escT).join("; ")}</div>`+
-    (pairs.length ? `<div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Current only</th><th>Certified expanded</th><th>Added history</th></tr></thead><tbody>${direct}</tbody></table></div>`+
+    (pairs.length ? `<div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Current only</th><th>Best available direct</th><th>Added clean history</th></tr></thead><tbody>${direct}</tbody></table></div>`+
     `<h4>Admitted half-open components</h4><div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Component</th><th>Bounds</th><th>Provenance</th><th>n current / expanded / added</th></tr></thead><tbody>${components || `<tr><td colspan="5">n/a — no admitted interval components</td></tr>`}</tbody></table></div>`+
     `<h4>Six named challengers</h4><div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Method</th><th>Served estimate</th><th>Service state</th><th>Confidence / imputation</th><th>Direct, history, borrowed decomposition</th></tr></thead><tbody>${challengers}</tbody></table></div>` :
     `<p>n/a — ${evidence.reasons.map(escT).join("; ")}</p>`);
