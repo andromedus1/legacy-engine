@@ -156,7 +156,7 @@ contracts remain untouched, proposals remain inert, and `uv.lock` remains unrela
 - Recurrent correction suite: 35 passed.
 - Recurrent plus interval/amplification integration slice: 66 passed.
 - Adjacent matchup/ranking/advisory CLI regression slice: 505 passed.
-- Full repository suite: 3982 passed, 1 skipped.
+- Correction-owner pre-adjacent-refresh-fix repository suite: 3982 passed, 1 skipped.
 - Ruff passed on all future-validation implementation/test files; the additive CLI surface passes
   with only the repository's existing `F821,F541` baseline ignored.
 - Compileall passed for recurrent advisory/workflow and CLI modules.
