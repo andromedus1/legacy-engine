@@ -37,11 +37,22 @@ DirectKind = Literal["current-only", "certified-expanded", "added-history"]
 class ReportIntervalSource(LegacyEngineModel):
     entity: str
     source: Literal[
-        "current-reference", "certified-history", "scalar-current", "camp-current-only"
+        "current-reference",
+        "certified-history",
+        "scalar-current",
+        "camp-current-only",
+        "localized-pre-exposure",
+        "localized-post-ban",
     ]
     segment_id: str | None = None
     certificate_id: str | None = None
     certificate_run_id: str | None = None
+    card: str | None = None
+    exposure_start: date | None = None
+    ban_date: date | None = None
+    boundary_provenance: Literal[
+        "released-at", "corpus-first-seen", "first-material-adoption"
+    ] | None = None
 
 
 class ReportIntervalComponent(LegacyEngineModel):
@@ -98,6 +109,10 @@ class PairEvidenceDiagnostic(LegacyEngineModel):
     current_only: DirectViewDiagnostic
     certified_expanded: DirectViewDiagnostic
     added_history: DirectViewDiagnostic
+    best_available_direct: DirectViewDiagnostic
+    best_available_basis: Literal[
+        "localized-clean-direct", "certified-direct", "current-direct", "unavailable"
+    ]
     interval_components: tuple[ReportIntervalComponent, ...]
     challengers: tuple[AmplifiedDiagnostic, ...]
     status: EvidenceAttachmentStatus
@@ -353,6 +368,7 @@ def build_report_evidence(
             challengers.append(diagnostic)
             pair_reasons.extend(candidate.reasons)
         components = _components(interval, subject, opponent, views)
+        pair_reasons.extend(views.certified_expanded.reasons)
         is_camp = any(
             source.source == "camp-current-only"
             for component in components
@@ -376,12 +392,43 @@ def build_report_evidence(
             pair_status = "degraded"
         else:
             pair_status = "available"
+        expanded_sources = {
+            source.source for component in components for source in component.sources
+        }
+        best_direct = (
+            views.certified_expanded
+            if views.certified_expanded.cell is not None
+            and views.certified_expanded.cell.n > 0
+            else views.current_only
+        )
+        best_basis: Literal[
+            "localized-clean-direct", "certified-direct", "current-direct", "unavailable"
+        ] = (
+            "localized-clean-direct"
+            if best_direct.cell is not None
+            and best_direct.cell.n > 0
+            and any(source.startswith("localized-") for source in expanded_sources)
+            else "certified-direct"
+            if best_direct.cell is not None
+            and best_direct.cell.n > 0
+            and "certified-history" in expanded_sources
+            else "current-direct"
+            if best_direct.cell is not None and best_direct.cell.n > 0
+            else "unavailable"
+        )
         pairs[pair_key(subject, opponent)] = PairEvidenceDiagnostic(
             subject=subject,
             opponent=opponent,
             current_only=_direct("current-only", views.current_only),
             certified_expanded=_direct("certified-expanded", views.certified_expanded),
             added_history=_direct("added-history", views.added_history),
+            best_available_direct=_direct(
+                "certified-expanded"
+                if best_direct is views.certified_expanded
+                else "current-only",
+                best_direct,
+            ),
+            best_available_basis=best_basis,
             interval_components=components,
             challengers=tuple(challengers),
             status=pair_status,

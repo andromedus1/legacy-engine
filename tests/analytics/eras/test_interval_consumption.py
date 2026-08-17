@@ -42,6 +42,7 @@ from legacy_engine.analytics.match_results import (
     select_pair_matches,
     selected_rows_for_pair,
 )
+from legacy_engine.advisory.best_call_evidence import build_report_evidence
 from legacy_engine.ingestion.store import init_schema
 
 
@@ -253,6 +254,19 @@ def test_localized_exposure_authority_recovers_clean_pre_and_post_ban_history():
     assert set(pair.current_only.match_ids).isdisjoint(pair.added_history.match_ids)
     ledger_rows = selected_rows_for_pair(interval.selected_outcomes, "A", "B")
     assert len({(row.view, row.match.match_id) for row in ledger_rows}) == len(ledger_rows)
+    report_pair = build_report_evidence(
+        interval, None, authority_payload={"production": "unchanged"},
+    ).pairs['["A","B"]']
+    assert report_pair.best_available_basis == "localized-clean-direct"
+    assert report_pair.best_available_direct.n == 2
+    assert any(
+        source.source == "localized-pre-exposure"
+        and source.card == "The Fantasticar"
+        and source.exposure_start == date(2026, 6, 20)
+        and source.ban_date == date(2026, 8, 10)
+        for component in report_pair.interval_components
+        for source in component.sources
+    )
 
 
 def test_same_date_multi_card_materiality_emits_one_union_cohort_gap():
