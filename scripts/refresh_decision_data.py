@@ -5,33 +5,39 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
-from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR
-from legacy_engine.ingestion.card_coverage import card_coverage_audit_lines
-from legacy_engine.workflows.decision_refresh import (
-    DefaultDecisionRefreshPorts,
-    RefreshStepStatus,
-    decision_refresh_audit_lines,
-    run_decision_refresh,
-)
-from legacy_engine.ops.scheduled_refresh import (
-    LockUnavailable,
-    decision_refresh_lock_path,
-    exclusive_file_lock,
-)
 
+SCRIPT_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(SCRIPT_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_PROJECT_ROOT))
 
 DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
 
 
 def run_manual_refresh(*, db_path: Path, out_path: Path, lock_dir: Path, ports):
     """Run the manual adapter under the same artifact lock as scheduled refreshes."""
+    from legacy_engine.ops.scheduled_refresh import (
+        decision_refresh_lock_path,
+        exclusive_file_lock,
+    )
+    from legacy_engine.workflows.decision_refresh import run_decision_refresh
+
     lock_path = decision_refresh_lock_path(db_path, out_path, lock_dir=lock_dir)
     with exclusive_file_lock(lock_path):
         return run_decision_refresh(ports, db_path=db_path, out_path=out_path)
 
 
 def main() -> None:
+    from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR
+    from legacy_engine.ingestion.card_coverage import card_coverage_audit_lines
+    from legacy_engine.ops.scheduled_refresh import LockUnavailable
+    from legacy_engine.workflows.decision_refresh import (
+        DefaultDecisionRefreshPorts,
+        RefreshStepStatus,
+        decision_refresh_audit_lines,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", default=str(DUCKDB_PATH))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
