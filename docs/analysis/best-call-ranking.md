@@ -40,8 +40,8 @@ decisions:
   - "Benchmark launch requires a zero-gap card-metadata preflight at every planned training cutoff on the same derived copy; exact Scryfall/current aliases and evidence-backed provider serialization may resolve names, while ambiguous, truncated, and manual candidates remain fail-closed."
   - "The generated page names its future-only validation status and summary artifact id. No supplied summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive, or predictive-claim-supported."
   - "Recurrent interval and amplification evidence is diagnostic-only. The attachment exposes current-only, certified-expanded, and added-history views plus six named challenger slots, while a canonical authority-payload digest proves that Agency, candidacy, P(best), ordering, and every mature row metric are unchanged."
-  - "The normal current refresh needs no manual evidence run ids: it builds typed exact direct evidence even when certification/amplification artifact tables are absent, keeps field shares post-ban, and localizes a ban to affected matchup edges. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10) while admitting clean pre-exposure plus post-ban rows; unaffected edges retain compatible history."
-  - "The first-read archetype table publishes a covered-field direct matchup estimate, direct n, clean-history n, provenance, confidence, and proof status separately. Full typed evidence remains available to Python/store consumers; offline HTML embeds only four highest-share opponent ledgers per supported row, with digests/counts instead of raw match-id arrays and no global pair universe."
+  - "The normal current refresh needs no manual evidence run ids: it builds typed exact direct evidence even when certification/amplification artifact tables are absent, keeps field shares post-ban, and localizes a ban to affected matchup edges. A card/cohort's corpus fallback is its global first-seen date across all archetypes. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10), with clean pre-history bounded by the last confirmed ban before exposure plus any earlier stored disturbance; unaffected edges retain compatible history."
+  - "The first-read archetype table publishes a covered-field direct matchup estimate, direct n, clean-history n, provenance, confidence, and proof status separately. Localized/certified provenance requires actual selected added-history observations; zero added history is current-direct. A proof-grade call exists iff grounded rows exist. Full typed evidence remains available to Python/store consumers; offline HTML embeds only four highest-share opponent ledgers per supported row, with digests/counts instead of raw match-id arrays and no global pair universe."
   - "Parents may consume an exact certification run; camps remain current-only and cannot acquire certified historical intervals or added-history observations. Missing, invalid, non-final, future, unpromoted, or guard-mismatched certificates abstain with named reasons rather than widening evidence."
   - "An explicitly requested amplification run is exact-run only: no latest-run lookup or approximate reuse. Missing or mismatched corpus, clock, certificate, direct baselines, profile registry/order, fit identities, match-set digests, or comparison audit fails generation before atomic replacement; omitting the run is a valid typed not-assessed state."
   - "A retrospective report target uses an exclusive data_until cutoff, the latest confirmed ban boundary strictly before that cutoff, and the label Today’s model because taxonomy/configuration are current at knowledge_as_of. It is never represented as what the engine knew then."
@@ -114,8 +114,12 @@ absent, the current report still builds typed localized direct evidence with
 remain post-ban. Matchup evidence uses pairwise clean interval unions instead: an edge touching a
 materially Fantasticar-affected archetype excludes `[2026-06-20, 2026-08-10)`, admits compatible
 clean evidence before exposure and after the ban, and preserves the positive gap as separate
-components. Unaffected edges retain their compatible history. Camps remain current-only and never
-inherit a parent's direct history.
+components. The fallback exposure date is global per banned card/cohort across all archetypes, so
+later adopters cannot shift the gap. Clean pre-exposure recovery begins at the latest confirmed ban
+strictly before exposure, narrowed by a stored disturbance only when that disturbance also predates
+exposure. Unaffected edges retain compatible history. Camps remain current-only and never inherit a
+parent's direct history. Interval construction fails closed if any expanded observation lands in a
+typed contamination gap.
 
 The default archetype row visibly reports the best covered-field direct matchup estimate with
 direct sample size, estimated-cell and field-mass coverage, clean-history sample, provenance, and
@@ -124,25 +128,27 @@ their former authority. Expanded details are a compact publication projection: a
 highest-share opponents for each supported row, exact match-set digests and counts instead of raw
 match-id arrays, and no duplicate global pair universe. Library/store evidence APIs retain the
 complete typed pair surface; the offline report does not need to serialize it all to remain
-auditable.
+auditable. Provenance is observation-based: `localized-clean-direct` or `certified-direct` requires
+at least one actually selected added-history observation from that source; otherwise the estimate
+is `current-direct`.
 
 ### Fantasticar current-corpus utility audit (2026-08-16)
 
 The pre-change report exposed `0/50` proof-grounded supported archetype rows and no visible best
 direct estimate, making the primary table nearly empty as a decision aid. The refreshed corpus is
 through August 16, 2026 (exclusive model cutoff August 17) with a 197-deck observed field since the
-August 10 ban. Localized recovery now shows estimates on `50/50` supported rows across 2,416 visible
-direct matchup cells and adds 7,690 unique clean-history physical matches beyond current-only
-evidence. Of those visible cells, 2,093 use localized-clean provenance and 323 retain unaffected
-current/certified provenance. Proof remains `0/50`: usefulness changed to `useful`, but validation
-and production authority did not change. The practical diagnostic call is Show and Tell; the
-unchanged proof-grade call remains Golgari Cradle Control.
+August 10 ban. Localized recovery now shows estimates on `50/50` supported rows across 2,716 visible
+direct matchup cells and adds 9,949 unique clean-history physical matches beyond current-only
+evidence. Observation-based provenance classifies 745 cells as localized-clean and 1,971 as
+current/certified; the counts reconcile exactly to visible cells. Proof remains `0/50`: usefulness
+is `useful`, but validation and production authority did not change. The practical diagnostic call
+is Show and Tell, and no proof-grade call is published while grounded coverage is zero.
 
 The compact top-four supported-row projection embeds 200 parent and 95 camp pair ledgers. The
-self-contained HTML is 38,556,126 bytes, down from the rejected 538,582,790-byte full-pair draft and
+self-contained HTML is 38,637,569 bytes, down from the rejected 538,582,790-byte full-pair draft and
 close to the prior roughly 34MB report. On the final live run, exact parent/camp interval evidence
-took 164.7 seconds under concurrent machine load, compact projection 12.3 seconds, and serialization
-plus atomic write 0.6 seconds. A controlled one-scan benchmark completed the same parent/camp
+took 61.6 seconds, compact projection 5.8 seconds, and serialization plus atomic write 0.3 seconds.
+A controlled one-scan benchmark completed the same parent/camp
 interval builds in 59.2 seconds combined; resolver-call and exact-parity tests protect the
 eliminated N+1 corpus scan independently of wall-clock variance.
 

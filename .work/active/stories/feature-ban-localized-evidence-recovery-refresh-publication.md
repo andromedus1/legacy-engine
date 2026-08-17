@@ -35,6 +35,8 @@ labels.
 - Added a report-utility projection that counts visible estimates, affected/unaffected direct cells,
   recovered physical history matches, and proof-grade rows separately. Scheduled status renders
   estimate coverage and proof coverage as distinct ratios.
+- `proof_grade_call` is null iff there are no grounded rows; the utility validator rejects either
+  direction of contradiction and requires affected/unaffected cell counts to reconcile.
 - Preserved explicit `--field-since` as the legacy authority-only override and kept the mature
   ranking payload byte-identical by excluding additive row estimates/report utility from the
   authority projection.

@@ -29,7 +29,11 @@ each bound was chosen.
   interval and cardinality risk.
 - Review weight: standard (project default); feature review remains the independent boundary.
 - Added a typed, validated same-date ban-event exposure authority. Authoritative release dates are
-  supported; corpus-first-seen is the deterministic outcome-free fallback used by the current data.
+  supported; global corpus-first-seen across every archetype is the deterministic outcome-free
+  fallback used by the current data.
+- Added a typed clean-pre lower bound from the last confirmed ban strictly before exposure. A stored
+  disturbance narrows it only when the disturbance also predates exposure; a boundary inside or
+  after contamination cannot erase clean pre-history.
 - Compiled explicit clean pre-exposure and post-ban atoms around the positive contamination gap.
   The existing selected-outcome ledger remains the single physical-match selection seam.
 - Multi-card bans use one union-materiality cohort gap, preventing a tiny individual card from

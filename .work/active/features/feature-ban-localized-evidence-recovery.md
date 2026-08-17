@@ -331,23 +331,23 @@ state separately. The full typed pair surface remains available to library/store
 offline HTML publishes only four highest-share opponent ledgers per supported row, uses counts and
 digests in place of raw match-id arrays, and omits the duplicated global pair universe.
 
-On the live corpus through August 16, 2026, the report recovered estimates for 50/50 supported rows
-across 2,416 cells using 7,690 unique clean-history physical matches. The audit distinguishes 2,093
-localized-affected cells from 323 unaffected current/certified cells. Proof stays 0/50 and the
-production authority/call remains separately labeled. The final self-contained report is
-38,556,126 bytes, close to the prior roughly 34MB output and 90% smaller than the rejected full-pair
-draft.
+On the live corpus through August 16, 2026, the corrected report recovers estimates for 50/50
+supported rows across 2,716 cells using 9,949 unique clean-history physical matches.
+Observation-based provenance distinguishes 745 cells with actually selected localized history from
+1,971 current/certified cells. Proof stays 0/50, so `proof_grade_call` is null while the practical
+diagnostic call remains separately labeled. The final self-contained report is 38,637,569 bytes,
+close to the prior roughly 34MB output and 90% smaller than the rejected full-pair draft.
 
 ## Verification
 
-- Focused localized evidence, report projection, and DOM tests: 79 passed.
-- Full repository suite: 3,997 passed, 1 skipped.
+- Focused localized evidence, report projection, workflow, and status tests: 110 passed.
+- Full repository suite: 4,002 passed, 1 skipped.
 - Live generation: field 197 since 2026-08-10; corpus max 2026-08-16; 95 parent + 106 camp rows.
 - Live HTML JavaScript syntax/load parse: passed.
 - Knowledge-index regeneration/lint: 0 errors (six pre-existing/document-size warnings).
 - Performance: one resolver call per ledger with exact reference parity; controlled parent/camp
-  interval benchmark 59.2s combined. Final loaded run: exact intervals 164.7s, compact projection
-  12.3s, serialization/atomic write 0.6s.
+  interval benchmark 59.2s combined. Final run: exact intervals 61.6s, compact projection 5.8s,
+  serialization/atomic write 0.3s.
 
 ## Review correction — 2026-08-16
 
@@ -361,3 +361,9 @@ The independent review requested changes before approval:
   eligible interval geometry;
 - enforce `proof_grade_call` as null whenever no grounded row exists; and
 - recompute the live utility audit and its affected/unaffected counts after those corrections.
+
+All review blockers were corrected. Every one of the 16 live Fantasticar authorities now uses the
+global `[2026-06-20, 2026-08-10)` gap and typed 2026-05-18 prior-regime lower bound. Doomsday, TES,
+and Mystic Forge Combo retain clean pre atoms; Mystic Forge's later Fantasticar-pre interval remains
+excluded where the older Candelabra contamination gap overlaps it. The production ledger validator
+confirmed zero expanded observations inside any typed localized gap during final generation.

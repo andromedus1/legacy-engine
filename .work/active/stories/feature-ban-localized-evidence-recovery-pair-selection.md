@@ -29,6 +29,10 @@ affected edges exclude only contaminated exposure intervals, and camps remain cu
   post-ban components while the contamination gap stays absent.
 - Added report-level localized source metadata and a typed `best_available_direct` projection with
   `localized-clean-direct`, `certified-direct`, `current-direct`, or `unavailable` provenance.
+- Provenance is observation-based: localized/certified labels require actual selected added-history
+  rows from those components; zero added history is always `current-direct`.
+- The physical ledger now fails closed if any expanded observation lands inside a typed localized
+  contamination gap.
 - Preserved parent/camp parity: camp evidence still has identical current/expanded match digests,
   empty added history, and the explicit `camp-current-only` reason.
 - Tests added: localized pair report projection, best-direct sample recovery, exact boundary/card
