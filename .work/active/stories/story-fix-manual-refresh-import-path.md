@@ -1,7 +1,7 @@
 ---
 id: story-fix-manual-refresh-import-path
 kind: story
-stage: review
+stage: done
 created: 2026-08-16
 updated: 2026-08-16
 tags: [bug, ops]
@@ -60,3 +60,10 @@ the root is established, and imports the exact ranking module that failed in pro
   the ranking; the full repository passes `3,983 passed, 1 skipped`.
 - **Adjacent issues:** none bundled. The unreadable cached Standard event remains an explicit
   non-Legacy skip, and low ranking groundedness remains an honest data/support state.
+
+## Review
+
+Approved in the bounded standalone-story lane. The fix addresses the reproduced entry-point cause,
+does not change refresh ordering or authority, retains lock behavior, and uses a subprocess
+regression from an unrelated working directory rather than relying on the test runner's import
+environment. No material correctness, security, compatibility, or test-integrity finding remains.
