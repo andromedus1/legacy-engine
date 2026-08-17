@@ -1069,6 +1069,7 @@ class TestMainEndToEnd:
     def test_methodology_copy_distinguishes_decision_field_and_direct_estimates(self):
         template = rbcr.TEMPLATE_PATH.read_text()
         assert "transition-stabilized decision field" in template
+        assert "field-basis line below reports both observed" in template
         assert "affected archetypes are" in template
         assert "excluded from that preceding-regime prior" in template
         assert "A field reset does not erase matchup history" in template
@@ -1076,6 +1077,8 @@ class TestMainEndToEnd:
         assert "exact union of eligible clean intervals" in template
         assert "does not change Agency, its floor, grounding" in template
         assert "P(best), or ordering" in template
+        assert "preceding-regime camp fraction" in template
+        assert "parent is represented only by transition-prior decks" in template
 
     def test_ranking_subject_warnings_are_in_a_bottom_disclosure_not_the_header(self):
         template = rbcr.TEMPLATE_PATH.read_text()

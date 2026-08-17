@@ -262,7 +262,7 @@ and blowout highlights.</div>
       decklist since the latest confirmed B&amp;R change (the audit header names the ban). If that
       sample is below 500 decks, ranking uses a <b>transition-stabilized decision field</b>: it adds
       a bounded count-weighted prior from the immediately preceding regime; affected archetypes are
-      excluded from that preceding-regime prior. The audit reports both observed
+      excluded from that preceding-regime prior. The field-basis line below reports both observed
       and effective counts; <b>% of meta</b> and matchup weighting use the decision field. Within
       each slice, raw counts apply — one published list = one vote, no win-rate weighting.
       A field reset does not erase matchup history: matchup eligibility is resolved independently
@@ -329,8 +329,9 @@ and blowout highlights.</div>
       re-clustering (co-membership stability ≥0.9 over 50 resamples) and every camp needs a
       real sample plus clearly divergent signature cards. Camps are a <i>staged overlay</i>
       — applied for analysis, never silently promoted to taxonomy — and decks that fit no
-      camp stay honestly [unlabeled]. Camp field share = parent share × the camp's fraction
-      of the parent's current-window decks. All camp matchup cells come from ONE
+      camp stay honestly [unlabeled]. Camp field share = parent decision share × the camp's
+      current-window fraction; when the parent is represented only by transition-prior decks, the
+      preceding-regime camp fraction is used instead. All camp matchup cells come from ONE
       multi-split matrix built over every staged parent at once — numerically identical to
       the old one-matrix-per-parent builds (parity-tested in the engine), but every camp
       now coexists in a single matrix.</li>
@@ -432,8 +433,8 @@ need ≥&nbsp;5% measured field coverage; rows below that show <b>n/a</b> with t
 (their score would be pure imputation). The chip is the risk-adjusted lower-quartile field
 WR (Q25); <b>S*</b> marks coverage &lt; 85% — a full-field estimate leaning on imputation
 for the unmeasured share, including each camp's own parent (that cell is absent by
-construction). <br>Camp % of meta = parent share × camp fraction among the parent's
-field-window decks.
+construction). <br>Camp % of meta = parent decision share × current-window camp fraction, except
+that a parent represented only by transition-prior decks uses its preceding-regime camp fraction.
 The evidence column reports measured/imputed field share and the typed stratum. Historical-only
 camps stay visible as inactive; unsupported rows show P(best)=n/a. The grouping control reorganizes
 these same rows under evidence headings without changing scores or hiding inactive evidence.

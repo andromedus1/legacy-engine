@@ -56,3 +56,20 @@ rendered in a disclosure below the Subarchetypes section.
   commit `3da6246`; knowledge-index regeneration and the required planning-doc consistency review
   are handled before story closure.
 - Adjacent issues parked: none.
+
+## Review findings
+
+- **Blocker — camp-share exception omitted from page prose.** The first consistency pass found that
+  the template said every camp fraction came from current-window decks, while production correctly
+  uses the preceding-regime camp fraction for a parent represented only by transition-prior decks.
+  The runbook already names the exception. Bounced to implementing to correct both page references,
+  extend the copy regression, regenerate the artifact, and re-verify.
+
+## Review correction
+
+- Corrected both camp-share references to distinguish current-window camp fractions from the
+  preceding-regime fraction used for a transition-prior-only parent.
+- Corrected the count-location wording: the field-basis line, not the compact audit header, reports
+  both observed and effective field counts.
+- Added both claims to the methodology-copy regression, reran the 74-test focused suite, and
+  regenerated the live 38,640,596-byte report successfully.
