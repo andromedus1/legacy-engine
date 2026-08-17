@@ -180,7 +180,7 @@ The standard feature reviews found and drove substantial corrections rather than
 the first implementations: exact change-point boundaries and distribution metrics, certification
 bootstrap/semantic integrity, canonical one-orientation interval ledgers, real challenger fits,
 complete report composition/cutoff safety, and executable future-validation gates. The final full
-repository verification is `3,982 passed, 1 skipped`; the combined corrected acceptance surface is
+repository verification is `3,983 passed, 1 skipped`; the combined corrected acceptance surface is
 `95 passed`. Only the pre-existing uncommitted `uv.lock` remains outside the epic.
 
 ## Aggregate review

@@ -193,7 +193,8 @@ chain, binds canonical cases and aligned draws, scores proper predictive and who
 evidence, evaluates all five gate statuses from complete clauses, and exposes only content-addressed
 evaluation artifacts plus inert operator proposals. Root reran the combined corrected publication
 and recurrent acceptance suite (`95 passed in 9.71s`); the correction owner additionally verified
-the full repository (`3,982 passed, 1 skipped`). Every named standard-review blocker has a direct
+the final full repository (`3,983 passed, 1 skipped`, including the subsequently repaired manual
+refresh entry-point regression). Every named standard-review blocker has a direct
 regression, and the standard lifecycle requires no second independent implementation review.
 
 ## Review correction resolution
