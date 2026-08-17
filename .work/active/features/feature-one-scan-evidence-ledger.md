@@ -1,7 +1,7 @@
 ---
 id: feature-one-scan-evidence-ledger
 kind: feature
-stage: implementing
+stage: review
 created: 2026-08-16
 updated: 2026-08-16
 tags: [analytics, perf]

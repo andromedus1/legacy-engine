@@ -1,7 +1,7 @@
 ---
 id: feature-ban-localized-evidence-recovery
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [epic-recurrent-stable-era-evidence]
