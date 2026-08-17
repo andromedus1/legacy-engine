@@ -3,7 +3,7 @@ description: Read before refreshing or interpreting the Best Deck / Best Call ag
 type: design
 kind: planning
 status: active
-updated: 2026-08-16
+updated: 2026-08-17
 summary: |
   Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
   regenerable). One tracked script recomputes the page from the DuckDB corpus through a
@@ -15,9 +15,9 @@ summary: |
   the page itself carries the authoritative definitional prose. Typed report targets may
   add diagnostic-only recurrent interval and amplification evidence without changing the
   mature ranking payload. The normal current refresh automatically uses localized clean
-  direct intervals, keeps post-ban field shares, and publishes a compact first-read
-  estimate/provenance summary. Exclusive-cutoff “Today’s model” siblings remain available
-  in a failure-safe offline bundle.
+  direct intervals, keeps exact post-ban observations beside transition-stabilized
+  decision shares, and publishes a compact first-read estimate/provenance summary.
+  Exclusive-cutoff “Today’s model” siblings remain available in a failure-safe offline bundle.
 decisions:
   - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
   - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
@@ -26,7 +26,7 @@ decisions:
   - "Gated Agency remains the default and authoritative ranking number. The opt-in seeded posterior lean is diagnostic only: it uses the era candidate regardless of n, falls back only when the era candidate is absent, uses Jeffreys cells for resolved evidence, a weak row-centred prior for unresolved cells, and continuous field-share × precision weighting; it reports Q25, median, and 95% CI."
   - "Rank stability compares raw, CI-gated, ban-scoped, and era-only variants within each peer table; rank spans are shown only when all four variants rank the row. Interactive n changes mark generated stability and grounding paths stale, while the posterior lean remains independent of the interactive gate."
   - "Grounding paths collect every shortfall among the top-k opponents first, then prioritize remaining cells by share gained per additional match until the coverage target; the page displays the first three actions plus a remainder count and total projected matches/coverage. Plan rows expose grounding paths but do not expose lean or stability."
-  - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
+  - "Field basis separates observation from decision: --field-since defaults to the latest confirmed ban event, so observed presence is exactly post-ban; when that slice is thin, effective decision shares add a bounded preceding-regime prior after removing affected archetypes. % of meta and matchup weights use those effective counts; the observed-field sample tier uses the observed count."
   - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
   - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
   - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
@@ -40,7 +40,7 @@ decisions:
   - "Benchmark launch requires a zero-gap card-metadata preflight at every planned training cutoff on the same derived copy; exact Scryfall/current aliases and evidence-backed provider serialization may resolve names, while ambiguous, truncated, and manual candidates remain fail-closed."
   - "The generated page names its future-only validation status and summary artifact id. No supplied summary is shown as not-run; a supplied canonical summary remains honestly not-evaluable, descriptive, or predictive-claim-supported."
   - "Recurrent interval and amplification evidence is diagnostic-only. The attachment exposes current-only, certified-expanded, and added-history views plus six named challenger slots, while a canonical authority-payload digest proves that Agency, candidacy, P(best), ordering, and every mature row metric are unchanged."
-  - "The normal current refresh needs no manual evidence run ids: it builds typed exact direct evidence even when certification/amplification artifact tables are absent, keeps field shares post-ban, and localizes a ban to affected matchup edges. A card/cohort's corpus fallback is its global first-seen date across all archetypes. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10), with clean pre-history bounded by the last confirmed ban before exposure plus any earlier stored disturbance; unaffected edges retain compatible history."
+  - "The normal current refresh needs no manual evidence run ids: it builds typed exact direct evidence even when certification/amplification artifact tables are absent, keeps post-ban counts as the observed presence claim, uses transition-stabilized decision shares for ranking weights, and localizes a ban to affected matchup edges. A card/cohort's corpus fallback is its global first-seen date across all archetypes. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10), with clean pre-history bounded by the last confirmed ban before exposure plus any earlier stored disturbance; unaffected edges retain compatible history."
   - "The first-read archetype table publishes a covered-field direct matchup estimate, direct n, clean-history n, provenance, confidence, and proof status separately. Localized/certified provenance requires actual selected added-history observations; zero added history is current-direct. A proof-grade call exists iff grounded rows exist. Full typed evidence remains available to Python/store consumers; offline HTML embeds only four highest-share opponent ledgers per supported row, with digests/counts instead of raw match-id arrays and no global pair universe."
   - "Parents may consume an exact certification run; camps remain current-only and cannot acquire certified historical intervals or added-history observations. Missing, invalid, non-final, future, unpromoted, or guard-mismatched certificates abstain with named reasons rather than widening evidence."
   - "An explicitly requested amplification run is exact-run only: no latest-run lookup or approximate reuse. Missing or mismatched corpus, clock, certificate, direct baselines, profile registry/order, fit identities, match-set digests, or comparison audit fails generation before atomic replacement; omitting the run is a valid typed not-assessed state."
@@ -56,7 +56,8 @@ The page: [decks/best-deck-best-call-ranking.html](../../decks/best-deck-best-ca
 filters and column sorting apply to the strategic-plan, archetype, and camp peer
 tables. Only direct headers of those outer peer tables are sticky; headers in
 nested plan ledgers scroll with their expanded row. Rows expand to accessible
-per-opponent matchup ledgers.
+per-opponent matchup ledgers. Per-subject ranking exclusions are kept out of the first-read audit
+header and collected in a collapsed **Ranking exclusions and diagnostics** disclosure at the bottom.
 
 ## Refresh (one command)
 
@@ -110,8 +111,10 @@ good page. Omitting the flag is not a failure; it is the honest `not-assessed` p
 The unqualified current CLI and composed decision refresh create the exact current target
 automatically. Certification and amplification tables are optional enrichment: when they are
 absent, the current report still builds typed localized direct evidence with
-`certificate_run_id=null` / `amplification_run_id=null`. Field shares and the action universe
-remain post-ban. Matchup evidence uses pairwise clean interval unions instead: an edge touching a
+`certificate_run_id=null` / `amplification_run_id=null`. Exact observed counts and recentness
+remain post-ban; `% of meta`, opponent weights, and the action universe use the effective decision
+field, which may include an unaffected preceding-regime prior while the observed slice is thin.
+Matchup evidence uses pairwise clean interval unions instead: an edge touching a
 materially Fantasticar-affected archetype excludes `[2026-06-20, 2026-08-10)`, admits compatible
 clean evidence before exposure and after the ban, and preserves the positive gap as separate
 components. The fallback exposure date is global per banned card/cohort across all archetypes, so
@@ -372,7 +375,8 @@ archetype rows from one `build_adaptive_matrix` + one `build_matrix` per distinc
 ban-affectedness fallback date; camp rows from ONE `build_multi_split_adaptive`
 pass over every staged discovery parent (`staged_split_parents()`) plus one
 `build_multi_split_matrix` per distinct ban-scoped fallback date serving all
-parents at once; field shares and camp fractions from the ban-regime window —
+parents at once; transition-stabilized decision shares plus camp fractions from the observed slice
+(or the preceding slice for a prior-only parent) —
 and splices it into `scripts/best_call_ranking_template.html` at the
 `__D_BLOB__` placeholder. Camp cells are field-for-field identical to per-parent
 `split_variant` builds — the engine parity suite plus the script-level parity
@@ -504,14 +508,15 @@ unchanged for inspection.
   real count, or when `# effective_n` supplies the complete allocated denominator. Partial row
   counts still retain the historical synthetic-one Dirichlet fallback, but never claim an exact
   currency percentage. Share-only and undated aggregates say why currency is unavailable.
-- **Field and matchup windows are independent.** Window field composition to the current regime;
-  keep matchup cells adaptive unless explicitly diagnosing another window. A current-only matchup
-  matrix can starve coverage even when the current field composition is trustworthy.
+- **Field and matchup windows are independent.** Observe presence in the current regime and use the
+  transition-stabilized decision field for weighting while that observed slice is thin; keep
+  matchup cells adaptive unless explicitly diagnosing another window. A current-only matchup
+  matrix can starve coverage even when the field weighting is usable.
 
 - **Strata are honesty walls**: grounded+current, grounded-but-not-current
   (<5 decks in the last 4 corpus weeks), ungrounded (thin floor = upper bound).
   Column sorting reorders *within* a stratum only.
-- **Blowouts** count measured current-field matchups at raw observed WR <40%
+- **Blowouts** count measured matchups against the decision field at raw observed WR <40%
   (full) / 40–45% (half). The `n>=8` measured-cell gate excludes thin cells;
   among those measured cells, classification uses the raw rate rather than the
   shrunk estimate. "% meta that blows you out" weights them by field share and
@@ -570,7 +575,9 @@ field floor, `build_transition_field` may add at most `500 - observed_n` integer
 the immediately preceding confirmed regime, after removing directly affected archetypes and
 deterministically renormalizing the survivors. Effective counts drive ranking shares; observed
 counts remain adjacent and prior-only labels are `transition-prior`, never post-ban sightings.
-The transition projection never widens a matchup `PairWindow`.
+The displayed `% of meta`, every field-share-weighted ranking metric, and the diagnostic direct
+estimate use those effective shares. Raw observed counts alone drive presence and recentness. The
+transition projection never widens a matchup `PairWindow`.
 
 The status payload retains a practical ordering of supported rows by the existing posterior lean
 Q25, then median, then label. The generated page does not render a separate practical-shortlist
