@@ -830,7 +830,7 @@ def resolve_match_records(
                 p1_won = not p1_won
             else:
                 continue
-        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)), match_idx, normalize_player(p1), normalize_player(p2), label1, label2, p1_won, physical_id))
+        pending.append((str(prov), str(event_id), date.fromisoformat(str(event_date)[:10]), match_idx, normalize_player(p1), normalize_player(p2), label1, label2, p1_won, physical_id))
     records: list[ResolvedMatch] = []
     for prov, event_id, event_date, _match_idx, p1, p2, label1, label2, p1_won, match_id in sorted(pending):
         records.append(ResolvedMatch(match_id=match_id, event_id=event_id, event_date=event_date, provenance=prov, subject=label1, opponent=label2, subject_player_id=p1 or None, opponent_player_id=p2 or None, subject_won=p1_won, mirror=label1 == label2))

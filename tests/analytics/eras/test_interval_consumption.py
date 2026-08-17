@@ -444,6 +444,18 @@ def test_directed_resolver_normalizes_reverse_and_excludes_unrelated_rows():
     )
 
 
+def test_resolver_normalizes_timezone_timestamp_event_date_to_calendar_date():
+    con = _db()
+    _insert_match(
+        con, "timestamp-event", datetime(2025, 7, 20, 9, 0, tzinfo=UTC), "A", "B",
+    )
+
+    records = resolve_match_records(con, subject="A", opponent="B")
+
+    assert len(records) == 1
+    assert records[0].event_date == date(2025, 7, 20)
+
+
 def test_single_and_multi_split_pass_explicit_camp_parent_and_never_inherit_parent_certificate():
     con = _db()
     _insert_match(con, "px-old", date(2026, 1, 10), "P", "O", variants=("x", None))
