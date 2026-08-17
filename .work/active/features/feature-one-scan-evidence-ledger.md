@@ -1,7 +1,7 @@
 ---
 id: feature-one-scan-evidence-ledger
 kind: feature
-stage: review
+stage: done
 created: 2026-08-16
 updated: 2026-08-16
 tags: [analytics, perf]
@@ -167,3 +167,10 @@ report. The full report also contains variable mature ranking, compact publicati
 and machine-load costs. Revise the provisional under-90-second wording to own only the controlled
 interval phase; its measured result is 59.2 seconds with exact parity and one resolver call per
 ledger.
+
+## Independent review — approved 2026-08-16
+
+Fresh recheck at `465fbde` approved the feature with no remaining findings. It independently
+confirmed exact reference parity, one resolver call per non-empty ledger, unique physical rows,
+derived reverse orientation, and a 59.116-second controlled parent-plus-camp benchmark against the
+owned under-90-second interval-phase target.

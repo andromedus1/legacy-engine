@@ -1,7 +1,7 @@
 ---
 id: feature-ban-localized-evidence-recovery
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [epic-recurrent-stable-era-evidence]
@@ -367,3 +367,11 @@ global `[2026-06-20, 2026-08-10)` gap and typed 2026-05-18 prior-regime lower bo
 and Mystic Forge Combo retain clean pre atoms; Mystic Forge's later Fantasticar-pre interval remains
 excluded where the older Candelabra contamination gap overlaps it. The production ledger validator
 confirmed zero expanded observations inside any typed localized gap during final generation.
+
+## Independent review — approved 2026-08-16
+
+Fresh recheck at `465fbde` approved the feature with no remaining blockers, important findings, or
+nits. The reviewer independently reproduced all 16 exact Fantasticar gaps, zero admitted gap rows,
+clean pre-exposure handling for the named forcing archetypes (including Mystic Forge's independent
+Candelabra exclusion), observation-based provenance, null proof call at 0/50 grounded rows, and the
+normal no-run-id refresh contract. Focused recheck: 110 passed.
