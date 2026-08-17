@@ -1,7 +1,7 @@
 ---
 id: feature-ban-localized-evidence-recovery
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory, ui, testing]
 parent: null
 depends_on: [epic-recurrent-stable-era-evidence]
@@ -348,3 +348,16 @@ draft.
 - Performance: one resolver call per ledger with exact reference parity; controlled parent/camp
   interval benchmark 59.2s combined. Final loaded run: exact intervals 164.7s, compact projection
   12.3s, serialization/atomic write 0.6s.
+
+## Review correction — 2026-08-16
+
+The independent review requested changes before approval:
+
+- derive fallback exposure from the banned-card/cohort's global corpus-first-seen date so every
+  materially affected entity shares the exact Fantasticar contamination gap;
+- bound recovered pre-exposure history by the previous confirmed-ban regime, without allowing a
+  later stored horizon to erase clean pre-history;
+- classify localized/certified/current provenance from selected added observations rather than
+  eligible interval geometry;
+- enforce `proof_grade_call` as null whenever no grounded row exists; and
+- recompute the live utility audit and its affected/unaffected counts after those corrections.

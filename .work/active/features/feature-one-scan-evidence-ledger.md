@@ -1,7 +1,7 @@
 ---
 id: feature-one-scan-evidence-ledger
 kind: feature
-stage: review
+stage: implementing
 created: 2026-08-16
 updated: 2026-08-16
 tags: [analytics, perf]
@@ -155,3 +155,11 @@ sibling/subject index removed that second-order scan with exact parity. Focused 
 Integrated verification also passed the complete repository suite: 3,997 passed, 1 skipped. The
 final live report completed atomic publication with exact interval, compact-projection, and write
 phase timings emitted separately.
+
+## Review correction — 2026-08-16
+
+The measured acceptance boundary is the parent-plus-camp exact interval phase, not the complete
+report. The full report also contains variable mature ranking, compact publication, serialization,
+and machine-load costs. Revise the provisional under-90-second wording to own only the controlled
+interval phase; its measured result is 59.2 seconds with exact parity and one resolver call per
+ledger.
