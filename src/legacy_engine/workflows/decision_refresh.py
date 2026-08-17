@@ -463,7 +463,10 @@ class DefaultDecisionRefreshPorts:
         )
 
     def write_ranking(self, db_path: Path, out_path: Path) -> RankingUtilitySummary | None:
-        from scripts.refresh_best_call_ranking import current_report_target, generate_ranking
+        from legacy_engine.advisory.best_call_generator import (
+            current_report_target,
+            generate_ranking,
+        )
 
         blob = generate_ranking(
             db_path=db_path,

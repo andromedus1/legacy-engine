@@ -5,30 +5,18 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 import json
-import importlib.util
 import os
 from pathlib import Path
 import shutil
 import tempfile
 
+from .best_call_generator import generate_ranking as _generate_ranking
 from .best_call_targets import (
     ReportBundleManifest,
     ReportTarget,
     ReportTargetEntry,
     validate_targets,
 )
-
-
-def _generate_ranking(**kwargs):
-    """Load the repository script without requiring ``scripts`` to be a Python package."""
-    script_path = Path(__file__).resolve().parents[3] / "scripts" / "refresh_best_call_ranking.py"
-    spec = importlib.util.spec_from_file_location("legacy_engine_refresh_best_call_ranking", script_path)
-    if spec is None or spec.loader is None:  # pragma: no cover - fixed repository path
-        raise RuntimeError(f"cannot load ranking generator at {script_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.generate_ranking(**kwargs)
-
 
 def _safe_json(value: object) -> str:
     return (

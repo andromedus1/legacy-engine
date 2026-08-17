@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -81,8 +82,31 @@ class RecordingPorts:
 
 
 class TestDecisionRefresh:
-    def test_default_ranking_port_publishes_one_current_typed_target(self, tmp_path, monkeypatch):
-        import scripts.refresh_best_call_ranking as ranking_script
+    def test_default_ranking_port_works_without_repository_root_on_sys_path(
+        self, tmp_path, monkeypatch,
+    ):
+        from legacy_engine.advisory import best_call_generator as ranking_generator
+        from legacy_engine.config import PROJECT_ROOT
+
+        for module_name in tuple(sys.modules):
+            if module_name == "scripts" or module_name.startswith("scripts."):
+                monkeypatch.delitem(sys.modules, module_name)
+        monkeypatch.setattr(
+            sys,
+            "path",
+            [
+                entry
+                for entry in sys.path
+                if Path(entry or ".").resolve() != PROJECT_ROOT.resolve()
+            ],
+        )
+        ranking_generator._load_generator.cache_clear()
+        loaded_generator = ranking_generator._load_generator(
+            ranking_generator.RANKING_SCRIPT_PATH,
+        )
+        assert Path(loaded_generator.__file__).resolve() == (
+            PROJECT_ROOT / "scripts" / "refresh_best_call_ranking.py"
+        ).resolve()
 
         db_path = tmp_path / "ranking.duckdb"
         out_path = tmp_path / "ranking.html"
@@ -96,13 +120,13 @@ class TestDecisionRefresh:
             unaffected_estimate_cells=1, practical_call="Tempo", proof_grade_call=None,
             rendered_shortlist_rows=0, status="useful", practical_ranked_actions=("Tempo",),
         )
-        monkeypatch.setattr(ranking_script, "current_report_target", lambda path: target)
+        monkeypatch.setattr(ranking_generator, "current_report_target", lambda path: target)
 
         def generate_ranking(**kwargs):
             calls.append(kwargs)
             return {"meta": {"report_utility": utility.model_dump(mode="json")}}
 
-        monkeypatch.setattr(ranking_script, "generate_ranking", generate_ranking)
+        monkeypatch.setattr(ranking_generator, "generate_ranking", generate_ranking)
 
         result = DefaultDecisionRefreshPorts().write_ranking(db_path, out_path)
 
