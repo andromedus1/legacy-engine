@@ -1,7 +1,7 @@
 ---
 id: story-fix-resolved-match-timestamp-dates
 kind: story
-stage: review
+stage: done
 created: 2026-08-16
 updated: 2026-08-16
 tags: [analytics, bug]
@@ -61,3 +61,18 @@ and asserts the resolver returns its calendar date without rejecting the physica
 - Adjacent issues parked: none. The pre-existing pair-by-pair query cost surfaced after the parser
   fix and remains in the parent feature's Unit 4 implementation scope because the normal refresh
   must be operational at current-corpus scale.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+**Rejected**: none
+
+**Notes**: Bounded inline review of a standalone fix story; no independent or cross-model reviewer
+ran. Correctness, regression coverage, design alignment, public-contract compatibility, and relevant
+input-safety lenses passed. Security and foundation drift were not applicable to this date-parser
+boundary. The calendar-prefix normalization follows existing corpus conventions and preserves the
+SQL query's half-open cutoff and physical-match identity behavior.
