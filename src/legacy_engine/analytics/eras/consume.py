@@ -40,7 +40,14 @@ from legacy_engine.models.base import LegacyEngineModel
 from legacy_engine.models.matchup import MatchupCell
 
 KnowledgeMode = Literal["retrospective-current-model", "as-known-then"]
-EligibilitySource = Literal["current-reference", "certified-history", "scalar-current", "camp-current-only"]
+EligibilitySource = Literal[
+    "current-reference",
+    "certified-history",
+    "scalar-current",
+    "camp-current-only",
+    "localized-pre-exposure",
+    "localized-post-ban",
+]
 
 
 class AnalysisClock(LegacyEngineModel):
@@ -62,6 +69,12 @@ class EligibilitySourceRef(LegacyEngineModel):
     segment_id: str | None = None
     certificate_id: str | None = None
     certificate_run_id: str | None = None
+    card: str | None = None
+    exposure_start: date | None = None
+    ban_date: date | None = None
+    boundary_provenance: Literal[
+        "released-at", "corpus-first-seen", "first-material-adoption"
+    ] | None = None
 
 
 class EligibilityAtom(LegacyEngineModel):
@@ -85,7 +98,7 @@ class EntityEligibility(LegacyEngineModel):
     expanded: tuple[EligibilityAtom, ...]
     certificate_run_id: str | None
     clock: AnalysisClock
-    status: Literal["certified-expanded", "current-only", "abstained"]
+    status: Literal["certified-expanded", "localized-expanded", "current-only", "abstained"]
     reasons: tuple[str, ...]
 
 
@@ -194,6 +207,85 @@ def intersect_atoms(left: tuple[EligibilityAtom, ...], right: tuple[EligibilityA
             sources = tuple(sorted((*a.sources, *b.sources), key=_source_key))
             out.append(EligibilityAtom(component_id=_atom_id(start, end, sources), start=start, end=end, sources=sources))
     return normalize_atoms(tuple(out))
+
+
+def localized_clean_atoms(
+    entity: str,
+    *,
+    start: date | None,
+    end: date,
+    boundaries: Sequence[object],
+) -> tuple[EligibilityAtom, ...]:
+    """Compile clean intervals around explicit localized-ban contamination gaps."""
+
+    relevant = tuple(
+        boundary
+        for boundary in boundaries
+        if boundary.contaminated_start < end
+        and (start is None or boundary.contaminated_end > start)
+    )
+    if not relevant:
+        ref = EligibilitySourceRef(source="scalar-current", entity=entity)
+        return (
+            EligibilityAtom(
+                component_id=_atom_id(start, end, (ref,)),
+                start=start,
+                end=end,
+                sources=(ref,),
+            ),
+        ) if start is None or start < end else ()
+
+    result: list[EligibilityAtom] = []
+    cursor = start
+    for boundary in sorted(
+        relevant, key=lambda item: (item.contaminated_start, item.contaminated_end, item.cards)
+    ):
+        gap_start = boundary.contaminated_start
+        gap_end = min(boundary.contaminated_end, end)
+        if cursor is not None and gap_end <= cursor:
+            continue
+        clean_end = min(gap_start, end)
+        if cursor is None or cursor < clean_end:
+            ref = EligibilitySourceRef(
+                source="localized-pre-exposure",
+                entity=entity,
+                card=" + ".join(boundary.cards),
+                exposure_start=boundary.contaminated_start,
+                ban_date=boundary.ban_date,
+                boundary_provenance=boundary.provenance,
+            )
+            result.append(
+                EligibilityAtom(
+                    component_id=_atom_id(cursor, clean_end, (ref,)),
+                    start=cursor,
+                    end=clean_end,
+                    sources=(ref,),
+                )
+            )
+        cursor = gap_end if cursor is None else max(cursor, gap_end)
+        if cursor >= end:
+            break
+    if cursor is None or cursor < end:
+        boundary = max(
+            relevant, key=lambda item: (item.contaminated_end, item.contaminated_start, item.cards)
+        )
+        ref = EligibilitySourceRef(
+            source="localized-post-ban",
+            entity=entity,
+            card=" + ".join(boundary.cards),
+            exposure_start=boundary.contaminated_start,
+            ban_date=boundary.ban_date,
+            boundary_provenance=boundary.provenance,
+        )
+        result.append(
+            EligibilityAtom(
+                component_id=_atom_id(cursor, end, (ref,)),
+                start=cursor,
+                end=end,
+                sources=(ref,),
+            )
+        )
+    return normalize_atoms(tuple(result))
 
 # Field-era self-heal gate (epic design decision): below this many decks in the candidate
 # [field_since, now) window, the detection-derived field era is too thin to trust — degrade back
@@ -491,9 +583,12 @@ def build_entity_eligibility(
     camp_parent: Mapping[str, str] | None = None,
     provenance: str | None = None,
     ban_events: Sequence[tuple[object, str, str]] | None = None,
+    released_at_by_card: Mapping[str, date] | None = None,
 ) -> EntityEligibility:
     """Compile scalar horizons and one exact certification run into interval authority."""
     from legacy_engine.analytics.eras.certificate_store import read_certification_run
+
+    from legacy_engine.analytics.affectedness import exposure_boundary_authorities
 
     parent = camp_parent.get(entity) if camp_parent else None
     is_camp = parent is not None
@@ -501,7 +596,8 @@ def build_entity_eligibility(
         con, [entity], provenance=provenance, camp_parent=camp_parent,
         ban_events=ban_events,
     )
-    horizon = horizons[entity].since
+    horizon_authority = horizons[entity]
+    horizon = horizon_authority.since
     current_start = date.fromisoformat(horizon) if horizon else None
     if requested_since is not None and (current_start is None or requested_since > current_start):
         current_start = requested_since
@@ -512,6 +608,19 @@ def build_entity_eligibility(
     result = None
     current_end = clock.data_until
     run_invalid = False
+    localized_boundaries = ()
+    if not is_camp:
+        try:
+            localized_boundaries = exposure_boundary_authorities(
+                con,
+                (entity,),
+                provenance=provenance,
+                ban_events=ban_events,
+                released_at_by_card=released_at_by_card,
+            )[entity]
+        except duckdb.CatalogException as exc:
+            if "decks" not in str(exc).lower() and "deck_cards" not in str(exc).lower():
+                raise
     if certificate_run_id is not None and not is_camp:
         try:
             run = read_certification_run(con, certificate_run_id)
@@ -533,7 +642,35 @@ def build_entity_eligibility(
             current_end = min(result.reference_interval.end, clock.data_until)
         elif result is not None:
             reasons.append("current-reference-missing")
-    current_ref = EligibilitySourceRef(source="current-reference" if current_segment else current_source, entity=entity, segment_id=current_segment, certificate_run_id=certificate_run_id if current_segment else None)
+    latest_localized = max(
+        (
+            boundary
+            for boundary in localized_boundaries
+            if current_start is not None and boundary.clean_post_ban_start == current_start
+        ),
+        key=lambda boundary: (boundary.ban_date, boundary.cards),
+        default=None,
+    )
+    current_ref = EligibilitySourceRef(
+        source=(
+            "current-reference"
+            if current_segment
+            else "localized-post-ban"
+            if latest_localized is not None
+            else current_source
+        ),
+        entity=entity,
+        segment_id=current_segment,
+        certificate_run_id=certificate_run_id if current_segment else None,
+        card=" + ".join(latest_localized.cards) if latest_localized is not None else None,
+        exposure_start=(
+            latest_localized.contaminated_start if latest_localized is not None else None
+        ),
+        ban_date=latest_localized.ban_date if latest_localized is not None else None,
+        boundary_provenance=(
+            latest_localized.provenance if latest_localized is not None else None
+        ),
+    )
     current = (EligibilityAtom(component_id=_atom_id(current_start, current_end, (current_ref,)), start=current_start, end=current_end, sources=(current_ref,)),) if current_start is None or current_start < current_end else ()
     expanded: list[EligibilityAtom] = list(current)
     if is_camp:
@@ -611,9 +748,43 @@ def build_entity_eligibility(
                 expanded.append(EligibilityAtom(
                     component_id=_atom_id(start, end, (ref,)), start=start, end=end, sources=(ref,),
                 ))
+    if localized_boundaries and not is_camp:
+        localized_start = (
+            date.fromisoformat(horizon_authority.stored_since)
+            if horizon_authority.clamped_by_confirmed_ban
+            and horizon_authority.stored_since is not None
+            else None
+        )
+        if requested_since is not None and (
+            localized_start is None or requested_since > localized_start
+        ):
+            localized_start = requested_since
+        clean = localized_clean_atoms(
+            entity,
+            start=localized_start,
+            end=current_end,
+            boundaries=localized_boundaries,
+        )
+        certified_clean = intersect_atoms(
+            normalize_atoms(tuple(expanded)), clean, data_until=current_end
+        )
+        expanded = [*clean, *certified_clean]
+        reasons.extend(
+            f"localized-ban-gap:{' + '.join(boundary.cards)}:"
+            f"{boundary.contaminated_start.isoformat()}:"
+            f"{boundary.contaminated_end.isoformat()}:"
+            f"{boundary.provenance}"
+            for boundary in localized_boundaries
+        )
     expanded_norm = normalize_atoms(tuple(expanded))
-    status: Literal["certified-expanded", "current-only", "abstained"] = (
+    status: Literal[
+        "certified-expanded", "localized-expanded", "current-only", "abstained"
+    ] = (
         "certified-expanded" if any(any(s.source == "certified-history" for s in atom.sources) for atom in expanded_norm)
+        else "localized-expanded" if any(
+            any(s.source == "localized-pre-exposure" for s in atom.sources)
+            for atom in expanded_norm
+        )
         else "current-only"
     )
     if not current:

@@ -6,6 +6,7 @@ import duckdb
 import pytest
 
 from legacy_engine.analytics import matchup as matchup_module
+from legacy_engine.analytics.affectedness import exposure_boundary_authorities
 from legacy_engine.analytics.eras.certificate_store import write_certification_run
 from legacy_engine.analytics.eras.certification import (
     ContextOverlapEvidence,
@@ -81,6 +82,13 @@ def _insert_match(con, event_id, when, left, right, *, result="2-0", variants=(N
     con.execute(
         "INSERT INTO rounds VALUES (?, ?, ?, ?, ?)",
         [event_id, 0, f"{event_id}-left", f"{event_id}-right", result],
+    )
+
+
+def _insert_card(con, event_id, deck_idx, name):
+    con.execute(
+        "INSERT INTO deck_cards VALUES (?, ?, ?, ?, ?)",
+        [event_id, deck_idx, "main", name, 4],
     )
 
 
@@ -184,6 +192,91 @@ def test_open_start_does_not_borrow_later_provenance():
         (None, date(2020, 1, 1), ("open",)),
         (date(2021, 1, 1), date(2022, 1, 1), ("later",)),
     ]
+
+
+def test_localized_exposure_authority_recovers_clean_pre_and_post_ban_history():
+    con = _db()
+    _insert_match(con, "before", date(2026, 6, 1), "A", "B")
+    _insert_match(con, "exposed", date(2026, 6, 20), "A", "B")
+    _insert_card(con, "exposed", 0, "The Fantasticar")
+    _insert_match(con, "after", date(2026, 8, 11), "A", "B")
+    bans = ((date(2026, 8, 10), "The Fantasticar", "banned"),)
+    authority = exposure_boundary_authorities(con, ("A", "B"), ban_events=bans)
+    assert authority["B"] == ()
+    assert len(authority["A"]) == 1
+    boundary = authority["A"][0]
+    assert (
+        boundary.clean_pre_exposure_end,
+        boundary.contaminated_start,
+        boundary.contaminated_end,
+        boundary.clean_post_ban_start,
+        boundary.provenance,
+        boundary.materiality_scope,
+        boundary.cards,
+    ) == (
+        date(2026, 6, 20),
+        date(2026, 6, 20),
+        date(2026, 8, 10),
+        date(2026, 8, 10),
+        "corpus-first-seen",
+        "same-date-card-union",
+        ("The Fantasticar",),
+    )
+
+    clock = AnalysisClock(
+        data_until=date(2026, 8, 17),
+        knowledge_as_of=datetime(2026, 8, 17, tzinfo=UTC),
+        knowledge_mode="retrospective-current-model",
+    )
+    eligibility = build_entity_eligibility(
+        con, "A", clock=clock, ban_events=bans,
+    )
+    assert [(atom.start, atom.end) for atom in eligibility.current] == [
+        (date(2026, 8, 10), date(2026, 8, 17)),
+    ]
+    assert [(atom.start, atom.end) for atom in eligibility.expanded] == [
+        (None, date(2026, 6, 20)),
+        (date(2026, 8, 10), date(2026, 8, 17)),
+    ]
+    assert eligibility.status == "localized-expanded"
+    assert any(reason.startswith("localized-ban-gap:The Fantasticar") for reason in eligibility.reasons)
+
+    interval = matchup_module.build_interval_adaptive_matrix(
+        con, clock=clock, certificate_run_id=None, min_row_share=0.0, ban_events=bans,
+    )
+    pair = interval.evidence[("A", "B")]
+    assert pair.current_only.concentration.event_counts == {"after": 1}
+    assert pair.certified_expanded.concentration.event_counts == {"before": 1, "after": 1}
+    assert pair.added_history.concentration.event_counts == {"before": 1}
+    assert "exposed" not in pair.certified_expanded.concentration.event_counts
+    assert len(pair.certified_expanded.match_ids) == len(set(pair.certified_expanded.match_ids))
+    assert set(pair.current_only.match_ids).isdisjoint(pair.added_history.match_ids)
+    ledger_rows = selected_rows_for_pair(interval.selected_outcomes, "A", "B")
+    assert len({(row.view, row.match.match_id) for row in ledger_rows}) == len(ledger_rows)
+
+
+def test_same_date_multi_card_materiality_emits_one_union_cohort_gap():
+    con = _db()
+    for index, when in enumerate((date(2026, 6, 1), date(2026, 6, 10), date(2026, 6, 20), date(2026, 7, 1))):
+        event_id = f"event-{index}"
+        _insert_match(con, event_id, when, "A", "B")
+        if index == 1:
+            _insert_card(con, event_id, 0, "Card One")
+        if index == 2:
+            _insert_card(con, event_id, 0, "Card Two")
+    bans = (
+        (date(2026, 8, 10), "Card One", "banned"),
+        (date(2026, 8, 10), "Card Two", "banned"),
+    )
+    rows = exposure_boundary_authorities(
+        con, ("A",), ban_events=bans, affect_threshold=0.4,
+    )["A"]
+    assert len(rows) == 1
+    assert rows[0].cards == ("Card One", "Card Two")
+    assert rows[0].contaminated_start == date(2026, 6, 10)
+    assert rows[0].material_decks == 2
+    assert rows[0].pre_ban_decks == 4
+    assert rows[0].ban_event_inclusion_rate == 0.5
 
 
 def test_selection_excludes_gap_and_keeps_pair_component_constant():
