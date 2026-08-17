@@ -1,7 +1,7 @@
 ---
 id: story-fix-scheduled-ranking-package-import
 kind: story
-stage: review
+stage: done
 created: 2026-08-16
 updated: 2026-08-16
 tags: [infra, bug]
@@ -71,3 +71,20 @@ port publishes one typed current target through that adapter.
 - Direct script compatibility remains covered by `tests/test_refresh_best_call_ranking.py` in the
   82-test focused set. Atomic publication behavior is unchanged.
 - Adjacent issues parked: none.
+
+## Review (2026-08-16)
+
+**Verdict**: Approve
+
+**Blockers**: none
+**Important**: none
+**Nits**: none
+**Rejected**: none
+
+**Notes**: Bounded inline review of a standalone fix story; no independent, fresh-context, or
+cross-model reviewer ran. Correctness, regression coverage, design alignment, fixed-path safety,
+public CLI compatibility, and foundation-assertion lenses passed. The adapter resolves only the
+configured repository generator path, introduces no user-controlled import path, and leaves the
+generator's direct CLI and atomic write boundary unchanged. The complete scheduled wrapper remains
+the deliberately deferred operational confirmation because it repeats the expensive live ranking
+generation; the isolated installed-entrypoint condition and all 82 relevant tests are green.
