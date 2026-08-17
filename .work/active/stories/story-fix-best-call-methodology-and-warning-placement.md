@@ -1,7 +1,7 @@
 ---
 id: story-fix-best-call-methodology-and-warning-placement
 kind: story
-stage: review
+stage: done
 created: 2026-08-17
 updated: 2026-08-17
 tags: [bug, ux]
@@ -73,3 +73,23 @@ rendered in a disclosure below the Subarchetypes section.
   both observed and effective field counts.
 - Added both claims to the methodology-copy regression, reran the 74-test focused suite, and
   regenerated the live 38,640,596-byte report successfully.
+
+## Review (2026-08-17)
+
+**Verdict**: Approve
+
+**Blockers**: none; the camp-fraction and count-location copy findings were corrected and verified.
+
+**Important**: `.work/backlog/idea-align-principle-era-hierarchy.md` records the pre-existing
+foundation sentence that still describes ban-regime-only windows.
+
+**Nits**: none.
+
+**Rejected**: none.
+
+**Notes**: Bounded inline standalone-story review; no independent or cross-model code reviewer ran.
+Correctness was checked against `build_transition_field`, the localized interval selection and
+report projection paths, and the regenerated live artifact. The executed DOM regression proves
+warnings are absent from the first-read audit and present in the collapsed bottom disclosure.
+Security, public API, migration, and concurrency lenses were inapplicable to this static report-copy
+and client-side placement change. Final documentation re-audit reported 0 Critical / 0 High.
