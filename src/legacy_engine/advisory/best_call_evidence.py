@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from collections import Counter
 from datetime import date
 from hashlib import sha256
@@ -21,7 +22,7 @@ from legacy_engine.analytics.amplification import (
     pair_key,
     validate_amplification_run,
 )
-from legacy_engine.analytics.eras.consume import AnalysisClock, EvidenceConcentration
+from legacy_engine.analytics.eras.consume import AnalysisClock
 from legacy_engine.analytics.match_results import (
     intersect_pair_eligibility,
     selected_rows_for_pair,
@@ -80,9 +81,26 @@ class DirectViewDiagnostic(LegacyEngineModel):
     match_ids_sha256: str
     component_ids: tuple[str, ...]
     certificate_ids: tuple[str, ...]
-    concentration: EvidenceConcentration
+    concentration: "ReportEvidenceConcentration"
     prior_audit: dict
     reasons: tuple[str, ...]
+
+
+class ReportEvidenceConcentration(LegacyEngineModel):
+    """Compact report projection; exact count maps remain on the typed interval view."""
+
+    raw_n: int
+    distinct_events: int
+    distinct_dates: int
+    distinct_pilots: int | None
+    pilot_identity_available: bool
+    effective_events: float
+    max_event_id: str | None
+    max_event_share: float | None
+    max_source: str | None
+    max_source_share: float | None
+    max_component_id: str | None
+    max_component_share: float | None
 
 
 class AmplifiedDiagnostic(LegacyEngineModel):
@@ -155,6 +173,9 @@ def _direct(kind: DirectKind, view) -> DirectViewDiagnostic:
         "\n".join(sorted(view.match_ids)).encode()
     ).hexdigest():
         raise ValueError(f"{kind} match-set digest differs from exact interval view")
+    prior_audit = view.prior.model_dump(mode="json")
+    prior_audit["prior_match_n"] = len(prior_audit.pop("prior_match_ids", ()))
+    concentration = view.concentration
     return DirectViewDiagnostic(
         kind=kind,
         wins=wins,
@@ -169,10 +190,61 @@ def _direct(kind: DirectKind, view) -> DirectViewDiagnostic:
         match_ids_sha256=view.prior.observation_match_ids_sha256,
         component_ids=tuple(dict.fromkeys(view.pair_component_ids)),
         certificate_ids=view.certificate_ids,
-        concentration=view.concentration,
-        prior_audit=view.prior.model_dump(mode="json"),
+        concentration=ReportEvidenceConcentration(
+            raw_n=concentration.raw_n,
+            distinct_events=concentration.distinct_events,
+            distinct_dates=concentration.distinct_dates,
+            distinct_pilots=concentration.distinct_pilots,
+            pilot_identity_available=concentration.pilot_identity_available,
+            effective_events=concentration.effective_events,
+            max_event_id=concentration.max_event_id,
+            max_event_share=concentration.max_event_share,
+            max_source=concentration.max_source,
+            max_source_share=concentration.max_source_share,
+            max_component_id=concentration.max_component_id,
+            max_component_share=concentration.max_component_share,
+        ),
+        prior_audit=prior_audit,
         reasons=view.reasons,
     )
+
+
+def best_available_direct_view(
+    interval: IntervalAdaptiveMatrix, subject: str, opponent: str,
+):
+    """Return one direct interval view and its report provenance without serializing it."""
+    views = interval.evidence.get((subject, opponent))
+    if views is None:
+        return None, "unavailable"
+    best_direct = (
+        views.certified_expanded
+        if views.certified_expanded.cell is not None
+        and views.certified_expanded.cell.n > 0
+        else views.current_only
+    )
+    pair = intersect_pair_eligibility(
+        interval.selected_outcomes.entity_eligibility[subject],
+        interval.selected_outcomes.entity_eligibility[opponent],
+    )
+    expanded_sources = {
+        source.source for atom in pair.expanded for source in atom.sources
+    }
+    basis: Literal[
+        "localized-clean-direct", "certified-direct", "current-direct", "unavailable"
+    ] = (
+        "localized-clean-direct"
+        if best_direct.cell is not None
+        and best_direct.cell.n > 0
+        and any(source.startswith("localized-") for source in expanded_sources)
+        else "certified-direct"
+        if best_direct.cell is not None
+        and best_direct.cell.n > 0
+        and "certified-history" in expanded_sources
+        else "current-direct"
+        if best_direct.cell is not None and best_direct.cell.n > 0
+        else "unavailable"
+    )
+    return best_direct, basis
 
 
 def _components(
@@ -317,6 +389,7 @@ def build_report_evidence(
     amplification: AmplificationRun | None,
     *,
     authority_payload: dict,
+    pair_keys: Collection[tuple[str, str]] | None = None,
 ) -> ReportEvidenceAttachment:
     """Project exact diagnostics while proving the caller's authority payload is untouched."""
     authority_json = canonical_json(authority_payload)
@@ -330,8 +403,11 @@ def build_report_evidence(
         if amplification is not None
         else {}
     )
+    requested_pairs = frozenset(pair_keys) if pair_keys is not None else None
     pairs: dict[str, PairEvidenceDiagnostic] = {}
     for (subject, opponent), views in sorted(interval.evidence.items()):
+        if requested_pairs is not None and (subject, opponent) not in requested_pairs:
+            continue
         challengers = []
         pair_reasons: list[str] = []
         for method in AMPLIFICATION_METHOD_IDS:
@@ -392,30 +468,10 @@ def build_report_evidence(
             pair_status = "degraded"
         else:
             pair_status = "available"
-        expanded_sources = {
-            source.source for component in components for source in component.sources
-        }
-        best_direct = (
-            views.certified_expanded
-            if views.certified_expanded.cell is not None
-            and views.certified_expanded.cell.n > 0
-            else views.current_only
+        best_direct, best_basis = best_available_direct_view(
+            interval, subject, opponent,
         )
-        best_basis: Literal[
-            "localized-clean-direct", "certified-direct", "current-direct", "unavailable"
-        ] = (
-            "localized-clean-direct"
-            if best_direct.cell is not None
-            and best_direct.cell.n > 0
-            and any(source.startswith("localized-") for source in expanded_sources)
-            else "certified-direct"
-            if best_direct.cell is not None
-            and best_direct.cell.n > 0
-            and "certified-history" in expanded_sources
-            else "current-direct"
-            if best_direct.cell is not None and best_direct.cell.n > 0
-            else "unavailable"
-        )
+        assert best_direct is not None
         pairs[pair_key(subject, opponent)] = PairEvidenceDiagnostic(
             subject=subject,
             opponent=opponent,

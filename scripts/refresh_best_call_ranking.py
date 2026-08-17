@@ -68,6 +68,7 @@ import duckdb
 
 from legacy_engine.advisory.field import build_custom_field, build_transition_field
 from legacy_engine.advisory.best_call_evidence import (
+    best_available_direct_view,
     build_report_evidence,
     canonical_json,
 )
@@ -201,12 +202,21 @@ def _json_for_script(value: object, *, compact: bool = False) -> str:
 
 def _authority_payload(blob: dict) -> dict:
     """Return the complete mature ranking contract, excluding additive diagnostics/audits."""
-    payload = copy.deepcopy(blob)
-    payload.pop("evidence", None)
-    payload.pop("report_target", None)
-    for row in [*payload.get("arch", ()), *payload.get("camps", ())]:
-        row.pop("diagnostic_evidence", None)
-        row.pop("best_available_estimate", None)
+    payload = {}
+    for key, value in blob.items():
+        if key in {"evidence", "report_target"}:
+            continue
+        if key in {"arch", "camps"}:
+            payload[key] = [
+                {
+                    row_key: copy.deepcopy(row_value)
+                    for row_key, row_value in row.items()
+                    if row_key not in {"diagnostic_evidence", "best_available_estimate"}
+                }
+                for row in value
+            ]
+        else:
+            payload[key] = copy.deepcopy(value)
     meta = payload.get("meta", {})
     meta.pop("target_data_audit", None)
     meta.pop("evidence_audit", None)
@@ -1640,44 +1650,38 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
 
 
 def _publish_visible_best_estimates(
-    blob: dict, *, parent_attachment, camp_attachment, parent_interval,
+    blob: dict, *, parent_interval, camp_interval,
 ) -> None:
     """Publish direct useful estimates while keeping them outside ranking authority."""
 
-    attachments = {
-        False: tuple(parent_attachment.model_dump(mode="json")["pairs"].values()),
-        True: (
-            tuple(camp_attachment.model_dump(mode="json")["pairs"].values())
-            if camp_attachment is not None else ()
-        ),
-    }
     estimated_supported_rows = visible_cells = affected_cells = unaffected_cells = 0
     for is_camp, rows in ((False, blob["arch"]), (True, blob["camps"])):
-        by_subject: dict[str, dict[str, dict]] = {}
-        for pair in attachments[is_camp]:
-            by_subject.setdefault(pair["subject"], {})[pair["opponent"]] = pair
+        interval = camp_interval if is_camp else parent_interval
         for row in rows:
-            pairs = by_subject.get(row["subject"], {})
             cells = []
             for cell in row.get("cells", ()):
-                pair = pairs.get(cell["opp"])
-                if pair is None:
+                if interval is None:
                     continue
-                direct = pair["best_available_direct"]
-                if direct["n"] > 0 and direct["estimate"] is not None:
-                    cells.append((cell, pair, direct))
+                direct, basis = best_available_direct_view(
+                    interval, row["subject"], cell["opp"],
+                )
+                if direct is not None and direct.cell is not None and direct.cell.n > 0:
+                    cells.append((cell, direct, basis))
             denominator = sum(float(cell.get("share", 0.0)) for cell in row.get("cells", ()))
-            measured_mass = sum(float(cell.get("share", 0.0)) for cell, _pair, _direct in cells)
+            measured_mass = sum(float(cell.get("share", 0.0)) for cell, _direct, _basis in cells)
             estimate = (
                 sum(
-                    float(cell.get("share", 0.0)) * float(direct["estimate"])
-                    for cell, _pair, direct in cells
+                    float(cell.get("share", 0.0)) * float(direct.cell.p_shrunk)
+                    for cell, direct, _basis in cells
                 ) / measured_mass
                 if measured_mass > 0 else None
             )
-            direct_n = sum(int(direct["n"]) for _cell, _pair, direct in cells)
-            history_n = sum(int(pair["added_history"]["n"]) for _c, pair, _d in cells)
-            bases = tuple(dict.fromkeys(pair["best_available_basis"] for _c, pair, _d in cells))
+            direct_n = sum(int(direct.cell.n) for _cell, direct, _basis in cells)
+            history_n = sum(
+                int(interval.evidence[(row["subject"], cell["opp"])].added_history.cell.n)
+                for cell, _direct, _basis in cells
+            ) if interval is not None else 0
+            bases = tuple(dict.fromkeys(basis for _cell, _direct, basis in cells))
             basis = (
                 "localized-clean-direct" if "localized-clean-direct" in bases
                 else "certified-direct" if "certified-direct" in bases
@@ -1700,12 +1704,12 @@ def _publish_visible_best_estimates(
             if not is_camp:
                 visible_cells += len(cells)
                 affected_cells += sum(
-                    pair["best_available_basis"] == "localized-clean-direct"
-                    for _cell, pair, _direct in cells
+                    basis == "localized-clean-direct"
+                    for _cell, _direct, basis in cells
                 )
                 unaffected_cells += sum(
-                    pair["best_available_basis"] in {"current-direct", "certified-direct"}
-                    for _cell, pair, _direct in cells
+                    basis in {"current-direct", "certified-direct"}
+                    for _cell, _direct, basis in cells
                 )
                 if row.get("ranking_evidence", {}).get("eligible") and estimate is not None:
                     estimated_supported_rows += 1
@@ -1748,6 +1752,29 @@ def _publish_visible_best_estimates(
     })
     validate_ranking_utility(utility)
     blob["meta"]["report_utility"] = utility.model_dump(mode="json")
+
+
+REPORT_DIAGNOSTIC_OPPONENTS = 4
+
+
+def _diagnostic_pair_keys(rows: list[dict], *, limit: int) -> set[tuple[str, str]]:
+    """Bound detailed disclosure to supported rows' highest-share field opponents."""
+    result = set()
+    for row in rows:
+        if not row.get("ranking_evidence", {}).get("eligible"):
+            continue
+        opponents = sorted(
+            (
+                cell for cell in row.get("cells", ())
+                if cell["opp"] != row["subject"]
+            ),
+            key=lambda cell: (-float(cell.get("share", 0.0)), cell["opp"]),
+        )
+        result.update(
+            (row["subject"], cell["opp"])
+            for cell in opponents[:limit]
+        )
+    return result
 
 
 def generate_ranking(
@@ -1806,6 +1833,7 @@ def generate_ranking(
             ban_events=ban_events,
         )
         if target is not None:
+            evidence_started = time.perf_counter()
             authority_payload = _authority_payload(blob)
             before = canonical_json(authority_payload)
             clock = AnalysisClock(
@@ -1832,6 +1860,8 @@ def generate_ranking(
                     split_variants=parents,
                     ban_events=ban_events,
                 )
+            interval_seconds = time.perf_counter() - evidence_started
+            projection_started = time.perf_counter()
             amplification = None
             if target.amplification_run_id is not None:
                 amplification = read_amplification_run(con, target.amplification_run_id)
@@ -1862,16 +1892,24 @@ def generate_ranking(
                 raise ValueError(
                     "amplification run corpus differs from both exact report interval corpora"
                 )
+            parent_display_pairs = _diagnostic_pair_keys(
+                blob["arch"], limit=REPORT_DIAGNOSTIC_OPPONENTS,
+            )
+            camp_display_pairs = _diagnostic_pair_keys(
+                blob["camps"], limit=REPORT_DIAGNOSTIC_OPPONENTS,
+            )
             parent_attachment = build_report_evidence(
                 parent_interval,
                 parent_amplification,
                 authority_payload=authority_payload,
+                pair_keys=parent_display_pairs,
             )
             camp_attachment = (
                 build_report_evidence(
                     camp_interval,
                     camp_amplification,
                     authority_payload=authority_payload,
+                    pair_keys=camp_display_pairs,
                 )
                 if camp_interval is not None
                 else None
@@ -1880,41 +1918,55 @@ def generate_ranking(
                 camp_attachment if camp_amplification is not None else parent_attachment
             )
             assert primary_attachment is not None
-            parent_pairs = tuple(
-                parent_attachment.model_dump(mode="json")["pairs"].values()
+            parent_payload = parent_attachment.model_dump(mode="json")
+            camp_payload = (
+                camp_attachment.model_dump(mode="json")
+                if camp_attachment is not None else None
             )
+            primary_payload = (
+                camp_payload if camp_amplification is not None else parent_payload
+            )
+            parent_pairs = tuple(parent_payload["pairs"].values())
             camp_pairs = (
-                tuple(camp_attachment.model_dump(mode="json")["pairs"].values())
-                if camp_attachment is not None
+                tuple(camp_payload["pairs"].values())
+                if camp_payload is not None
                 else ()
             )
-            for row in [*blob["arch"], *blob["camps"]]:
-                source_pairs = camp_pairs if row in blob["camps"] else parent_pairs
-                row_pairs = tuple(
-                    pair for pair in source_pairs if pair["subject"] == row["subject"]
-                )
-                row_reasons = tuple(
-                    dict.fromkeys(reason for pair in row_pairs for reason in pair["reasons"])
-                )
-                row["diagnostic_evidence"] = {
-                    "authority": "diagnostic-only",
-                    "status": (
-                        camp_attachment.status
-                        if row in blob["camps"] and camp_attachment is not None
-                        else parent_attachment.status
-                    ) if row_pairs else "not-assessed",
-                    "reasons": row_reasons
-                    if row_pairs
-                    else ("no exact interval pair is available for this report row",),
-                    "pairs": row_pairs,
-                }
+            for rows, source_pairs, attachment in (
+                (blob["arch"], parent_pairs, parent_attachment),
+                (blob["camps"], camp_pairs, camp_attachment),
+            ):
+                for row in rows:
+                    row_pairs = tuple(
+                        pair for pair in source_pairs if pair["subject"] == row["subject"]
+                    )
+                    row_reasons = tuple(
+                        dict.fromkeys(reason for pair in row_pairs for reason in pair["reasons"])
+                    )
+                    row["diagnostic_evidence"] = {
+                        "authority": "diagnostic-only",
+                        "status": attachment.status if row_pairs and attachment is not None
+                        else "not-assessed",
+                        "reasons": row_reasons
+                        if row_pairs
+                        else ("no exact interval pair is available for this report row",),
+                        "pairs": row_pairs,
+                    }
             _publish_visible_best_estimates(
                 blob,
-                parent_attachment=parent_attachment,
-                camp_attachment=camp_attachment,
                 parent_interval=parent_interval,
+                camp_interval=camp_interval,
             )
-            blob["evidence"] = primary_attachment.model_dump(mode="json")
+            blob["evidence"] = {
+                key: value for key, value in primary_payload.items() if key != "pairs"
+            }
+            blob["evidence"].update({
+                "pair_diagnostic_count": len(primary_payload["pairs"]),
+                "pair_scope": (
+                    f"top-{REPORT_DIAGNOSTIC_OPPONENTS}-current-field-opponents-"
+                    "per-supported-row"
+                ),
+            })
             blob["report_target"] = target.model_dump(mode="json")
             interval_digest = _digest_rows(
                 {
@@ -1935,6 +1987,9 @@ def generate_ranking(
                 "amplification_run_id": primary_attachment.amplification_run_id,
                 "status": primary_attachment.status,
                 "reasons": primary_attachment.reasons,
+                "parent_diagnostic_pairs": len(parent_pairs),
+                "camp_diagnostic_pairs": len(camp_pairs),
+                "diagnostic_opponents_per_row": REPORT_DIAGNOSTIC_OPPONENTS,
             }
             blob["meta"]["target_data_audit"] = _report_data_audit(
                 con,
@@ -1946,13 +2001,23 @@ def generate_ranking(
             ).model_dump(mode="json")
             if canonical_json(_authority_payload(blob)) != before:
                 raise RuntimeError("diagnostic attachment changed ranking authority bytes")
+            print(f"  exact interval evidence: {interval_seconds:.1f}s")
+            print(
+                "  compact report projection: "
+                f"{time.perf_counter() - projection_started:.1f}s"
+            )
     finally:
         con.close()
 
     template = TEMPLATE_PATH.read_text()
     assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
+    render_started = time.perf_counter()
     rendered = template.replace("__D_BLOB__", _json_for_script(blob), 1)
     _atomic_write_text(out_path, rendered)
+    print(
+        f"  report serialization/write: {time.perf_counter() - render_started:.1f}s "
+        f"({len(rendered.encode('utf-8')):,} bytes)"
+    )
     return blob
 
 

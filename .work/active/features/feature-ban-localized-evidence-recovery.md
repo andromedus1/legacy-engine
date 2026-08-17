@@ -206,13 +206,13 @@ post-ban-only horizon.
 
 **Acceptance criteria**:
 
-- [ ] Fantasticar-aware parent entities can represent clean history before `2026-06-20`, an exact
+- [x] Fantasticar-aware parent entities can represent clean history before `2026-06-20`, an exact
   excluded exposure gap through `2026-08-10`, and post-ban evidence after `2026-08-10`.
-- [ ] Unaffected entities continue to expose their certified/current intervals unchanged.
-- [ ] Intersection remains exact and gap-preserving; no adjacent clean spans separated by a positive
+- [x] Unaffected entities continue to expose their certified/current intervals unchanged.
+- [x] Intersection remains exact and gap-preserving; no adjacent clean spans separated by a positive
   exposure gap are merged.
-- [ ] Reverse-orientation selection stays derived from one physical selected match set.
-- [ ] Missing release metadata degrades to deterministic fallback provenance rather than a silent
+- [x] Reverse-orientation selection stays derived from one physical selected match set.
+- [x] Missing release metadata degrades to deterministic fallback provenance rather than a silent
   fabricated bound.
 
 ### Unit 2: Pairwise localized selection, report evidence views, and camp/current-only protection
@@ -229,12 +229,12 @@ intervals, and camps retain the established `camp-current-only` direct-evidence 
 
 **Acceptance criteria**:
 
-- [ ] Parent evidence views distinguish unaffected retention from affected-edge recovery/exclusion on
+- [x] Parent evidence views distinguish unaffected retention from affected-edge recovery/exclusion on
   the same current report.
-- [ ] Added-history views include clean pre-exposure rows when compatible, not only post-ban rows.
-- [ ] Parent/camp parity rules hold: camps do not inherit direct parent history observations.
-- [ ] History/prior/donor roles remain non-overlapping under localized recovery.
-- [ ] The exact evidence ledger stays inspectable per component with explicit localized-gap
+- [x] Added-history views include clean pre-exposure rows when compatible, not only post-ban rows.
+- [x] Parent/camp parity rules hold: camps do not inherit direct parent history observations.
+- [x] History/prior/donor roles remain non-overlapping under localized recovery.
+- [x] The exact evidence ledger stays inspectable per component with explicit localized-gap
   provenance.
 
 ### Unit 3: Automatic current-refresh evidence activation and utility-first table publication
@@ -254,14 +254,14 @@ the authority seal, production recommendation, and no-auto-promotion contract re
 
 **Acceptance criteria**:
 
-- [ ] The current report path resolves matching exact current evidence automatically when present,
+- [x] The current report path resolves matching exact current evidence automatically when present,
   and fails loudly on mismatched artifacts.
-- [ ] No manual certificate/amplification run id is required for the normal localized-ban current
+- [x] No manual certificate/amplification run id is required for the normal localized-ban current
   refresh path.
-- [ ] The first-read archetype table remains the single decision surface and uses existing table /
+- [x] The first-read archetype table remains the single decision surface and uses existing table /
   disclosure patterns.
-- [ ] Proof-grade status remains visible and separate from “best estimate shown”.
-- [ ] Scheduled status/usefulness output reflects localized recovery honestly without claiming
+- [x] Proof-grade status remains visible and separate from “best estimate shown”.
+- [x] Scheduled status/usefulness output reflects localized recovery honestly without claiming
   validation or promotion.
 
 ### Unit 4: Current-corpus utility audit and adversarial regression suite
@@ -278,14 +278,14 @@ localized rather than globally permissive.
 
 **Acceptance criteria**:
 
-- [ ] The audit records the August 17, 2026 baseline (`0/50` proof-grounded supported rows) and the
+- [x] The audit records the August 17, 2026 baseline (`0/50` proof-grounded supported rows) and the
   post-change current-corpus recovery counts.
-- [ ] Tests cover unaffected pairs retaining history across the Fantasticar ban boundary.
-- [ ] Tests cover affected edges excluding exactly the Fantasticar exposure interval while admitting
+- [x] Tests cover unaffected pairs retaining history across the Fantasticar ban boundary.
+- [x] Tests cover affected edges excluding exactly the Fantasticar exposure interval while admitting
   clean pre-exposure plus post-ban rows.
-- [ ] Tests cover no duplicate physical-match selection, no scalarized gap collapse, and no camp
+- [x] Tests cover no duplicate physical-match selection, no scalarized gap collapse, and no camp
   history inheritance.
-- [ ] Tests cover artifact auto-resolution/mismatch refusal and utility/status publication honesty.
+- [x] Tests cover artifact auto-resolution/mismatch refusal and utility/status publication honesty.
 
 ## Implementation order
 
@@ -316,3 +316,35 @@ localized rather than globally permissive.
   provenance labels are not kept visibly separate on the first-read surface.
 - Localized pair recovery increases interval complexity, so tests must attack duplicate selection,
   gap collapse, donor/direct overlap, and unaffected-pair regressions directly.
+
+## Implementation result
+
+All four units are implemented. Current field authority remains post-ban, while typed pair evidence
+uses explicit localized clean interval unions. The normal current refresh needs no manual run ids
+and works without certification/amplification tables; exact artifacts remain optional fail-closed
+enrichment. Camps remain current-only. The mature authority payload is digest-invariant before and
+after diagnostic attachment.
+
+The default archetype table now shows a covered-field direct matchup estimate, direct sample,
+estimated-cell/field coverage, recovered clean-history sample, provenance, confidence, and proof
+state separately. The full typed pair surface remains available to library/store consumers. The
+offline HTML publishes only four highest-share opponent ledgers per supported row, uses counts and
+digests in place of raw match-id arrays, and omits the duplicated global pair universe.
+
+On the live corpus through August 16, 2026, the report recovered estimates for 50/50 supported rows
+across 2,416 cells using 7,690 unique clean-history physical matches. The audit distinguishes 2,093
+localized-affected cells from 323 unaffected current/certified cells. Proof stays 0/50 and the
+production authority/call remains separately labeled. The final self-contained report is
+38,556,126 bytes, close to the prior roughly 34MB output and 90% smaller than the rejected full-pair
+draft.
+
+## Verification
+
+- Focused localized evidence, report projection, and DOM tests: 79 passed.
+- Full repository suite: 3,997 passed, 1 skipped.
+- Live generation: field 197 since 2026-08-10; corpus max 2026-08-16; 95 parent + 106 camp rows.
+- Live HTML JavaScript syntax/load parse: passed.
+- Knowledge-index regeneration/lint: 0 errors (six pre-existing/document-size warnings).
+- Performance: one resolver call per ledger with exact reference parity; controlled parent/camp
+  interval benchmark 59.2s combined. Final loaded run: exact intervals 164.7s, compact projection
+  12.3s, serialization/atomic write 0.6s.

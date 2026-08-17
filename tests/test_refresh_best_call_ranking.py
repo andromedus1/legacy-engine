@@ -84,6 +84,23 @@ def test_benchmark_validation_payload_has_honest_default_and_artifact_identity(t
     assert "artifact ${validation.artifact_id || \"none\"}" in template
 
 
+def test_detailed_diagnostics_are_bounded_to_top_field_opponents():
+    rows = [{
+        "subject": "A",
+        "ranking_evidence": {"eligible": True},
+        "cells": [
+            {"opp": f"O{index}", "share": share}
+            for index, share in enumerate((0.05, 0.40, 0.10, 0.30, 0.15))
+        ],
+    }]
+
+    assert rbcr._diagnostic_pair_keys(rows, limit=3) == {
+        ("A", "O1"), ("A", "O3"), ("A", "O4"),
+    }
+    rows[0]["ranking_evidence"]["eligible"] = False
+    assert rbcr._diagnostic_pair_keys(rows, limit=3) == set()
+
+
 def _run_template_javascript(blob: dict, probe: str) -> dict:
     """Execute the tracked report script with a minimal DOM and return a JSON probe."""
     template = rbcr.TEMPLATE_PATH.read_text()
@@ -1226,21 +1243,27 @@ class TestEvidenceTargetIntegration:
             baseline
         )
         assert attached["evidence"]["status"] == "not-assessed"
+        assert "pairs" not in attached["evidence"]
+        assert attached["evidence"]["pair_scope"] == (
+            "top-4-current-field-opponents-per-supported-row"
+        )
         assert attached["meta"]["report_utility"]["estimated_rows"] > 0
         assert all("best_available_estimate" in row for row in attached["arch"])
         assert all("diagnostic_evidence" in row for row in attached["arch"])
         assert attached["camps"]
-        assert all(
-            row["diagnostic_evidence"]["pairs"]
-            and all(
+        for row in attached["camps"]:
+            pairs = row["diagnostic_evidence"]["pairs"]
+            if not row["ranking_evidence"]["eligible"]:
+                assert not pairs
+                continue
+            assert pairs
+            assert all(
                 "camp-current-only" in pair["reasons"]
                 and pair["current_only"]["match_ids_sha256"]
                 == pair["certified_expanded"]["match_ids_sha256"]
                 and pair["added_history"]["n"] == 0
-                for pair in row["diagnostic_evidence"]["pairs"]
+                for pair in pairs
             )
-            for row in attached["camps"]
-        )
         rendered = target_path.read_text()
         assert "Current </script><script>alert(1)</script>" not in rendered
         assert "\\u003c/script\\u003e" in rendered

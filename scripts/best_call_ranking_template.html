@@ -955,6 +955,7 @@ function evidenceDiagnosticsHtml(r) {
   })).join("");
   const body = `<div class="diagnostic-boundary"><b>Diagnostic only — ranking authority unchanged.</b> `+
     `These direct and challenger estimates are frozen generated evidence. Browser threshold controls do not recompute, hide, rank, or promote them. `+
+    `The detailed ledger is bounded to this supported row’s top-${(D.meta.evidence_audit || {}).diagnostic_opponents_per_row || 4} current-field opponents; the first-read estimate above uses every direct cell with evidence. `+
     `<span class="chip">${escT(evidence.status)}</span> ${evidence.reasons.map(escT).join("; ")}</div>`+
     (pairs.length ? `<div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Current only</th><th>Best available direct</th><th>Added clean history</th></tr></thead><tbody>${direct}</tbody></table></div>`+
     `<h4>Admitted half-open components</h4><div class="diagnostic-scroll"><table class="diagnostic-table"><thead><tr><th>Opponent</th><th>Component</th><th>Bounds</th><th>Provenance</th><th>n current / expanded / added</th></tr></thead><tbody>${components || `<tr><td colspan="5">n/a — no admitted interval components</td></tr>`}</tbody></table></div>`+

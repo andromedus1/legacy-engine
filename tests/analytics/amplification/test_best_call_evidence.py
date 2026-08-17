@@ -53,7 +53,12 @@ def _patch_ranking_inputs(monkeypatch, module, interval_matrix, run, template_pa
         "compute_blob",
         lambda *_args, **_kwargs: {
             "meta": {"current_4wk": "2026-03-01"},
-            "arch": [{"subject": "A", "agency": 0.5}],
+            "arch": [{
+                "subject": "A",
+                "agency": 0.5,
+                "ranking_evidence": {"eligible": True},
+                "cells": [{"opp": "B", "share": 1.0}],
+            }],
             "camps": [],
             "plans": [],
         },
@@ -103,6 +108,9 @@ class TestBestCallEvidenceProjection:
         assert set(pair.current_only.component_ids) <= {
             item.component_id for item in pair.interval_components
         }
+        assert "prior_match_ids" not in pair.current_only.prior_audit
+        assert pair.current_only.prior_audit["prior_match_n"] >= 0
+        assert "event_counts" not in pair.current_only.concentration.model_dump()
 
     def test_no_run_is_typed_not_assessed_with_six_named_slots(self, interval_matrix):
         result = build_report_evidence(
@@ -117,6 +125,31 @@ class TestBestCallEvidenceProjection:
             and all(item.served is None for item in pair.challengers)
             for pair in result.pairs.values()
         )
+
+    def test_report_projection_can_limit_pairs_without_changing_interval_identity(
+        self, interval_matrix
+    ):
+        complete = build_report_evidence(
+            interval_matrix, None, authority_payload={"ranking": ["A", "B"]}
+        )
+        requested = next(iter(interval_matrix.evidence))
+
+        limited = build_report_evidence(
+            interval_matrix, None, authority_payload={"ranking": ["A", "B"]},
+            pair_keys={requested},
+        )
+
+        assert tuple(limited.pairs) == (pair_key(*requested),)
+        assert limited.pairs[pair_key(*requested)] == complete.pairs[pair_key(*requested)]
+        assert limited.interval_corpus_sha256 == complete.interval_corpus_sha256
+        assert limited.authority_payload_sha256 == complete.authority_payload_sha256
+
+        empty = build_report_evidence(
+            interval_matrix, None, authority_payload={"ranking": ["A", "B"]},
+            pair_keys=set(),
+        )
+        assert empty.pairs == {}
+        assert empty.interval_corpus_sha256 == complete.interval_corpus_sha256
 
     def test_tampered_exact_identity_fails_closed(
         self, interval_matrix, amplification_run
@@ -149,7 +182,13 @@ class TestGeneratorExactRunComposition:
 
         assert blob["evidence"]["amplification_run_id"] == amplification_run.run_id
         assert blob["evidence"]["status"] == "available"
-        assert len(blob["evidence"]["pairs"][pair_key("A", "B")]["challengers"]) == 6
+        assert "pairs" not in blob["evidence"]
+        assert blob["evidence"]["pair_diagnostic_count"] > 0
+        pair = next(
+            pair for pair in blob["arch"][0]["diagnostic_evidence"]["pairs"]
+            if pair["opponent"] == "B"
+        )
+        assert len(pair["challengers"]) == 6
 
     def test_mismatched_requested_run_preserves_the_last_good_page(
         self, tmp_path, monkeypatch, interval_matrix, amplification_run

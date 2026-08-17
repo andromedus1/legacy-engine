@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-16T23:54:25Z'
+generated_at: '2026-08-17T02:11:21Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -149,10 +149,15 @@ documents:
       add diagnostic-only recurrent interval and amplification evidence without changing
       the
 
-      mature ranking payload, and may publish exclusive-cutoff “Today’s model” siblings
-      in a
+      mature ranking payload. The normal current refresh automatically uses localized
+      clean
 
-      failure-safe offline bundle.
+      direct intervals, keeps post-ban field shares, and publishes a compact first-read
+
+      estimate/provenance summary. Exclusive-cutoff “Today’s model” siblings remain
+      available
+
+      in a failure-safe offline bundle.
 
       '
     decisions:
@@ -252,6 +257,16 @@ documents:
       exposes current-only, certified-expanded, and added-history views plus six named
       challenger slots, while a canonical authority-payload digest proves that Agency,
       candidacy, P(best), ordering, and every mature row metric are unchanged.
+    - 'The normal current refresh needs no manual evidence run ids: it builds typed
+      exact direct evidence even when certification/amplification artifact tables
+      are absent, keeps field shares post-ban, and localizes a ban to affected matchup
+      edges. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10) while admitting
+      clean pre-exposure plus post-ban rows; unaffected edges retain compatible history.'
+    - The first-read archetype table publishes a covered-field direct matchup estimate,
+      direct n, clean-history n, provenance, confidence, and proof status separately.
+      Full typed evidence remains available to Python/store consumers; offline HTML
+      embeds only four highest-share opponent ledgers per supported row, with digests/counts
+      instead of raw match-id arrays and no global pair universe.
     - Parents may consume an exact certification run; camps remain current-only and
       cannot acquire certified historical intervals or added-history observations.
       Missing, invalid, non-final, future, unpromoted, or guard-mismatched certificates
