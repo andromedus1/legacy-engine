@@ -21,6 +21,7 @@ Units covered:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -1526,19 +1527,34 @@ def build_interval_adaptive_matrix(
         split_variant=split_variant,
         split_variants=split_parents,
     )
-    directed_rows = tuple(
-        row
-        for subject, opponent in pair_keys
-        for row in selected_rows_for_pair(ledger, subject, opponent)
-    )
+    directed_by_subject = defaultdict(list)
+    for subject, opponent in pair_keys:
+        directed_by_subject[subject].extend(
+            selected_rows_for_pair(ledger, subject, opponent)
+        )
+    siblings_by_parent = {
+        parent: tuple(sorted(
+            camp for camp, sibling_parent in camp_parent.items()
+            if sibling_parent == parent
+        ))
+        for parent in set(camp_parent.values())
+    }
     for subject, opponent in pair_keys:
         selected = selected_rows_for_pair(ledger, subject, opponent)
+        hierarchy_subjects = siblings_by_parent.get(
+            camp_parent.get(subject), (subject,),
+        )
+        hierarchy_rows = tuple(
+            row
+            for hierarchy_subject in hierarchy_subjects
+            for row in directed_by_subject.get(hierarchy_subject, ())
+        )
         evidence[(subject, opponent)] = build_evidence_views(
             subject,
             opponent,
             selected,
             clock=clock,
-            hierarchy_rows=directed_rows,
+            hierarchy_rows=hierarchy_rows,
             camp_parent=camp_parent,
             reasons=(*eligibilities[subject].reasons, *eligibilities[opponent].reasons),
         )

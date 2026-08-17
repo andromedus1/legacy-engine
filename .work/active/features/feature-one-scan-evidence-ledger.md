@@ -112,10 +112,10 @@ def build_selected_outcome_ledger(
 
 **Acceptance Criteria**:
 
-- [ ] Fixture output rows and `content_sha256` exactly match a retained per-pair reference build.
-- [ ] One ledger build calls the resolver exactly once regardless of pair count.
-- [ ] Forward/reverse rows retain one physical id and complementary outcomes.
-- [ ] Current parent and camp report generation completes under the measured target without
+- [x] Fixture output rows and `content_sha256` exactly match a retained per-pair reference build.
+- [x] One ledger build calls the resolver exactly once regardless of pair count.
+- [x] Forward/reverse rows retain one physical id and complementary outcomes.
+- [x] Current parent and camp report generation completes under the measured target without
   changing atomic publication behavior.
 
 ## Benchmarks
@@ -136,3 +136,18 @@ and the full current ranking completes in under 90s on the same corpus/machine.
 2. Implement one-scan canonical grouping and the derived pair index.
 3. Run focused/full tests, benchmark parent+camp interval generation, then rerun the live current
    ranking to verify atomic publication and utility counts.
+
+## Implementation Result
+
+The selected-outcome ledger now resolves the physical corpus once, groups canonical pairs in
+memory, and exposes a derived pair index. Interval construction also supplies only the relevant
+subject or sibling-camp hierarchy rows to each evidence view. Reference tests preserve exact rows,
+digests, forward/reverse polarity, and both parent and multi-split behavior while enforcing one
+resolver call.
+
+The live controlled benchmark completed the parent interval in 24.284 seconds and the camp interval
+in 34.954 seconds (59.2 seconds combined), selecting 17,828 rows across 25,098 directed pairs. The
+former run did not finish this phase after more than 132 seconds. A follow-up profile found the
+remaining pre-index cost in repeated hierarchy-wide `_view_rows`/`_view_local_prior` scans; the
+sibling/subject index removed that second-order scan with exact parity. Focused verification passed
+79 tests.

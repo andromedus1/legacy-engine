@@ -13,7 +13,7 @@ downstream consumers.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from hashlib import sha256
@@ -251,6 +251,9 @@ class SelectedOutcomeLedger:
     entity_eligibility: Mapping[str, "EntityEligibility"]
     certificate_run_id: str | None
     content_sha256: str
+    rows_by_pair: Mapping[tuple[str, str], tuple[SelectedMatch, ...]] = field(
+        default_factory=dict, compare=False, repr=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -880,21 +883,24 @@ def select_pair_matches(records: tuple[ResolvedMatch, ...], pair: PairEligibilit
     return tuple(selected)
 
 
+def _reverse_resolved(match: ResolvedMatch) -> ResolvedMatch:
+    return ResolvedMatch(
+        match_id=match.match_id,
+        event_id=match.event_id,
+        event_date=match.event_date,
+        provenance=match.provenance,
+        subject=match.opponent,
+        opponent=match.subject,
+        subject_player_id=match.opponent_player_id,
+        opponent_player_id=match.subject_player_id,
+        subject_won=not match.subject_won,
+        mirror=match.mirror,
+    )
+
+
 def _reverse_selected(row: SelectedMatch) -> SelectedMatch:
-    match = row.match
     return SelectedMatch(
-        match=ResolvedMatch(
-            match_id=match.match_id,
-            event_id=match.event_id,
-            event_date=match.event_date,
-            provenance=match.provenance,
-            subject=match.opponent,
-            opponent=match.subject,
-            subject_player_id=match.opponent_player_id,
-            opponent_player_id=match.subject_player_id,
-            subject_won=not match.subject_won,
-            mirror=match.mirror,
-        ),
+        match=_reverse_resolved(row.match),
         view=row.view,
         pair_component_id=row.pair_component_id,
         subject_component_id=row.opponent_component_id,
@@ -911,10 +917,13 @@ def selected_rows_for_pair(
     if subject == opponent:
         return ()
     canonical = (subject, opponent) if subject < opponent else (opponent, subject)
-    rows = tuple(
-        row for row in ledger.rows
-        if (row.match.subject, row.match.opponent) == canonical
-    )
+    if ledger.rows_by_pair:
+        rows = ledger.rows_by_pair.get(canonical, ())
+    else:
+        rows = tuple(
+            row for row in ledger.rows
+            if (row.match.subject, row.match.opponent) == canonical
+        )
     return rows if canonical == (subject, opponent) else tuple(_reverse_selected(row) for row in rows)
 
 
@@ -973,21 +982,28 @@ def build_selected_outcome_ledger(
 ) -> SelectedOutcomeLedger:
     """Select exact interval outcomes once per unordered pair and bind them to a digest."""
     canonical_pairs = sorted({tuple(sorted(pair)) for pair in pair_keys if pair[0] != pair[1]})
+    requested_pairs = frozenset(canonical_pairs)
+    records_by_pair: dict[tuple[str, str], list[ResolvedMatch]] = defaultdict(list)
+    for record in resolve_match_records(
+        con,
+        provenance=provenance,
+        until=clock.data_until.isoformat(),
+        split_variant=split_variant,
+        split_variants=split_variants,
+    ):
+        canonical = tuple(sorted((record.subject, record.opponent)))
+        if canonical not in requested_pairs:
+            continue
+        records_by_pair[canonical].append(
+            record if (record.subject, record.opponent) == canonical
+            else _reverse_resolved(record)
+        )
     selected: list[SelectedMatch] = []
     for subject, opponent in canonical_pairs:
-        records = resolve_match_records(
-            con,
-            provenance=provenance,
-            until=clock.data_until.isoformat(),
-            split_variant=split_variant,
-            split_variants=split_variants,
-            subject=subject,
-            opponent=opponent,
-        )
         pair = intersect_pair_eligibility(
             entity_eligibility[subject], entity_eligibility[opponent],
         )
-        selected.extend(select_pair_matches(records, pair))
+        selected.extend(select_pair_matches(tuple(records_by_pair[(subject, opponent)]), pair))
     rows = tuple(sorted(
         selected,
         key=lambda row: (
@@ -995,6 +1011,12 @@ def build_selected_outcome_ledger(
             row.match.event_date, row.match.event_id, row.match.match_id,
         ),
     ))
+    indexed: dict[tuple[str, str], list[SelectedMatch]] = {
+        pair: [] for pair in canonical_pairs
+    }
+    for row in rows:
+        indexed[(row.match.subject, row.match.opponent)].append(row)
+    rows_by_pair = {pair: tuple(pair_rows) for pair, pair_rows in indexed.items()}
     digest = _ledger_digest_payload(rows, clock, entity_eligibility, certificate_run_id)
     return SelectedOutcomeLedger(
         rows=rows,
@@ -1002,4 +1024,5 @@ def build_selected_outcome_ledger(
         entity_eligibility=dict(entity_eligibility),
         certificate_run_id=certificate_run_id,
         content_sha256=digest,
+        rows_by_pair=rows_by_pair,
     )

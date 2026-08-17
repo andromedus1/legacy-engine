@@ -6,6 +6,7 @@ import duckdb
 import pytest
 
 from legacy_engine.analytics import matchup as matchup_module
+from legacy_engine.analytics import match_results as match_results_module
 from legacy_engine.analytics.affectedness import exposure_boundary_authorities
 from legacy_engine.analytics.eras.certificate_store import write_certification_run
 from legacy_engine.analytics.eras.certification import (
@@ -37,9 +38,12 @@ from legacy_engine.analytics.eras.store import init_eras_schema
 from legacy_engine.analytics.match_results import (
     PairEligibility,
     ResolvedMatch,
+    SelectedOutcomeLedger,
     SelectedMatch,
+    intersect_pair_eligibility,
     resolve_match_records,
     select_pair_matches,
+    selected_outcome_ledger_digest,
     selected_rows_for_pair,
 )
 from legacy_engine.advisory.best_call_evidence import build_report_evidence
@@ -427,6 +431,100 @@ def test_db_backed_matrix_excludes_gap_and_exposes_digest_bound_physical_ledger(
     assert selected_rows_for_pair(result.selected_outcomes, "A", "B")[0].match.match_id == selected_rows_for_pair(result.selected_outcomes, "B", "A")[0].match.match_id
     assert ab.certified_expanded.prior.prior_match_ids
     assert set(ab.certified_expanded.match_ids).isdisjoint(ab.certified_expanded.prior.prior_match_ids)
+
+
+@pytest.mark.parametrize("split_variants", [None, ("A",)])
+def test_selected_ledger_one_scan_matches_per_pair_reference(split_variants):
+    con = _matrix_db()
+    run = _run()
+    write_certification_run(con, run)
+    result = matchup_module.build_interval_adaptive_matrix(
+        con, clock=_clock(), certificate_run_id=run.run_id,
+        split_variants=split_variants, min_row_share=0.0,
+    )
+    ledger = result.selected_outcomes
+    canonical_pairs = sorted({
+        tuple(sorted(pair)) for pair in result.evidence if pair[0] != pair[1]
+    })
+    reference = []
+    for subject, opponent in canonical_pairs:
+        records = resolve_match_records(
+            con, until=_clock().data_until.isoformat(),
+            split_variants=split_variants, subject=subject, opponent=opponent,
+        )
+        pair = intersect_pair_eligibility(
+            ledger.entity_eligibility[subject], ledger.entity_eligibility[opponent],
+        )
+        reference.extend(select_pair_matches(records, pair))
+    reference_rows = tuple(sorted(reference, key=lambda row: (
+        row.match.subject, row.match.opponent, row.view,
+        row.match.event_date, row.match.event_id, row.match.match_id,
+    )))
+    reference_ledger = SelectedOutcomeLedger(
+        rows=reference_rows, clock=ledger.clock,
+        entity_eligibility=ledger.entity_eligibility,
+        certificate_run_id=ledger.certificate_run_id, content_sha256="reference",
+    )
+
+    assert ledger.rows == reference_rows
+    assert ledger.content_sha256 == selected_outcome_ledger_digest(reference_ledger)
+
+
+@pytest.mark.parametrize("split_variants", [None, ("A",)])
+def test_selected_ledger_resolves_corpus_exactly_once(
+    monkeypatch, split_variants,
+):
+    con = _matrix_db()
+    run = _run()
+    write_certification_run(con, run)
+    original = match_results_module.resolve_match_records
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(match_results_module, "resolve_match_records", counted)
+
+    matchup_module.build_interval_adaptive_matrix(
+        con, clock=_clock(), certificate_run_id=run.run_id,
+        split_variants=split_variants, min_row_share=0.0,
+    )
+
+    assert len(calls) == 1
+    assert calls[0].get("subject") is None
+    assert calls[0].get("opponent") is None
+
+
+@pytest.mark.parametrize("split_variants", [None, ("A",)])
+def test_indexed_hierarchy_evidence_matches_full_directed_reference(split_variants):
+    con = _matrix_db()
+    run = _run()
+    write_certification_run(con, run)
+    result = matchup_module.build_interval_adaptive_matrix(
+        con, clock=_clock(), certificate_run_id=run.run_id,
+        split_variants=split_variants, min_row_share=0.0,
+    )
+    pairs = tuple(result.evidence)
+    full_hierarchy = tuple(
+        row
+        for subject, opponent in pairs
+        for row in selected_rows_for_pair(result.selected_outcomes, subject, opponent)
+    )
+    matrix = result.current.multi if hasattr(result.current, "multi") else result.current.matrix
+    camp_parent = getattr(matrix, "camp_parent", {})
+    for subject, opponent in pairs:
+        eligibility = result.selected_outcomes.entity_eligibility
+        expected = build_evidence_views(
+            subject,
+            opponent,
+            selected_rows_for_pair(result.selected_outcomes, subject, opponent),
+            clock=result.clock,
+            hierarchy_rows=full_hierarchy,
+            camp_parent=camp_parent,
+            reasons=(*eligibility[subject].reasons, *eligibility[opponent].reasons),
+        )
+        assert result.evidence[(subject, opponent)] == expected
 
 
 def test_directed_resolver_normalizes_reverse_and_excludes_unrelated_rows():

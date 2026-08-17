@@ -14,7 +14,7 @@ from legacy_engine.analytics.eras.consume import AnalysisClock
 from legacy_engine.analytics.matchup import build_interval_adaptive_matrix
 from legacy_engine.archetype.discovered import staged_split_parents
 from legacy_engine.ingestion.banlist import BAN_EVENTS
-from scripts.refresh_best_call_ranking import current_report_target
+from refresh_best_call_ranking import current_report_target
 
 
 def main() -> None:
