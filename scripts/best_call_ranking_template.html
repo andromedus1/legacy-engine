@@ -195,14 +195,16 @@ and blowout highlights.</div>
   A high-agency deck never hands the result to the pairing screen:
   it concedes no free wins to the room. Theory under test: <b>maximum agency = most fun</b>.</div>
   <ul class="gates">
-    <li><b>Measured cells only</b> — a matchup counts when it clears the table's selected
+    <li><b>Measured Agency cells only</b> — a matchup counts when it clears the table's selected
         minimum matchup <i>n</i> (the generated default is <code>--ground-n</code>, normally 8).
         Era-windowed cells are preferred; when the era window is below that gate, a fallback cell is
         used — and the fallback pools matches only since <b>the last ban that affected either
         deck</b> in the pair (ran a banned card in ≥25% of its pre-ban lists), labeled
         <span class="chip">BA date</span>. A true full-corpus cell
         (<span class="chip">FC</span>) exists only when neither deck was ever ban-affected.
-        The Nadu rule: a banned engine's matches never inflate a row — in either direction.</li>
+        The Nadu rule: a banned engine's matches never inflate a row — in either direction. This is
+        the mature Agency/P(best) ledger; the separate direct estimate can recover older clean
+        intervals without changing this gate.</li>
     <li><b>Every measured matchup can set the floor</b> — once a cell clears the selected
         measured-evidence gate, its shrunk estimate participates in the minimum. This
         makes visible holes matter sooner. Because a deck with more measured opponents has
@@ -236,6 +238,13 @@ and blowout highlights.</div>
         only when era evidence is absent, and unresolved opponents retain a weak explicit prior.
         The displayed lean is Q25 with median and 95% interval in the row detail. It does not change
         P(best), evidence strata, or the gated recommendation.</li>
+    <li><b>Direct matchup estimate is diagnostic</b> — this column is a field-weighted average of
+        direct matchup cells from the exact union of eligible clean intervals. For a deck touched by
+        a short-lived banned card, that can join clean pre-exposure history to post-ban results while
+        excluding the card's entire exposure gap; unaffected pairs retain their eligible history.
+        The row shows direct <i>n</i>, covered field share, and how many clean-history matches were
+        added. It improves the readable estimate but does not change Agency, its floor, grounding,
+        P(best), or ordering.</li>
     <li id="field-basis"></li>
   </ul>
   </details>
@@ -249,11 +258,16 @@ and blowout highlights.</div>
       meta share and its matchup sample are different-sized populations — a big field share
       with thin matchup cells is normal, not a bug. A match counts when one player took
       strictly more games ("2-1", "2-0"); draws and byes are excluded from win rates.</li>
-      <li><b>What "current field" means</b> — the field is every published decklist since the
-      latest confirmed B&amp;R change (the audit header names the ban): a ban invalidates the
-      room it changed, so share estimates never mix regimes. <b>% of meta</b> is a deck's share
-      of all window decklists — raw counts, one published list = one vote, no win-rate
-      weighting. Know what gets published, because the field inherits that bias: MTGO leagues
+      <li><b>What "current field" means</b> — the observed current field is every published
+      decklist since the latest confirmed B&amp;R change (the audit header names the ban). If that
+      sample is below 500 decks, ranking uses a <b>transition-stabilized decision field</b>: it adds
+      a bounded count-weighted prior from the immediately preceding regime; affected archetypes are
+      excluded from that preceding-regime prior. The audit reports both observed
+      and effective counts; <b>% of meta</b> and matchup weighting use the decision field. Within
+      each slice, raw counts apply — one published list = one vote, no win-rate weighting.
+      A field reset does not erase matchup history: matchup eligibility is resolved independently
+      by pair.
+      Know what gets published, because the field inherits that bias: MTGO leagues
       publish only 5-0 lists, challenges publish top finishers, paper events publish whatever
       the venue uploads — and online + paper are blended here (the engine tracks venue splits,
       but this page doesn't). Decklists the labeling rules can't classify surface as
@@ -285,7 +299,7 @@ and blowout highlights.</div>
       <i>stable_since</i>; each boundary is attributed to a ban/release when the evidence
       names one (e.g. "release: Flow State adoption"), and an unattributed disturbance
       raises a drift alarm instead of silently re-windowing.</li>
-      <li><b>How a cell picks its window</b> — a matchup A-vs-B pools matches back to the
+      <li><b>How an Agency/P(best) cell picks its window</b> — a matchup A-vs-B pools matches back to the
       <i>later</i> of the two decks' stable_since dates (both sides must be in their current
       form). If that era window falls below the selected matchup-<i>n</i> gate, a fallback cell is
       shown instead — pooled since
@@ -294,6 +308,13 @@ and blowout highlights.</div>
       data, may blend older builds of the same legal engine — but never a banned one: the
       Nadu-era Cephalid and Candelabra-era Forge matches are structurally excluded from
       every fallback that touches those decks.</li>
+      <li><b>How the direct estimate recovers clean history</b> — each archetype receives explicit
+      eligible intervals. A localized card exposure creates pre-exposure, excluded-gap, and
+      post-ban atoms; pair eligibility is their exact intersection, so a physical match is selected
+      once only when both decks were clean. The report prefers that expanded direct view when it
+      contributes observed history, otherwise it uses current direct results. Provenance labels are
+      based on matches actually admitted, not merely on eligibility. This diagnostic view is kept
+      separate from the mature Agency ledger and proof gate above.</li>
       <li><b>The matchup-<i>n</i> control recomputes the page</b> — changing it reselects each
       archetype/camp cell from its embedded era and ban-scoped fallback candidates, then recomputes
       adjusted field WR, floor, agency, blowouts, coverage, grounding, labels, and sorting in the
@@ -382,7 +403,8 @@ excluded from floor and blowouts.
 <b>◦not current</b> marks names with fewer than 5 decks in that span (historical form, not a
 live pick); <b>window</b> = the row's era window (<span class="chip">since date</span> =
 stable_since from era detection; <span class="chip">full history</span> = no accepted era
-boundary); <b>% of meta</b> = share of all decks in the field window (audit header);
+boundary); <b>% of meta</b> = transition-stabilized decision-field share (the audit header
+separates observed and effective counts);
 <b>grounded</b> row = the configured top field opponents each clear the selected matchup-n gate and
 the generated minimum field-share coverage is met — its floor is broadly measured; <b>≤</b> plus the
 <span class="chip">upper bound</span> marker means grounding failed and the agency value can
@@ -421,6 +443,13 @@ candidacy, P(best), or which rows are called grounded.
 builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
 Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
 
+<div class="card def">
+  <details class="method" id="ranking-subject-warnings">
+    <summary id="ranking-subject-warning-summary">Ranking exclusions and diagnostics</summary>
+    <div class="audit" id="ranking-subject-warning-lines" style="margin-top:8px"></div>
+  </details>
+</div>
+
 <div class="tooltip" id="tip"></div>
 </div>
 <script>
@@ -450,6 +479,10 @@ const productionCall = M.production_recommendation || {chosen_action:null};
 const reportUtility = M.report_utility || null;
 const reportTarget = D.report_target || null;
 const evidenceAudit = M.evidence_audit || null;
+const rankingSubjectWarnings = (M.audit || []).filter(
+  line => line.startsWith("// [warn] ranking subject "));
+const headerAudit = (M.audit || []).filter(
+  line => !line.startsWith("// [warn] ranking subject "));
 const audit = [
   `// corpus through ${M.corpus_max}`
     + (M.corpus_decks ? ` · ${nf(M.corpus_decks)} decks / ${nf(M.corpus_events)} events` : "")
@@ -469,9 +502,15 @@ const audit = [
     ` · amplification ${evidenceAudit.amplification_run_id || "none"} · interval ${evidenceAudit.interval_corpus_sha256}`+
     ` · authority ${evidenceAudit.authority_payload_sha256}`+
     (evidenceAudit.reasons.length ? ` · ${evidenceAudit.reasons.join("; ")}` : "")] : []),
-  ...(M.audit || []),
+  ...headerAudit,
 ].join("\n");
 document.getElementById("audit").textContent = audit;
+const rankingWarningDetails = document.getElementById("ranking-subject-warnings");
+rankingWarningDetails.hidden = rankingSubjectWarnings.length === 0;
+document.getElementById("ranking-subject-warning-summary").textContent =
+  `Ranking exclusions and diagnostics (${rankingSubjectWarnings.length})`;
+document.getElementById("ranking-subject-warning-lines").textContent =
+  rankingSubjectWarnings.join("\n");
 
 function windowChip(r) {
   if (!r.since) return `<span class="chip">full history</span>`;

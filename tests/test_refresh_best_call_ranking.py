@@ -971,7 +971,10 @@ class TestMainEndToEnd:
             "meta": {
                 "ground_n": 8, "top_k": 1, "cover_min": 0.5, "rank": {"quantile": 0.25},
                 "field_since": "2026-01-01", "field_decks": 100, "corpus_max": "2026-01-31",
-                "regime_card": None, "audit": [],
+                "regime_card": None, "audit": [
+                    "// ranking evidence: 1 eligible, 1 quarantined",
+                    "// [warn] ranking subject Empty Camp: no resolved page-used matchup cells; P(best)=n/a",
+                ],
             },
             "arch": [arch], "camps": [camp], "plans": [],
             "report_target": {
@@ -1012,6 +1015,9 @@ class TestMainEndToEnd:
     targetOption: document.getElementById("report-target").children[0].textContent,
     targetMode: document.getElementById("target-mode").textContent,
     targetStatus: document.getElementById("target-status").textContent,
+    headerAudit: document.getElementById("audit").textContent,
+    warningSummary: document.getElementById("ranking-subject-warning-summary").textContent,
+    warningLines: document.getElementById("ranking-subject-warning-lines").textContent,
   };
 })()
 """)
@@ -1028,6 +1034,10 @@ class TestMainEndToEnd:
         assert "Before hostile </option>" in result["targetOption"]
         assert result["targetMode"] == "Today’s model"
         assert result["targetStatus"].startswith("Exclusive data cutoff")
+        assert "ranking evidence: 1 eligible" in result["headerAudit"]
+        assert "[warn] ranking subject" not in result["headerAudit"]
+        assert result["warningSummary"] == "Ranking exclusions and diagnostics (1)"
+        assert "[warn] ranking subject Empty Camp" in result["warningLines"]
         assert 'aria-expanded="false"' in result["initial"]["row"]
         assert 'aria-controls="row-detail-c-0"' in result["initial"]["row"]
         assert result["tiedGrounded"] is False
@@ -1055,6 +1065,26 @@ class TestMainEndToEnd:
         assert "Posterior lean diagnostic active; gated candidacy and P(best) unchanged" in template
         assert "tableState[\"t-arch\"].col = 2" in template
         assert "tableState[\"t-camp\"].col = 2" in template
+
+    def test_methodology_copy_distinguishes_decision_field_and_direct_estimates(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        assert "transition-stabilized decision field" in template
+        assert "affected archetypes are" in template
+        assert "excluded from that preceding-regime prior" in template
+        assert "A field reset does not erase matchup history" in template
+        assert "Direct matchup estimate is diagnostic" in template
+        assert "exact union of eligible clean intervals" in template
+        assert "does not change Agency, its floor, grounding" in template
+        assert "P(best), or ordering" in template
+
+    def test_ranking_subject_warnings_are_in_a_bottom_disclosure_not_the_header(self):
+        template = rbcr.TEMPLATE_PATH.read_text()
+        warning_id = 'id="ranking-subject-warnings"'
+        assert warning_id in template
+        assert template.index("<h2>Subarchetypes (camps)</h2>") < template.index(warning_id)
+        assert "const rankingSubjectWarnings = (M.audit || []).filter" in template
+        assert "const headerAudit = (M.audit || []).filter" in template
+        assert "document.getElementById(\"ranking-subject-warning-lines\").textContent" in template
 
     def test_stability_and_grounding_mark_generated_gate_staleness(self):
         template = rbcr.TEMPLATE_PATH.read_text()
