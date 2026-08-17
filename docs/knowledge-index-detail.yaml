@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-17T02:37:37Z'
+generated_at: '2026-08-17T14:17:00Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -152,12 +152,12 @@ documents:
       mature ranking payload. The normal current refresh automatically uses localized
       clean
 
-      direct intervals, keeps post-ban field shares, and publishes a compact first-read
+      direct intervals, keeps exact post-ban observations beside transition-stabilized
 
-      estimate/provenance summary. Exclusive-cutoff “Today’s model” siblings remain
-      available
+      decision shares, and publishes a compact first-read estimate/provenance summary.
 
-      in a failure-safe offline bundle.
+      Exclusive-cutoff “Today’s model” siblings remain available in a failure-safe
+      offline bundle.
 
       '
     decisions:
@@ -190,9 +190,11 @@ documents:
       target; the page displays the first three actions plus a remainder count and
       total projected matches/coverage. Plan rows expose grounding paths but do not
       expose lean or stability.
-    - Field basis = the current ban-regime window; --field-since defaults to the latest
-      confirmed ban event so regime changes auto-track; its confidence tier is computed
-      from window size, never hardcoded.
+    - 'Field basis separates observation from decision: --field-since defaults to
+      the latest confirmed ban event, so observed presence is exactly post-ban; when
+      that slice is thin, effective decision shares add a bounded preceding-regime
+      prior after removing affected archetypes. % of meta and matchup weights use
+      those effective counts; the observed-field sample tier uses the observed count.'
     - Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform
       multi-split matrix per distinct ban-fallback date) — numerically identical to
       per-parent split builds (parity-tested at engine and script level, ~25x cheaper),
@@ -259,7 +261,8 @@ documents:
       candidacy, P(best), ordering, and every mature row metric are unchanged.
     - 'The normal current refresh needs no manual evidence run ids: it builds typed
       exact direct evidence even when certification/amplification artifact tables
-      are absent, keeps field shares post-ban, and localizes a ban to affected matchup
+      are absent, keeps post-ban counts as the observed presence claim, uses transition-stabilized
+      decision shares for ranking weights, and localizes a ban to affected matchup
       edges. A card/cohort''s corpus fallback is its global first-seen date across
       all archetypes. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10),
       with clean pre-history bounded by the last confirmed ban before exposure plus
