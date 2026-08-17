@@ -54,6 +54,10 @@ class ReportIntervalSource(LegacyEngineModel):
     boundary_provenance: Literal[
         "released-at", "corpus-first-seen", "first-material-adoption"
     ] | None = None
+    prior_regime_start: date | None = None
+    prior_regime_start_provenance: Literal[
+        "previous-confirmed-ban", "open-corpus"
+    ] | None = None
 
 
 class ReportIntervalComponent(LegacyEngineModel):
@@ -226,8 +230,12 @@ def best_available_direct_view(
         interval.selected_outcomes.entity_eligibility[subject],
         interval.selected_outcomes.entity_eligibility[opponent],
     )
-    expanded_sources = {
-        source.source for atom in pair.expanded for source in atom.sources
+    added_component_ids = set(views.added_history.pair_component_ids)
+    observed_added_sources = {
+        source.source
+        for atom in pair.expanded
+        if atom.component_id in added_component_ids
+        for source in atom.sources
     }
     basis: Literal[
         "localized-clean-direct", "certified-direct", "current-direct", "unavailable"
@@ -235,11 +243,15 @@ def best_available_direct_view(
         "localized-clean-direct"
         if best_direct.cell is not None
         and best_direct.cell.n > 0
-        and any(source.startswith("localized-") for source in expanded_sources)
+        and views.added_history.cell is not None
+        and views.added_history.cell.n > 0
+        and "localized-pre-exposure" in observed_added_sources
         else "certified-direct"
         if best_direct.cell is not None
         and best_direct.cell.n > 0
-        and "certified-history" in expanded_sources
+        and views.added_history.cell is not None
+        and views.added_history.cell.n > 0
+        and "certified-history" in observed_added_sources
         else "current-direct"
         if best_direct.cell is not None and best_direct.cell.n > 0
         else "unavailable"

@@ -969,6 +969,31 @@ def selected_outcome_ledger_digest(ledger: SelectedOutcomeLedger) -> str:
     )
 
 
+def validate_localized_gap_selection(
+    rows: Sequence[SelectedMatch],
+    entity_eligibility: Mapping[str, "EntityEligibility"],
+) -> None:
+    """Fail closed if an expanded observation lands inside a typed localized-ban gap."""
+    gaps_by_entity: dict[str, set[tuple[date, date]]] = {}
+    for entity, eligibility in entity_eligibility.items():
+        gaps_by_entity[entity] = {
+            (source.exposure_start, source.ban_date)
+            for atom in (*eligibility.current, *eligibility.expanded)
+            for source in atom.sources
+            if source.exposure_start is not None and source.ban_date is not None
+        }
+    for row in rows:
+        if row.view != "certified-expanded":
+            continue
+        for entity in (row.match.subject, row.match.opponent):
+            for gap_start, gap_end in gaps_by_entity.get(entity, ()):
+                if gap_start <= row.match.event_date < gap_end:
+                    raise ValueError(
+                        "localized contamination gap admitted expanded match "
+                        f"{row.match.match_id}: {entity} [{gap_start}, {gap_end})"
+                    )
+
+
 def build_selected_outcome_ledger(
     con: duckdb.DuckDBPyConnection,
     *,
@@ -1011,6 +1036,7 @@ def build_selected_outcome_ledger(
             row.match.event_date, row.match.event_id, row.match.match_id,
         ),
     ))
+    validate_localized_gap_selection(rows, entity_eligibility)
     indexed: dict[tuple[str, str], list[SelectedMatch]] = {
         pair: [] for pair in canonical_pairs
     }

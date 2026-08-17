@@ -75,6 +75,10 @@ class EligibilitySourceRef(LegacyEngineModel):
     boundary_provenance: Literal[
         "released-at", "corpus-first-seen", "first-material-adoption"
     ] | None = None
+    prior_regime_start: date | None = None
+    prior_regime_start_provenance: Literal[
+        "previous-confirmed-ban", "open-corpus"
+    ] | None = None
 
 
 class EligibilityAtom(LegacyEngineModel):
@@ -253,6 +257,10 @@ def localized_clean_atoms(
                 exposure_start=boundary.contaminated_start,
                 ban_date=boundary.ban_date,
                 boundary_provenance=boundary.provenance,
+                prior_regime_start=boundary.clean_pre_exposure_start,
+                prior_regime_start_provenance=(
+                    boundary.clean_pre_exposure_start_provenance
+                ),
             )
             result.append(
                 EligibilityAtom(
@@ -749,12 +757,23 @@ def build_entity_eligibility(
                     component_id=_atom_id(start, end, (ref,)), start=start, end=end, sources=(ref,),
                 ))
     if localized_boundaries and not is_camp:
-        localized_start = (
-            date.fromisoformat(horizon_authority.stored_since)
-            if horizon_authority.clamped_by_confirmed_ban
-            and horizon_authority.stored_since is not None
-            else None
+        first_boundary = min(
+            localized_boundaries,
+            key=lambda boundary: (boundary.contaminated_start, boundary.ban_date, boundary.cards),
         )
+        localized_start = first_boundary.clean_pre_exposure_start
+        stored_value = horizon_authority.stored_since
+        if stored_value is None and horizon_authority.source in {"era", "era-parent"}:
+            stored_value = horizon_authority.since
+        stored_start = date.fromisoformat(stored_value) if stored_value is not None else None
+        # A disturbance before exposure honestly narrows the clean pre-period.  A stored boundary
+        # inside or after the contamination gap cannot erase the already-clean pre-exposure regime.
+        if (
+            stored_start is not None
+            and stored_start < first_boundary.contaminated_start
+            and (localized_start is None or stored_start > localized_start)
+        ):
+            localized_start = stored_start
         if requested_since is not None and (
             localized_start is None or requested_since > localized_start
         ):

@@ -125,8 +125,36 @@ class TestDecisionRefresh:
             validate_ranking_utility(RankingUtilitySummary(
                 observed_field_n=10, effective_field_n=10, prior_strength=0,
                 affected_clamp_count=0, supported_rows=2, transition_prior_rows=0,
-                grounded_rows=1, practical_call="First", proof_grade_call=None,
+                grounded_rows=1, practical_call="First", proof_grade_call="First",
                 rendered_shortlist_rows=1, status="useful",
+                practical_ranked_actions=("First",),
+            ))
+
+    @pytest.mark.parametrize(
+        ("grounded_rows", "proof_grade_call"),
+        ((0, "False Proof"), (1, None)),
+    )
+    def test_usefulness_contract_enforces_proof_call_iff_grounded_rows(
+        self, grounded_rows, proof_grade_call,
+    ):
+        with pytest.raises(ValueError, match="proof-grade call must exist iff"):
+            validate_ranking_utility(RankingUtilitySummary(
+                observed_field_n=10, effective_field_n=10, prior_strength=0,
+                affected_clamp_count=0, supported_rows=2, transition_prior_rows=0,
+                grounded_rows=grounded_rows, practical_call="First",
+                proof_grade_call=proof_grade_call, rendered_shortlist_rows=0,
+                status="degraded", practical_ranked_actions=("First",),
+            ))
+
+    def test_usefulness_contract_reconciles_estimate_cell_provenance(self):
+        with pytest.raises(ValueError, match="estimate-cell provenance counts"):
+            validate_ranking_utility(RankingUtilitySummary(
+                observed_field_n=10, effective_field_n=10, prior_strength=0,
+                affected_clamp_count=0, supported_rows=1, transition_prior_rows=0,
+                grounded_rows=0, estimated_rows=1, visible_estimate_cells=2,
+                affected_estimate_cells=1, unaffected_estimate_cells=0,
+                practical_call="First", proof_grade_call=None,
+                rendered_shortlist_rows=0, status="useful",
                 practical_ranked_actions=("First",),
             ))
 

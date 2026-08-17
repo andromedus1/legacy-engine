@@ -30,6 +30,9 @@ _DEFAULT_AFFECT_THRESHOLD: float = 0.25  # banned-card inclusion in pre-ban deck
 ExposureBoundaryProvenance = Literal[
     "released-at", "corpus-first-seen", "first-material-adoption"
 ]
+PreExposureLowerBoundProvenance = Literal[
+    "previous-confirmed-ban", "open-corpus"
+]
 
 
 class ExposureBoundaryAuthority(LegacyEngineModel):
@@ -43,6 +46,8 @@ class ExposureBoundaryAuthority(LegacyEngineModel):
     entity: str
     cards: tuple[str, ...]
     ban_date: date
+    clean_pre_exposure_start: date | None
+    clean_pre_exposure_start_provenance: PreExposureLowerBoundProvenance
     clean_pre_exposure_end: date
     contaminated_start: date
     contaminated_end: date
@@ -63,6 +68,16 @@ class ExposureBoundaryAuthority(LegacyEngineModel):
             == self.ban_date
         ):
             raise ValueError("exposure authority requires one exact half-open contamination gap")
+        if (
+            self.clean_pre_exposure_start is not None
+            and self.clean_pre_exposure_start >= self.clean_pre_exposure_end
+        ):
+            raise ValueError("pre-exposure lower bound must precede the contamination gap")
+        if (
+            (self.clean_pre_exposure_start is None)
+            != (self.clean_pre_exposure_start_provenance == "open-corpus")
+        ):
+            raise ValueError("pre-exposure lower-bound provenance must match its bound")
         if self.pre_ban_decks <= 0 or not (0 <= self.material_decks <= self.pre_ban_decks):
             raise ValueError("exposure authority material counts must fit the pre-ban denominator")
         if not 0.0 <= self.ban_event_inclusion_rate <= 1.0:
@@ -82,9 +97,9 @@ def exposure_boundary_authorities(
     """Return exact localized-ban gaps for materially affected parent entities.
 
     Materiality intentionally reuses :func:`archetype_valid_since`'s denominator and ANY-card
-    rule.  An authoritative release date wins when supplied; otherwise the first corpus deck for
-    that entity/card is the deterministic, outcome-free fallback.  Unaffected entities retain an
-    empty tuple rather than acquiring a global ban boundary.
+    rule.  An authoritative release date wins when supplied; otherwise the card cohort's first
+    corpus deck across every archetype is the deterministic, outcome-free fallback.  Unaffected
+    entities retain an empty tuple rather than acquiring a global ban boundary.
     """
 
     result: dict[str, list[ExposureBoundaryAuthority]] = {entity: [] for entity in entities}
@@ -127,59 +142,68 @@ def exposure_boundary_authorities(
         if not affected:
             previous = ban_date
             continue
-        affected_names = sorted(affected)
-        affected_ph = ",".join("?" for _ in affected_names)
         first_rows = con.execute(
             f"""
-            SELECT d.archetype, dc.name,
-                   min(cast(substr(t.date, 1, 10) AS DATE)) AS first_seen,
-                   count(DISTINCT CASE WHEN (? IS NULL OR t.date >= ?)
-                                       THEN (d.tournament_id, d.deck_idx) END) AS card_decks
+            SELECT dc.name,
+                   min(cast(substr(t.date, 1, 10) AS DATE)) AS first_seen
             FROM decks d
             JOIN tournaments t ON t.id = d.tournament_id
             JOIN deck_cards dc
               ON dc.tournament_id = d.tournament_id AND dc.deck_idx = d.deck_idx
-            WHERE d.archetype IN ({affected_ph})
-              AND dc.name IN ({card_ph})
+            WHERE dc.name IN ({card_ph})
               AND (? IS NULL OR t.provenance = ?)
               AND t.date < ?
-            GROUP BY d.archetype, dc.name
+            GROUP BY dc.name
             """,
-            [since, since, *affected_names, *cards, provenance, provenance, ban_date.isoformat()],
+            [*cards, provenance, provenance, ban_date.isoformat()],
         ).fetchall()
-        observations: dict[str, list[tuple[str, date, int, date | None]]] = {}
-        for entity, card, first_seen, card_decks in first_rows:
-            card = str(card)
+        first_seen_by_card = {str(card): first_seen for card, first_seen in first_rows}
+        cohort: list[tuple[str, date, date | None]] = []
+        for card in cards:
             release_date = release_dates.get(card)
             if release_date is not None and release_date >= ban_date:
                 raise ValueError(
                     f"release date for {card} must precede its {ban_date.isoformat()} ban"
                 )
-            observations.setdefault(str(entity), []).append(
-                (card, first_seen, int(card_decks), release_date)
-            )
-        for entity, seen in observations.items():
-            # Materiality is defined for the same-date card union, so its contamination authority
-            # is also one event-cohort gap.  This avoids letting a tiny individual card silently
-            # widen a union-qualified entity while preserving every contributing card name.
-            exposure_start = min(release or first for _card, first, _n, release in seen)
-            if exposure_start >= ban_date:
-                continue
-            decks, run_decks = affected[entity]
+            first_seen = first_seen_by_card.get(card)
+            if release_date is not None or first_seen is not None:
+                observed_start = first_seen if first_seen is not None else release_date
+                assert observed_start is not None
+                cohort.append((card, observed_start, release_date))
+        if not cohort:
+            previous = ban_date
+            continue
+        # Materiality and contamination are one same-date event cohort.  A corpus fallback is
+        # therefore global per card/cohort, never re-learned later from each affected archetype.
+        exposure_start = min(release or first for _card, first, release in cohort)
+        if exposure_start >= ban_date:
+            previous = ban_date
+            continue
+        prior_ban = max(
+            (event_date for event_date, _event_cards in grouped if event_date < exposure_start),
+            default=None,
+        )
+        cohort_cards = tuple(sorted(card for card, _first, _release in cohort))
+        provenance_kind: ExposureBoundaryProvenance = (
+            "released-at"
+            if all(release is not None for _card, _first, release in cohort)
+            else "corpus-first-seen"
+        )
+        for entity, (decks, run_decks) in affected.items():
             result[entity].append(
                 ExposureBoundaryAuthority(
                     entity=entity,
-                    cards=tuple(sorted(card for card, _first, _n, _release in seen)),
+                    cards=cohort_cards,
                     ban_date=ban_date,
+                    clean_pre_exposure_start=prior_ban,
+                    clean_pre_exposure_start_provenance=(
+                        "previous-confirmed-ban" if prior_ban is not None else "open-corpus"
+                    ),
                     clean_pre_exposure_end=exposure_start,
                     contaminated_start=exposure_start,
                     contaminated_end=ban_date,
                     clean_post_ban_start=ban_date,
-                    provenance=(
-                        "released-at"
-                        if all(release is not None for _card, _first, _n, release in seen)
-                        else "corpus-first-seen"
-                    ),
+                    provenance=provenance_kind,
                     material_decks=run_decks,
                     pre_ban_decks=decks,
                     ban_event_inclusion_rate=run_decks / decks,

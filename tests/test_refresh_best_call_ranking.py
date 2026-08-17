@@ -1248,6 +1248,12 @@ class TestEvidenceTargetIntegration:
             "top-4-current-field-opponents-per-supported-row"
         )
         assert attached["meta"]["report_utility"]["estimated_rows"] > 0
+        utility = attached["meta"]["report_utility"]
+        assert (utility["grounded_rows"] > 0) == (utility["proof_grade_call"] is not None)
+        assert (
+            utility["affected_estimate_cells"] + utility["unaffected_estimate_cells"]
+            == utility["visible_estimate_cells"]
+        )
         assert all("best_available_estimate" in row for row in attached["arch"])
         assert all("diagnostic_evidence" in row for row in attached["arch"])
         assert attached["camps"]

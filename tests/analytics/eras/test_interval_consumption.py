@@ -34,7 +34,8 @@ from legacy_engine.analytics.eras.consume import (
     build_evidence_views,
     normalize_atoms,
 )
-from legacy_engine.analytics.eras.store import init_eras_schema
+from legacy_engine.analytics.eras.ensemble import EntityEras
+from legacy_engine.analytics.eras.store import init_eras_schema, write_entity_eras
 from legacy_engine.analytics.match_results import (
     PairEligibility,
     ResolvedMatch,
@@ -45,6 +46,7 @@ from legacy_engine.analytics.match_results import (
     select_pair_matches,
     selected_outcome_ledger_digest,
     selected_rows_for_pair,
+    validate_localized_gap_selection,
 )
 from legacy_engine.advisory.best_call_evidence import build_report_evidence
 from legacy_engine.ingestion.store import init_schema
@@ -258,6 +260,13 @@ def test_localized_exposure_authority_recovers_clean_pre_and_post_ban_history():
     assert set(pair.current_only.match_ids).isdisjoint(pair.added_history.match_ids)
     ledger_rows = selected_rows_for_pair(interval.selected_outcomes, "A", "B")
     assert len({(row.view, row.match.match_id) for row in ledger_rows}) == len(ledger_rows)
+    validate_localized_gap_selection(
+        interval.selected_outcomes.rows, interval.selected_outcomes.entity_eligibility,
+    )
+    assert all(
+        not (date(2026, 6, 20) <= row.match.event_date < date(2026, 8, 10))
+        for row in ledger_rows if row.view == "certified-expanded"
+    )
     report_pair = build_report_evidence(
         interval, None, authority_payload={"production": "unchanged"},
     ).pairs['["A","B"]']
@@ -271,6 +280,30 @@ def test_localized_exposure_authority_recovers_clean_pre_and_post_ban_history():
         for component in report_pair.interval_components
         for source in component.sources
     )
+
+
+def test_localized_eligibility_without_added_observations_reports_current_direct():
+    con = _db()
+    _insert_match(con, "global-exposure", date(2026, 6, 20), "A", "C")
+    _insert_card(con, "global-exposure", 0, "The Fantasticar")
+    _insert_match(con, "post-only", date(2026, 8, 11), "A", "B")
+    bans = ((date(2026, 8, 10), "The Fantasticar", "confirmed"),)
+    clock = AnalysisClock(
+        data_until=date(2026, 8, 17),
+        knowledge_as_of=datetime(2026, 8, 17, tzinfo=UTC),
+        knowledge_mode="retrospective-current-model",
+    )
+
+    interval = matchup_module.build_interval_adaptive_matrix(
+        con, clock=clock, min_row_share=0.0, ban_events=bans,
+    )
+    pair = build_report_evidence(
+        interval, None, authority_payload={"production": "unchanged"},
+    ).pairs['["A","B"]']
+
+    assert pair.added_history.n == 0
+    assert pair.best_available_direct.n == 1
+    assert pair.best_available_basis == "current-direct"
 
 
 def test_same_date_multi_card_materiality_emits_one_union_cohort_gap():
@@ -295,6 +328,58 @@ def test_same_date_multi_card_materiality_emits_one_union_cohort_gap():
     assert rows[0].material_decks == 2
     assert rows[0].pre_ban_decks == 4
     assert rows[0].ban_event_inclusion_rate == 0.5
+
+
+def test_global_first_seen_and_prior_regime_recover_pre_exposure_despite_later_stored_horizon():
+    con = _db()
+    _insert_match(con, "b-before", date(2026, 6, 1), "B", "X")
+    _insert_match(con, "global-first", date(2026, 6, 20), "A", "X")
+    _insert_card(con, "global-first", 0, "The Fantasticar")
+    _insert_match(con, "b-adoption", date(2026, 7, 10), "B", "X")
+    _insert_card(con, "b-adoption", 0, "The Fantasticar")
+    bans = (
+        (date(2026, 5, 18), "Earlier Ban", "confirmed"),
+        (date(2026, 6, 29), "Mid-gap Ban", "confirmed"),
+        (date(2026, 8, 10), "The Fantasticar", "confirmed"),
+    )
+    boundary = exposure_boundary_authorities(con, ("A", "B", "X"), ban_events=bans)["B"][0]
+
+    assert boundary.contaminated_start == date(2026, 6, 20)
+    assert boundary.clean_pre_exposure_start == date(2026, 5, 18)
+    assert boundary.clean_pre_exposure_start_provenance == "previous-confirmed-ban"
+
+    def write_stored(since: str) -> None:
+        write_entity_eras(
+            con,
+            {"B": EntityEras(
+                entity="B", stable_since=since, boundaries=(), inherited_from_parent=False,
+            )},
+            {}, {},
+            run_meta={
+                "provenance": None, "alpha": 0.05,
+                "run_at": "2026-08-16T00:00:00+00:00",
+                "post_boundary_decks": {}, "parent": {"B": "B"},
+            },
+        )
+
+    clock = AnalysisClock(
+        data_until=date(2026, 8, 17),
+        knowledge_as_of=datetime(2026, 8, 17, tzinfo=UTC),
+        knowledge_mode="retrospective-current-model",
+    )
+    write_stored("2026-06-29")
+    eligibility = build_entity_eligibility(con, "B", clock=clock, ban_events=bans)
+    assert [(atom.start, atom.end) for atom in eligibility.expanded] == [
+        (date(2026, 5, 18), date(2026, 6, 20)),
+        (date(2026, 8, 10), date(2026, 8, 17)),
+    ]
+
+    write_stored("2026-06-10")
+    narrowed = build_entity_eligibility(con, "B", clock=clock, ban_events=bans)
+    assert [(atom.start, atom.end) for atom in narrowed.expanded] == [
+        (date(2026, 6, 10), date(2026, 6, 20)),
+        (date(2026, 8, 10), date(2026, 8, 17)),
+    ]
 
 
 def test_selection_excludes_gap_and_keeps_pair_component_constant():
@@ -431,6 +516,11 @@ def test_db_backed_matrix_excludes_gap_and_exposes_digest_bound_physical_ledger(
     assert selected_rows_for_pair(result.selected_outcomes, "A", "B")[0].match.match_id == selected_rows_for_pair(result.selected_outcomes, "B", "A")[0].match.match_id
     assert ab.certified_expanded.prior.prior_match_ids
     assert set(ab.certified_expanded.match_ids).isdisjoint(ab.certified_expanded.prior.prior_match_ids)
+    report_ab = build_report_evidence(
+        result, None, authority_payload={"production": "unchanged"},
+    ).pairs['["A","B"]']
+    assert report_ab.added_history.n == 1
+    assert report_ab.best_available_basis == "certified-direct"
 
 
 @pytest.mark.parametrize("split_variants", [None, ("A",)])

@@ -101,6 +101,15 @@ def validate_ranking_utility(summary: RankingUtilitySummary) -> None:
         raise ValueError("ranking utility grounded rows exceed supported rows")
     if summary.transition_prior_rows > summary.supported_rows:
         raise ValueError("ranking utility transition-prior rows exceed supported rows")
+    if (
+        summary.affected_estimate_cells + summary.unaffected_estimate_cells
+        != summary.visible_estimate_cells
+    ):
+        raise ValueError("ranking utility estimate-cell provenance counts do not reconcile")
+    if (summary.grounded_rows > 0) != (summary.proof_grade_call is not None):
+        raise ValueError(
+            "ranking utility proof-grade call must exist iff grounded rows exist"
+        )
     if summary.supported_rows and summary.practical_call is None:
         raise ValueError("ranking utility has supported rows but no practical call")
     if (
