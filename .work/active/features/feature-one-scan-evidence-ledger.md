@@ -1,7 +1,7 @@
 ---
 id: feature-one-scan-evidence-ledger
 kind: feature
-stage: implementing
+stage: review
 created: 2026-08-16
 updated: 2026-08-16
 tags: [analytics, perf]
@@ -151,3 +151,7 @@ former run did not finish this phase after more than 132 seconds. A follow-up pr
 remaining pre-index cost in repeated hierarchy-wide `_view_rows`/`_view_local_prior` scans; the
 sibling/subject index removed that second-order scan with exact parity. Focused verification passed
 79 tests.
+
+Integrated verification also passed the complete repository suite: 3,997 passed, 1 skipped. The
+final live report completed atomic publication with exact interval, compact-projection, and write
+phase timings emitted separately.
