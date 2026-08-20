@@ -1,16 +1,17 @@
 ---
 id: feature-doomsday-pivot-performance
 kind: feature
-stage: implementing
+stage: done
 tags: [research, advisory, analytics]
 parent: null
 depends_on:
   - research-handoff-doomsday-splash-variants-5
 release_binding: null
 gate_origin: null
-research_origin: null
+research_origin: doomsday-pivot-performance
 research_refs:
   - doomsday-splash-variants
+  - doomsday-pivot-performance
 research_dials:
   scope_authority: mixed
   verification_rigor: standard
@@ -101,3 +102,33 @@ or sideboard transformation explains the apparent penalty. Three parallel facets
 Self-flag: the 12-list post-ban window is too small for an adjusted causal model. The engagement
 must be willing to return “directional signal only” and express break-even requirements rather than
 convert a selected published surface into a package win rate.
+
+## Engagement record
+
+- **Campaign:** `.research/analysis/campaigns/doomsday-pivot-performance/parent.md`
+- **Fan-out:** three independent facets covering outcome/bias, pivot taxonomy, and matchup
+  economics/test design.
+- **Population contract:** twelve exact-archetype Doomsday registrations dated 2026-08-10 through
+  2026-08-18; the conflict-labelled row is reported separately and excluded from comparisons.
+- **Finding:** the Personal Tutor/Wasteland published-record gap falls from 37.7 percentage points
+  raw to 14.6 points without selected League 5-0s and 8.3 points in Challenges only. The direction
+  remains descriptive, but the sample cannot identify a causal tempo penalty and is materially
+  pilot-dependent.
+- **Decision:** prioritize a matched-main Dimir no-juke versus literal sideboard-only-juke test;
+  retain Esper/value as the next distinct rung and treat Wasteland/Murktide as a deeper, separately
+  costed hybrid. Use hostile-metagame break-even math before promoting any pivot.
+- **Verification:** the single standard adversarial pass returned `NEEDS-REVISION`; all five gates
+  were corrected and directly checked. Citation lint resolved 141 citations with zero broken, thin,
+  or pattern flags; `git diff --check` passed. No second independent research review was run.
+- **Evidence gaps:** no failed-League denominator, incomplete direct player rounds, and no controlled
+  matched-main local logs. No source-grounded acquisition candidate was available.
+- **Operations caveat:** the local scheduled-refresh projection remained stale at 2026-08-18 with
+  legality pending; the campaign used the already-refreshed local corpus through 2026-08-19 and did
+  not trigger a network refresh merely to clear the banner.
+
+## Completion
+
+All acceptance criteria are satisfied at the evidence-supported level. The campaign separates
+publication, construction, and prospective local evidence; defines a reproducible intensity axis;
+tests the apparent penalty under available controls; and emits a prioritized paired-playtest matrix
+without claiming causal superiority.
