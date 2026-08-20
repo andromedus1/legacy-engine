@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-4
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -102,3 +102,20 @@ The prototypes are learning instruments, not stock recommendations:
 - Discrepancies from design: Cutter uses the exact valid 2026-07-17 Eureka22422 5-0 registration as its source anchor; the July 21 Last Chance lists are also valid 60+15 registrations, but the July 17 5-0 was selected as the evidence anchor. The emitted Cutter reconstruction remains only `-3 The Fantasticar +3 Personal Tutor`.
 - Review fixes: narrowed Moonshadow's Fantasticar claim to the seven late-June lineage lists, acknowledged the exact legal Enrichetta 2026-01-29 comparator, and strengthened manifest/section-marker tests.
 - Adjacent issues parked: none.
+
+## Review (2026-08-20)
+
+**Verdict**: Approve after changes
+
+**Blockers**: resolved inline — Moonshadow evidence is scoped to the seven late-June
+Fantasticar/Bauble lists and separately acknowledges the exact legal January registration.
+**Important**: resolved inline — Cutter source selection no longer calls valid July 21 lists
+invalid, and tests now enforce the exact six manifest pairs plus one Sideboard marker per file.
+**Nits**: none
+**Rejected**: `Spectral Restitching` to `Hide on the Ceiling` is canonical Oracle-name resolution,
+not an undisclosed card substitution.
+
+**Notes**: Standard-weight substrate review used exactly one fresh-context balanced pass. Commit
+`da10fea` resolves every receiver-confirmed finding; 34 focused/related tests pass and the diff is
+clean. No second independent pass runs under standard weight. Security, migration, concurrency,
+UI, and deployed-operational lenses were inapplicable.
