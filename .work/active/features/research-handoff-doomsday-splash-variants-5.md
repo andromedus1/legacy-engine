@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-5
 kind: feature
-stage: review
+stage: done
 tags: [advisory, analytics]
 parent: null
 depends_on:
@@ -131,3 +131,21 @@ context only and are never merged into playtest outcomes.
 - Added adversarial coverage for every review reproduction. Verification: 25 playtest-contract
   tests and 75 integrated Doomsday tests pass; empty-template and valid-fixture CLI smoke pass;
   `git diff --check` is clean.
+
+## Review (2026-08-20)
+
+**Verdict**: Approve after changes
+
+**Blockers**: resolved inline — duplicate experimental identity, pairing/block invariants,
+completed-match accounting, fixed stopping threshold, conditional states, and omitted primary
+measures are all corrected and covered adversarially.
+**Important**: resolved inline — manifest parsing is root-type checked, path-contained, hash/path
+unique, and evidence posture is checked against the artifact contract.
+**Nits**: none
+**Rejected**: none
+
+**Notes**: Standard-weight substrate review used exactly one fresh-context balanced pass. Commit
+`15e3a0a` resolves every receiver-confirmed finding plus the receiver-observed missing row-level
+deck-hash binding. The 25 focused and 75 integrated Doomsday tests pass; both CLI smoke cases and
+`git diff --check` are green. No second independent pass runs under standard weight. Network,
+database migration, concurrency, UI, and deployed-operational lenses were inapplicable.
