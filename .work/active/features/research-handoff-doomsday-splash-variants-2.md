@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-2
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -385,3 +385,25 @@ git diff --check -- .work/active/features/research-handoff-doomsday-splash-varia
   Doomsday variant artifacts. **Fallback:** this feature owns only `dated/`; the downstream
   comparison-program feature, which depends on all candidate features, consolidates the root
   manifest after their directories exist.
+
+## Implementation notes
+
+- Execution capability: GPT-5.6 Luna high — bounded static artifacts, source-ledger reconstruction,
+  and focused parser/legality tests required high judgment around provenance but no broad code
+  surface.
+- Review weight: standard (default).
+- Files changed: `decks/doomsday-variants/dated/bug-veil-carpet-reconstructed.txt`,
+  `decks/doomsday-variants/dated/grixis-squelcher-refresh.txt`,
+  `decks/doomsday-variants/dated/README.md`,
+  `tests/test_doomsday_dated_variants.py`, and this item.
+- Tests added/removed: added the hermetic `TestDoomsdayDatedVariants` contract coverage for exact
+  registrations, provenance labels, package counts, pinned/current legality, and manifest status
+  separation; no tests removed.
+- Simplification: no production abstraction or second parser/validator added; the immutable
+  registrations remain plain import text and tests reuse canonical parser and ban-list functions.
+- Discrepancies from design: read-only DuckDB reports maximum Doomsday date `2026-08-18` (the
+  all-format database maximum is later); its Squelcher query observes 12 stored source rows while
+  the source-direct campaign extract reports nine 2026 entries, consistent with the documented
+  duplicate/source-entry caveat. Neither changes the design outcome: zero post-ban BUG or Squelcher
+  rows, and the latest Squelcher date remains `2026-06-27`.
+- Adjacent issues parked: none.
