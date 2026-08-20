@@ -173,9 +173,20 @@ def test_grixis_expected_package_contract() -> None:
 
 def test_manifest_names_both_candidates_and_separates_statuses() -> None:
     manifest = (CANDIDATE_DIR / "README.md").read_text(encoding="utf-8")
-    for name in CANDIDATE_FILES:
-        assert name in manifest
-    assert "inferred-reconstruction" in manifest
-    assert "observed-historical" in manifest
-    assert "legal-at-cutoff" in manifest
-    assert "observed-current" in manifest
+    rows = {
+        candidate_id: next(
+            line for line in manifest.splitlines() if line.startswith(f"| `{candidate_id}` |")
+        )
+        for candidate_id in ("bug-veil-carpet-reconstructed", "grixis-squelcher-refresh")
+    }
+    bug_row = rows["bug-veil-carpet-reconstructed"]
+    assert "`bug-veil-carpet-reconstructed.txt`" in bug_row
+    assert "`inferred-reconstruction`" in bug_row
+    assert "observed 2026-07-13" in bug_row
+    assert "ddv-packages-list-bug-wakame-preban.md" in bug_row
+
+    grixis_row = rows["grixis-squelcher-refresh"]
+    assert "`grixis-squelcher-refresh.txt`" in grixis_row
+    assert "`observed-historical` / `legal-at-cutoff` (not observed-current)" in grixis_row
+    assert "observed 2026-05-31" in grixis_row
+    assert "ddv-packages-list-grixis-nevilshute.md" in grixis_row

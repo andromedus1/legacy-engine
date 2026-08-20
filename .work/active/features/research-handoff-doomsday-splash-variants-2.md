@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-2
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -402,8 +402,23 @@ git diff --check -- .work/active/features/research-handoff-doomsday-splash-varia
 - Simplification: no production abstraction or second parser/validator added; the immutable
   registrations remain plain import text and tests reuse canonical parser and ban-list functions.
 - Discrepancies from design: read-only DuckDB reports maximum Doomsday date `2026-08-18` (the
-  all-format database maximum is later); its Squelcher query observes 12 stored source rows while
-  the source-direct campaign extract reports nine 2026 entries, consistent with the documented
-  duplicate/source-entry caveat. Neither changes the design outcome: zero post-ban BUG or Squelcher
-  rows, and the latest Squelcher date remains `2026-06-27`.
+  all-format database maximum is later). An all-dates Squelcher query observes 12 stored rows: three
+  March registrations plus the nine May 24–June 27 entries in the campaign's bounded May 18-forward
+  period. Neither changes the design outcome: zero post-ban BUG or Squelcher rows, and the latest
+  Squelcher date remains `2026-06-27`.
 - Adjacent issues parked: none.
+
+## Review (2026-08-20)
+
+**Verdict**: Approve with comments
+
+**Blockers**: none
+**Important**: resolved inline — the durable all-dates versus May 18-forward Squelcher count is now
+scoped correctly, and manifest tests bind status, evidence date, source, and filename per row.
+**Nits**: top-level focused tests are acceptable; a class wrapper would not change behavior.
+**Rejected**: none
+
+**Notes**: Standard-weight substrate review used exactly one fresh-context balanced pass. The
+receiver verified both findings, corrected them, and reran the seven focused tests successfully.
+Security, migration, concurrency, UI, and performance lenses were inapplicable to immutable deck
+artifacts and hermetic tests. Closure required no second independent pass under standard weight.
