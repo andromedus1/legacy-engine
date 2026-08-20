@@ -52,8 +52,12 @@ offline validator/summarizer that reports descriptive results without claiming c
 - `scripts/doomsday_variant_results.py LOG.csv` validates rows and emits per-list and paired-delta
   descriptive summaries. Invalid enums, missing required fields, unknown list ids, impossible turn
   values, and inconsistent conditional fields fail fast with row-specific errors.
-- The candidate-list manifest under `decks/doomsday-variants/README.md` is the list-id authority;
-  the script must derive valid ids from it rather than maintain a second enumeration.
+- `decks/doomsday-variants/manifest.json` is extended from the four current registrations to a
+  complete playtest registry covering every finished list from features 1–4 (current, dated,
+  chassis, and alternate). The JSON remains the list-id authority; the script must derive valid
+  ids and deck paths from it rather than maintain a second enumeration. Entries added for
+  reconstructed prototypes must retain their evidence posture and may not masquerade as exact
+  source registrations.
 
 ### Measurement contract
 
@@ -79,6 +83,8 @@ context only and are never merged into playtest outcomes.
   `not_seen`/`not_applicable` states instead of silent blanks.
 - List order and play/draw are balanced within matchup blocks; each experimental list is paired
   against the Dimir control under the same opponent list/version.
+- Every parser-valid 75 delivered by features 1–4 has exactly one stable manifest id, path, evidence
+  posture, and deck hash; no stale manifest path or unregistered candidate remains.
 - Summaries display denominators and remain descriptive; low sample sizes are labeled and no win-
   rate ranking is emitted before the preregistered stopping threshold.
 - The validator rejects malformed or internally inconsistent rows and accepts the distributed
