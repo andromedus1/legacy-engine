@@ -1,7 +1,7 @@
 ---
 id: feature-doomsday-pivot-performance
 kind: feature
-stage: drafting
+stage: implementing
 tags: [research, advisory, analytics]
 parent: null
 depends_on:
@@ -77,3 +77,27 @@ comparison vocabulary without deleting the source-facing labels.
 - Identifies which matchup-specific gains would repay aggregate consistency costs.
 - Produces a concrete prioritized testing matrix without claiming unsupported causal superiority.
 - Passes the standard agentic-research verification stack and records any unresolved evidence gaps.
+
+## Decomposition rationale
+
+Autopilot Checkpoint A considered three shapes:
+
+1. **Construction-first:** quantify outcome bias, define pivot intensity, then model matchup payoff.
+2. **Color-first:** compare Dimir, Esper, BUG, Grixis, and green-white directly.
+3. **Evidence-layer-first:** separate published, local-controlled, and mechanistic evidence before
+   considering deck construction.
+
+The construction-first shape is selected. Color-first would reproduce the known chassis/splash
+confounding, while evidence-layer-first would not independently test whether maindeck commitment
+or sideboard transformation explains the apparent penalty. Three parallel facets will cover:
+
+- **Outcome surface and bias:** published records, event/League selection, pilot and exact-list
+  dependence, standings/round coverage, and sensitivity analyses.
+- **Pivot-intensity taxonomy:** reproducible classification of maindeck tempo commitment,
+  value-combo overlap, and sideboard-only transformation across the registered and wider corpus.
+- **Matchup economics and test design:** which hostile-matchup improvements could repay the broad
+  consistency cost, what existing match data can support, and the next paired-test matrix.
+
+Self-flag: the 12-list post-ban window is too small for an adjusted causal model. The engagement
+must be willing to return “directional signal only” and express break-even requirements rather than
+convert a selected published surface into a package win rate.
