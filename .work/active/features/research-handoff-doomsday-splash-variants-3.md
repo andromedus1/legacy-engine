@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-3
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -312,6 +312,22 @@ and package-shipped ban-list registry are the deterministic sources.
   validator without new generation or registry machinery.
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
+
+## Review (2026-08-20)
+
+**Verdict**: Approve after changes
+
+**Blockers**: resolved inline — source-fidelity tests now use tracked immutable fixtures rather
+than the gitignored local cache.
+**Important**: resolved inline — result, date, anchor, and both boards are derived from the tracked
+source row while the original upstream path remains checked provenance.
+**Nits**: none
+**Rejected**: none
+
+**Notes**: Standard-weight substrate review used exactly one fresh-context balanced pass. The
+receiver confirmed both findings; commit `f70393d` supplies the fixes, 70 focused/regression tests
+pass, and `git diff --check` is clean. No second independent pass is permitted or required under
+standard weight. Security, migration, concurrency, UI, and performance lenses were inapplicable.
 - Review-fix verification: replaced gitignored cache reads with tracked immutable source-row
   fixtures under `tests/fixtures/doomsday_variants/`; tests derive result/date/anchor/boards from
   those rows and still assert the original upstream `source_path` provenance metadata. The item
