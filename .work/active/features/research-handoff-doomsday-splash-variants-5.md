@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-5
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, analytics]
 parent: null
 depends_on:
@@ -104,3 +104,12 @@ context only and are never merged into playtest outcomes.
   fields; changed hashes begin a new version.
 - Sparse data invites premature conclusions. Mitigation: preregistered threshold, denominators, and
   descriptive-only output below it.
+
+## Implementation notes
+- Execution capability: GPT-5.6 Luna high; cohesive registry, protocol, validator, and descriptive CLI implementation.
+- Review weight: standard (default).
+- Files changed: `decks/doomsday-variants/manifest.json`; `decks/doomsday-variants/README.md`; `decks/doomsday-variants/playtest-protocol.md`; `decks/doomsday-variants/playtest-log.csv`; `decks/README.md`; `scripts/doomsday_variant_results.py`; `tests/test_doomsday_variant_results.py`; `tests/fixtures/doomsday_variants/playtest-valid.csv`; `tests/test_doomsday_variant_decks.py`.
+- Tests added/removed: added manifest completeness, CSV acceptance, enum/conditional rejection, paired-delta, thin-sample, and CLI-contract coverage; adapted the former four-registration contract to validate its current subset while the expanded manifest owns all 15 candidates. Doomsday-focused suite passes (58 tests).
+- Simplification: the CLI derives candidate IDs, paths, and hashes directly from the manifest; no second list enumeration or premature ranking layer was introduced.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.

@@ -28,6 +28,19 @@ EXPECTED_IDS = frozenset({
     "current-light-green-white",
     "current-four-color-shield",
 })
+ALL_MANIFEST_IDS = EXPECTED_IDS | frozenset({
+    "bug-veil-carpet-reconstructed",
+    "grixis-squelcher-refresh",
+    "personal-tutor-turbo",
+    "tamiyo-bilbo-unearth-value",
+    "wasteland-murktide-tempo",
+    "paradigm-shift-oracle",
+    "emrakul-shelldock-isle",
+    "moonshadow-creature-switch",
+    "cori-steel-cutter-barrowgoyf",
+    "chancellor-annex-protection",
+    "value-threats-jace-riddler-sheoldred",
+})
 EXPECTED_HASHES = {
     "current-dimir-creature-transform": "02eb0b378efbd7861e7be9e9b5aac61e34e83fc842af627bf061ba48262d62ab",
     "current-esper-teferi-swords": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620",
@@ -160,11 +173,18 @@ def _candidate_entries(manifest: dict[str, object]) -> list[dict[str, Any]]:
     candidates = manifest.get("candidates")
     if not isinstance(candidates, list):
         raise ValueError("manifest 'candidates' must be a list")
-    if len(candidates) != 4:
-        raise ValueError(f"manifest must contain exactly four candidates, got {len(candidates)}")
     if not all(isinstance(candidate, dict) for candidate in candidates):
         raise ValueError("manifest candidates must be objects")
-    return candidates  # type: ignore[return-value]
+    ids = [candidate.get("id") for candidate in candidates]
+    if any(candidate_id not in ALL_MANIFEST_IDS for candidate_id in ids):
+        bad = next(candidate_id for candidate_id in ids if candidate_id not in ALL_MANIFEST_IDS)
+        raise ValueError(f"unknown candidate id {bad!r}; allowed set is {sorted(ALL_MANIFEST_IDS)!r}")
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate candidate id")
+    current = [candidate for candidate in candidates if candidate.get("id") in EXPECTED_IDS]
+    if len(current) != 4:
+        raise ValueError(f"current manifest candidates do not contain exactly four entries, got {len(current)}")
+    return current  # type: ignore[return-value]
 
 
 def _validate_manifest_shape(manifest: dict[str, object], *, root: Path = ROOT) -> list[dict[str, Any]]:

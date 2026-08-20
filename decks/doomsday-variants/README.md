@@ -14,3 +14,16 @@ package-level superiority, matchup rates, or causal strategic outcomes.
 The manifest records both the 2026-08-10 ban snapshot used for historical reproducibility and the
 repository's current snapshot checked when the contract tests run. A later ban-list change should
 make the candidate stale loudly rather than silently changing its contents.
+
+## Paired playtest program
+
+The complete 15-list registry in [`manifest.json`](manifest.json) is the sole list-id authority for
+the preregistered comparison. Use [`playtest-protocol.md`](playtest-protocol.md) before recording
+games in [`playtest-log.csv`](playtest-log.csv), then validate and summarize with:
+
+```bash
+.venv/bin/python scripts/doomsday_variant_results.py decks/doomsday-variants/playtest-log.csv
+```
+
+The command reports descriptive denominators and paired deltas only; it does not rank lists or
+merge published finishes into playtest outcomes.

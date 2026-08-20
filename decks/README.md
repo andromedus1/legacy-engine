@@ -19,6 +19,9 @@ These observed 75s are selected for chassis learning, not consensus decks, match
 speed measurements. Each file is an exact published registration with its source provenance in the
 header.
 
+The broader 15-list paired comparison registry and playtest protocol live in
+[doomsday-variants/](doomsday-variants/).
+
 | Structural label | Registration | Source |
 | --- | --- | --- |
 | `personal-tutor-turbo` | [doomsday-personal-tutor-turbo-75.txt](doomsday-personal-tutor-turbo-75.txt) — clan, 2026-08-18, 5-0 | exact published registration |
