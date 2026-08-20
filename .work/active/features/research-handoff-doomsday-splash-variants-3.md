@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-3
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -297,3 +297,18 @@ and package-shipped ban-list registry are the deterministic sources.
 - **Recorded finish invites causal interpretation:** 5-0 and seventh-place labels are salient but
   uncontrolled. **Fallback:** retain results only in provenance fields and prohibit superiority or
   measured-speed wording in the artifact/README contract.
+
+## Implementation notes
+
+- Execution capability: GPT-5.6 Luna high — bounded static-artifact transcription with a focused
+  parser/source/legality contract.
+- Review weight: standard (default).
+- Files changed: `tests/test_doomsday_chassis_variants.py`; the three `decks/doomsday-*-75.txt`
+  registrations; `decks/README.md`.
+- Tests added/removed: added six parameterized tests covering canonical parsing, exact cached
+  main/side equality, 60/15 totals, current version-stamped legality, structural signatures, and
+  provenance/header equality; none removed.
+- Simplification: none; the implementation uses the existing canonical parser and ban-list
+  validator without new generation or registry machinery.
+- Discrepancies from design: none.
+- Adjacent issues parked: none.
