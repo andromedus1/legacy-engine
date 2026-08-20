@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-4
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -92,3 +92,12 @@ The prototypes are learning instruments, not stock recommendations:
 - Shelldock and Chancellor packages can look like ordinary sideboard cards without their setup
   constraints. Mitigation: workbook sequencing notes and a dedicated measurement question.
 - Six lists may drift independently. Mitigation: machine-checked manifest and shared validation.
+
+## Implementation notes
+- Execution capability: GPT-5.6 Luna high; cohesive data-and-test implementation with six bounded import-text artifacts.
+- Review weight: standard (default).
+- Files changed: `decks/doomsday-variants/alternate/README.md`; six files under `decks/doomsday-variants/alternate/`; `tests/test_doomsday_alternate_variants.py`.
+- Tests added/removed: added 21 focused checks for workbook/file agreement, parser section counts, copy limits, module presence, provenance headers, card-dimension coverage, reconstruction disclosure, and pinned/current banlist legality. Focused plus existing Doomsday parser/banlist suites pass (34 tests).
+- Simplification: kept each reconstruction to the smallest disclosed maindeck splice (`The Fantasticar` removal plus `Personal Tutor` replacement); no shared production abstraction or central manifest changes.
+- Discrepancies from design: Cutter uses the exact valid 2026-07-17 Eureka22422 registration as its source anchor; the initially inspected 2026-07-21 Last Chance row was not a valid 60-card registration. The emitted Cutter reconstruction remains only `-3 The Fantasticar +3 Personal Tutor`.
+- Adjacent issues parked: none.

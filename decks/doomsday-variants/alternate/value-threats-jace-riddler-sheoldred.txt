@@ -1,0 +1,46 @@
+// Status: observed-historical (legal at current cutoff; not observed-current)
+// Evidence through: 2026-08-20 (read-only corpus cutoff; source date 2026-08-08)
+// Observed source: Ich1k4, 25th Melee Legacy event 2026-08-08; .research/attestation/ddv-landscape-current-db.md (section 8)
+// Reconstruction: none. Exact registered 75; Quantum Riddler, Jace, and Sheoldred are recurring value-threat slots across heterogeneous shells, not a unified archetype or superiority claim.
+4 Brainstorm
+1 Cavern of Souls
+1 Consider
+4 Dark Ritual
+2 Daze
+4 Doomsday
+1 Edge of Autumn
+1 Flooded Strand
+2 Flow State
+4 Force of Will
+1 Ideas Unbound
+1 Island
+1 Lion's Eye Diamond
+4 Lotus Petal
+1 Marsh Flats
+1 Misty Rainforest
+2 Personal Tutor
+4 Polluted Delta
+4 Ponder
+1 Quantum Riddler
+1 Scalding Tarn
+2 Street Wraith
+1 Swamp
+2 Thassa's Oracle
+4 Thoughtseize
+2 Undercity Sewers
+3 Underground Sea
+1 Unearth
+
+Sideboard
+1 Barrowgoyf
+1 Brazen Borrower
+1 Consign to Memory
+2 Dauthi Voidwalker
+1 Duress
+1 Engineered Explosives
+2 Force of Negation
+1 Jace, Wielder of Mysteries
+1 Murktide Regent
+1 Quantum Riddler
+2 Sheoldred, the Apocalypse
+1 Vision Charm
