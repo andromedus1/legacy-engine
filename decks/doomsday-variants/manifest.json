@@ -24,6 +24,7 @@
         "attestation_handle": "ddv-compare-current-corpus"
       },
       "canonical_deck_sha256": "02eb0b378efbd7861e7be9e9b5aac61e34e83fc842af627bf061ba48262d62ab",
+      "versions": {"2026-08-20a": "02eb0b378efbd7861e7be9e9b5aac61e34e83fc842af627bf061ba48262d62ab"},
       "observed_axes": {
         "chassis": "Personal Tutor/Tamiyo creature-transform",
         "protection": ["Force of Will", "Daze", "Thoughtseize"],
@@ -56,6 +57,7 @@
         "attestation_handle": "ddv-packages-list-esper-battlegrounds"
       },
       "canonical_deck_sha256": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620",
+      "versions": {"2026-08-20a": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620"},
       "observed_axes": {
         "chassis": "Bilbo/Tamiyo fair-combo",
         "protection": ["Force of Will", "Teferi, Time Raveler"],
@@ -86,6 +88,7 @@
         "attestation_handle": "ddv-packages-list-green-white-wizardpasta"
       },
       "canonical_deck_sha256": "dbd444ab43279a87d82d58fc1eef244f5451116451797c017a5057d7bf4b0f98",
+      "versions": {"2026-08-20a": "dbd444ab43279a87d82d58fc1eef244f5451116451797c017a5057d7bf4b0f98"},
       "observed_axes": {
         "chassis": "Personal Tutor/Flow State combo",
         "protection": ["Force of Will", "Daze", "Veil of Summer"],
@@ -116,6 +119,7 @@
         "attestation_handle": "ddv-packages-list-four-color-wakame"
       },
       "canonical_deck_sha256": "4109763e425cb4db5cf2b41cc1e2b9214aa56573b393cf3ab1930fb5a71480fe",
+      "versions": {"2026-08-20a": "4109763e425cb4db5cf2b41cc1e2b9214aa56573b393cf3ab1930fb5a71480fe"},
       "observed_axes": {
         "chassis": "Tamiyo/Teferi fair-combo",
         "protection": ["Force of Will", "Daze", "Veil of Summer", "Teferi, Time Raveler"],
@@ -142,7 +146,8 @@
         "player": "wakame",
         "citation": ".research/attestation/ddv-packages-list-bug-wakame-preban.md"
       },
-      "canonical_deck_sha256": "2eab3e5ee88ebcbdcdc4e1a8fdf8c2901cfb6b5a11636543b20429e2854d1906"
+      "canonical_deck_sha256": "2eab3e5ee88ebcbdcdc4e1a8fdf8c2901cfb6b5a11636543b20429e2854d1906",
+      "versions": {"2026-08-20a": "2eab3e5ee88ebcbdcdc4e1a8fdf8c2901cfb6b5a11636543b20429e2854d1906"}
     },
     {
       "id": "grixis-squelcher-refresh",
@@ -158,7 +163,8 @@
         "result": "3rd Place",
         "citation": ".research/attestation/ddv-packages-list-grixis-nevilshute.md"
       },
-      "canonical_deck_sha256": "b950ff11c75cea553a57c14c22fdf4fc5edff5c74ff0d0923a1e7b82882cecba"
+      "canonical_deck_sha256": "b950ff11c75cea553a57c14c22fdf4fc5edff5c74ff0d0923a1e7b82882cecba",
+      "versions": {"2026-08-20a": "b950ff11c75cea553a57c14c22fdf4fc5edff5c74ff0d0923a1e7b82882cecba"}
     },
     {
       "id": "personal-tutor-turbo",
@@ -174,7 +180,8 @@
         "result": "5-0",
         "citation": ".research/analysis/campaigns/doomsday-splash-variants/parent.md"
       },
-      "canonical_deck_sha256": "b53aef5db9603ffa8e88e3b92b8dbd30da4e282034ebf9f848fa8b5c79075e36"
+      "canonical_deck_sha256": "b53aef5db9603ffa8e88e3b92b8dbd30da4e282034ebf9f848fa8b5c79075e36",
+      "versions": {"2026-08-20a": "b53aef5db9603ffa8e88e3b92b8dbd30da4e282034ebf9f848fa8b5c79075e36"}
     },
     {
       "id": "wasteland-murktide-tempo",
@@ -190,7 +197,8 @@
         "result": "7th Place",
         "citation": ".research/analysis/campaigns/doomsday-splash-variants/parent.md"
       },
-      "canonical_deck_sha256": "a3b4be9ef98542aa8d317ce3e3d9d7bdf4388d402d0a3d349dedf857240e26b8"
+      "canonical_deck_sha256": "a3b4be9ef98542aa8d317ce3e3d9d7bdf4388d402d0a3d349dedf857240e26b8",
+      "versions": {"2026-08-20a": "a3b4be9ef98542aa8d317ce3e3d9d7bdf4388d402d0a3d349dedf857240e26b8"}
     },
     {
       "id": "paradigm-shift-oracle",
@@ -204,7 +212,8 @@
         "result": "5-0",
         "citation": ".research/attestation/ddv-compare-wide-corpus.md#9"
       },
-      "canonical_deck_sha256": "4645f0497d1b05ddfd1dbceaaa0095a7a54db6f521828674a1ee407e007eb00a"
+      "canonical_deck_sha256": "4645f0497d1b05ddfd1dbceaaa0095a7a54db6f521828674a1ee407e007eb00a",
+      "versions": {"2026-08-20a": "4645f0497d1b05ddfd1dbceaaa0095a7a54db6f521828674a1ee407e007eb00a"}
     },
     {
       "id": "emrakul-shelldock-isle",
@@ -218,7 +227,8 @@
         "result": "5-0",
         "citation": ".research/attestation/ddv-packages-module-census.md#7"
       },
-      "canonical_deck_sha256": "9b675ea4b0519c5c1a3b004ffa861c2edb3fdbc83a66db6b192664c559ccd006"
+      "canonical_deck_sha256": "9b675ea4b0519c5c1a3b004ffa861c2edb3fdbc83a66db6b192664c559ccd006",
+      "versions": {"2026-08-20a": "9b675ea4b0519c5c1a3b004ffa861c2edb3fdbc83a66db6b192664c559ccd006"}
     },
     {
       "id": "moonshadow-creature-switch",
@@ -232,7 +242,8 @@
         "result": "5-0",
         "citation": ".research/attestation/ddv-landscape-current-db.md#7"
       },
-      "canonical_deck_sha256": "7bbd7c3640e16236fa73fd231d07b99efb66b4d18718209af5b503c95f0eedd0"
+      "canonical_deck_sha256": "7bbd7c3640e16236fa73fd231d07b99efb66b4d18718209af5b503c95f0eedd0",
+      "versions": {"2026-08-20a": "7bbd7c3640e16236fa73fd231d07b99efb66b4d18718209af5b503c95f0eedd0"}
     },
     {
       "id": "cori-steel-cutter-barrowgoyf",
@@ -246,7 +257,8 @@
         "result": "5-0",
         "citation": ".research/attestation/ddv-compare-wide-corpus.md#12"
       },
-      "canonical_deck_sha256": "87ae6ffe0cd33245234249c1575440337948694d9f2175f9d7cd9f9b0365b50f"
+      "canonical_deck_sha256": "87ae6ffe0cd33245234249c1575440337948694d9f2175f9d7cd9f9b0365b50f",
+      "versions": {"2026-08-20a": "87ae6ffe0cd33245234249c1575440337948694d9f2175f9d7cd9f9b0365b50f"}
     },
     {
       "id": "chancellor-annex-protection",
@@ -260,7 +272,8 @@
         "result": "25th Place",
         "citation": ".research/attestation/ddv-compare-wide-corpus.md#10"
       },
-      "canonical_deck_sha256": "fbe82f8aef61e41f24eaab6a5efdeea90601e6102a46d65dc29078c699b2d600"
+      "canonical_deck_sha256": "fbe82f8aef61e41f24eaab6a5efdeea90601e6102a46d65dc29078c699b2d600",
+      "versions": {"2026-08-20a": "fbe82f8aef61e41f24eaab6a5efdeea90601e6102a46d65dc29078c699b2d600"}
     },
     {
       "id": "value-threats-jace-riddler-sheoldred",
@@ -274,7 +287,8 @@
         "result": "25th Place",
         "citation": ".research/attestation/ddv-landscape-current-db.md#8"
       },
-      "canonical_deck_sha256": "33f0802a7aa0efa35053ee080070e7e424f615939968dca73451a9fe2b3fbb3e"
+      "canonical_deck_sha256": "33f0802a7aa0efa35053ee080070e7e424f615939968dca73451a9fe2b3fbb3e",
+      "versions": {"2026-08-20a": "33f0802a7aa0efa35053ee080070e7e424f615939968dca73451a9fe2b3fbb3e"}
     }
   ],
   "artifact_aliases": [

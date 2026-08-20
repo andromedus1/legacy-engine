@@ -11,6 +11,7 @@ import pytest
 from scripts.doomsday_variant_results import (
     FIELDS,
     LogValidationError,
+    _validate_matches,
     load_manifest,
     render_summary,
     summarize,
@@ -52,6 +53,7 @@ def test_manifest_canonicalizes_fifteen_artifacts_as_fourteen_unique_lists() -> 
     assert len(entries) + len(raw["artifact_aliases"]) == 15
     assert all(entry["evidence_posture"] for entry in entries.values())
     assert all(len(entry["canonical_deck_sha256"]) == 64 for entry in entries.values())
+    assert all(entry["canonical_deck_sha256"] in entry["versions"].values() for entry in entries.values())
 
 
 def test_header_only_template_and_valid_fixture_are_accepted() -> None:
@@ -66,6 +68,10 @@ def test_header_only_template_and_valid_fixture_are_accepted() -> None:
     rendered = render_summary(result)
     assert "mulligans=1 (denom games=2)" in rendered
     assert "combo_turns={'3': 1, '4': 1} (observed=2/games=2)" in rendered
+    assert result["block_deltas"]["block-01"]["paired_games"] == 2
+    assert result["block_deltas"]["block-01"]["delta"] == 1.0
+    assert "Paired matchup-block deltas" in rendered
+    assert "block-01: candidate=personal-tutor-turbo" in rendered
     assert result["ranking"] is None
 
 
@@ -75,6 +81,7 @@ def test_header_only_template_and_valid_fixture_are_accepted() -> None:
         ("game_result", "maybe", "invalid game_result"),
         ("list_id", "not-a-list", "unknown list_id"),
         ("deck_sha256", "0" * 64, "deck_sha256 does not match"),
+        ("list_version", "unregistered", "list_version .* is not registered"),
         ("combo_turn", "31", "impossible combo_turn"),
         ("splash_color_failure", "no", "splash_color_failure must be not_applicable"),
     ],
@@ -209,6 +216,30 @@ def test_block_rejects_unbalanced_assignments(
             ),
             "alternate_plan_result",
         ),
+        (lambda rows: rows[0].__setitem__("combo_turn", "not_applicable"), "combo_turn cannot be not_applicable"),
+        (
+            lambda rows: (
+                rows[0].__setitem__("splash_mana_effect", "not_seen"),
+                rows[0].__setitem__("splash_color_failure", "yes"),
+            ),
+            "unobserved splash mana",
+        ),
+        (
+            lambda rows: (
+                rows[0].__setitem__("opening_hand_size", "7"),
+                rows[0].__setitem__("mulligan_count", "7"),
+                rows[0].__setitem__("opening_hand_decision", "mulligan"),
+            ),
+            "disagrees with London mulligan count",
+        ),
+        (
+            lambda rows: (
+                rows[0].__setitem__("mulligan_count", "1"),
+                rows[0].__setitem__("opening_hand_decision", "keep"),
+            ),
+            "opening_hand_decision=keep",
+        ),
+        (lambda rows: rows[2].__setitem__("cards_boarded_in", "0 Black Lotus"), "card counts must be positive"),
     ],
 )
 def test_conditional_states_reject_the_adversarial_direction(
@@ -241,6 +272,34 @@ def test_completed_matches_require_one_consistent_terminal_result(tmp_path: Path
         validate_log(path, MANIFEST)
 
 
+@pytest.mark.parametrize("field", ["pilot_id", "played_on", "list_version", "deck_sha256"])
+def test_match_identity_fields_cannot_change_mid_match(field: str) -> None:
+    rows = _rows()
+    rows[3][field] = "changed" if field != "deck_sha256" else "0" * 64
+    with pytest.raises(LogValidationError, match=rf"{field} must remain constant"):
+        _validate_matches(rows)
+
+
+def test_matches_reject_pre_after_post_terminal_before_last_and_incoherent_draw() -> None:
+    rows = _rows()
+    trailing_pre = dict(rows[1])
+    trailing_pre["game_id"] = "game-05"
+    trailing_pre["match_result"] = "not_seen"
+    with pytest.raises(LogValidationError, match="pre-board games must precede post-board games"):
+        _validate_matches(rows + [trailing_pre])
+
+    rows = _rows()
+    trailing_post = dict(rows[3])
+    trailing_post["game_id"] = "game-05"
+    trailing_post["match_result"] = "not_seen"
+    with pytest.raises(LogValidationError, match="terminal result must be on the last game"):
+        _validate_matches(rows + [trailing_post])
+
+    rows = _rows()
+    rows[3]["match_result"] = "draw"
+    with pytest.raises(LogValidationError, match="match draw conflicts"):
+        _validate_matches(rows)
+
 def test_unfinished_matches_do_not_reach_the_fixed_threshold(tmp_path: Path) -> None:
     rows = _rows()
     rows[2]["match_result"] = "not_seen"
@@ -253,6 +312,8 @@ def test_unfinished_matches_do_not_reach_the_fixed_threshold(tmp_path: Path) -> 
     assert summary["lists"]["personal-tutor-turbo"]["sample_label"] == "thin-sample"
     with pytest.raises(ValueError, match="exactly 20"):
         summarize(validated, stopping_matches=1)
+
+
 def test_manifest_rejects_root_escape_bad_root_and_posture_drift(tmp_path: Path) -> None:
     raw = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
@@ -274,4 +335,18 @@ def test_manifest_rejects_root_escape_bad_root_and_posture_drift(tmp_path: Path)
     path = tmp_path / "relabeled.json"
     path.write_text(json.dumps(relabeled), encoding="utf-8")
     with pytest.raises(LogValidationError, match="disagrees with artifact"):
+        load_manifest(path)
+
+    unversioned = json.loads(json.dumps(raw))
+    del unversioned["candidates"][0]["versions"]
+    path = tmp_path / "unversioned.json"
+    path.write_text(json.dumps(unversioned), encoding="utf-8")
+    with pytest.raises(LogValidationError, match="register at least one list version"):
+        load_manifest(path)
+
+    stale_versions = json.loads(json.dumps(raw))
+    stale_versions["candidates"][0]["versions"] = {"old": "0" * 64}
+    path = tmp_path / "stale-versions.json"
+    path.write_text(json.dumps(stale_versions), encoding="utf-8")
+    with pytest.raises(LogValidationError, match="current deck hash is not registered"):
         load_manifest(path)

@@ -91,3 +91,8 @@ actually closes a game after opponents remove or constrain the primary combo.
 All other prototypes have an empty substitution ledger: their emitted card tuples match the cited
 registration. The exact card files are the import surface; this workbook owns their evidence,
 qualification, sequencing caveats, and measurement questions.
+
+The tracked clean-checkout source fixture at
+`tests/fixtures/doomsday_variants/alternate-sources.json` preserves each selected source 75 and the
+two declared reconstructions. It also records MTGO's `Spectral Restitching` name as the same Oracle
+card canonicalized here as `Hide on the Ceiling`; that name normalization is not a deck change.

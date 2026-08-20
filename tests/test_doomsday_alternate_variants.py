@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 from pathlib import Path
 import re
-import shutil
 
-import duckdb
 import pytest
 
 from legacy_engine.ingestion.banlist import banlist_as_of, current_banlist, validate_deck
@@ -15,7 +14,7 @@ from legacy_engine.models.decklist import parse_decklist
 
 
 VARIANT_DIR = Path("decks/doomsday-variants/alternate")
-CARD_DB = Path("data/legacy.duckdb")
+SOURCE_FIXTURE = Path("tests/fixtures/doomsday_variants/alternate-sources.json")
 MANIFEST: tuple[tuple[str, str], ...] = (
     ("paradigm-shift-oracle", "paradigm-shift-oracle.txt"),
     ("emrakul-shelldock-isle", "emrakul-shelldock-isle.txt"),
@@ -102,27 +101,33 @@ def test_variants_are_legal_at_cutoff_and_current_snapshot(
     assert validate_deck(main, side, snapshot=current_banlist()) == []
 
 
-def test_all_card_names_resolve_against_local_card_dimension(tmp_path: Path) -> None:
-    if not CARD_DB.exists():
-        pytest.skip("local card dimension is not present in this checkout")
-    names = set()
-    for _prototype_id, filename in MANIFEST:
+def test_candidates_exactly_match_tracked_sources_after_declared_normalization() -> None:
+    fixture = json.loads(SOURCE_FIXTURE.read_text(encoding="utf-8"))
+    assert fixture["schema"] == "doomsday-alternate-source-fixtures"
+    sources = {entry["id"]: entry for entry in fixture["sources"]}
+    assert set(sources) == {prototype_id for prototype_id, _filename in MANIFEST}
+
+    for prototype_id, filename in MANIFEST:
+        source = sources[prototype_id]
+        expected = {
+            "main": dict(source["main"]),
+            "side": dict(source["side"]),
+        }
+        for old_name, canonical_name in source["name_aliases"].items():
+            for zone in expected.values():
+                if old_name in zone:
+                    zone[canonical_name] = zone.pop(old_name)
+        for zone_name, changes in source["reconstruction"].items():
+            zone = expected[zone_name]
+            for card, count in changes["remove"].items():
+                assert zone.pop(card) == count
+            for card, count in changes["add"].items():
+                assert card not in zone
+                zone[card] = count
+
         _text, main, side = _read(filename)
-        names.update(main)
-        names.update(side)
-    # A full-suite run may hold the shared DuckDB open.  Copy the immutable card
-    # dimension to a hermetic path before opening it, matching the project's
-    # file-backed test-database convention.
-    local_db = tmp_path / "legacy.duckdb"
-    shutil.copy2(CARD_DB, local_db)
-    con = duckdb.connect(str(local_db), read_only=True)
-    try:
-        rows = con.execute(
-            "SELECT name FROM cards WHERE name IN (SELECT UNNEST(?))", [sorted(names)]
-        ).fetchall()
-    finally:
-        con.close()
-    assert {row[0] for row in rows} == names
+        assert main == expected["main"]
+        assert side == expected["side"]
 
 
 def test_reconstruction_headers_disclose_every_inferred_swap() -> None:

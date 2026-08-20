@@ -132,6 +132,19 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> dict[str, dict[str, Any]]:
             raise LogValidationError(
                 f"manifest candidate {candidate_id!r}: deck hash {expected_hash} does not match {actual_hash}"
             )
+        if not alias:
+            versions = candidate.get("versions")
+            if not isinstance(versions, dict) or not versions:
+                raise LogValidationError(f"manifest candidate {candidate_id!r} must register at least one list version")
+            for version_id, version_hash in versions.items():
+                if not isinstance(version_id, str) or not _ID_RE.fullmatch(version_id):
+                    raise LogValidationError(f"manifest candidate {candidate_id!r} has invalid version id {version_id!r}")
+                if not isinstance(version_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", version_hash):
+                    raise LogValidationError(f"manifest candidate {candidate_id!r} version {version_id!r} has invalid hash")
+            if expected_hash not in versions.values():
+                raise LogValidationError(
+                    f"manifest candidate {candidate_id!r}: current deck hash is not registered in versions"
+                )
         posture = candidate.get("evidence_posture")
         if not isinstance(posture, str) or posture.split(";", 1)[0] not in _EVIDENCE_POSTURES:
             raise LogValidationError(f"manifest candidate {candidate_id!r} has closed-vocabulary evidence_posture {posture!r}")
@@ -242,8 +255,16 @@ def _validate_row(row_number: int, row: dict[str, str], manifest: dict[str, dict
         raise LogValidationError(f"row {row_number}: unknown list_id {row['list_id']!r}")
     if not re.fullmatch(r"[0-9a-f]{64}", row["deck_sha256"]):
         raise LogValidationError(f"row {row_number}: deck_sha256 must be 64 lowercase hexadecimal characters")
-    if row["deck_sha256"] != manifest[row["list_id"]]["canonical_deck_sha256"]:
-        raise LogValidationError(f"row {row_number}: deck_sha256 does not match manifest list_id {row['list_id']!r}")
+    versions = manifest[row["list_id"]]["versions"]
+    if row["list_version"] not in versions:
+        raise LogValidationError(
+            f"row {row_number}: list_version {row['list_version']!r} is not registered for list_id {row['list_id']!r}"
+        )
+    if row["deck_sha256"] != versions[row["list_version"]]:
+        raise LogValidationError(
+            f"row {row_number}: deck_sha256 does not match manifest list_id/version "
+            f"{row['list_id']!r}/{row['list_version']!r}"
+        )
     _require_date(row_number, row["played_on"])
     _require_token(row_number, "board_state", row["board_state"], {"pre", "post"})
     _require_token(row_number, "play_draw", row["play_draw"], {"play", "draw"})
@@ -255,7 +276,17 @@ def _validate_row(row_number: int, row: dict[str, str], manifest: dict[str, dict
         raise LogValidationError(f"row {row_number}: opening_hand_size and mulligan_count cannot be sentinels")
     if row["opening_hand_decision"] == "mulligan" and mulligans < 1:
         raise LogValidationError(f"row {row_number}: a mulligan decision requires mulligan_count >= 1")
+    if row["opening_hand_decision"] == "keep" and mulligans != 0:
+        raise LogValidationError(f"row {row_number}: opening_hand_decision=keep requires mulligan_count=0")
+    expected_opening_size = max(7 - mulligans, 0)
+    if opening_size != expected_opening_size:
+        raise LogValidationError(
+            f"row {row_number}: opening_hand_size {opening_size} disagrees with London mulligan count {mulligans}; "
+            f"expected {expected_opening_size}"
+        )
     combo_turn = _require_int(row_number, "combo_turn", row["combo_turn"], minimum=1, maximum=30)
+    if row["combo_turn"] == NOT_APPLICABLE:
+        raise LogValidationError(f"row {row_number}: combo_turn cannot be not_applicable")
     _require_token(row_number, "game_result", row["game_result"], _GAME_RESULTS)
     if combo_turn is not None and row["game_result"] != "win":
         raise LogValidationError(f"row {row_number}: combo_turn is only valid when game_result=win")
@@ -277,6 +308,11 @@ def _validate_row(row_number: int, row: dict[str, str], manifest: dict[str, dict
             raise LogValidationError(
                 f"row {row_number}: {field} must be 'not_seen', 'not_applicable', or ';'-separated '<count> <card>' values"
             )
+        if value not in _SENTINELS:
+            for item in value.split(";"):
+                count_text, _card_name = item.split(" ", 1)
+                if int(count_text) < 1:
+                    raise LogValidationError(f"row {row_number}: {field} card counts must be positive")
     if row["board_state"] == "pre":
         for field in ("cards_boarded_in", "cards_boarded_out", "alternate_plan", "alternate_plan_result"):
             if row[field] != NOT_APPLICABLE:
@@ -295,6 +331,8 @@ def _validate_row(row_number: int, row: dict[str, str], manifest: dict[str, dict
         raise LogValidationError(f"row {row_number}: splash_color_failure must be not_applicable without a splash effect")
     if row["splash_mana_effect"] != NOT_APPLICABLE and row["splash_color_failure"] == NOT_APPLICABLE:
         raise LogValidationError(f"row {row_number}: splash_color_failure is required when splash mana was observed")
+    if row["splash_mana_effect"] == NOT_SEEN and row["splash_color_failure"] != NOT_SEEN:
+        raise LogValidationError(f"row {row_number}: unobserved splash mana requires splash_color_failure=not_seen")
     if row["wasteland_exposed"] == "yes" and row["wasteland_punished"] == NOT_APPLICABLE:
         raise LogValidationError(f"row {row_number}: exposed Wasteland requires punished yes, no, or not_seen")
     if row["wasteland_exposed"] != "yes" and row["wasteland_punished"] != NOT_APPLICABLE:
@@ -388,6 +426,16 @@ def _validate_matches(rows: list[dict[str, str]]) -> None:
     for row in rows:
         grouped[(row["matchup_block_id"], row["list_id"], row["match_id"])].append(row)
     for (block_id, list_id, match_id), games in grouped.items():
+        for field in ("pilot_id", "played_on", "list_version", "deck_sha256"):
+            if len({row[field] for row in games}) != 1:
+                raise LogValidationError(
+                    f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: {field} must remain constant"
+                )
+        states = [row["board_state"] for row in games]
+        if "post" in states and "pre" in states[states.index("post") + 1 :]:
+            raise LogValidationError(
+                f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: pre-board games must precede post-board games"
+            )
         terminals = [row for row in games if row["match_result"] != NOT_SEEN]
         if not terminals:
             continue
@@ -403,6 +451,10 @@ def _validate_matches(rows: list[dict[str, str]]) -> None:
             raise LogValidationError(
                 f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: terminal result must be on the post-board game"
             )
+        if terminals[0] is not games[-1]:
+            raise LogValidationError(
+                f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: terminal result must be on the last game"
+            )
         terminal_result = terminals[0]["match_result"]
         wins = sum(row["game_result"] == "win" for row in games)
         losses = sum(row["game_result"] == "loss" for row in games)
@@ -413,6 +465,10 @@ def _validate_matches(rows: list[dict[str, str]]) -> None:
         if terminal_result == "loss" and losses < 2:
             raise LogValidationError(
                 f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: match loss requires at least two game losses"
+            )
+        if terminal_result == "draw" and (wins >= 2 or losses >= 2):
+            raise LogValidationError(
+                f"matchup block {block_id!r}, list {list_id!r}, match {match_id!r}: match draw conflicts with a two-game match win or loss"
             )
 
 
@@ -493,11 +549,31 @@ def summarize(rows: list[dict[str, str]], *, stopping_matches: int = STOPPING_MA
     for aggregate in paired_deltas.values():
         games = aggregate["paired_games"]
         aggregate["delta"] = (aggregate["candidate_wins"] - aggregate["control_wins"]) / games if games else 0.0
+    block_deltas: dict[str, dict[str, Any]] = {}
+    by_block: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        by_block[row["matchup_block_id"]].append(row)
+    for block_id, block in by_block.items():
+        candidate_id = next(row["list_id"] for row in block if row["list_id"] != CONTROL_ID)
+        block_pairs = [result for result in paired.values() if result["matchup_block_id"] == block_id]
+        candidate_wins = sum(result["candidate_game_result"] == "win" for result in block_pairs)
+        control_wins = sum(result["control_game_result"] == "win" for result in block_pairs)
+        games = len(block_pairs)
+        block_deltas[block_id] = {
+            "candidate_id": candidate_id,
+            "opponent_archetype": block[0]["opponent_archetype"],
+            "opponent_list_version": block[0]["opponent_list_version"],
+            "paired_games": games,
+            "candidate_wins": candidate_wins,
+            "control_wins": control_wins,
+            "delta": (candidate_wins - control_wins) / games if games else 0.0,
+        }
     return {
         "stopping_matches": stopping_matches,
         "lists": lists,
         "paired": paired,
         "paired_deltas": dict(paired_deltas),
+        "block_deltas": block_deltas,
         "ranking": None,
     }
 
@@ -522,6 +598,14 @@ def render_summary(summary: dict[str, Any]) -> str:
             f"{candidate_id}: paired_games={result['paired_games']}, "
             f"candidate_wins={result['candidate_wins']}, control_wins={result['control_wins']}, "
             f"delta={result['delta']:+.3f}"
+        )
+    lines.append("Paired matchup-block deltas (candidate minus Dimir control):")
+    for block_id, result in summary["block_deltas"].items():
+        lines.append(
+            f"{block_id}: candidate={result['candidate_id']}, "
+            f"opponent={result['opponent_archetype']}@{result['opponent_list_version']}, "
+            f"paired_games={result['paired_games']}, candidate_wins={result['candidate_wins']}, "
+            f"control_wins={result['control_wins']}, delta={result['delta']:+.3f}"
         )
     return "\n".join(lines)
 

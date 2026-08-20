@@ -1,0 +1,302 @@
+{
+  "schema": "doomsday-alternate-source-fixtures",
+  "sources": [
+    {
+      "id": "paradigm-shift-oracle",
+      "source_path": "data/cache/Tournaments/MTGO/2026/05/11/legacy-league-2026-05-1110612.json",
+      "player": "rgbandre",
+      "name_aliases": {},
+      "reconstruction": {},
+      "main": {
+        "Brainstorm": 4,
+        "Cavern of Souls": 1,
+        "Consider": 3,
+        "Dark Ritual": 4,
+        "Daze": 1,
+        "Deep Analysis": 1,
+        "Doomsday": 4,
+        "Duress": 1,
+        "Edge of Autumn": 1,
+        "Flooded Strand": 1,
+        "Flow State": 4,
+        "Force of Will": 4,
+        "Island": 2,
+        "Lion's Eye Diamond": 1,
+        "Lotus Petal": 4,
+        "Marsh Flats": 1,
+        "Misty Rainforest": 1,
+        "Personal Tutor": 1,
+        "Polluted Delta": 4,
+        "Ponder": 4,
+        "Scalding Tarn": 1,
+        "Street Wraith": 1,
+        "Swamp": 1,
+        "Thassa's Oracle": 1,
+        "Thoughtseize": 4,
+        "Undercity Sewers": 1,
+        "Underground Sea": 3,
+        "Unearth": 1
+      },
+      "side": {
+        "Cavern of Souls": 1,
+        "Duress": 1,
+        "Force of Negation": 4,
+        "Inquisition of Kozilek": 2,
+        "Paradigm Shift": 4,
+        "Thassa's Oracle": 3
+      }
+    },
+    {
+      "id": "emrakul-shelldock-isle",
+      "source_path": "data/cache/Tournaments/MTGO/2026/05/12/legacy-league-2026-05-1210612.json",
+      "player": "Bejamel",
+      "name_aliases": {
+        "Spectral Restitching": "Hide on the Ceiling"
+      },
+      "reconstruction": {},
+      "main": {
+        "Brainstorm": 4,
+        "Cabal Ritual": 1,
+        "Consider": 1,
+        "Dark Ritual": 4,
+        "Daze": 2,
+        "Doomsday": 4,
+        "Edge of Autumn": 2,
+        "Flooded Strand": 2,
+        "Flusterstorm": 2,
+        "Force of Will": 4,
+        "Island": 1,
+        "Jace, Wielder of Mysteries": 1,
+        "Lion's Eye Diamond": 1,
+        "Lotus Petal": 3,
+        "Misty Rainforest": 2,
+        "Personal Tutor": 3,
+        "Polluted Delta": 4,
+        "Ponder": 4,
+        "Scalding Tarn": 1,
+        "Spoils of the Vault": 1,
+        "Street Wraith": 2,
+        "Swamp": 1,
+        "Thassa's Oracle": 1,
+        "Thoughtseize": 4,
+        "Undercity Sewers": 1,
+        "Underground Sea": 4
+      },
+      "side": {
+        "Duress": 3,
+        "Emrakul, the Aeons Torn": 1,
+        "Flusterstorm": 1,
+        "Force of Negation": 2,
+        "Leyline of the Void": 3,
+        "Nihil Spellbomb": 1,
+        "Shelldock Isle": 1,
+        "Spectral Restitching": 1,
+        "Unearth": 1,
+        "Vision Charm": 1
+      }
+    },
+    {
+      "id": "moonshadow-creature-switch",
+      "source_path": "data/cache/Tournaments/MTGO/2026/06/29/legacy-league-2026-06-2910831.json",
+      "player": "Lans_NL",
+      "name_aliases": {},
+      "reconstruction": {
+        "main": {
+          "remove": {
+            "The Fantasticar": 4
+          },
+          "add": {
+            "Personal Tutor": 4
+          }
+        }
+      },
+      "main": {
+        "Brainstorm": 4,
+        "Cabal Ritual": 1,
+        "Cavern of Souls": 1,
+        "Consider": 1,
+        "Dark Ritual": 4,
+        "Daze": 4,
+        "Doomsday": 4,
+        "Edge of Autumn": 1,
+        "Flooded Strand": 1,
+        "Force of Will": 4,
+        "Island": 1,
+        "Lion's Eye Diamond": 1,
+        "Lotus Petal": 4,
+        "Mishra's Bauble": 4,
+        "Misty Rainforest": 1,
+        "Polluted Delta": 4,
+        "Ponder": 4,
+        "Scalding Tarn": 1,
+        "Street Wraith": 1,
+        "Swamp": 1,
+        "Thassa's Oracle": 2,
+        "The Fantasticar": 4,
+        "Thoughtseize": 1,
+        "Undercity Sewers": 1,
+        "Underground Sea": 4,
+        "Verdant Catacombs": 1
+      },
+      "side": {
+        "Consign to Memory": 2,
+        "Duress": 1,
+        "Fatal Push": 2,
+        "Flusterstorm": 1,
+        "Force of Negation": 2,
+        "Long Goodbye": 1,
+        "Moonshadow": 4,
+        "Surgical Extraction": 2
+      }
+    },
+    {
+      "id": "cori-steel-cutter-barrowgoyf",
+      "source_path": "data/cache/Tournaments/MTGO/2026/07/17/legacy-league-2026-07-1710831.json",
+      "player": "Eureka22422",
+      "name_aliases": {},
+      "reconstruction": {
+        "main": {
+          "remove": {
+            "The Fantasticar": 3
+          },
+          "add": {
+            "Personal Tutor": 3
+          }
+        }
+      },
+      "main": {
+        "Badlands": 1,
+        "Bloodstained Mire": 1,
+        "Brainstorm": 4,
+        "Cavern of Souls": 1,
+        "Consider": 1,
+        "Dark Ritual": 4,
+        "Daze": 2,
+        "Doomsday": 4,
+        "Edge of Autumn": 1,
+        "Flow State": 3,
+        "Force of Will": 4,
+        "Island": 1,
+        "Lion's Eye Diamond": 1,
+        "Lotus Petal": 4,
+        "Mishra's Bauble": 4,
+        "Polluted Delta": 4,
+        "Ponder": 4,
+        "Scalding Tarn": 2,
+        "Street Wraith": 1,
+        "Swamp": 1,
+        "Thassa's Oracle": 1,
+        "The Fantasticar": 3,
+        "Thoughtseize": 3,
+        "Undercity Sewers": 1,
+        "Underground Sea": 3,
+        "Volcanic Island": 1
+      },
+      "side": {
+        "Barrowgoyf": 4,
+        "Cori-Steel Cutter": 4,
+        "Dauthi Voidwalker": 2,
+        "Fatal Push": 2,
+        "Force of Negation": 2,
+        "Jace, Wielder of Mysteries": 1
+      }
+    },
+    {
+      "id": "chancellor-annex-protection",
+      "source_path": "data/cache/Tournaments/MTGO/2026/06/27/legacy-challenge-32-2026-06-2712845663.json",
+      "player": "ragavanejoyer",
+      "name_aliases": {},
+      "reconstruction": {},
+      "main": {
+        "Bloodstained Mire": 1,
+        "Brainstorm": 4,
+        "Cabal Ritual": 1,
+        "Cavern of Souls": 1,
+        "Consider": 1,
+        "Dark Ritual": 4,
+        "Daze": 2,
+        "Doomsday": 4,
+        "Duress": 1,
+        "Edge of Autumn": 2,
+        "Flooded Strand": 2,
+        "Flow State": 4,
+        "Flusterstorm": 1,
+        "Force of Will": 4,
+        "Island": 1,
+        "Lion's Eye Diamond": 1,
+        "Lotus Petal": 3,
+        "Misty Rainforest": 1,
+        "Personal Tutor": 1,
+        "Polluted Delta": 4,
+        "Ponder": 4,
+        "Street Wraith": 2,
+        "Swamp": 1,
+        "Thassa's Oracle": 2,
+        "Thoughtseize": 3,
+        "Undercity Sewers": 1,
+        "Underground Sea": 4
+      },
+      "side": {
+        "Barrowgoyf": 4,
+        "Chancellor of the Annex": 4,
+        "Consign to Memory": 1,
+        "Dauthi Voidwalker": 1,
+        "Fatal Push": 1,
+        "Force of Negation": 2,
+        "Inquisition of Kozilek": 1,
+        "Long Goodbye": 1
+      }
+    },
+    {
+      "id": "value-threats-jace-riddler-sheoldred",
+      "source_path": "data/cache/Tournaments/MTGmelee/2026/08/08/8-in-legacy-443299-2026-08-08.json",
+      "player": "Ich1k4",
+      "name_aliases": {},
+      "reconstruction": {},
+      "main": {
+        "Thassa's Oracle": 2,
+        "Street Wraith": 2,
+        "Quantum Riddler": 1,
+        "Lotus Petal": 4,
+        "Lion's Eye Diamond": 1,
+        "Dark Ritual": 4,
+        "Thoughtseize": 4,
+        "Brainstorm": 4,
+        "Ponder": 4,
+        "Personal Tutor": 2,
+        "Unearth": 1,
+        "Consider": 1,
+        "Daze": 2,
+        "Flow State": 2,
+        "Edge of Autumn": 1,
+        "Ideas Unbound": 1,
+        "Doomsday": 4,
+        "Force of Will": 4,
+        "Polluted Delta": 4,
+        "Underground Sea": 3,
+        "Undercity Sewers": 2,
+        "Island": 1,
+        "Swamp": 1,
+        "Flooded Strand": 1,
+        "Marsh Flats": 1,
+        "Scalding Tarn": 1,
+        "Misty Rainforest": 1,
+        "Cavern of Souls": 1
+      },
+      "side": {
+        "Dauthi Voidwalker": 2,
+        "Barrowgoyf": 1,
+        "Brazen Borrower": 1,
+        "Sheoldred, the Apocalypse": 2,
+        "Quantum Riddler": 1,
+        "Murktide Regent": 1,
+        "Engineered Explosives": 1,
+        "Duress": 1,
+        "Consign to Memory": 1,
+        "Vision Charm": 1,
+        "Force of Negation": 2,
+        "Jace, Wielder of Mysteries": 1
+      }
+    }
+  ]
+}
