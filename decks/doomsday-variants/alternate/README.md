@@ -47,11 +47,15 @@ displacing the primary Oracle line.
 
 ### Moonshadow creature switch
 
-The source had four Moonshadow in the sideboard and a four-Fantasticar/four-Bauble maindeck.
-Fantasticar is banned, so this file removes only those four copies and adds four Personal Tutor as
-an inferred legal repair. Moonshadow is a combat transformation, not evidence of a faster Doomsday
-kill. Measure post-board threat density, graveyard-dependent growth, and how often the replacement
-Tutor changes an opening-hand or pile decision.
+The selected later anchor had four Moonshadow in the sideboard and a four-Fantasticar/four-Bauble
+maindeck. The seven late-June Moonshadow lists in that lineage used the now-banned Fantasticar
+chassis. Fantasticar is banned, so this file removes only those four copies and adds four Personal
+Tutor as an inferred legal repair. A separate exact legal Enrichetta 2026-01-29 60+15 registration
+had four Personal Tutor main and four Moonshadow side; the later anchor remains selected because it
+tests the repeated late-June Fantasticar/Bauble lineage and isolates the legality repair rather
+than silently substituting an earlier shell. Moonshadow is a combat transformation, not evidence
+of a faster Doomsday kill. Measure post-board threat density, graveyard-dependent growth, and how
+often the replacement Tutor changes an opening-hand or pile decision.
 
 ### Cori-Steel Cutter / Barrowgoyf
 

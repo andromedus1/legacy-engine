@@ -54,13 +54,20 @@ def _combined(main: dict[str, int], side: dict[str, int]) -> dict[str, int]:
 
 def test_workbook_manifest_matches_exactly_six_files() -> None:
     workbook = (VARIANT_DIR / "README.md").read_text(encoding="utf-8")
+    rows = []
+    for line in workbook.splitlines():
+        if not line.startswith("| `"):
+            continue
+        fields = [field.strip().strip("`") for field in line.split("|")[1:-1]]
+        if len(fields) == 6:
+            rows.append((fields[0], fields[1]))
+    assert len(rows) == len(MANIFEST)
+    assert len({prototype_id for prototype_id, _filename in rows}) == len(MANIFEST)
+    assert len({filename for _prototype_id, filename in rows}) == len(MANIFEST)
+    assert set(rows) == set(MANIFEST)
     assert sorted(name for _id, name in MANIFEST) == sorted(
         path.name for path in VARIANT_DIR.glob("*.txt")
     )
-    for prototype_id, filename in MANIFEST:
-        assert f"`{prototype_id}`" in workbook
-        assert f"`{filename}`" in workbook
-    assert workbook.count("| `") >= len(MANIFEST)
 
 
 @pytest.mark.parametrize("_prototype_id,filename", MANIFEST)
@@ -68,6 +75,7 @@ def test_variant_is_an_importable_60_plus_15_with_provenance(
     _prototype_id: str, filename: str
 ) -> None:
     text, main, side = _read(filename)
+    assert sum(line.strip().lower() == "sideboard" for line in text.splitlines()) == 1
     assert sum(main.values()) == 60
     assert sum(side.values()) == 15
     assert "The Fantasticar" not in _combined(main, side)

@@ -1,7 +1,8 @@
 // Status: inferred-reconstruction (Fantasticar-era source repaired for legality)
 // Evidence through: 2026-08-20 (read-only corpus cutoff; source date 2026-06-29)
 // Observed source: Lans_NL, 5-0 MTGO Legacy League 2026-06-29; .research/attestation/ddv-landscape-current-db.md (section 7)
-// Reconstruction: main -4 The Fantasticar, +4 Personal Tutor. Every observed Moonshadow list used the now-banned Fantasticar/Bauble chassis; the legal Tutor splice is inferred and not an observed 75.
+// Earlier legal comparator: Enrichetta, 5-0 MTGO Legacy League 2026-01-29, exact 60+15 with 4 Personal Tutor main and 4 Moonshadow side; source https://www.mtgo.com/decklist/legacy-league-2026-01-2910172.
+// Reconstruction: main -4 The Fantasticar, +4 Personal Tutor. The seven late-June Moonshadow lists in the cited lineage used the now-banned Fantasticar/Bauble chassis; this later anchor is retained to test that recurring lineage's smallest legal repair, while the earlier Enrichetta 75 confirms a separate exact legal precedent. The Tutor splice is inferred and not an observed 75.
 4 Brainstorm
 1 Cabal Ritual
 1 Cavern of Souls
