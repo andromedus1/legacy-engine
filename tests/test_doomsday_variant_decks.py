@@ -19,6 +19,7 @@ from legacy_engine.models.decklist import parse_decklist
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "decks/doomsday-variants/manifest.json"
+FIXTURE_DIR = ROOT / "tests/fixtures/doomsday_variants"
 HISTORICAL_SNAPSHOT = banlist_as_of(date(2026, 8, 10))
 
 EXPECTED_IDS = frozenset({
@@ -82,6 +83,35 @@ NONFETCH_LAND_NAMES = frozenset({
     "Cavern of Souls", "Island", "Scrubland", "Snow-Covered Island", "Snow-Covered Swamp",
     "Swamp", "Tropical Island", "Tundra", "Undercity Sewers", "Underground Sea",
 })
+
+FIXTURE_PATHS = {
+    candidate_id: FIXTURE_DIR / f"{candidate_id}.json" for candidate_id in EXPECTED_IDS
+}
+
+
+def load_source_fixture(candidate_id: str) -> dict[str, Any]:
+    """Load the tracked immutable source row; never consult the gitignored cache in CI."""
+    value = json.loads(FIXTURE_PATHS[candidate_id].read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"source fixture for {candidate_id!r} must be an object")
+    return value
+
+
+def _card_dimension_names() -> dict[str, str]:
+    names: dict[str, str] = {}
+    for candidate_id in EXPECTED_IDS:
+        deck = load_source_fixture(candidate_id)["deck"]
+        for name in set(deck["mainboard"]) | set(deck["sideboard"]):
+            if name in NONFETCH_LAND_NAMES or name in BASIC_LAND_NAMES or staple_role(name) == "fetchland":
+                names[name] = "land"
+            else:
+                names[name] = "spell"
+    return names
+
+
+CARD_DIMENSION = _card_dimension_names()
+CARD_DIMENSION_ALLOWED = frozenset({"land", "spell"})
+assert set(CARD_DIMENSION.values()) <= CARD_DIMENSION_ALLOWED
 
 
 def load_candidate_manifest(path: Path) -> dict[str, object]:
@@ -172,7 +202,19 @@ def _validate_manifest_shape(manifest: dict[str, object], *, root: Path = ROOT) 
             raise ValueError(f"candidate {candidate_id!r} file is absent: {path}")
 
         source = candidate.get("source")
-        if not isinstance(source, dict) or source != EXPECTED_SOURCE[candidate_id]:
+        fixture = load_source_fixture(candidate_id)
+        fixture_deck = fixture.get("deck")
+        expected_source = {
+            "cache_path": fixture.get("source_path"),
+            "tournament_id": fixture.get("tournament_id"),
+            "deck_idx": fixture.get("deck_idx"),
+            "event_date": fixture.get("event_date"),
+            "event_name": fixture.get("event_name"),
+            "player": fixture_deck.get("player") if isinstance(fixture_deck, dict) else None,
+            "result": fixture_deck.get("result") if isinstance(fixture_deck, dict) else None,
+            "attestation_handle": EXPECTED_SOURCE[candidate_id]["attestation_handle"],
+        }
+        if not isinstance(source, dict) or source != expected_source:
             raise ValueError(f"candidate {candidate_id!r} source metadata drifted")
         try:
             date.fromisoformat(source["event_date"])
@@ -186,7 +228,8 @@ def _validate_manifest_shape(manifest: dict[str, object], *, root: Path = ROOT) 
         if not isinstance(axes, dict) or not isinstance(axes.get("chassis"), str):
             raise ValueError(f"candidate {candidate_id!r} has invalid observed chassis")
         for axis in ("protection", "interaction"):
-            if not isinstance(axes.get(axis), list) or not all(isinstance(item, str) for item in axes[axis]):
+            if (not isinstance(axes.get(axis), list) or not axes[axis]
+                    or not all(isinstance(item, str) for item in axes[axis])):
                 raise ValueError(f"candidate {candidate_id!r} has invalid observed {axis}")
         if not isinstance(axes.get("postboard_plan"), str):
             raise ValueError(f"candidate {candidate_id!r} has invalid observed postboard_plan")
@@ -206,10 +249,37 @@ def _validate_manifest_shape(manifest: dict[str, object], *, root: Path = ROOT) 
 
     if len(set(paths)) != len(paths):
         raise ValueError("duplicate candidate path")
+
+    parsed = {candidate["id"]: _validate_candidate_file(candidate, root=root) for candidate in candidates}
+    baseline = parsed[manifest["compatibility_baseline_id"]][0]
+    fetchlands = frozenset(
+        name for main, _side in parsed.values() for name in main if staple_role(name) == "fetchland"
+    )
+    for candidate in candidates:
+        main, _side = parsed[candidate["id"]]
+        deltas = board_delta(main, baseline, fetchland_names=fetchlands)
+        compatibility = candidate["shared_base_compatibility"]
+        expected_status = (
+            "baseline" if deltas == (0, 0, 0)
+            else "compatible" if deltas[:2] == (0, 0)
+            else "incompatible-spells" if deltas[0] and not deltas[1]
+            else "incompatible-nonfetch" if deltas[1] and not deltas[0]
+            else "incompatible-spells-and-nonfetch"
+        )
+        actual_deltas = tuple(compatibility[field] for field in (
+            "spell_delta", "nonfetch_land_delta", "fetchland_delta",
+        ))
+        if actual_deltas != deltas or compatibility["status"] != expected_status:
+            raise ValueError(
+                f"candidate {candidate['id']!r} compatibility drifted: "
+                f"expected status={expected_status!r}, deltas={deltas!r}"
+            )
     return candidates
 
 
-def _validate_candidate_file(candidate: dict[str, Any], *, root: Path = ROOT) -> tuple[dict[str, int], dict[str, int]]:
+def _validate_candidate_file(
+    candidate: dict[str, Any], *, root: Path = ROOT, verify_fixture: bool = True,
+) -> tuple[dict[str, int], dict[str, int]]:
     path = root / candidate["path"]
     try:
         main, side = parse_decklist(path.read_text(encoding="utf-8"))
@@ -224,9 +294,20 @@ def _validate_candidate_file(candidate: dict[str, Any], *, root: Path = ROOT) ->
     digest = canonical_deck_sha256(main, side)
     if digest != candidate["canonical_deck_sha256"]:
         raise ValueError(f"candidate {candidate['id']!r} canonical hash drifted")
-    unknown_lands = (set(main) | set(side)) & NONFETCH_LAND_NAMES
-    if unknown_lands - NONFETCH_LAND_NAMES:
-        raise ValueError(f"card dimension missing names: {sorted(unknown_lands)!r}")
+    names = set(main) | set(side)
+    unknown_names = names - CARD_DIMENSION.keys()
+    if unknown_names:
+        raise ValueError(f"card dimension missing names: {sorted(unknown_names)!r}")
+    if verify_fixture:
+        fixture_deck = load_source_fixture(candidate["id"])["deck"]
+        if main != fixture_deck["mainboard"] or side != fixture_deck["sideboard"]:
+            raise ValueError(f"candidate {candidate['id']!r} differs from tracked source fixture")
+    observed = candidate["observed_axes"]
+    observed_cards = names
+    for axis in ("protection", "interaction"):
+        missing = set(observed[axis]) - observed_cards
+        if missing:
+            raise ValueError(f"candidate {candidate['id']!r} observed {axis} missing cards: {sorted(missing)!r}")
     return main, side
 
 
@@ -267,7 +348,19 @@ class TestDoomsdayVariantManifest:
     def test_source_objects_are_pinned_to_attested_records(self):
         manifest = load_candidate_manifest(MANIFEST_PATH)
         for candidate in _validate_manifest_shape(manifest):
-            assert candidate["source"] == EXPECTED_SOURCE[candidate["id"]]
+            fixture = load_source_fixture(candidate["id"])
+            source = candidate["source"]
+            deck = fixture["deck"]
+            assert source["cache_path"] == fixture["source_path"]
+            assert source["tournament_id"] == fixture["tournament_id"]
+            assert source["deck_idx"] == fixture["deck_idx"]
+            assert source["event_date"] == fixture["event_date"]
+            assert source["event_name"] == fixture["event_name"]
+            assert source["player"] == deck["player"]
+            assert source["result"] == deck["result"]
+            assert deck["anchor_uri"] == f"{source['tournament_id']}#deck_{source['player']}"
+            assert Path(source["cache_path"]).parts[:2] == ("data", "cache")
+            assert source["attestation_handle"] == EXPECTED_SOURCE[candidate["id"]]["attestation_handle"]
 
     @pytest.mark.parametrize(
         ("field", "value", "message"),
@@ -317,16 +410,16 @@ class TestDoomsdayVariantFiles:
         elif mutation == "sideboard":
             source = source.replace("1 Snuff Out", "2 Snuff Out", 1)
         elif mutation == "copy_limit":
-            source = source.replace("4 Brainstorm", "5 Brainstorm", 1)
+            source = source.replace("4 Brainstorm", "5 Brainstorm", 1).replace("1 Consider", "0 Consider", 1)
         elif mutation == "banned":
             source = source.replace("1 Consider", "1 The Fantasticar", 1)
         else:
-            source = source.replace("1 Consider", "2 Consider", 1)
+            source = source.replace("1 Consider", "1 Cavern of Souls", 1)
         candidate["path"] = "candidate.txt"
         path = tmp_path / candidate["path"]
         path.write_text(source, encoding="utf-8")
         with pytest.raises(ValueError, match="60/15|illegal|canonical hash"):
-            _validate_candidate_file(candidate, root=tmp_path)
+            _validate_candidate_file(candidate, root=tmp_path, verify_fixture=False)
 
     def test_compatibility_delta_boundaries(self):
         baseline = {"Brainstorm": 4, "Island": 1, "Polluted Delta": 2}
@@ -345,3 +438,16 @@ class TestDoomsdayVariantFiles:
             baseline,
             fetchland_names=frozenset({"Polluted Delta"}),
         ) == (0, 1, 0)
+
+    def test_unknown_card_dimension_name_has_named_failure(self, tmp_path):
+        manifest = load_candidate_manifest(MANIFEST_PATH)
+        candidate = _copy_manifest(manifest)["candidates"][0]
+        source = (ROOT / candidate["path"]).read_text(encoding="utf-8")
+        source = source.replace("1 Consider", "1 Unmodeled Card", 1)
+        candidate["path"] = "candidate.txt"
+        path = tmp_path / candidate["path"]
+        path.write_text(source, encoding="utf-8")
+        main, side = parse_decklist(source)
+        candidate["canonical_deck_sha256"] = canonical_deck_sha256(main, side)
+        with pytest.raises(ValueError, match="card dimension missing names"):
+            _validate_candidate_file(candidate, root=tmp_path, verify_fixture=False)

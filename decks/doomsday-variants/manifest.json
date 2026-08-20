@@ -50,7 +50,7 @@
       "canonical_deck_sha256": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620",
       "observed_axes": {
         "chassis": "Bilbo/Tamiyo fair-combo",
-        "protection": ["Force of Will", "Daze", "Teferi, Time Raveler"],
+        "protection": ["Force of Will", "Teferi, Time Raveler"],
         "interaction": ["Swords to Plowshares", "Prismatic Ending"],
         "postboard_plan": "Dimir creature pivot with white removal"
       },

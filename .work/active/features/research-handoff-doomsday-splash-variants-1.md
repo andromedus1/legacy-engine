@@ -248,3 +248,16 @@ local DuckDB.
 - Discrepancies from design: none; the four cached source rows reconciled exactly to the pinned
   deck indices, registrations, and canonical hashes.
 - Adjacent issues parked: none.
+
+### Review-fix verification
+
+- Replaced the Esper protection label with registered Force of Will/Teferi evidence and require
+  every observed protection/interaction card to occur in its parsed 75.
+- Added tracked immutable source-row fixtures under `tests/fixtures/doomsday_variants/`; tests now
+  derive board/date/result/anchor data from those fixtures while retaining each manifest upstream
+  `data/cache/...` provenance path.
+- Added deterministic closed card-dimension classification with named unknown-card failures,
+  compatibility status/delta consistency checks, and mutation tests that preserve intended 60/15
+  shape for copy-limit and hash diagnostics.
+- Review-fix verification: focused contract suite 16 passed; no stage change; unrelated changes
+  remain unstaged.
