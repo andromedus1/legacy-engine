@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-1
 kind: feature
-stage: review
+stage: done
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -248,6 +248,23 @@ local DuckDB.
 - Discrepancies from design: none; the four cached source rows reconciled exactly to the pinned
   deck indices, registrations, and canonical hashes.
 - Adjacent issues parked: none.
+
+## Review (2026-08-20)
+
+**Verdict**: Approve after changes
+
+**Blockers**: resolved inline — Esper protection metadata now names only registered cards; negative
+tests preserve deck size and exercise their intended hash/copy-limit/status diagnostics; source
+tests use tracked immutable fixtures instead of the gitignored cache.
+**Important**: resolved inline — observed-axis membership, deterministic card classification, and
+the compatibility-status closed vocabulary now fail fast with specific diagnostics.
+**Nits**: none
+**Rejected**: none
+
+**Notes**: Standard-weight substrate review used exactly one fresh-context balanced pass. Commit
+`69fbbf3` resolves the receiver-confirmed findings; 16 focused and 135 seam tests pass, and the diff
+is clean. Closure intentionally uses no second independent pass under standard weight. Security,
+migration, concurrency, UI, and performance lenses were inapplicable.
 
 ### Review-fix verification
 
