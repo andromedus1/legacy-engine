@@ -2,7 +2,7 @@
 id: research-handoff-doomsday-splash-variants-5
 kind: feature
 stage: drafting
-tags: [advisory, testing]
+tags: [advisory, analytics]
 parent: null
 depends_on: []
 release_binding: null
