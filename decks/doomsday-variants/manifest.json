@@ -1,0 +1,121 @@
+{
+  "schema": "doomsday-variant-candidates",
+  "banlist_snapshot_as_of": "2026-08-10",
+  "legality_checked_on": "2026-08-20",
+  "compatibility_baseline_id": "current-dimir-creature-transform",
+  "shared_base_policy": "fetchlands-only",
+  "candidates": [
+    {
+      "id": "current-dimir-creature-transform",
+      "path": "decks/doomsday-variants/current-dimir-creature-transform.txt",
+      "status": "exact-registration",
+      "source": {
+        "cache_path": "data/cache/Tournaments/MTGO/2026/08/16/legacy-challenge-32-2026-08-1612851673.json",
+        "tournament_id": "https://www.mtgo.com/decklist/legacy-challenge-32-2026-08-1612851673",
+        "deck_idx": 9,
+        "event_date": "2026-08-16",
+        "event_name": "Legacy Challenge 32",
+        "player": "2plus2isfive",
+        "result": "10th Place",
+        "attestation_handle": "ddv-compare-current-corpus"
+      },
+      "canonical_deck_sha256": "02eb0b378efbd7861e7be9e9b5aac61e34e83fc842af627bf061ba48262d62ab",
+      "observed_axes": {
+        "chassis": "Personal Tutor/Tamiyo creature-transform",
+        "protection": ["Force of Will", "Daze", "Thoughtseize"],
+        "interaction": ["Fatal Push", "Snuff Out", "Engineered Explosives"],
+        "postboard_plan": "Dimir creature-transform with Barrowgoyf, Murktide, and Dauthi"
+      },
+      "shared_base_compatibility": {
+        "status": "baseline",
+        "spell_delta": 0,
+        "nonfetch_land_delta": 0,
+        "fetchland_delta": 0
+      }
+    },
+    {
+      "id": "current-esper-teferi-swords",
+      "path": "decks/doomsday-variants/current-esper-teferi-swords.txt",
+      "status": "exact-registration",
+      "source": {
+        "cache_path": "data/cache/Tournaments/MTGO/2026/08/12/legacy-league-2026-08-1210967.json",
+        "tournament_id": "https://www.mtgo.com/decklist/legacy-league-2026-08-1210967",
+        "deck_idx": 3,
+        "event_date": "2026-08-12",
+        "event_name": "Legacy League",
+        "player": "Battlegrounds",
+        "result": "5-0",
+        "attestation_handle": "ddv-packages-list-esper-battlegrounds"
+      },
+      "canonical_deck_sha256": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620",
+      "observed_axes": {
+        "chassis": "Bilbo/Tamiyo fair-combo",
+        "protection": ["Force of Will", "Daze", "Teferi, Time Raveler"],
+        "interaction": ["Swords to Plowshares", "Prismatic Ending"],
+        "postboard_plan": "Dimir creature pivot with white removal"
+      },
+      "shared_base_compatibility": {
+        "status": "incompatible-spells-and-nonfetch",
+        "spell_delta": 18,
+        "nonfetch_land_delta": 7,
+        "fetchland_delta": 5
+      }
+    },
+    {
+      "id": "current-light-green-white",
+      "path": "decks/doomsday-variants/current-light-green-white.txt",
+      "status": "exact-registration",
+      "source": {
+        "cache_path": "data/cache/Tournaments/MTGO/2026/08/15/legacy-challenge-32-2026-08-1512851657.json",
+        "tournament_id": "https://www.mtgo.com/decklist/legacy-challenge-32-2026-08-1512851657",
+        "deck_idx": 16,
+        "event_date": "2026-08-15",
+        "event_name": "Legacy Challenge 32",
+        "player": "wizardpasta",
+        "result": "17th Place",
+        "attestation_handle": "ddv-packages-list-green-white-wizardpasta"
+      },
+      "canonical_deck_sha256": "dbd444ab43279a87d82d58fc1eef244f5451116451797c017a5057d7bf4b0f98",
+      "observed_axes": {
+        "chassis": "Personal Tutor/Flow State combo",
+        "protection": ["Force of Will", "Daze", "Veil of Summer"],
+        "interaction": ["Swords to Plowshares", "Portable Hole", "Prismatic Ending"],
+        "postboard_plan": "Carpet and white-removal shield with a small creature pivot"
+      },
+      "shared_base_compatibility": {
+        "status": "incompatible-spells-and-nonfetch",
+        "spell_delta": 10,
+        "nonfetch_land_delta": 7,
+        "fetchland_delta": 7
+      }
+    },
+    {
+      "id": "current-four-color-shield",
+      "path": "decks/doomsday-variants/current-four-color-shield.txt",
+      "status": "exact-registration",
+      "source": {
+        "cache_path": "data/cache/Tournaments/MTGO/2026/08/14/legacy-league-2026-08-1410967.json",
+        "tournament_id": "https://www.mtgo.com/decklist/legacy-league-2026-08-1410967",
+        "deck_idx": 9,
+        "event_date": "2026-08-14",
+        "event_name": "Legacy League",
+        "player": "wakame",
+        "result": "5-0",
+        "attestation_handle": "ddv-packages-list-four-color-wakame"
+      },
+      "canonical_deck_sha256": "4109763e425cb4db5cf2b41cc1e2b9214aa56573b393cf3ab1930fb5a71480fe",
+      "observed_axes": {
+        "chassis": "Tamiyo/Teferi fair-combo",
+        "protection": ["Force of Will", "Daze", "Veil of Summer", "Teferi, Time Raveler"],
+        "interaction": ["Swords to Plowshares", "Prismatic Ending"],
+        "postboard_plan": "Carpet and white-removal shield with Nihil and Jace"
+      },
+      "shared_base_compatibility": {
+        "status": "incompatible-spells-and-nonfetch",
+        "spell_delta": 20,
+        "nonfetch_land_delta": 9,
+        "fetchland_delta": 7
+      }
+    }
+  ]
+}

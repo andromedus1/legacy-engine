@@ -1,7 +1,7 @@
 ---
 id: research-handoff-doomsday-splash-variants-1
 kind: feature
-stage: implementing
+stage: review
 tags: [advisory, generation]
 parent: null
 depends_on: []
@@ -231,3 +231,20 @@ local DuckDB.
 - **Local refresh status is stale/pending-action:** the research DB reaches August 19, but the ops
   projection reports a stale terminal run. **Fallback:** source identity and legality are dated;
   rerun source reconciliation after the next operator refresh without changing the design contract.
+
+## Implementation notes
+
+- Execution capability: GPT-5.6 Luna high; this bounded data-and-contract stride required exact
+  source reconciliation and legality/hash verification but no production code path.
+- Review weight: standard (default).
+- Files changed: `decks/doomsday-variants/manifest.json`, `decks/doomsday-variants/README.md`,
+  the four `decks/doomsday-variants/current-*.txt` registrations, and
+  `tests/test_doomsday_variant_decks.py`.
+- Tests added/removed: added 15 focused contract tests covering manifest closure/provenance,
+  parser and board counts, dated/current legality, hash binding, ban diagnostics, and compatibility
+  boundaries; the full suite passed (4032 passed, 1 skipped).
+- Simplification: kept the text files as the authoritative card-list representation and used one
+  compact hash/manifest instead of introducing a generator or duplicate card registry.
+- Discrepancies from design: none; the four cached source rows reconciled exactly to the pinned
+  deck indices, registrations, and canonical hashes.
+- Adjacent issues parked: none.
