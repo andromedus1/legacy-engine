@@ -1,0 +1,9 @@
+{
+  "source_path": "data/cache/Tournaments/MTGO/2026/08/12/legacy-challenge-32-2026-08-1212851626.json",
+  "Date": "2026-08-12T21:00:00+00:00",
+  "Player": "HJ_Kaiser",
+  "Result": "7th Place",
+  "AnchorUri": "https://www.mtgo.com/decklist/legacy-challenge-32-2026-08-1212851626#deck_HJ_Kaiser",
+  "Mainboard": [{"Count": 4, "CardName": "Brainstorm"}, {"Count": 1, "CardName": "Cavern of Souls"}, {"Count": 1, "CardName": "Consider"}, {"Count": 4, "CardName": "Dark Ritual"}, {"Count": 1, "CardName": "Daze"}, {"Count": 4, "CardName": "Doomsday"}, {"Count": 1, "CardName": "Edge of Autumn"}, {"Count": 1, "CardName": "Flooded Strand"}, {"Count": 4, "CardName": "Flow State"}, {"Count": 4, "CardName": "Force of Will"}, {"Count": 1, "CardName": "Jace, Wielder of Mysteries"}, {"Count": 1, "CardName": "Lion's Eye Diamond"}, {"Count": 2, "CardName": "Lotus Petal"}, {"Count": 1, "CardName": "Marsh Flats"}, {"Count": 1, "CardName": "Misty Rainforest"}, {"Count": 2, "CardName": "Murktide Regent"}, {"Count": 4, "CardName": "Polluted Delta"}, {"Count": 3, "CardName": "Ponder"}, {"Count": 1, "CardName": "Scalding Tarn"}, {"Count": 1, "CardName": "Snow-Covered Island"}, {"Count": 1, "CardName": "Snow-Covered Swamp"}, {"Count": 1, "CardName": "Street Wraith"}, {"Count": 4, "CardName": "Tamiyo, Inquisitive Student"}, {"Count": 1, "CardName": "Thassa's Oracle"}, {"Count": 3, "CardName": "Thoughtseize"}, {"Count": 1, "CardName": "Undercity Sewers"}, {"Count": 4, "CardName": "Underground Sea"}, {"Count": 3, "CardName": "Wasteland"}],
+  "Sideboard": [{"Count": 4, "CardName": "Barrowgoyf"}, {"Count": 1, "CardName": "Bitter Triumph"}, {"Count": 3, "CardName": "Consign to Memory"}, {"Count": 2, "CardName": "Dauthi Voidwalker"}, {"Count": 2, "CardName": "Fatal Push"}, {"Count": 2, "CardName": "Force of Negation"}, {"Count": 1, "CardName": "Long Goodbye"}]
+}

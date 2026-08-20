@@ -312,3 +312,7 @@ and package-shipped ban-list registry are the deterministic sources.
   validator without new generation or registry machinery.
 - Discrepancies from design: none.
 - Adjacent issues parked: none.
+- Review-fix verification: replaced gitignored cache reads with tracked immutable source-row
+  fixtures under `tests/fixtures/doomsday_variants/`; tests derive result/date/anchor/boards from
+  those rows and still assert the original upstream `source_path` provenance metadata. The item
+  remains at `stage: review`.

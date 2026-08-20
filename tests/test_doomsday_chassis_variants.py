@@ -29,10 +29,9 @@ class ChassisCase:
     label: StructuralLabel
     color_configuration: Literal["dimir", "esper"]
     deck_path: Path
+    fixture_path: Path
     source_path: Path
     source_player: str
-    source_result: str
-    source_date: str
     required_main: dict[str, int]
     forbidden_main: frozenset[str]
 
@@ -42,11 +41,10 @@ CASES = (
         label="personal-tutor-turbo",
         color_configuration="dimir",
         deck_path=_ROOT / "decks/doomsday-personal-tutor-turbo-75.txt",
+        fixture_path=_ROOT / "tests/fixtures/doomsday_variants/personal-tutor-turbo.json",
         source_path=_ROOT
         / "data/cache/Tournaments/MTGO/2026/08/18/legacy-league-2026-08-1810967.json",
         source_player="clan",
-        source_result="5-0",
-        source_date="2026-08-18",
         required_main={
             "Personal Tutor": 3,
             "Lotus Petal": 3,
@@ -61,11 +59,10 @@ CASES = (
         label="tamiyo-bilbo-unearth-value",
         color_configuration="esper",
         deck_path=_ROOT / "decks/doomsday-tamiyo-bilbo-unearth-value-75.txt",
+        fixture_path=_ROOT / "tests/fixtures/doomsday_variants/tamiyo-bilbo-unearth-value.json",
         source_path=_ROOT
         / "data/cache/Tournaments/MTGO/2026/08/12/legacy-league-2026-08-1210967.json",
         source_player="Battlegrounds",
-        source_result="5-0",
-        source_date="2026-08-12",
         required_main={
             "Tamiyo, Inquisitive Student": 4,
             "Bilbo, Thief in the Night": 4,
@@ -77,11 +74,10 @@ CASES = (
         label="wasteland-murktide-tempo",
         color_configuration="dimir",
         deck_path=_ROOT / "decks/doomsday-wasteland-murktide-tempo-75.txt",
+        fixture_path=_ROOT / "tests/fixtures/doomsday_variants/wasteland-murktide-tempo.json",
         source_path=_ROOT
         / "data/cache/Tournaments/MTGO/2026/08/12/legacy-challenge-32-2026-08-1212851626.json",
         source_player="HJ_Kaiser",
-        source_result="7th Place",
-        source_date="2026-08-12",
         required_main={
             "Wasteland": 3,
             "Murktide Regent": 2,
@@ -104,6 +100,7 @@ _HEADER_KEYS = {
     "legality_snapshot",
     "claim_boundary",
 }
+_FIXTURE_KEYS = {"source_path", "Date", "Player", "Result", "AnchorUri", "Mainboard", "Sideboard"}
 
 
 def _parse_provenance_header(text: str) -> dict[str, str]:
@@ -123,18 +120,14 @@ def _parse_provenance_header(text: str) -> dict[str, str]:
 def _load_source_registration(
     path: Path,
     player: str,
-) -> tuple[dict[str, int], dict[str, int], str]:
-    """Load exactly one case-sensitive player registration from a cached event."""
-    payload = json.loads(path.read_text())
-    matches = [deck for deck in payload["Decks"] if deck.get("Player") == player]
-    assert len(matches) == 1, (
-        f"expected exactly one registration for player {player!r} in {path}, "
-        f"found {len(matches)}"
-    )
-    deck = matches[0]
+) -> tuple[dict[str, int], dict[str, int], dict[str, object]]:
+    """Load the one immutable, source-exact registration fixture."""
+    deck = json.loads(path.read_text())
+    assert set(deck) == _FIXTURE_KEYS
+    assert deck["Player"] == player, f"fixture {path} has player {deck['Player']!r}, expected {player!r}"
     main = {entry["CardName"]: entry["Count"] for entry in deck["Mainboard"]}
     side = {entry["CardName"]: entry["Count"] for entry in deck["Sideboard"]}
-    return main, side, deck["AnchorUri"]
+    return main, side, deck
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.label)
@@ -142,19 +135,21 @@ def test_chassis_artifact_matches_source_and_legality(case: ChassisCase) -> None
     text = case.deck_path.read_text()
     header = _parse_provenance_header(text)
     main, side = parse_decklist(text)
-    source_main, source_side, source_url = _load_source_registration(
-        case.source_path, case.source_player
+    source_main, source_side, source = _load_source_registration(
+        case.fixture_path, case.source_player
     )
+    upstream_path = case.source_path.relative_to(_ROOT).as_posix()
+    assert source["source_path"] == upstream_path
 
     assert set(header) == _HEADER_KEYS
     assert header["structural_label"] == case.label
     assert header["color_configuration"] == case.color_configuration
     assert header["evidence_scope"] == "exact-published-registration"
     assert header["source_player"] == case.source_player
-    assert header["source_result"] == case.source_result
-    assert header["source_date"] == case.source_date
-    assert header["source_path"] == case.source_path.relative_to(_ROOT).as_posix()
-    assert header["source_url"] == source_url
+    assert header["source_result"] == source["Result"]
+    assert header["source_date"] == source["Date"][:10]
+    assert header["source_path"] == source["source_path"]
+    assert header["source_url"] == source["AnchorUri"]
     assert header["source_url"].startswith("https://www.mtgo.com/decklist/")
     assert header["research_origin"] == _RESEARCH_ORIGIN
     snapshot = current_banlist()
