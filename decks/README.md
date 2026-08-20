@@ -19,7 +19,7 @@ These observed 75s are selected for chassis learning, not consensus decks, match
 speed measurements. Each file is an exact published registration with its source provenance in the
 header.
 
-The broader 15-list paired comparison registry and playtest protocol live in
+The broader 15-artifact / 14-unique-list paired comparison registry and playtest protocol live in
 [doomsday-variants/](doomsday-variants/).
 
 | Structural label | Registration | Source |

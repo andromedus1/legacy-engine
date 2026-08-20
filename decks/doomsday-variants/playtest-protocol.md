@@ -1,20 +1,25 @@
 # Doomsday variant paired-playtest protocol
 
-This is a preregistered descriptive comparison of the 15 lists in
-[manifest.json](manifest.json). The manifest is the only list-id authority. Published finishes
+This is a preregistered descriptive comparison of the 14 unique 75s in
+[manifest.json](manifest.json). The corpus contains 15 files because the Battlegrounds registration
+is both the Esper comparator and the Bilbo/Tamiyo chassis example; the manifest aliases that second
+artifact to one canonical experimental ID so its results cannot be split. The manifest is the only
+list-id authority. Published finishes
 and source dates are evidence posture, not playtest outcomes.
 
 ## Experimental units
 
-- A **game** is one CSV row. `list_id`, `list_version`, opponent list/version, board state,
+- A **game** is one CSV row. `list_id`, `deck_sha256`, `list_version`, opponent list/version, board state,
   play/draw, and list order identify the tested configuration.
 - A **pre/post-board pair** is represented by the same `match_id` with `board_state` set to
   `pre` or `post`; pre-board rows use `not_applicable` for boarding and alternate-plan fields.
-- A **match** is the games sharing a `match_id`. Record `match_result` on the completed match
-  row and `not_seen` on earlier or unfinished rows.
+- A **match** is the games sharing a `match_id` for one tested list. A completed match has at least
+  two games, both pre- and post-board states, and exactly one terminal `match_result` on its last
+  post-board row; use `not_seen` on earlier or unfinished rows.
 - A **matchup block** holds one candidate and the Dimir control against the same
   `opponent_archetype` and `opponent_list_version`. `pair_id` links one candidate game to the
-  corresponding control game.
+  corresponding control game under the same opponent, board state, play/draw condition, pilot/date,
+  and randomized list-order assignment. Pair IDs are globally unique.
 
 The distributed log is game-level so opening decisions, actual combo turns, splash-mana effects,
 Wasteland exposure, boarding, protection relevance, and alternate-plan outcomes cannot be merged
@@ -22,11 +27,12 @@ into a single headline number.
 
 ## Registration and randomization
 
-Before a block begins, copy the candidate `list_id`, `list_version`, and manifest hash into the
-session notes. A changed deck hash starts a new list version; do not overwrite old rows. Register
+Before a block begins, copy the candidate `list_id`, `list_version`, and manifest hash into every
+row's `deck_sha256` field. A changed deck hash starts a new list version; do not overwrite old rows. Register
 the opponent list/version as well. Randomize which list is played first and randomize play/draw
-within each block, then keep the assignments fixed for that block. Balance both dimensions so each
-arm has no more than one extra play or draw and no more than one extra first/second list position.
+within each block. A paired candidate/control game uses the same play/draw condition; rotate that
+condition and which list is tested first across pairs. Balance both dimensions so each arm has no
+more than one extra play or draw and no more than one extra first/second list position.
 
 Use a fresh `pilot_id`/`played_on` value for each pilot session. Do not use published event results
 as rows in this log.

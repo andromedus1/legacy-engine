@@ -83,8 +83,9 @@ context only and are never merged into playtest outcomes.
   `not_seen`/`not_applicable` states instead of silent blanks.
 - List order and play/draw are balanced within matchup blocks; each experimental list is paired
   against the Dimir control under the same opponent list/version.
-- Every parser-valid 75 delivered by features 1–4 has exactly one stable manifest id, path, evidence
-  posture, and deck hash; no stale manifest path or unregistered candidate remains.
+- Every parser-valid artifact delivered by features 1–4 is registered, while each unique normalized
+  75 has exactly one stable experimental id, evidence posture, and deck hash. Duplicate artifacts
+  must alias the canonical id rather than split denominators.
 - Summaries display denominators and remain descriptive; low sample sizes are labeled and no win-
   rate ranking is emitted before the preregistered stopping threshold.
 - The validator rejects malformed or internally inconsistent rows and accepts the distributed
@@ -109,7 +110,24 @@ context only and are never merged into playtest outcomes.
 - Execution capability: GPT-5.6 Luna high; cohesive registry, protocol, validator, and descriptive CLI implementation.
 - Review weight: standard (default).
 - Files changed: `decks/doomsday-variants/manifest.json`; `decks/doomsday-variants/README.md`; `decks/doomsday-variants/playtest-protocol.md`; `decks/doomsday-variants/playtest-log.csv`; `decks/README.md`; `scripts/doomsday_variant_results.py`; `tests/test_doomsday_variant_results.py`; `tests/fixtures/doomsday_variants/playtest-valid.csv`; `tests/test_doomsday_variant_decks.py`.
-- Tests added/removed: added manifest completeness, CSV acceptance, enum/conditional rejection, paired-delta, thin-sample, and CLI-contract coverage; adapted the former four-registration contract to validate its current subset while the expanded manifest owns all 15 candidates. Doomsday-focused suite passes (58 tests).
+- Tests added/removed: added manifest completeness, CSV acceptance, enum/conditional rejection, paired-delta, thin-sample, and CLI-contract coverage; adapted the former four-registration contract to validate its current subset while the expanded manifest accounts for all 15 artifacts as 14 unique experimental 75s. Initial Doomsday-focused suite passed (58 tests).
 - Simplification: the CLI derives candidate IDs, paths, and hashes directly from the manifest; no second list enumeration or premature ranking layer was introduced.
-- Discrepancies from design: none.
+- Discrepancies from design: the finished corpus exposed that the Battlegrounds Esper and
+  Bilbo/Tamiyo files are identical. The manifest therefore owns 14 unique experimental IDs and one
+  explicit artifact alias instead of inventing a fifteenth arm with duplicated denominators.
 - Adjacent issues parked: none.
+
+### Standard-review fix verification
+
+- Canonicalized the 15 artifacts into 14 unique experimental 75s plus one explicit alias for the
+  duplicate Battlegrounds Esper/Bilbo-Tamiyo registration.
+- Bound every log row to the manifest's `deck_sha256`; hardened manifest root, path containment,
+  unique hash/path, declared count, evidence-posture, and alias contracts.
+- Enforced one candidate plus control per block, globally unique two-row pairs, matched opponent /
+  board / play-draw / list-order / pilot conditions, balanced assignments, and coherent completed
+  matches with one terminal post-board result.
+- Fixed the threshold at 20 completed matches, tightened both directions of conditional-state
+  validation, and rendered mulligan plus combo-turn measures with denominators.
+- Added adversarial coverage for every review reproduction. Verification: 25 playtest-contract
+  tests and 75 integrated Doomsday tests pass; empty-template and valid-fixture CLI smoke pass;
+  `git diff --check` is clean.

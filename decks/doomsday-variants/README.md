@@ -17,8 +17,9 @@ make the candidate stale loudly rather than silently changing its contents.
 
 ## Paired playtest program
 
-The complete 15-list registry in [`manifest.json`](manifest.json) is the sole list-id authority for
-the preregistered comparison. Use [`playtest-protocol.md`](playtest-protocol.md) before recording
+The complete corpus has 15 artifacts but 14 unique 75s: the Battlegrounds Esper and Bilbo/Tamiyo
+files are the same registration, so the manifest aliases them to one experimental arm. The 14-list
+registry in [`manifest.json`](manifest.json) is the sole list-id authority for the preregistered comparison. Use [`playtest-protocol.md`](playtest-protocol.md) before recording
 games in [`playtest-log.csv`](playtest-log.csv), then validate and summarize with:
 
 ```bash
