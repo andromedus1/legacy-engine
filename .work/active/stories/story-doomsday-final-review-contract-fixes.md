@@ -1,7 +1,7 @@
 ---
 id: story-doomsday-final-review-contract-fixes
 kind: story
-stage: review
+stage: done
 tags: [analytics, testing]
 parent: null
 depends_on:
@@ -48,3 +48,13 @@ depended on ignored local data.
   57 passed.
 - All five Doomsday test modules — 86 passed.
 - `git diff --check` — clean.
+- Full repository suite — 4,090 passed, 1 unrelated existing skip.
+
+## Review
+
+Bounded standalone-story review: **approved**. The implementation closes every finding from the
+single final aggregate autopilot review without widening the deck corpus or changing its evidence
+postures. The public CSV command accepts the valid fixture, prints both candidate-level and
+matchup-block denominators, and remains explicitly descriptive with no ranking. Version history is
+append-only in the manifest, invalid matches cannot count as completed, and the alternate source
+contract no longer depends on ignored local data. No critical or important issue remains.
