@@ -1,0 +1,15 @@
+candidate_id,strategic_class,evidence_posture,main_cards,side_cards,main_personal_tutor,main_tamiyo,main_bilbo,main_teferi,main_wasteland,main_murktide,main_hexing_squelcher,side_nonoracle_creatures,side_veil,side_carpet,side_swords
+current-dimir-creature-transform,sideboard-led,exact-registration,60,15,2,2,0,0,0,0,0,7,0,0,0
+current-esper-teferi-swords,main-value,exact-registration,60,15,0,4,4,2,0,0,0,8,0,0,3
+current-light-green-white,sideboard-led-shield,exact-registration,60,15,1,0,0,0,0,0,0,5,1,3,2
+current-four-color-shield,main-value-shield,exact-registration,60,15,0,4,0,3,0,0,0,0,0,3,3
+bug-veil-carpet-reconstructed,sideboard-led-shield,inferred-reconstruction,60,15,3,0,0,0,0,0,0,0,2,3,0
+grixis-squelcher-refresh,compact-main-value,observed-historical; legal-at-cutoff (not observed-current),60,15,0,0,0,0,0,0,1,8,0,0,0
+personal-tutor-turbo,focused-access,exact-published-registration,60,15,3,0,0,0,0,0,0,6,0,0,0
+wasteland-murktide-tempo,deep-denial-tempo,exact-published-registration,60,15,0,4,0,0,3,2,0,6,0,0,0
+paradigm-shift-oracle,alternate-combo,observed-historical; legal-at-cutoff (not observed-current),60,15,1,0,0,0,0,0,0,0,0,0,0
+emrakul-shelldock-isle,alternate-combo,observed-historical; legal-at-cutoff (not observed-current),60,15,3,0,0,0,0,0,0,1,0,0,0
+moonshadow-creature-switch,sideboard-led,inferred-reconstruction; Fantasticar-era source,60,15,4,0,0,0,0,0,0,4,0,0,0
+cori-steel-cutter-barrowgoyf,main-value,inferred-reconstruction; Fantasticar-era source,60,15,3,0,0,0,0,0,0,6,0,0,0
+chancellor-annex-protection,pregame-protection,observed-historical; concentrated pilot lineage,60,15,1,0,0,0,0,0,0,9,0,0,0
+value-threats-jace-riddler-sheoldred,main-value,observed-historical; heterogeneous module,60,15,2,0,0,0,0,0,0,8,0,0,0

@@ -1,0 +1,523 @@
+{
+  "title": "DOOMSDAY // FIELD GUIDE",
+  "subtitle": "Fourteen registered variants. Four evidence layers. No invented winner.",
+  "cutoff": {
+    "corpus_max": "2026-08-19",
+    "latest_exact_doomsday": "2026-08-18",
+    "field_since": "2026-08-10",
+    "ranking_field_decks": 386,
+    "ranking_archetype_rows": 95,
+    "ranking_camp_rows": 106,
+    "ranking_html_bytes": 35928949,
+    "current_exact_registrations": 12,
+    "standings_backed_registrations": 6,
+    "evidence_type": "observed",
+    "source_handles": ["ddx-outcome-db", "ddx-strategy-field-ranking"]
+  },
+  "evidence_legend": [
+    {
+      "key": "OBSERVED",
+      "label": "Tournament surface",
+      "meaning": "Named stored entrants and records; publication and dependence caveats apply.",
+      "evidence_type": "observed",
+      "source_handles": ["ddx-outcome-db"]
+    },
+    {
+      "key": "DETERMINISTIC",
+      "label": "Construction / raw seven",
+      "meaning": "Exact list composition and hypergeometric opening events; never played-game win rate.",
+      "evidence_type": "deterministic",
+      "source_handles": ["ddx-construction-results"]
+    },
+    {
+      "key": "INFERRED",
+      "label": "Decision scenario",
+      "meaning": "Cross-source interpretation or hypothetical break-even algebra with assumptions visible.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    },
+    {
+      "key": "PROSPECTIVE",
+      "label": "Physical test",
+      "meaning": "Preregistered matched-play requirement; this campaign recorded zero played games.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-playtest-protocol"]
+    }
+  ],
+  "headline": {
+    "kicker": "THE VERDICT",
+    "title": "Choose the smallest intervention that can earn its slots.",
+    "body": "Current Dimir is the live control; Personal Tutor is the focused-access benchmark. Green, white, red, and denial packages become preferred tests only when their paired gain clears their field-weighted cost. This is a testing hierarchy, not a power ranking.",
+    "primary_metric": "18–16",
+    "primary_metric_label": "current standings-backed Doomsday decisions",
+    "secondary_metric": "0",
+    "secondary_metric_label": "played-game results produced by this campaign",
+    "evidence_type": "inferred",
+    "source_handles": ["ddx-outcome-db", "ddx-strategy-playtest-protocol"]
+  },
+  "recommendation_cards": [
+    {
+      "rank": 1,
+      "name": "Current Dimir",
+      "tag": "LIVE CONTROL",
+      "recommendation": "Start here and make every larger package beat it in paired play.",
+      "why": "Exact current 75, one 4–2 standings recurrence, six access cards, and a seven-creature sideboard switch.",
+      "best_when": "The room is mixed or uncertain and comparison quality matters.",
+      "watch": "Post-board hands can split between combo and creature plans.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-strategy-list-dimir"]
+    },
+    {
+      "rank": 2,
+      "name": "Personal Tutor turbo",
+      "tag": "ACCESS BENCHMARK",
+      "recommendation": "Use as the focused-access calibration, not as an already proven winner.",
+      "why": "Seven access cards and a 53.906% raw-seven access-plus-black-or-Petal event; exact current recurrence is zero because the nearest publication differs by one sideboard card.",
+      "best_when": "A narrow, direct combo posture is expected to retain value across the room.",
+      "watch": "The raw-seven model does not measure keep quality, combo turn, or interaction.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-construction-results", "ddx-outcome-db", "ddx-strategy-list-turbo"]
+    },
+    {
+      "rank": 3,
+      "name": "Light green-white",
+      "tag": "FIRST SHIELD TEST",
+      "recommendation": "Test before the broader four-color bundle when Veil, Carpet, and creature removal have clear targets.",
+      "why": "Exact current 75, one 3–3 standings recurrence, five access, 15 selection, and a bounded green/white package.",
+      "best_when": "Blue/black interaction, Islands, and relevant creatures overlap in the expected room.",
+      "watch": "Conditional cards and green/white mana must be logged as live, stranded, or costly.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-strategy-list-green", "ddx-strategy-card-rules"]
+    },
+    {
+      "rank": 4,
+      "name": "Wasteland / Murktide",
+      "tag": "DENIAL-TEMPO TEST",
+      "recommendation": "Build when nonbasic mana and slower games are the declared target; seek an independent pilot.",
+      "why": "The exact lineage is 21–8 after duplicate collapse, but every recurrence is one pilot; 19 lands produce 72.058% two-land raw sevens.",
+      "best_when": "Opposing nonbasic mana is strategically central and a real clock matters.",
+      "watch": "Four access cards, seven acceleration cards, and Wasteland activations can compete with combo resources.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-strategy-list-wasteland"]
+    },
+    {
+      "rank": 5,
+      "name": "Esper Teferi / Swords",
+      "tag": "WHITE VALUE TEST",
+      "recommendation": "Test the compact white value-and-removal intervention before adding green mechanisms.",
+      "why": "Exact current 75 with ten main value/tempo cards; its exact recurrence is one selected League publication with no standings denominator.",
+      "best_when": "Creature boards and permission both demand answers.",
+      "watch": "Four access cards and multicolor sequencing trade raw access for board presence and timing control.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-construction-results", "ddx-outcome-db", "ddx-strategy-list-esper", "ddx-strategy-card-rules"]
+    },
+    {
+      "rank": 6,
+      "name": "Grixis Squelcher",
+      "tag": "REPLICATION TARGET",
+      "recommendation": "Treat as a current-regime replication of a persistent protection creature.",
+      "why": "The exact historical list has a 7–1 Challenge and one League publication, both from one pilot.",
+      "best_when": "A creature that creates a counter-proof window could attack the expected interaction.",
+      "watch": "No current exact entrant; red mana and creature removal are real exposure points.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-strategy-list-grixis", "ddx-strategy-card-rules"]
+    }
+  ],
+  "comparison_rows": [
+    {
+      "name": "Current Dimir transform",
+      "posture": "exact current; 4–2 exact recurrence",
+      "access": 6,
+      "selection": 14,
+      "protection": 11,
+      "value_tempo": 2,
+      "side_pivot": 7,
+      "access_resource_pct": 49.32,
+      "signal": "Balanced live reference with a substantial creature sideboard.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "Personal Tutor turbo",
+      "posture": "exact published; no exact current hash match",
+      "access": 7,
+      "selection": 13,
+      "protection": 12,
+      "value_tempo": 0,
+      "side_pivot": 6,
+      "access_resource_pct": 53.906,
+      "signal": "Focused-access benchmark; nearest current publication differs by one sideboard card.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "Light green-white",
+      "posture": "exact current; 3–3 exact recurrence",
+      "access": 5,
+      "selection": 15,
+      "protection": 10,
+      "value_tempo": 0,
+      "side_pivot": 5,
+      "access_resource_pct": 41.516,
+      "signal": "Incremental green/white shield with B13, W10, G9 fetch-enabled sources.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "Esper Teferi / Swords",
+      "posture": "exact current; League-only exact recurrence",
+      "access": 4,
+      "selection": 13,
+      "protection": 8,
+      "value_tempo": 10,
+      "side_pivot": 8,
+      "access_resource_pct": 34.855,
+      "signal": "Board-building value package with white removal and timing control.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "Four-color shield",
+      "posture": "exact current; League-only exact recurrence",
+      "access": 4,
+      "selection": 10,
+      "protection": 14,
+      "value_tempo": 7,
+      "side_pivot": 0,
+      "access_resource_pct": 34.855,
+      "signal": "Broad shield bundle; 23.72% compound access-selection-resource event.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "BUG Veil / Carpet",
+      "posture": "inferred reconstruction; no exact recurrence",
+      "access": 7,
+      "selection": 13,
+      "protection": 10,
+      "value_tempo": 1,
+      "side_pivot": 0,
+      "access_resource_pct": 53.906,
+      "signal": "Access-heavy green hypothesis; not an observed exact 75.",
+      "evidence_type": "deterministic+inferred",
+      "source_handles": ["ddx-construction-registry", "ddx-construction-results"]
+    },
+    {
+      "name": "Grixis Squelcher",
+      "posture": "historical; one-pilot 7–1 plus League",
+      "access": 4,
+      "selection": 15,
+      "protection": 12,
+      "value_tempo": 2,
+      "side_pivot": 6,
+      "access_resource_pct": 35.589,
+      "signal": "Persistent protection creature; current efficacy unmeasured.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    },
+    {
+      "name": "Wasteland / Murktide",
+      "posture": "exact published; one-pilot recurring lineage",
+      "access": 4,
+      "selection": 13,
+      "protection": 8,
+      "value_tempo": 10,
+      "side_pivot": 6,
+      "access_resource_pct": 34.855,
+      "signal": "Nineteen lands and 72.058% two-land sevens support a genuine denial-tempo posture.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results"]
+    }
+  ],
+  "secondary_rows": [
+    {
+      "name": "Paradigm Shift / Oracle",
+      "posture": "observed historical; two-pilot recurrence",
+      "signal": "5 access · 16 selection · 7 alternate-combo sideboard cards",
+      "role": "Alternate win-condition treatment, not a fair-pivot increment.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-construction-registry"]
+    },
+    {
+      "name": "Emrakul / Shelldock Isle",
+      "posture": "observed historical; League-only recurrence",
+      "signal": "7 access · 11 selection · 2 alternate-combo sideboard cards",
+      "role": "Exact publication without a standings-backed denominator.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-construction-registry"]
+    },
+    {
+      "name": "Moonshadow creature switch",
+      "posture": "inferred reconstruction",
+      "signal": "8 access · 59.767% access + B/Petal · 4 pivot cards",
+      "role": "Raw-access disconfirmer, not an observed legal 75.",
+      "evidence_type": "deterministic+inferred",
+      "source_handles": ["ddx-construction-results", "ddx-construction-registry"]
+    },
+    {
+      "name": "Cori-Steel Cutter / Barrowgoyf",
+      "posture": "inferred reconstruction",
+      "signal": "7 access · 17 selection · 10 pivot cards",
+      "role": "Deep sideboard-capacity experiment from a repaired historical chassis.",
+      "evidence_type": "deterministic+inferred",
+      "source_handles": ["ddx-construction-results", "ddx-construction-registry"]
+    },
+    {
+      "name": "Chancellor protection",
+      "posture": "observed historical; one 3–3 exact recurrence",
+      "signal": "5 access · 15 selection · 9 pivot cards",
+      "role": "Narrow historical protection mechanism.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-construction-registry"]
+    },
+    {
+      "name": "Jace / Riddler / Sheoldred value threats",
+      "posture": "observed historical; one 3–3 exact recurrence",
+      "signal": "6 access · 13 selection · 8 pivot cards",
+      "role": "Heterogeneous value module rather than one clean mechanism.",
+      "evidence_type": "observed+deterministic+inferred",
+      "source_handles": ["ddx-outcome-db", "ddx-construction-results", "ddx-construction-registry"]
+    }
+  ],
+  "playstyle_rows": [
+    {
+      "style": "Focused access",
+      "tempo": "Compress resources toward Doomsday; decide when to expose the top-deck Tutor line.",
+      "mulligan": "Access + mana + protection.",
+      "advantage": "Few game-one cards point away from the combo.",
+      "risk": "A narrow plan may leave opposing combo hate live.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-list-turbo", "ddx-strategy-card-rules"]
+    },
+    {
+      "style": "Dimir transform",
+      "tempo": "Combo/disrupt game one; choose combo, clock, or both after boarding.",
+      "mulligan": "A functional primary axis without stranded halves.",
+      "advantage": "Post-board role flexibility.",
+      "risk": "Role ambiguity can become dilution.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-list-dimir", "ddx-strategy-playtest-protocol"]
+    },
+    {
+      "style": "Green shield",
+      "tempo": "Time Veil around blue/black interaction and Carpet around opposing Islands.",
+      "mulligan": "Functional green mana plus a live, opponent-relevant payoff.",
+      "advantage": "Targeted stack insulation and conditional mana.",
+      "risk": "Dead conditional cards and splash exposure outside the target class.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-card-rules", "ddx-strategy-list-green", "ddx-strategy-list-bug"]
+    },
+    {
+      "style": "White / four-color value",
+      "tempo": "Develop creature or planeswalker value before choosing the combo window.",
+      "mulligan": "Functional multicolor mana plus a coherent early action.",
+      "advantage": "Board presence, removal, and response-window control.",
+      "risk": "More mechanisms tax access and complicate attribution.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-card-rules", "ddx-strategy-list-esper", "ddx-strategy-list-four-color"]
+    },
+    {
+      "style": "Grixis Squelcher",
+      "tempo": "Resolve a persistent protection creature, then exploit its window or remain on combo.",
+      "mulligan": "Red access plus spells that benefit from the protection window.",
+      "advantage": "Protection and clock in one permanent.",
+      "risk": "Creature removal and unsupported current-field efficacy.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-card-rules", "ddx-strategy-list-grixis"]
+    },
+    {
+      "style": "Deep denial-tempo",
+      "tempo": "Allocate lands between colored combo mana and Wasteland while applying pressure.",
+      "mulligan": "Functional colored mana plus relevant denial or pressure.",
+      "advantage": "A real mana-denial and clock axis.",
+      "risk": "Self-sacrificed lands and lower access may conflict with combo assembly.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-card-rules", "ddx-strategy-list-wasteland"]
+    }
+  ],
+  "break_even_rows": [
+    {
+      "hostile_share_pct": 8.4,
+      "gain_for_half_point_cost": 5.45,
+      "gain_for_one_point_cost": 10.9,
+      "gain_for_two_point_cost": 21.81,
+      "label": "Dimir Tempo example",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    },
+    {
+      "hostile_share_pct": 10,
+      "gain_for_half_point_cost": 4.5,
+      "gain_for_one_point_cost": 9,
+      "gain_for_two_point_cost": 18,
+      "label": "narrow pocket",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    },
+    {
+      "hostile_share_pct": 20,
+      "gain_for_half_point_cost": 2,
+      "gain_for_one_point_cost": 4,
+      "gain_for_two_point_cost": 8,
+      "label": "broad pocket",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    },
+    {
+      "hostile_share_pct": 30,
+      "gain_for_half_point_cost": 1.17,
+      "gain_for_one_point_cost": 2.33,
+      "gain_for_two_point_cost": 4.67,
+      "label": "five representative roles combined; not one shared effect stratum",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    }
+  ],
+  "experiments": [
+    {
+      "name": "Outcome surface",
+      "status": "complete",
+      "result": "Current standings total 18–16; no stable variant ordering survives the publication, dependence, and taxonomy caveats.",
+      "measured": "Selection channel, Wilson intervals, pilot/event deletion, threshold sensitivity, historical windows, exact recurrence.",
+      "not_measured": "Failed League denominator, stable pilot-adjusted effects, or current matchup effects.",
+      "evidence_type": "observed+inferred",
+      "source_handles": ["ddx-outcome-db"]
+    },
+    {
+      "name": "Construction / raw seven",
+      "status": "complete",
+      "result": "Fourteen exact 60/15 artifacts passed hash and legality checks; opening events were enumerated exactly.",
+      "measured": "Composition, source allocation, role counts, raw unordered seven-card probabilities.",
+      "not_measured": "Mulligans, sequencing, piles, opponent interaction, matchups, or wins.",
+      "evidence_type": "deterministic",
+      "source_handles": ["ddx-construction-results"]
+    },
+    {
+      "name": "Scenario economics",
+      "status": "complete",
+      "result": "Break-even surfaces translate broad-field cost and hostile share into required target-pocket gain.",
+      "measured": "Algebraic thresholds under a two-stratum weighted-average assumption.",
+      "not_measured": "Any candidate's actual gain or loss.",
+      "evidence_type": "inferred",
+      "source_handles": ["ddx-strategy-field-ranking"]
+    },
+    {
+      "name": "Paired physical screen",
+      "status": "prospective-no-results",
+      "result": "260 candidate and 260 paired-control matches are allocated; played results remain zero.",
+      "measured": "Nothing yet.",
+      "not_measured": "Matchup effects, combo turns, alternate-plan conversion, splash costs, and pilot sensitivity.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-results", "ddx-strategy-playtest-protocol"]
+    }
+  ],
+  "limitations": [
+    {
+      "text": "Six of twelve current exact-archetype registrations are selected League 5–0 publications.",
+      "evidence_type": "observed",
+      "source_handles": ["ddx-outcome-db"]
+    },
+    {
+      "text": "Current standings contain 34 decisions nested within five pilots and five events; ordinary Wilson intervals do not repair dependence.",
+      "evidence_type": "observed",
+      "source_handles": ["ddx-outcome-db"]
+    },
+    {
+      "text": "Taxonomy thresholds are analyst-defined and move outcome-bearing entrants between classes.",
+      "evidence_type": "observed",
+      "source_handles": ["ddx-outcome-db"]
+    },
+    {
+      "text": "Raw-seven results omit mulligans, sequencing, mana assignment, piles, and opponents.",
+      "evidence_type": "deterministic",
+      "source_handles": ["ddx-construction-results"]
+    },
+    {
+      "text": "BUG, Moonshadow, and Cutter are reconstructed rather than observed exact configurations.",
+      "evidence_type": "deterministic",
+      "source_handles": ["ddx-construction-registry"]
+    },
+    {
+      "text": "No played games were generated; scenario weights and vulnerabilities remain hypotheses.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-results", "ddx-strategy-playtest-protocol"]
+    }
+  ],
+  "next_tests": [
+    {
+      "order": 1,
+      "title": "Register the opponent field",
+      "action": "Lock exact 75s and versions for Dimir Tempo, Tron, Boros Energy, Azorius Midrange, and Doomsday.",
+      "success": "Every block names the same opponent artifact for candidate and control.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-playtest-protocol", "ddx-strategy-field-ranking"]
+    },
+    {
+      "order": 2,
+      "title": "Isolate the sideboard juke",
+      "action": "Register a no-creature combo/protection sideboard paired with the unchanged current Dimir 60 and compare it with the creature-transform 15.",
+      "success": "Main-deck hash is identical and only the registered 15 differs.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-list-dimir", "ddx-strategy-playtest-protocol"]
+    },
+    {
+      "order": 3,
+      "title": "Calibrate focused access",
+      "action": "Run Personal Tutor turbo and paired Dimir controls across five roles at four matches per role.",
+      "success": "Twenty completed candidate matches with balanced play/draw and order.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-list-turbo", "ddx-strategy-playtest-protocol"]
+    },
+    {
+      "order": 4,
+      "title": "Separate shield mechanisms",
+      "action": "Run light green-white, Esper, then four-color as distinct blocks; log every protection/removal card as relevant, stranded, or mana-costly.",
+      "success": "Mechanism-level logs support or reject the declared target class.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-playtest-protocol", "ddx-strategy-card-rules"]
+    },
+    {
+      "order": 5,
+      "title": "Replicate denial and Squelcher",
+      "action": "Run Wasteland/Murktide and Grixis with an independent pilot and matched Dimir controls.",
+      "success": "Twenty completed matches per candidate and explicit denial/protection-window logs.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-playtest-protocol", "ddx-outcome-db"]
+    },
+    {
+      "order": 6,
+      "title": "Complete the registered screen",
+      "action": "Finish all thirteen non-control candidates: 260 candidate and 260 paired-control matches.",
+      "success": "No ranking below 20 matches per list; four-match matchup cells remain descriptive.",
+      "evidence_type": "prospective",
+      "source_handles": ["ddx-strategy-results", "ddx-strategy-playtest-protocol"]
+    }
+  ],
+  "provenance": {
+    "campaign": "doomsday-variant-experiments",
+    "generated_on": "2026-08-20",
+    "projection_of": ".research/analysis/campaigns/doomsday-variant-experiments/parent.md",
+    "source_handles": [
+      "ddx-construction-card-catalog",
+      "ddx-construction-registry",
+      "ddx-construction-results",
+      "ddx-outcome-db",
+      "ddx-outcome-manifest",
+      "ddx-strategy-card-rules",
+      "ddx-strategy-field-ranking",
+      "ddx-strategy-list-bug",
+      "ddx-strategy-list-dimir",
+      "ddx-strategy-list-esper",
+      "ddx-strategy-list-four-color",
+      "ddx-strategy-list-green",
+      "ddx-strategy-list-grixis",
+      "ddx-strategy-list-turbo",
+      "ddx-strategy-list-wasteland",
+      "ddx-strategy-manifest",
+      "ddx-strategy-playtest-protocol",
+      "ddx-strategy-results"
+    ],
+    "evidence_type": "projection",
+    "note": "Machine-readable presentation projection; not an independent evidence source."
+  }
+}

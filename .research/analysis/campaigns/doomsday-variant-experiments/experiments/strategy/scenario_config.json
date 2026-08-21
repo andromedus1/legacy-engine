@@ -1,0 +1,33 @@
+{
+  "schema": "doomsday-strategy-scenarios-v1",
+  "field_source": "decks/best-deck-best-call-ranking.html",
+  "manifest": "decks/doomsday-variants/manifest.json",
+  "control_id": "current-dimir-creature-transform",
+  "representative_opponents": [
+    {"archetype": "Dimir Tempo", "role": "disrupt-pressure", "matches_per_arm": 4},
+    {"archetype": "Tron", "role": "go-over", "matches_per_arm": 4},
+    {"archetype": "Boros Energy", "role": "go-wide", "matches_per_arm": 4},
+    {"archetype": "Azorius Midrange", "role": "lock-outlast", "matches_per_arm": 4},
+    {"archetype": "Doomsday", "role": "go-off", "matches_per_arm": 4}
+  ],
+  "break_even": {
+    "hostile_share_percent": [2, 4, 5, 8, 8.4, 10, 15, 20, 25, 30, 35.4, 40, 50],
+    "broad_field_cost_points": [0.5, 1, 2, 3, 5]
+  },
+  "strategic_classes": {
+    "personal-tutor-turbo": "focused-access",
+    "current-dimir-creature-transform": "sideboard-led",
+    "current-light-green-white": "sideboard-led-shield",
+    "bug-veil-carpet-reconstructed": "sideboard-led-shield",
+    "grixis-squelcher-refresh": "compact-main-value",
+    "current-esper-teferi-swords": "main-value",
+    "current-four-color-shield": "main-value-shield",
+    "wasteland-murktide-tempo": "deep-denial-tempo",
+    "paradigm-shift-oracle": "alternate-combo",
+    "emrakul-shelldock-isle": "alternate-combo",
+    "moonshadow-creature-switch": "sideboard-led",
+    "cori-steel-cutter-barrowgoyf": "main-value",
+    "chancellor-annex-protection": "pregame-protection",
+    "value-threats-jace-riddler-sheoldred": "main-value"
+  }
+}

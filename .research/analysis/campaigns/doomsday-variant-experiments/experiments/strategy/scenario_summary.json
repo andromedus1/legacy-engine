@@ -1,0 +1,16 @@
+{
+  "schema": "doomsday-strategy-scenarios-v1",
+  "source_clock": {
+    "field_since": "2026-08-10",
+    "corpus_max": "2026-08-19",
+    "field_decks": 386,
+    "field_evidence_kind": "transition-stabilized"
+  },
+  "candidate_count": 14,
+  "non_control_candidate_count": 13,
+  "representative_opponent_share": 0.3,
+  "prospective_candidate_matches": 260,
+  "prospective_control_matches": 260,
+  "played_game_results": 0,
+  "interpretation": "algebraic scenarios and prospective design only; no observed candidate matchup effects"
+}

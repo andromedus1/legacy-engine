@@ -1,0 +1,12 @@
+category,entries,pilots,events,exact_lists,wins,losses,draws,decision_win_pct,wilson95_low_pct,wilson95_high_pct,leave_one_pilot_out_min_pct,leave_one_pilot_out_max_pct,leave_one_event_out_min_pct,leave_one_event_out_max_pct
+personal_tutor_main,2,2,2,2,7,5,0,58.3,32.0,80.7,50.0,66.7,50.0,66.7
+wasteland_main,3,2,3,3,7,9,0,43.8,23.1,66.8,0.0,50.0,33.3,50.0
+tamiyo_main,5,4,5,5,15,13,0,53.6,35.8,70.5,50.0,57.7,50.0,57.7
+bilbo_main,2,2,2,2,7,6,0,53.8,29.1,76.8,42.9,66.7,42.9,66.7
+teferi_main,1,1,1,1,4,2,0,66.7,30.0,90.3,,,,
+murktide_main,2,2,2,2,4,5,0,44.4,18.9,73.3,0.0,57.1,0.0,57.1
+squelcher_main,0,0,0,0,0,0,0,,,,,,,
+A_focused_combo,0,0,0,0,0,0,0,,,,,,,
+B_sideboard_led,2,2,2,2,7,5,0,58.3,32.0,80.7,50.0,66.7,50.0,66.7
+C_value_combo,1,1,1,1,4,2,0,66.7,30.0,90.3,,,,
+D_deep_denial,3,2,3,3,7,9,0,43.8,23.1,66.8,0.0,50.0,33.3,50.0
