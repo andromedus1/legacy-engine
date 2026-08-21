@@ -1,7 +1,7 @@
 ---
 id: feature-doomsday-variant-experiments-report
 kind: feature
-stage: drafting
+stage: implementing
 tags: [research, advisory, analytics, ui]
 parent: null
 depends_on:
@@ -77,3 +77,30 @@ duplicate the ranking generator, or imply a complete game simulator exists.
 
 - Screens: `.mockups/screens/feature-doomsday-variant-experiments-report/index.html`
 - Selected: pending layout exploration inside the confirmed dark-academia/trading-terminal world
+
+## Decomposition rationale
+
+Checkpoint A compared three shapes:
+
+1. **Color-by-color:** intuitive for deckbuilding, but it repeats splash/chassis confounding and
+   encourages unsupported winner labels from tiny cohorts.
+2. **Simulator-first:** attractive for a decisive answer, but the rules-aware goldfish and matchup
+   simulator remains an unfinished project arc; treating a draw checker as game simulation would
+   be misleading.
+3. **Evidence-axis:** independently test observed outcomes, exact-list construction/access costs,
+   and matchup/metagame economics, then cross-synthesize them.
+
+The evidence-axis shape is selected. Three parallel facets cover:
+
+- **Outcome experiment:** refreshed census, event/pilot/publication controls, bootstrap or exact
+  uncertainty where support permits, taxonomy sensitivity, recurrence, and current/historical
+  boundaries.
+- **Construction/access experiment:** exact 75 verification, color and land pressure, opening-hand
+  resource/access distributions, post-board exchange costs, and explicit abstention where card
+  sequencing would require the unfinished rules engine.
+- **Strategic experiment:** matchup-rescue break-even surfaces, metagame scenarios, play-style and
+  skill-burden comparison, boarding-plan implications, and a concrete paired physical-test matrix.
+
+Self-flag: no computational result in this campaign may be described as a played-game win rate.
+The synthesis must preserve observed, simulated-draw, inferred-scenario, and prospective-test
+labels as separate evidence types.
