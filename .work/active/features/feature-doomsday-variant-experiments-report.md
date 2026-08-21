@@ -1,17 +1,18 @@
 ---
 id: feature-doomsday-variant-experiments-report
 kind: feature
-stage: implementing
+stage: done
 tags: [research, advisory, analytics, ui]
 parent: null
 depends_on:
   - feature-doomsday-pivot-performance
 release_binding: null
 gate_origin: null
-research_origin: null
+research_origin: doomsday-variant-experiments
 research_refs:
   - doomsday-splash-variants
   - doomsday-pivot-performance
+  - doomsday-variant-experiments
 research_dials:
   scope_authority: mixed
   verification_rigor: full
@@ -66,6 +67,8 @@ exact future protocol instead.
 - Four distinct report-layout mocks are produced inside the confirmed visual world, one direction
   is selected, and the final self-contained HTML report is checked for responsive, accessible,
   at-a-glance interpretation.
+- BUG, Esper, Turbo Dimir, and Dimir Creature Juke receive clean Moxfield-ready 60/15 exports with
+  exact-vs-reconstructed provenance kept explicit and contract-tested against their canonical lists.
 
 ## Simplification opportunity
 
@@ -76,7 +79,9 @@ duplicate the ranking generator, or imply a complete game simulator exists.
 ## Mockups
 
 - Screens: `.mockups/screens/feature-doomsday-variant-experiments-report/index.html`
-- Selected: pending layout exploration inside the confirmed dark-academia/trading-terminal world
+- Selected: option-4, **Pilot's Field Manual** (2026-08-20)
+- Rationale: book-like navigation and play-style-first comparison, with compact numeric density
+  borrowed from option-2 for at-a-glance decisions.
 
 ## Decomposition rationale
 
@@ -104,3 +109,39 @@ The evidence-axis shape is selected. Three parallel facets cover:
 Self-flag: no computational result in this campaign may be described as a played-game win rate.
 The synthesis must preserve observed, simulated-draw, inferred-scenario, and prospective-test
 labels as separate evidence types.
+
+## Engagement record
+
+- Regenerated `decks/best-deck-best-call-ranking.html` from the local DuckDB: 386 field decks
+  since 2026-08-10, corpus maximum 2026-08-19, 95 archetype rows, and 106 camp rows.
+- Dispatched three independent facets: observed outcomes and bias controls, exact-list
+  construction/access experiments, and strategic break-even plus prospective playtest design.
+- Synthesized the completed facets into
+  `.research/analysis/campaigns/doomsday-variant-experiments/parent.md` and the report-facing
+  `report-content.json`; all 14 unique registered/reconstructed candidates remain accounted for.
+- Preserved the main tension instead of flattening it into a power ranking: current category
+  standings are B 7-5, C 4-2, and D 7-9, while the exact Wasteland/Murktide lineage is 21-8 after
+  duplicate collapse but comes from one pilot. No causal tempo penalty is claimed.
+- Recorded deterministic opening-resource/access differences and the metagame break-even surface;
+  none is represented as a played-game win rate. The preregistered physical program remains 260
+  candidate matches plus 260 matched Dimir-control matches.
+- Full verification completed: adversarial and isolated-evaluator revision findings were resolved;
+  the second isolated evaluation approved the campaign; citation lint reports 250 resolved
+  citations with zero broken, thin, or pattern flags.
+- Implemented the selected Pilot's Field Manual as a generated, self-contained, responsive HTML
+  surface backed by a tracked template and renderer. The final output contains 14 candidates and
+  reports the 2026-08-19 corpus cutoff.
+- Published four clean Moxfield imports under `decks/doomsday-variants/moxfield/`; BUG is explicitly
+  an inferred post-ban reconstruction, while Esper, Turbo Dimir, and Creature Juke preserve exact
+  observed artifacts/registrations.
+- Verification: 87 focused tests pass; Ruff check and format check pass; HTML structure,
+  self-containment, responsive behavior, reduced-motion handling, and embedded-data escaping are
+  covered.
+
+## Completion
+
+Completed 2026-08-20. The result is a bounded build-and-test priority guide, not a causal matchup
+ranking. The local operations projection remains stale at 2026-08-18 with legality pending; the
+research corpus itself reaches 2026-08-19, and no network refresh was triggered to clear the
+banner. Exact published legal BUG, Moonshadow, and Cutter registrations remain optional acquisition
+candidates rather than silently promoted work.
