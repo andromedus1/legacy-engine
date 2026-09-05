@@ -17,7 +17,7 @@ decisions:
   - "The current field uses a provisional 28-day exponential half-life over the observed ban-regime slice. The denominator is published deck lists, not a census of entrants. Integer observed counts, decay-weighted counts, effective sample size, and bounded transition prior counts remain separate."
   - "Clean interval evidence may override a cell once. The override keeps the actual MatchupCell prior_strength and its interval/source provenance; it is not pooled again with overlapping fallback evidence."
   - "The mature positioning estimator and future-only benchmark remain frozen reference surfaces. Their outputs do not validate or promote this current descriptive projection."
-  - "scripts/evaluate_deck_rankings.py is a retrospective diagnostic: it compares fixed field half-lives chronologically and optionally scores a limited matchup baseline. It is not an exact production replay or a deployment gate."
+  - "scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic. Separate --served-model mode freezes the shared production projection before later outcomes, compares fixed prior scales and a conditional opponent-plan prior challenger, and reports evidence without selecting or publishing a method."
   - "The generated page is disposable. Edit the tracked script or template, then regenerate decks/deck-rankings.html; do not hand-edit the output."
 ---
 
@@ -106,11 +106,29 @@ their Agency/P(best) terminology must not be read as the definition of the Deck 
 Likewise, the future-only ranking benchmark evaluates its preregistered legacy estimators and does
 not certify this new current method.
 
-`scripts/evaluate_deck_rankings.py` is optional retrospective evidence. Its field pass scores fixed
-14-, 28-, 56-day, and uniform methods on chronological complete-day folds without tuning. Its
-optional matchup pass is limited to a pre-cutoff adaptive baseline and scores each unordered
-holdout pair once; it is not an exact reproduction of the production page’s interval overrides,
-field/prior composition, or recommendation projection.
+`scripts/evaluate_deck_rankings.py` has two retrospective modes. The default field diagnostic still
+scores fixed 14-, 28-, 56-day, and uniform methods on chronological complete-day folds without
+tuning; its optional matchup pass remains the limited pre-cutoff adaptive baseline.
+
+`--served-model --output-dir <path>` instead evaluates the current Deck Rankings projection. For
+each declared origin it creates a raw pre-cutoff snapshot, refits the projection under retrospective
+fixed-parent taxonomy, and seals the prediction artifact before any later outcomes are loaded. This
+is parent-only: card availability is observed-by-cutoff where release dates are unavailable, and
+the fixed taxonomy does not reconstruct the label knowledge an operator would have had at the
+cutoff. The same outcome-blind card-metadata quarantine applies to training and held-out data for
+every method, with hard ceilings of `.5%` of decks and `2%` of rounds. Raw and retained denominators,
+evidence, and hashes remain visible; quarantine excludes unresolved whole decks rather than repairing
+metadata.
+
+The declared comparison includes production scale `1`, fixed prior-strength sensitivities `.5` and
+`2`, and `opponent-plan-prior-v1`. The challenger conditionally borrows a prior from cutoff-safe
+evidence for opponents assigned to the same primary strategic plan while preserving each target
+cell's direct wins/n and selected-source identity. Outputs retain source/config hashes and report log
+loss, Brier score, calibration, support strata, reciprocity, paired event log-loss differences,
+performance/floor order, and later support for the baseline's named floor pairings. Missing forecasts
+and unavailable floor outcomes stay visible. These are diagnostic scores and sensitivity evidence;
+the experiment is pending, no production change has been selected, and the evaluator has no
+publication or deployment gate.
 
 The operational status schema may report `useful` when the generated artifact contains supported
 performance/floor estimates and a practical call, even when evidence is thin or the current method
@@ -124,5 +142,7 @@ observed ESS; prior pseudo-lists stay separate. The legacy integer total remains
 - `src/legacy_engine/advisory/recent_field.py` — dated field observations and evidence accounting.
 - `scripts/refresh_best_call_ranking.py` — legacy ledger plus current projection and publication.
 - `scripts/refresh_decision_data.py` — full refresh composition and default publication path.
-- `scripts/evaluate_deck_rankings.py` — retrospective diagnostic comparisons.
+- `scripts/evaluate_deck_rankings.py` — default field diagnostic and frozen served-model evaluation.
+- `src/legacy_engine/advisory/deck_ranking_projection.py` — shared production/evaluation projection handoff.
+- `src/legacy_engine/workflows/deck_ranking_evaluation.py` — freeze-before-outcomes artifact and scoring workflow.
 - [README.md](../../README.md) — user-facing commands and local refresh overview.

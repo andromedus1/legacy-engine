@@ -303,9 +303,24 @@ Standalone analysis helpers that sit alongside the CLI:
 ```
 
 The full refresh uses `scripts/refresh_decision_data.py`; the focused script name is retained for
-callers and scheduler wiring. `scripts/evaluate_deck_rankings.py` is an optional retrospective
-diagnostic for fixed field half-lives, with a limited optional matchup baseline. It does not exactly
-replay production interval overrides and does not validate or gate the current Deck Rankings method.
+callers and scheduler wiring. `scripts/evaluate_deck_rankings.py` retains its default retrospective
+field-half-life diagnostic and optional adaptive matchup baseline. Its separate `--served-model`
+mode freezes cutoff-refitted, retrospective fixed-parent snapshots and the shared production Deck
+Rankings projection before it reads later outcomes:
+
+```bash
+.venv/bin/python scripts/evaluate_deck_rankings.py --db data/legacy.duckdb \
+  --served-model --output-dir data/benchmarks/deck-rankings-evaluation-v1
+```
+
+The served-model experiment compares the production prior scale `1` with fixed `.5` and `2`
+sensitivities and the conditional `opponent-plan-prior-v1` challenger on one prediction grid. It
+reports log loss, Brier score, calibration, support strata, reciprocity, paired event differences,
+and later evidence for the named floor pairings. The run is parent-only and uses observed-by-cutoff
+card availability where release dates are unavailable. Its outcome-blind card-metadata quarantine
+applies the same fixed ceilings to every method (at most `.5%` of decks and `2%` of rounds), records
+raw and retained ledgers, and does not repair metadata. Results are diagnostic: no experiment result
+or production change has been selected, and this command has no publication or deployment gate.
 
 `meta_view.py` is the **meta view** (where the field is, how it's moving, what's
 best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
