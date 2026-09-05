@@ -1,11 +1,12 @@
 ---
 id: feature-ranking-refresh-insights
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory]
 parent: null
 depends_on: [feature-validated-historical-evidence-promotion]
 release_binding: null
+gate_origin: null
 created: 2026-09-05
 updated: 2026-09-05
 ---
@@ -52,3 +53,12 @@ eventual borrowing selection. One Luna xhigh worker owns the pure comparison mod
 read/attach seam, template card, and focused tests. Do not change compute_blob, the projection,
 or historical evaluation code while forecast freezes run. Existing card styling is reused under
 the approved existing-component mock exception. Host retains empirical selection and PR/CI.
+
+## Implementation notes
+- Execution capability: Luna xhigh single-owner pass; the comparison module, publication attachment seam, existing-style card, and focused contracts form one cohesive change.
+- Review weight: standard (project default; host agent performs the independent feature review).
+- Files changed: `src/legacy_engine/advisory/ranking_changes.py`, `scripts/refresh_best_call_ranking.py`, `scripts/best_call_ranking_template.html`, and `tests/test_ranking_changes.py`.
+- Tests added/removed: `tests/test_ranking_changes.py` covers baseline, unchanged data, compatibility boundaries, symmetric attribution identity, missing forecasts, floor support handling, and JSON-decoder prior reads; no tests removed.
+- Simplification: refresh inputs are persisted in the existing `meta.refresh_changes.snapshot`; no second store, computation path, or UI control was introduced.
+- Discrepancies from design: the additive `meta.refresh_changes` field is excluded from `_authority_payload` so diagnostic publication metadata cannot alter the ranking authority invariant.
+- Adjacent issues parked: none.

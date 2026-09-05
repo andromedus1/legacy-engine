@@ -49,6 +49,11 @@ from legacy_engine.advisory.positioning import (
     practical_recommendation_order,
     rank_decks,
 )
+from legacy_engine.advisory.ranking_changes import (
+    RankingSnapshotError,
+    compare_ranking_snapshots,
+    ranking_snapshot,
+)
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.amplification import (
     build_interval_evidence_corpus,
@@ -160,6 +165,52 @@ def _json_for_script(value: object, *, compact: bool = False) -> str:
     )
 
 
+class PublishedRankingPayloadError(ValueError):
+    """Raised when an existing ranking page has a recognized but malformed payload."""
+
+
+def read_published_ranking(path: Path) -> dict | None:
+    """Read the embedded ranking object without executing the published HTML.
+
+    A page from before the Deck Rankings payload was introduced has no recognized
+    ``deck_rankings`` method and is treated as a baseline.  Once that marker is
+    present, malformed JSON is surfaced to the comparison layer instead of being
+    mistaken for a clean first publication.
+    """
+    if not path.is_file():
+        return None
+    try:
+        html = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PublishedRankingPayloadError(
+            f"cannot read previous ranking page: {exc}"
+        ) from exc
+    marker = "const D ="
+    position = html.find(marker)
+    if position < 0:
+        return None
+    encoded = html[position + len(marker):].lstrip()
+    try:
+        payload, _end = json.JSONDecoder().raw_decode(encoded)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise PublishedRankingPayloadError(
+            f"previous ranking payload JSON is malformed: {exc.msg if isinstance(exc, json.JSONDecodeError) else exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise PublishedRankingPayloadError("previous ranking payload is not an object")
+    meta = payload.get("meta")
+    deck_rankings = meta.get("deck_rankings") if isinstance(meta, dict) else None
+    if not isinstance(deck_rankings, dict) or not deck_rankings.get("method_id"):
+        return None
+    try:
+        ranking_snapshot(payload)
+    except RankingSnapshotError as exc:
+        raise PublishedRankingPayloadError(
+            f"previous ranking payload is not a valid snapshot: {exc}"
+        ) from exc
+    return payload
+
+
 def _authority_payload(blob: dict) -> dict:
     """Return the complete mature ranking contract, excluding additive diagnostics/audits."""
     payload = {}
@@ -182,6 +233,7 @@ def _authority_payload(blob: dict) -> dict:
     meta.pop("evidence_audit", None)
     meta.pop("report_utility", None)
     meta.pop("deck_rankings", None)
+    meta.pop("refresh_changes", None)
     return payload
 
 
@@ -2185,6 +2237,42 @@ def generate_ranking(
         blob.pop("_deck_ranking_projection_inputs", None)
     finally:
         con.close()
+
+    current_snapshot = ranking_snapshot(blob)
+    try:
+        previous_blob = read_published_ranking(out_path)
+        previous_changes = (
+            previous_blob.get("meta", {}).get("refresh_changes", {})
+            if previous_blob is not None and isinstance(previous_blob.get("meta"), dict)
+            else {}
+        )
+        previous_snapshot = (
+            previous_changes.get("snapshot")
+            if isinstance(previous_changes, dict)
+            and isinstance(previous_changes.get("snapshot"), dict)
+            else ranking_snapshot(previous_blob) if previous_blob is not None else None
+        )
+        refresh_changes = compare_ranking_snapshots(current_snapshot, previous_snapshot)
+    except (PublishedRankingPayloadError, RankingSnapshotError) as exc:
+        reason = f"previous ranking comparison unavailable: {exc}"
+        refresh_changes = compare_ranking_snapshots(current_snapshot, None)
+        refresh_changes.update({
+            "status": "unavailable",
+            "reason": reason,
+            "insights": [{
+                "type": "unavailable",
+                "text": f"Comparison unavailable: {reason}; the current publication remains usable.",
+                "evidence": {"available": False, "reason": reason},
+            }],
+        })
+    # The snapshot is the only persisted handoff needed by the next refresh.
+    # Detailed per-candidate diagnostics remain in the selected insight evidence;
+    # avoid carrying an unused decomposition table into every HTML page.
+    refresh_changes["snapshot"] = current_snapshot
+    refresh_changes["unavailable_attributions"] = refresh_changes.get(
+        "unavailable_attributions", [],
+    )[:3]
+    blob["meta"]["refresh_changes"] = refresh_changes
 
     template = TEMPLATE_PATH.read_text()
     assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
