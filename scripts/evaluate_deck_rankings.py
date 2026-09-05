@@ -381,7 +381,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--served-model", action="store_true",
-        help="freeze and score the current served Deck Rankings model on declared origins",
+        help="run the served-model freeze/development/confirmation experiment",
+    )
+    parser.add_argument(
+        "--phase", choices=("freeze", "development", "confirmation", "all"),
+        default="development",
+        help="served-model phase (default: freeze all, then score development)",
+    )
+    parser.add_argument(
+        "--selected-method",
+        help="method selected from sealed development results before confirmation",
     )
     parser.add_argument(
         "--output-dir", type=Path,
@@ -428,7 +437,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             scales = tuple(args.prior_scales) if args.prior_scales else (1.0, 0.5, 2.0)
             summary = run_served_model_evaluation(
                 args.db, args.output_dir, origins=origins,
-                prior_scales=scales, draws=args.draws,
+                prior_scales=scales, draws=args.draws, phase=args.phase,
+                selected_method=args.selected_method,
             )
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc

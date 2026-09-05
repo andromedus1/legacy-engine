@@ -123,6 +123,42 @@ pending; the baseline production prior is unchanged.
 The single standard independent implementation review runs alongside the forecast freezes.
 Actual-corpus results, review fixes, and CI remain required for final feature closure.
 
+## Current-cycle implementation update — 2026-09-05
+
+Accepted review corrections are implemented in the shared projection, raw snapshot/heldout
+utilities, served evaluator, and generator handoff.  Parent classification now binds and replays
+the production colour-split registry (including Energy branches) in both training and heldout
+windows.  Optional `match_idx` is carried from the source rounds table, so physical identity
+deduplication preserves same-player rematches and removes only the reverse row for the same match.
+The fixed quarantine policy remains `quarantine-unresolved-decks` with ceilings of 0.005 decks and
+0.02 rounds in every training and heldout window; its ledger and retained-facts binding are
+recorded in the artifacts.  The evaluator requires an artifact digest, rejects duplicate forecast
+cells, and reports selected-view identity including source clock, windows, components, match hash,
+and concentration for every positive-n interval override.  The plan-borrowing challenger remains
+conditional: it overlays mean/strength while preserving direct W/n and source identity, and a
+target with no donors exactly uses the baseline prior.
+
+The served CLI has explicit `freeze`, `development`, `confirmation`, and `all` phases.  The
+default `--served-model` invocation freezes all six predeclared origins and scores only the three
+development horizons, writing `development-summary.json`; confirmation reads sealed predictions,
+requires `--selected-method`, writes `development-selection.json`, and only then opens its three
+confirmation horizons.  Summaries contain match-weighted scores, event-paired stability,
+per-method performance/floor order sensitivity, and named-floor followups for every method, with
+descriptive `supported`, `tentative`, or `inconclusive` status and no significance/publication
+gate.  Runnable commands are:
+
+```
+.venv/bin/python scripts/evaluate_deck_rankings.py --db <source.duckdb> --served-model \
+  --output-dir data/benchmarks/deck-rankings-evaluation-v1 --phase development
+.venv/bin/python scripts/evaluate_deck_rankings.py --db <source.duckdb> --served-model \
+  --output-dir data/benchmarks/deck-rankings-evaluation-v1 --phase confirmation \
+  --selected-method <development-method>
+```
+
+Focused projection, evaluator, snapshot, CLI compatibility, and file-backed production parity
+tests pass.  The actual-corpus freeze and all development/confirmation scores remain pending
+host execution; no empirical conclusion or production prior change is claimed here.
+
 ## Review boundary
 
 Shared projection, fixed challengers, snapshot/heldout policy, and evaluator implementation are

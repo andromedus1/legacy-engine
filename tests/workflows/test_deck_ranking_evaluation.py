@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from legacy_engine.advisory.ranking_benchmark import content_sha256
-from legacy_engine.workflows.deck_ranking_evaluation import evaluate_ranking_origin
+from legacy_engine.workflows.deck_ranking_evaluation import (
+    _phase_summary,
+    _seal_development_selection,
+    _write_digested,
+    evaluate_ranking_origin,
+)
 
 
 def _cell(subject: str, opponent: str, probability: float, support_n: int = 8) -> dict:
@@ -111,6 +116,66 @@ def test_tampered_frozen_artifact_fails_closed() -> None:
     artifact["forecasts"]["1"]["cells"][0]["probability"] = 0.99
     with pytest.raises(ValueError, match="artifact digest"):
         evaluate_ranking_origin(artifact, [_match()])
+
+
+def test_frozen_artifact_requires_digest() -> None:
+    artifact = _artifact()
+    artifact.pop("artifact_sha256")
+    with pytest.raises(ValueError, match="missing artifact digest"):
+        evaluate_ranking_origin(artifact, [_match()])
+
+
+def test_frozen_artifact_rejects_duplicate_forecast_cells() -> None:
+    artifact = _artifact()
+    artifact["forecasts"]["1"]["cells"].append(_cell("A", "B", 0.8))
+    artifact["artifact_sha256"] = content_sha256({
+        key: value for key, value in artifact.items() if key != "artifact_sha256"
+    })
+    with pytest.raises(ValueError, match="duplicate forecast cells"):
+        evaluate_ranking_origin(artifact, [_match()])
+
+
+def test_named_floor_followup_is_reported_for_each_method() -> None:
+    artifact = _artifact(floor_pairings=[{
+        "subject": "A", "opponent": "C", "support_n": 0, "available": True,
+    }])
+    artifact["forecasts"]["0.5"]["floor_pairings"] = artifact["forecasts"]["1"]["floor_pairings"]
+    artifact["artifact_sha256"] = content_sha256({
+        key: value for key, value in artifact.items() if key != "artifact_sha256"
+    })
+    result = evaluate_ranking_origin(artifact, [_match()])
+    assert {item["method"] for item in result["floor_evidence"]} == {"0.5", "1"}
+
+
+def test_phase_summary_exposes_weighted_scores_and_independent_order_sensitivity() -> None:
+    result = evaluate_ranking_origin(_artifact(), [_match()])
+    summary = _phase_summary(
+        [result], phase="development", selected_method=None,
+        origins_declared=(("2026-01-01", "2026-01-08", "2025-12-01"),),
+        scales=(1.0, 0.5, 2.0), draws=64,
+    )
+    assert summary["status"] == "tentative"
+    assert summary["methods"]["1"]["match_weighted"]["weight"] == pytest.approx(1.0)
+    assert summary["methods"]["0.5"]["performance_order_sensitivity"]["by_origin"]
+    assert summary["methods"]["1"]["named_floor_followup"] == []
+
+
+def test_development_selection_is_sealed_and_cannot_change(tmp_path) -> None:
+    result = evaluate_ranking_origin(_artifact(), [_match()])
+    development = _phase_summary(
+        [result], phase="development", selected_method=None,
+        origins_declared=(("2026-01-01", "2026-01-08", "2025-12-01"),),
+        scales=(1.0, 0.5, 2.0), draws=64,
+    )
+    development = _write_digested(tmp_path / "development-summary.json", development)
+    selection = _seal_development_selection(
+        tmp_path, development, selected_method="0.5", scales=(1.0, 0.5, 2.0),
+    )
+    assert selection["selected_method"] == "0.5"
+    with pytest.raises(ValueError, match="already sealed"):
+        _seal_development_selection(
+            tmp_path, development, selected_method="1", scales=(1.0, 0.5, 2.0),
+        )
 
 
 def test_excluded_and_mirror_rows_do_not_become_zero_loss() -> None:

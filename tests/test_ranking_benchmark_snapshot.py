@@ -122,6 +122,42 @@ def test_snapshot_excludes_every_future_or_derived_surface(tmp_path):
     con.close()
 
 
+def test_optional_color_split_registry_matches_production_parent_labeling(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    color_path = tmp_path / "color-splits.json"
+    color_path.write_text(json.dumps({
+        "version": "test",
+        "splits": [{
+            "parent": "Alpha", "min_copies": 1,
+            "buckets": [
+                {"name": "Blue Alpha", "requires_any": ["U"]},
+                {"name": "Other Alpha", "forbids_all": ["U"]},
+            ],
+        }],
+    }))
+    snapshot = tmp_path / "snapshot.duckdb"
+    manifest = build_origin_snapshot(
+        source, snapshot, fold=_fold(), protocol_hash="protocol",
+        color_splits_path=color_path,
+    )
+    assert manifest.color_splits_sha256 == hashlib.sha256(color_path.read_bytes()).hexdigest()
+    con = duckdb.connect(str(snapshot), read_only=True)
+    assert con.execute(
+        "SELECT archetype FROM decks WHERE tournament_id='past' AND deck_idx=0"
+    ).fetchone() == ("Blue Alpha",)
+    con.close()
+    outcomes = load_heldout_outcomes(
+        source, _fold(), color_splits_path=color_path,
+        expected_color_splits_sha256=manifest.color_splits_sha256,
+    )
+    assert all(match.match_idx is not None for match in outcomes.matches)
+    with pytest.raises(ValueError, match="color-split registry hash"):
+        load_heldout_outcomes(
+            source, _fold(), color_splits_path=color_path,
+            expected_color_splits_sha256="tampered",
+        )
+
+
 def test_quarantine_snapshot_removes_whole_training_deck_before_classification(tmp_path):
     source = _source_db(tmp_path / "source.duckdb")
     con = store.connect(source)

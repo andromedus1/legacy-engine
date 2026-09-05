@@ -208,6 +208,7 @@ class SnapshotManifest(LegacyEngineModel):
     taxonomy_effective_at: str | None
     taxonomy_sha256: str
     rules_sha256: str
+    color_splits_sha256: str | None = None
     card_availability_sha256: str
     degraded: bool
     reasons: tuple[str, ...]
@@ -385,6 +386,10 @@ def canonical_json_bytes(value: object) -> bytes:
                 value.pop("card_metadata_quarantine", None)
             if value.get("card_metadata_quarantine_sha256") is None:
                 value.pop("card_metadata_quarantine_sha256", None)
+            if value.get("color_splits_sha256") is None:
+                value.pop("color_splits_sha256", None)
+            if value.get("match_idx") is None:
+                value.pop("match_idx", None)
             if value.get("claim_ceiling") == "predictive-claim-supported":
                 value.pop("claim_ceiling", None)
     return (json.dumps(

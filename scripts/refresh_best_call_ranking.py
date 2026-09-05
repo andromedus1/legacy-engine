@@ -1865,7 +1865,7 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
     projection_inputs = {}
     for key, interval in (("arch", parent_interval), ("camps", camp_interval)):
         rows = blob[key]
-        overrides, notes, presence = {}, {}, {}
+        overrides, notes, override_identities, presence = {}, {}, {}, {}
         details = {}
         for row in rows:
             subject = row["subject"]
@@ -1897,6 +1897,22 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                         atoms = pair.expanded if direct.kind == "certified-expanded" else pair.current
                         admitted = set(direct.pair_component_ids)
                         ranges = [f"[{atom.start or 'start'}, {atom.end})" for atom in atoms if atom.component_id in admitted]
+                        selected_views = interval.evidence[(subject, opponent)]
+                        override_identities[(subject, opponent)] = {
+                            "view": direct.kind,
+                            "basis": basis,
+                            "clock": selected_views.clock.model_dump(mode="json"),
+                            "match_ids_sha256": direct.prior.observation_match_ids_sha256,
+                            "match_n": len(direct.match_ids),
+                            "pair_component_ids": list(direct.pair_component_ids),
+                            "certificate_ids": list(direct.certificate_ids),
+                            "windows": ranges,
+                            "status": direct.status,
+                            "concentration": (
+                                direct.concentration.model_dump(mode="json")
+                                if direct.concentration is not None else None
+                            ),
+                        }
                         concentration = direct.concentration
                         details[(subject, opponent)] = {
                             "intervals": ", ".join(ranges),
@@ -1909,7 +1925,9 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
             projection = project_ranking_rows(
                 {row["subject"]: _row_measurements(row) for row in rows},
                 shares, counts=counts, candidate_presence=presence,
-                cell_overrides=overrides, override_sources={k: notes[k] for k in overrides},
+                cell_overrides=overrides,
+                override_sources={k: notes[k] for k in overrides},
+                override_identities=override_identities,
             )
             for row in rows:
                 row["decision"] = normalized(projection["rows"][row["subject"]], row, notes)
@@ -1925,7 +1943,12 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 "counts": dict(counts),
                 "candidate_presence": dict(presence),
                 "cell_overrides": dict(overrides),
-                "override_sources": dict(notes),
+                # Keep this mapping aligned with cell_overrides.  The ranking
+                # kernel rejects provenance labels for cells it was not given;
+                # era/fallback notes for untouched cells belong to the report,
+                # not to the evaluator handoff.
+                "override_sources": {k: notes[k] for k in overrides},
+                "override_identities": dict(override_identities),
             }
 
     # Private handoff for the evaluator: the production projection has already

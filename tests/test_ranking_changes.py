@@ -107,6 +107,24 @@ def test_first_and_same_data_publications_are_honest():
     }
 
 
+def test_zero_previous_observed_field_suppresses_movement():
+    previous = _snap(
+        shares={"Alpha": 1.0},
+        cells={"Alpha": {}},
+        observed_field_n=0,
+    )
+    current = _snap(
+        shares={"Alpha": 1.0},
+        cells={"Alpha": {}},
+        date="2026-02-01",
+    )
+    result = compare_ranking_snapshots(current, previous)
+
+    assert result["status"] == "unavailable"
+    assert result["insights"][0]["type"] == "unavailable"
+    assert "zero observed field" in result["reason"]
+
+
 @pytest.mark.parametrize(
     ("field", "old", "new"),
     [
@@ -151,6 +169,7 @@ def test_change_reports_field_movement_beneficiary_and_symmetric_attribution():
     by_type = {insight["type"]: insight for insight in result["insights"]}
 
     assert result["status"] == "changed"
+    assert len(result["insights"]) <= 3
     assert set(by_type) == {"field_movement", "beneficiary", "recommendation"}
     beneficiary = by_type["beneficiary"]["evidence"]
     assert beneficiary["candidate"] == "Alpha"

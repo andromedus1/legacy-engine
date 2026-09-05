@@ -48,6 +48,7 @@ from legacy_engine.analytics.eras.run import run_eras
 from legacy_engine.analytics.match_results import compute_match_results
 from legacy_engine.analytics.match_results import normalize_player, parse_match_result
 from legacy_engine.analytics.matchup import build_adaptive_matrix, build_matrix
+from legacy_engine.archetype.color_splits import load_color_split_registry
 from legacy_engine.archetype.labeler import label_decks
 from legacy_engine.archetype.matcher import classify
 from legacy_engine.archetype.rules import load_ruleset
@@ -55,6 +56,7 @@ from legacy_engine.colors import compute_deck_colors
 from legacy_engine.config import RULES_DIR
 from legacy_engine.ingestion import store
 from legacy_engine.ingestion.banlist import BAN_EVENTS
+from legacy_engine.models.color_split import ColorSplitRegistry
 
 _RAW_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "tournaments": ("id", "name", "date", "uri", "format", "source", "provenance"),
@@ -63,6 +65,22 @@ _RAW_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "rounds": ("tournament_id", "match_idx", "player1", "player2", "result"),
     "standings": ("tournament_id", "rank", "player", "points", "wins", "losses", "draws"),
 }
+
+
+def _color_split_binding(
+    color_splits_path: Path | None,
+    color_splits: ColorSplitRegistry | None,
+) -> tuple[ColorSplitRegistry | None, str | None]:
+    """Resolve the explicit parent color registry and bind its exact source bytes."""
+    if color_splits_path is not None and color_splits is not None:
+        raise ValueError("pass color_splits_path or color_splits, not both")
+    if color_splits_path is not None:
+        path = Path(color_splits_path)
+        registry = load_color_split_registry(path)
+        return registry, hashlib.sha256(path.read_bytes()).hexdigest()
+    if color_splits is not None:
+        return color_splits, content_sha256(color_splits.model_dump(mode="json"))
+    return None, None
 
 
 def _rows(con: duckdb.DuckDBPyConnection, table: str, columns: tuple[str, ...], cutoff: str):
@@ -271,11 +289,16 @@ def build_origin_snapshot(
     taxonomy_snapshot: Path | None = None,
     ban_events: tuple[tuple[str, str, str], ...] | None = None,
     card_metadata_policy: CardMetadataPolicy | None = None,
+    color_splits_path: Path | None = None,
+    color_splits: ColorSplitRegistry | None = None,
 ) -> SnapshotManifest:
     """Build an atomic, raw-facts-only pre-cutoff corpus and recompute its era ledger."""
     if source_db.resolve() == destination_db.resolve():
         raise ValueError("source and destination snapshot paths must differ")
     cutoff = fold.cutoff
+    color_registry, color_splits_sha256 = _color_split_binding(
+        color_splits_path, color_splits,
+    )
     taxonomy_effective_at: str | None = None
     if taxonomy_mode == "contemporaneous":
         if taxonomy_snapshot is None:
@@ -312,7 +335,14 @@ def build_origin_snapshot(
         # Both modes replay their pinned parent rules. Stored archetype/variant columns are
         # mutable derived labels and may never define the frozen training experiment.
         ruleset = load_ruleset(rules_path)
-        label_decks(destination, ruleset, lambda name: store.load_card(destination, name))
+        card_cache = {}
+
+        def resolve_card(name: str):
+            if name not in card_cache:
+                card_cache[name] = store.load_card(destination, name)
+            return card_cache[name]
+
+        label_decks(destination, ruleset, resolve_card, color_splits=color_registry)
         destination.execute("UPDATE decks SET variant = NULL")
         _validate_closure(destination)
         registered_bans = (
@@ -362,6 +392,7 @@ def build_origin_snapshot(
             taxonomy_effective_at=taxonomy_effective_at,
             taxonomy_sha256=content_sha256(labels),
             rules_sha256=rules_hash,
+            color_splits_sha256=color_splits_sha256,
             card_availability_sha256=content_sha256(card_names),
             degraded=taxonomy_mode == "retrospective-fixed-parent",
             reasons=tuple(filter(None, (
@@ -681,19 +712,33 @@ def freeze_origin_predictions(
 def _classified_labels(
     con: duckdb.DuckDBPyConnection, taxonomy_snapshot: Path, cutoff: str,
     excluded_decks: set[tuple[str, int]] | None = None,
+    color_splits: ColorSplitRegistry | None = None,
 ) -> dict[tuple[str, int], str]:
     _manifest, rules_path = _load_taxonomy_snapshot(taxonomy_snapshot, cutoff)
-    return _classified_labels_with_rules(con, rules_path, excluded_decks=excluded_decks)
+    return _classified_labels_with_rules(
+        con, rules_path, excluded_decks=excluded_decks, color_splits=color_splits,
+    )
 
 
 def _classified_labels_with_rules(
     con: duckdb.DuckDBPyConnection, rules_path: Path,
     excluded_decks: set[tuple[str, int]] | None = None,
+    color_splits: ColorSplitRegistry | None = None,
 ) -> dict[tuple[str, int], str]:
     if not rules_path.is_dir():
         raise ValueError("taxonomy rules payload must be a rules directory")
     ruleset = load_ruleset(rules_path)
     labels: dict[tuple[str, int], str] = {}
+    card_cache = {}
+
+    def resolve_card(name: str):
+        if name not in card_cache:
+            try:
+                card_cache[name] = store.load_card(con, name)
+            except (TypeError, ValueError):
+                card_cache[name] = None
+        return card_cache[name]
+
     for tournament_id, deck_idx in con.execute(
         "SELECT tournament_id, deck_idx FROM decks ORDER BY 1, 2"
     ).fetchall():
@@ -708,15 +753,17 @@ def _classified_labels_with_rules(
         ).fetchall():
             target = main if board == "main" else side
             target[name] = target.get(name, 0) + count
-            try:
-                card = store.load_card(con, name)
-            except (TypeError, ValueError):
-                card = None
+            card = resolve_card(name)
             if card is not None:
                 cards.append(card)
-        labels[(str(tournament_id), int(deck_idx))] = classify(
-            main, side, ruleset, compute_deck_colors(cards),
-        ).archetype
+        result = classify(main, side, ruleset, compute_deck_colors(cards))
+        label = result.archetype
+        if color_splits is not None:
+            from legacy_engine.archetype.color_splits import count_deck_colors, resolve_color_split
+            label = resolve_color_split(
+                label, count_deck_colors(main, resolve_card), color_splits,
+            ) or label
+        labels[(str(tournament_id), int(deck_idx))] = label
     return labels
 
 
@@ -728,10 +775,21 @@ def load_heldout_outcomes(
     expected_rules_sha256: str | None = None,
     taxonomy_snapshot: Path | None = None,
     card_metadata_policy: CardMetadataPolicy | None = None,
+    color_splits_path: Path | None = None,
+    color_splits: ColorSplitRegistry | None = None,
+    expected_color_splits_sha256: str | None = None,
 ) -> HeldoutOutcomes:
     """Read future match outcomes and a separate classified field-mass denominator."""
     con = duckdb.connect(str(source_db), read_only=True)
     try:
+        color_registry, color_splits_sha256 = _color_split_binding(
+            color_splits_path, color_splits,
+        )
+        if (
+            expected_color_splits_sha256 is not None
+            and expected_color_splits_sha256 != color_splits_sha256
+        ):
+            raise ValueError("heldout color-split registry hash does not match frozen snapshot")
         quarantine: CardMetadataQuarantineLedger | None = None
         if card_metadata_policy is not None and card_metadata_policy.mode == "quarantine-unresolved-decks":
             quarantine = plan_card_metadata_quarantine(
@@ -748,6 +806,7 @@ def load_heldout_outcomes(
                 raise ValueError("contemporaneous held-out classification requires a taxonomy snapshot")
             classified = _classified_labels(
                 con, taxonomy_snapshot, fold.cutoff, excluded_decks=excluded_decks,
+                color_splits=color_registry,
             )
         elif taxonomy_mode == "retrospective-fixed-parent":
             if taxonomy_snapshot is not None:
@@ -757,6 +816,7 @@ def load_heldout_outcomes(
                 raise ValueError("retrospective parent taxonomy rules changed after prediction freeze")
             classified = _classified_labels_with_rules(
                 con, RULES_DIR, excluded_decks=excluded_decks,
+                color_splits=color_registry,
             )
         else:
             raise ValueError(f"unknown taxonomy mode: {taxonomy_mode}")
@@ -802,9 +862,10 @@ def load_heldout_outcomes(
     ) in rows:
         deck_key1 = (str(event_id), int(deck1)) if deck1 is not None else None
         deck_key2 = (str(event_id), int(deck2)) if deck2 is not None else None
+        round_key = (str(event_id), int(match_idx)) if match_idx is not None else None
         card_excluded = (
             deck_key1 in excluded_decks or deck_key2 in excluded_decks
-            or (str(event_id), int(match_idx)) in excluded_rounds
+            or (round_key is not None and round_key in excluded_rounds)
         )
         arch1 = classified.get(deck_key1) if deck_key1 is not None else None
         arch2 = classified.get(deck_key2) if deck_key2 is not None else None
@@ -828,7 +889,7 @@ def load_heldout_outcomes(
             subject_player, opponent_player = player1, player2
             subject_won = outcome is not None and outcome.winner == "p1"
         heldout.append(HeldoutMatch(
-            event_id=str(event_id), match_idx=int(match_idx),
+            event_id=str(event_id), match_idx=(int(match_idx) if match_idx is not None else None),
             event_date=str(event_date), provenance=str(provenance),
             subject=subject, opponent=opponent,
             subject_player_key=normalize_player(subject_player) or None,

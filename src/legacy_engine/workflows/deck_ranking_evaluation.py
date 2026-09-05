@@ -14,6 +14,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 import hashlib
+import json
 import math
 from pathlib import Path
 import subprocess
@@ -34,6 +35,7 @@ from legacy_engine.analytics.eras.consume import AnalysisClock
 from legacy_engine.analytics.amplification.corpus import build_interval_evidence_corpus
 from legacy_engine.ingestion.banlist import BAN_EVENTS
 from legacy_engine.analytics.strategy_plan import load_strategic_plan_registry
+from legacy_engine.config import COLOR_SPLITS_REGISTRY_PATH
 from legacy_engine.workflows.ranking_benchmark import (
     build_origin_snapshot,
     load_heldout_outcomes,
@@ -63,6 +65,8 @@ DECLARED_ORIGINS: tuple[tuple[str, str, str], ...] = (
     ("2026-08-24", "2026-08-31", "2026-08-10"),
     ("2026-08-31", "2026-09-04", "2026-08-10"),
 )
+DEVELOPMENT_ORIGINS = DECLARED_ORIGINS[:3]
+CONFIRMATION_ORIGINS = DECLARED_ORIGINS[3:]
 
 
 def _date(value: object, *, name: str) -> date:
@@ -143,6 +147,7 @@ def _protocol_hash(
             "registry_sha256": _registry_sha256(registry),
         },
         "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
+        "color_splits_sha256": _file_sha256(COLOR_SPLITS_REGISTRY_PATH),
         "taxonomy_mode": "retrospective-fixed-parent",
         "ground_n": DEFAULT_GROUND_N, "top_k": DEFAULT_TOP_K,
         "cover_min": DEFAULT_COVER_MIN, "min_row_share": DEFAULT_MIN_ROW_SHARE,
@@ -273,6 +278,7 @@ def _forecast_payload(projection: Mapping[str, Any]) -> dict[str, Any]:
                 "support_n": int(cell["n"]),
                 "served": True,
                 "source_kind": cell["source_kind"],
+                "source_identity": cell["source_identity"],
                 "prior_source": cell["prior_source"],
                 "prior_strength_original": float(cell["prior_strength_original"]),
                 "prior_strength_effective": float(cell["prior_strength_effective"]),
@@ -324,6 +330,7 @@ def freeze_ranking_origin(
         Path(source_db), snapshot, fold=fold, protocol_hash=protocol_hash,
         taxonomy_mode="retrospective-fixed-parent",
         card_metadata_policy=DEFAULT_CARD_METADATA_POLICY,
+        color_splits_path=COLOR_SPLITS_REGISTRY_PATH,
         ban_events=tuple(
             (event[0].isoformat(), event[1], event[2])
             for event in BAN_EVENTS if event[0].isoformat() < fold.cutoff
@@ -339,6 +346,7 @@ def freeze_ranking_origin(
             rows, shares, counts=counts, candidate_presence=presence,
             cell_overrides=handoff["cell_overrides"],
             override_sources=handoff["override_sources"],
+            override_identities=handoff.get("override_identities", {}),
             prior_scale=scale, draws=draws, seed=730_021,
         )
         for scale in scales
@@ -347,6 +355,7 @@ def freeze_ranking_origin(
         rows, shares, counts=counts, candidate_presence=presence,
         cell_overrides=handoff["cell_overrides"],
         override_sources=handoff["override_sources"],
+        override_identities=handoff.get("override_identities", {}),
         prior_overrides=plan_context["priors"],
         draws=draws, seed=730_021,
     )
@@ -357,6 +366,7 @@ def freeze_ranking_origin(
         "snapshot_file_sha256": _file_sha256(snapshot),
         "training_facts_sha256": manifest.training_facts_sha256,
         "rules_sha256": manifest.rules_sha256,
+        "color_splits_sha256": manifest.color_splits_sha256,
         "taxonomy_mode": "retrospective-fixed-parent",
         "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
         "training_card_metadata_quarantine": (
@@ -381,6 +391,7 @@ def freeze_ranking_origin(
             "ground_n": DEFAULT_GROUND_N, "top_k": DEFAULT_TOP_K,
             "cover_min": DEFAULT_COVER_MIN, "min_row_share": DEFAULT_MIN_ROW_SHARE,
             "seed": 730_021,
+            "color_splits_sha256": manifest.color_splits_sha256,
             "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
             "plan_prior": {
                 "method": PLAN_BORROWING_METHOD,
@@ -413,13 +424,14 @@ def _validate_frozen_predictions(forecasts: Mapping[str, Any]) -> None:
     if not isinstance(forecasts, Mapping):
         raise ValueError("forecasts must be a mapping")
     digest = forecasts.get("artifact_sha256")
-    if digest is not None:
-        payload = {
-            key: value for key, value in forecasts.items()
-            if key not in {"artifact_sha256", "paths"}
-        }
-        if content_sha256(payload) != digest:
-            raise ValueError("frozen ranking prediction artifact digest mismatch")
+    if not isinstance(digest, str) or not digest:
+        raise ValueError("frozen ranking predictions are missing artifact digest")
+    payload = {
+        key: value for key, value in forecasts.items()
+        if key not in {"artifact_sha256", "paths"}
+    }
+    if content_sha256(payload) != digest:
+        raise ValueError("frozen ranking prediction artifact digest mismatch")
     metadata = forecasts.get("metadata")
     if not isinstance(metadata, Mapping):
         raise ValueError("frozen ranking predictions are missing metadata")
@@ -433,15 +445,25 @@ def _validate_frozen_predictions(forecasts: Mapping[str, Any]) -> None:
         raise ValueError("frozen ranking predictions are missing methods")
     keys: set[tuple[str, str]] | None = None
     for method, value in methods.items():
-        if not isinstance(value, Mapping) or not isinstance(value.get("cells"), Sequence):
+        if (
+            not isinstance(value, Mapping)
+            or not isinstance(value.get("cells"), Sequence)
+            or isinstance(value.get("cells"), (str, bytes))
+        ):
             raise ValueError(f"frozen ranking method {method!r} has no cell grid")
-        method_keys = {
-            (str(cell.get("subject")), str(cell.get("opponent")))
-            for cell in value["cells"] if isinstance(cell, Mapping)
-        }
+        method_keys: list[tuple[str, str]] = []
+        for cell in value["cells"]:
+            if not isinstance(cell, Mapping):
+                raise ValueError(f"frozen ranking method {method!r} has an invalid cell")
+            if "subject" not in cell or "opponent" not in cell:
+                raise ValueError(f"frozen ranking method {method!r} has an unidentified cell")
+            method_keys.append((str(cell["subject"]), str(cell["opponent"])))
+        if len(set(method_keys)) != len(method_keys):
+            raise ValueError(f"frozen ranking method {method!r} has duplicate forecast cells")
+        method_key_set = set(method_keys)
         if keys is None:
-            keys = method_keys
-        elif method_keys != keys:
+            keys = method_key_set
+        elif method_key_set != keys:
             raise ValueError("frozen ranking methods do not share an identical cell grid")
 
 
@@ -639,6 +661,7 @@ def evaluate_ranking_origin(
             "missing_forecast_directions": missing_directions,
             "log_loss": log_sum / weight_sum if weight_sum else None,
             "brier": brier_sum / weight_sum if weight_sum else None,
+            "scored_directed_weight": weight_sum,
             "support_strata": strata,
             "calibration": _calibration(points),
             "reciprocity": {
@@ -672,9 +695,11 @@ def evaluate_ranking_origin(
             if method != "1"
         }
     floor_evidence: list[dict[str, Any]] = []
-    baseline = evaluated.get("1")
-    if baseline is not None:
-        for pairing in baseline["floor_pairings"]:
+    # The named-floor followup is descriptive evidence for every forecast
+    # method.  It never replaces the fitted floor or makes an unavailable
+    # pairing a zero-loss observation.
+    for method, result in evaluated.items():
+        for pairing in result["floor_pairings"]:
             subject, opponent = pairing["subject"], pairing["opponent"]
             matching = [
                 outcome for outcome in valid
@@ -687,6 +712,7 @@ def evaluate_ranking_origin(
                 for outcome in matching
             )
             floor_evidence.append({
+                "method": method,
                 "subject": subject, "opponent": opponent,
                 "available": bool(matching), "matches": len(matching),
                 "subject_wins": wins, "subject_losses": len(matching) - wins,
@@ -731,11 +757,22 @@ def _markdown_summary(summary: Mapping[str, Any]) -> str:
     lines = [
         "# Deck Rankings served-model evaluation",
         "",
+        f"Phase: {summary.get('phase', 'unknown')}; evidence status: {summary.get('status', 'unknown')}",
+        f"Selected candidate: {summary.get('selected_candidate') or 'not sealed'}",
         "Fixed prior scales and retrospective parent taxonomy; forecasts were frozen before heldout outcomes were read.",
         "",
-        "| Origin | Scale | total matches | common cases | log loss | Brier |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Method | weighted matches | log loss | Brier |",
+        "|---|---:|---:|---:|",
     ]
+    methods = summary.get("methods", {})
+    for method, aggregate in methods.items():
+        weighted = aggregate.get("match_weighted", {})
+        lines.append(
+            f"| {method} | {weighted.get('weight', 0):g} | "
+            f"{weighted.get('log_loss') if weighted.get('log_loss') is not None else 'n/a'} | "
+            f"{weighted.get('brier') if weighted.get('brier') is not None else 'n/a'} |"
+        )
+    lines.extend(["", "| Origin | Method | total matches | common cases | log loss | Brier |", "|---|---|---:|---:|---:|---:|"])
     for origin in summary.get("origins", []):
         fold = origin["fold"]
         label = f"{fold['cutoff']}→{fold['evaluation_until']}"
@@ -752,43 +789,300 @@ def _markdown_summary(summary: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_served_model_evaluation(
+def _artifact_body(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: item for key, item in value.items()
+        if key not in {"artifact_sha256", "paths"}
+    }
+
+
+def _read_sealed_json(path: Path, *, description: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unable to read sealed {description}: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"sealed {description} must be a JSON object")
+    digest = value.get("artifact_sha256")
+    if not isinstance(digest, str) or content_sha256(_artifact_body(value)) != digest:
+        raise ValueError(f"sealed {description} has an invalid artifact digest")
+    return value
+
+
+def _freeze_all_origins(
     source_db: Path,
-    output_dir: Path,
+    root: Path,
+    origins: Sequence[tuple[str, str, str]],
     *,
-    origins: Sequence[tuple[str, str, str]] = DECLARED_ORIGINS,
-    prior_scales: tuple[float, ...] = DEFAULT_PRIOR_SCALES,
-    draws: int = DEFAULT_DRAWS,
-) -> dict[str, Any]:
-    """Freeze every declared origin, then load and score all heldout horizons."""
-    scales = _validate_scales(prior_scales)
-    if not origins:
-        raise ValueError("at least one chronological origin must be declared")
-    root = Path(output_dir)
+    scales: tuple[float, ...],
+    draws: int,
+) -> list[dict[str, Any]]:
     frozen: list[dict[str, Any]] = []
-    # Phase 1: all prediction artifacts are sealed before phase 2 opens outcomes.
     for cutoff, evaluation_until, regime_start in origins:
         origin_dir = root / f"{cutoff}--{evaluation_until}"
-        frozen.append(freeze_ranking_origin(
-            source_db, origin_dir, cutoff=cutoff,
-            evaluation_until=evaluation_until, regime_start=regime_start,
-            prior_scales=scales, draws=draws,
-        ))
-    evaluated: list[dict[str, Any]] = []
-    for artifact in frozen:
-        fold = BenchmarkFold.model_validate(artifact["metadata"]["fold"])
-        outcomes = load_heldout_outcomes(
-            Path(source_db), fold,
-            expected_rules_sha256=artifact["metadata"]["rules_sha256"],
-            card_metadata_policy=DEFAULT_CARD_METADATA_POLICY,
+        paths = (
+            origin_dir / "snapshot.duckdb",
+            origin_dir / "snapshot-manifest.json",
+            origin_dir / "predictions.json",
         )
-        evaluation = evaluate_ranking_origin(artifact, outcomes)
-        eval_path = root / f"{fold.cutoff}--{fold.evaluation_until}" / "evaluation.json"
-        atomic_write_canonical(eval_path, evaluation)
-        evaluated.append(evaluation)
-    summary = {
+        if any(path.exists() for path in paths):
+            frozen.append(_load_reusable_frozen_origin(
+                root, (cutoff, evaluation_until, regime_start), scales=scales, draws=draws,
+            ))
+            continue
+        frozen.append(freeze_ranking_origin(
+            source_db, origin_dir, cutoff=cutoff, evaluation_until=evaluation_until,
+            regime_start=regime_start, prior_scales=scales, draws=draws,
+        ))
+    return frozen
+
+
+def _load_reusable_frozen_origin(
+    root: Path,
+    origin: tuple[str, str, str],
+    *,
+    scales: tuple[float, ...],
+    draws: int,
+) -> dict[str, Any]:
+    cutoff, evaluation_until, regime_start = origin
+    origin_dir = root / f"{cutoff}--{evaluation_until}"
+    snapshot_path = origin_dir / "snapshot.duckdb"
+    manifest_path = origin_dir / "snapshot-manifest.json"
+    prediction_path = origin_dir / "predictions.json"
+    paths = (snapshot_path, manifest_path, prediction_path)
+    if not all(path.is_file() for path in paths):
+        missing = ", ".join(path.name for path in paths if not path.is_file())
+        raise ValueError(f"frozen ranking origin is incomplete ({missing}): {origin_dir}")
+    artifact = _read_sealed_json(prediction_path, description="ranking predictions")
+    _validate_frozen_predictions(artifact)
+    metadata = artifact.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise ValueError(f"frozen ranking origin is missing metadata: {prediction_path}")
+    expected_fold = _fold(cutoff, evaluation_until, regime_start)
+    if metadata.get("fold") != expected_fold.model_dump(mode="json"):
+        raise ValueError(f"frozen ranking origin identity does not match {prediction_path}")
+    if metadata.get("protocol_hash") != _protocol_hash(expected_fold, scales, draws):
+        raise ValueError(f"frozen ranking protocol does not match requested configuration: {prediction_path}")
+    config = metadata.get("config")
+    if not isinstance(config, Mapping):
+        raise ValueError(f"frozen ranking origin is missing configuration: {prediction_path}")
+    if list(config.get("prior_scales", ())) != list(scales) or config.get("draws") != draws:
+        raise ValueError(f"frozen ranking configuration does not match request: {prediction_path}")
+    if metadata.get("color_splits_sha256") != _file_sha256(COLOR_SPLITS_REGISTRY_PATH):
+        raise ValueError(f"frozen ranking color registry does not match request: {prediction_path}")
+    if config.get("color_splits_sha256") != metadata.get("color_splits_sha256"):
+        raise ValueError(f"frozen ranking color registry configuration is inconsistent: {prediction_path}")
+    if metadata.get("card_metadata_policy") != DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"):
+        raise ValueError(f"frozen ranking card metadata policy does not match request: {prediction_path}")
+    if config.get("card_metadata_policy") != metadata.get("card_metadata_policy"):
+        raise ValueError(f"frozen ranking card metadata configuration is inconsistent: {prediction_path}")
+    registry_hash = _registry_sha256(load_strategic_plan_registry())
+    if metadata.get("plan_prior", {}).get("registry_sha256") != registry_hash:
+        raise ValueError(f"frozen ranking plan registry does not match request: {prediction_path}")
+    manifest = _read_json_object(manifest_path, description="snapshot manifest")
+    if content_sha256(manifest) != metadata.get("snapshot_manifest_sha256"):
+        raise ValueError(f"frozen ranking snapshot manifest digest mismatch: {manifest_path}")
+    if _file_sha256(snapshot_path) != metadata.get("snapshot_file_sha256"):
+        raise ValueError(f"frozen ranking snapshot digest mismatch: {snapshot_path}")
+    artifact["paths"] = {
+        "snapshot": str(snapshot_path), "manifest": str(manifest_path),
+        "predictions": str(prediction_path),
+    }
+    return artifact
+
+
+def _load_frozen_origins(
+    root: Path,
+    origins: Sequence[tuple[str, str, str]],
+    *,
+    scales: tuple[float, ...],
+    draws: int,
+) -> list[dict[str, Any]]:
+    return [
+        _load_reusable_frozen_origin(root, origin, scales=scales, draws=draws)
+        for origin in origins
+    ]
+
+
+def _read_json_object(path: Path, *, description: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unable to read {description}: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{description} must be a JSON object: {path}")
+    return value
+
+
+def _partition_origins(
+    origins: Sequence[tuple[str, str, str]],
+) -> tuple[tuple[tuple[str, str, str], ...], tuple[tuple[str, str, str], ...]]:
+    if tuple(origins) == DECLARED_ORIGINS:
+        return DEVELOPMENT_ORIGINS, CONFIRMATION_ORIGINS
+    # Custom origins are still declared in order and split chronologically;
+    # one-origin smoke runs remain useful development-only runs.
+    development_count = max(1, (len(origins) + 1) // 2)
+    return tuple(origins[:development_count]), tuple(origins[development_count:])
+
+
+def _validate_origins(origins: Sequence[tuple[str, str, str]]) -> None:
+    seen: set[tuple[str, str, str]] = set()
+    previous: BenchmarkFold | None = None
+    for origin in origins:
+        if len(origin) != 3 or origin in seen:
+            raise ValueError("origins must be unique cutoff/evaluation/regime triples")
+        seen.add(origin)
+        current = _fold(*origin)
+        if previous is not None and (
+            current.cutoff < previous.cutoff
+            or current.cutoff < previous.evaluation_until
+        ):
+            raise ValueError("origins must be chronological and non-overlapping")
+        previous = current
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _stdev(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    mean = sum(values) / len(values)
+    return math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+
+
+def _phase_evidence(evaluated: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    method_names = sorted({
+        str(method)
+        for origin in evaluated
+        for method in origin.get("methods", {})
+    })
+    methods: dict[str, dict[str, Any]] = {}
+    baseline_by_event: dict[str, dict[str, float]] = {}
+    for origin in evaluated:
+        baseline_by_event[origin["fold"]["fold_id"]] = {
+            str(event): float(score)
+            for event, score in origin.get("methods", {}).get("1", {}).get("event_log_loss", {}).items()
+        }
+    for method in method_names:
+        scores = [
+            origin["methods"][method]
+            for origin in evaluated if method in origin.get("methods", {})
+        ]
+        weights = [float(score.get("scored_directed_weight", 0.0)) for score in scores]
+        total_weight = sum(weights)
+        weighted_log_loss = sum(
+            float(score["log_loss"]) * weight
+            for score, weight in zip(scores, weights, strict=True)
+            if score.get("log_loss") is not None and weight > 0
+        )
+        weighted_brier = sum(
+            float(score["brier"]) * weight
+            for score, weight in zip(scores, weights, strict=True)
+            if score.get("brier") is not None and weight > 0
+        )
+        event_differences: list[float] = []
+        event_records: list[dict[str, Any]] = []
+        for origin in evaluated:
+            current = origin.get("methods", {}).get(method)
+            baseline = baseline_by_event.get(origin["fold"]["fold_id"], {})
+            if current is None:
+                continue
+            for event, value in sorted(current.get("event_log_loss", {}).items()):
+                if method == "1" or event not in baseline:
+                    continue
+                difference = float(value) - baseline[event]
+                event_differences.append(difference)
+                event_records.append({
+                    "fold_id": origin["fold"]["fold_id"],
+                    "event_id": event,
+                    "log_loss_difference_vs_scale_1": difference,
+                })
+        performance_orders = [
+            {"fold_id": origin["fold"]["fold_id"], "order": origin["methods"][method].get("performance_order", [])}
+            for origin in evaluated if method in origin.get("methods", {})
+        ]
+        floor_orders = [
+            {"fold_id": origin["fold"]["fold_id"], "order": origin["methods"][method].get("floor_order", [])}
+            for origin in evaluated if method in origin.get("methods", {})
+        ]
+        top_performance = Counter(
+            order["order"][0] for order in performance_orders if order["order"]
+        )
+        top_floor = Counter(order["order"][0] for order in floor_orders if order["order"])
+        followup = [
+            {"fold_id": origin["fold"]["fold_id"], **item}
+            for origin in evaluated
+            for item in origin.get("floor_evidence", [])
+            if item.get("method") == method
+        ]
+        methods[method] = {
+            "origins": len(scores),
+            "match_weighted": {
+                "weight": total_weight,
+                "log_loss": weighted_log_loss / total_weight if total_weight else None,
+                "brier": weighted_brier / total_weight if total_weight else None,
+            },
+            "event_paired_stability": {
+                "events": len(event_differences),
+                "mean_log_loss_difference_vs_scale_1": _mean(event_differences),
+                "stdev_log_loss_difference_vs_scale_1": _stdev(event_differences),
+                "improved_events": sum(value < 0 for value in event_differences),
+                "worsened_events": sum(value > 0 for value in event_differences),
+                "records": event_records,
+            },
+            "performance_order_sensitivity": {
+                "by_origin": performance_orders,
+                "top_call_counts": dict(sorted(top_performance.items())),
+            },
+            "floor_order_sensitivity": {
+                "by_origin": floor_orders,
+                "top_call_counts": dict(sorted(top_floor.items())),
+            },
+            "named_floor_followup": followup,
+            "support_strata": [
+                {"fold_id": origin["fold"]["fold_id"], "strata": origin["methods"][method].get("support_strata", {})}
+                for origin in evaluated if method in origin.get("methods", {})
+            ],
+        }
+    return methods
+
+
+def _phase_status(
+    methods: Mapping[str, Mapping[str, Any]], selected_method: str | None,
+) -> str:
+    if not methods or not any(
+        item.get("match_weighted", {}).get("weight", 0.0) > 0 for item in methods.values()
+    ):
+        return "inconclusive"
+    if selected_method is None or selected_method not in methods:
+        return "tentative"
+    selected = methods[selected_method]["match_weighted"]
+    baseline = methods.get("1", {}).get("match_weighted", {})
+    if selected_method == "1" or baseline.get("log_loss") is None:
+        return "tentative"
+    log_improves = selected.get("log_loss") is not None and selected["log_loss"] < baseline["log_loss"]
+    brier_improves = selected.get("brier") is not None and (
+        baseline.get("brier") is None or selected["brier"] < baseline["brier"]
+    )
+    return "supported" if log_improves and brier_improves else "tentative"
+
+
+def _phase_summary(
+    evaluated: Sequence[Mapping[str, Any]],
+    *,
+    phase: str,
+    selected_method: str | None,
+    origins_declared: Sequence[tuple[str, str, str]],
+    scales: Sequence[float],
+    draws: int,
+) -> dict[str, Any]:
+    methods = _phase_evidence(evaluated)
+    return {
         "protocol_id": "deck-ranking-evaluation-v1",
-        "origins_declared": [list(item) for item in origins],
+        "phase": phase,
+        "origins_declared": [list(item) for item in origins_declared],
         "prior_scales": list(scales), "draws": draws,
         "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
         "plan_prior": {
@@ -796,12 +1090,178 @@ def run_served_model_evaluation(
             "strength_cap": DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
             "registry_sha256": _registry_sha256(load_strategic_plan_registry()),
         },
-        "status": "complete",
-        "origins": evaluated,
+        "selected_candidate": selected_method,
+        "status": _phase_status(methods, selected_method),
+        "status_note": "Descriptive evidence only; status does not impose a significance or publication gate.",
+        "methods": methods,
+        "origins": list(evaluated),
     }
-    summary["artifact_sha256"] = content_sha256(summary)
+
+
+def _write_digested(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
+    value = dict(payload)
+    value["artifact_sha256"] = content_sha256(value)
+    atomic_write_canonical(path, value)
+    return value
+
+
+def _seal_development_selection(
+    root: Path,
+    development_summary: Mapping[str, Any],
+    *,
+    selected_method: str | None,
+    scales: Sequence[float],
+) -> dict[str, Any]:
+    if not selected_method:
+        raise ValueError("confirmation requires --selected-method from development results")
+    if selected_method not in development_summary.get("methods", {}):
+        raise ValueError(f"selected method {selected_method!r} is absent from development results")
+    if list(development_summary.get("prior_scales", [])) != list(scales):
+        raise ValueError("confirmation prior scales do not match sealed development results")
+    summary_path = root / "development-summary.json"
+    if not summary_path.exists():
+        raise ValueError("confirmation requires a sealed development-summary.json")
+    selection = {
+        "protocol_id": "deck-ranking-evaluation-v1",
+        "selected_method": selected_method,
+        "development_summary_sha256": _file_sha256(summary_path),
+        "development_artifact_sha256": development_summary["artifact_sha256"],
+        "prior_scales": list(scales),
+        "development_origins": development_summary.get("origins_declared", []),
+    }
+    selection_path = root / "development-selection.json"
+    expected = dict(selection)
+    expected["artifact_sha256"] = content_sha256(expected)
+    if selection_path.exists():
+        existing = _read_sealed_json(selection_path, description="development selection")
+        if _artifact_body(existing) != _artifact_body(expected):
+            raise ValueError("development selection is already sealed with a different method or summary")
+        return existing
+    atomic_write_canonical(selection_path, expected)
+    return expected
+
+
+def _evaluate_frozen_origins(
+    source_db: Path,
+    root: Path,
+    frozen: Sequence[Mapping[str, Any]],
+    origins_to_score: Sequence[tuple[str, str, str]],
+) -> list[dict[str, Any]]:
+    wanted = {
+        (cutoff, evaluation_until) for cutoff, evaluation_until, _regime_start in origins_to_score
+    }
+    evaluated: list[dict[str, Any]] = []
+    for artifact in frozen:
+        fold = BenchmarkFold.model_validate(artifact["metadata"]["fold"])
+        if (fold.cutoff, fold.evaluation_until) not in wanted:
+            continue
+        outcomes = load_heldout_outcomes(
+            Path(source_db), fold,
+            expected_rules_sha256=artifact["metadata"]["rules_sha256"],
+            card_metadata_policy=DEFAULT_CARD_METADATA_POLICY,
+            color_splits_path=COLOR_SPLITS_REGISTRY_PATH,
+            expected_color_splits_sha256=artifact["metadata"]["color_splits_sha256"],
+        )
+        evaluation = evaluate_ranking_origin(artifact, outcomes)
+        eval_path = root / f"{fold.cutoff}--{fold.evaluation_until}" / "evaluation.json"
+        atomic_write_canonical(eval_path, evaluation)
+        evaluated.append(evaluation)
+    if len(evaluated) != len(wanted):
+        raise ValueError("frozen ranking artifacts do not cover the requested evaluation phase")
+    return evaluated
+
+
+def run_served_model_evaluation(
+    source_db: Path,
+    output_dir: Path,
+    *,
+    origins: Sequence[tuple[str, str, str]] = DECLARED_ORIGINS,
+    prior_scales: tuple[float, ...] = DEFAULT_PRIOR_SCALES,
+    draws: int = DEFAULT_DRAWS,
+    phase: str = "development",
+    selected_method: str | None = None,
+) -> dict[str, Any]:
+    """Run the sealed freeze, development, or confirmation experiment phase.
+
+    Development freezes every declared origin before reading the first three
+    horizons.  Confirmation only consumes previously sealed predictions and
+    requires a development selection artifact before it reads later outcomes.
+    """
+    scales = _validate_scales(prior_scales)
+    if not origins:
+        raise ValueError("at least one chronological origin must be declared")
+    if phase not in {"freeze", "development", "confirmation", "all"}:
+        raise ValueError("phase must be freeze, development, confirmation, or all")
+    origins = tuple(tuple(origin) for origin in origins)
+    _validate_origins(origins)
+    root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
-    atomic_write_canonical(root / "summary.json", summary)
+    frozen = (
+        _load_frozen_origins(root, origins, scales=scales, draws=draws)
+        if phase == "confirmation" else
+        _freeze_all_origins(Path(source_db), root, origins, scales=scales, draws=draws)
+    )
+    if phase == "freeze":
+        summary = _write_digested(root / "freeze-summary.json", {
+            "protocol_id": "deck-ranking-evaluation-v1", "phase": "freeze",
+            "origins_declared": [list(item) for item in origins],
+            "prior_scales": list(scales), "draws": draws, "status": "frozen",
+            "prediction_artifacts": [artifact.get("artifact_sha256") for artifact in frozen],
+        })
+        return summary
+
+    development_origins, confirmation_origins = _partition_origins(origins)
+    if phase == "confirmation":
+        development_summary = _read_sealed_json(
+            root / "development-summary.json", description="development summary",
+        )
+        if tuple(tuple(item) for item in development_summary.get("origins_declared", [])) != tuple(origins):
+            raise ValueError("development summary origins do not match confirmation origins")
+        selection = _seal_development_selection(
+            root, development_summary, selected_method=selected_method, scales=scales,
+        )
+        evaluated = _evaluate_frozen_origins(Path(source_db), root, frozen, confirmation_origins)
+        summary = _phase_summary(
+            evaluated, phase="confirmation", selected_method=selection["selected_method"],
+            origins_declared=origins, scales=scales, draws=draws,
+        )
+        summary.update({
+            "development_summary_sha256": development_summary["artifact_sha256"],
+            "development_selection": selection,
+            "development": development_summary,
+        })
+        summary = _write_digested(root / "confirmation-summary.json", summary)
+        # summary.json is the convenience output for a one-phase invocation;
+        # development already owns that path in a two-phase run.
+        if not (root / "summary.json").exists():
+            atomic_write_canonical(root / "summary.json", summary)
+    else:
+        development_evaluated = _evaluate_frozen_origins(
+            Path(source_db), root, frozen, development_origins,
+        )
+        development_summary = _phase_summary(
+            development_evaluated, phase="development", selected_method=selected_method,
+            origins_declared=origins, scales=scales, draws=draws,
+        )
+        development_summary = _write_digested(root / "development-summary.json", development_summary)
+        if phase == "development":
+            summary = development_summary
+            atomic_write_canonical(root / "summary.json", summary)
+        else:
+            selection = _seal_development_selection(
+                root, development_summary, selected_method=selected_method, scales=scales,
+            )
+            evaluated = _evaluate_frozen_origins(Path(source_db), root, frozen, confirmation_origins)
+            summary = _phase_summary(
+                evaluated, phase="all", selected_method=selection["selected_method"],
+                origins_declared=origins, scales=scales, draws=draws,
+            )
+            summary.update({
+                "development_summary_sha256": development_summary["artifact_sha256"],
+                "development_selection": selection,
+                "development": development_summary,
+            })
+            summary = _write_digested(root / "summary.json", summary)
     from legacy_engine.advisory.ranking_benchmark import atomic_write_text
     atomic_write_text(root / "summary.md", _markdown_summary(summary))
     return summary
@@ -809,6 +1269,7 @@ def run_served_model_evaluation(
 
 __all__ = [
     "DEFAULT_CARD_METADATA_POLICY", "DEFAULT_PLAN_PRIOR_STRENGTH_CAP",
-    "DEFAULT_PRIOR_SCALES", "DECLARED_ORIGINS", "PLAN_BORROWING_METHOD",
+    "DEFAULT_PRIOR_SCALES", "DECLARED_ORIGINS", "DEVELOPMENT_ORIGINS",
+    "CONFIRMATION_ORIGINS", "PLAN_BORROWING_METHOD",
     "evaluate_ranking_origin", "freeze_ranking_origin", "run_served_model_evaluation",
 ]
