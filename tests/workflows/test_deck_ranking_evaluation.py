@@ -185,3 +185,14 @@ def test_excluded_and_mirror_rows_do_not_become_zero_loss() -> None:
     result = evaluate_ranking_origin(_artifact(), [excluded, mirror])
     assert result["total_support_matches"] == 0
     assert result["methods"]["1"]["log_loss"] is None
+
+
+def test_event_uncertainty_requires_replication_and_preserves_paired_direction():
+    from legacy_engine.workflows.deck_ranking_evaluation import _event_mean_interval
+
+    assert _event_mean_interval([]) is None
+    assert _event_mean_interval([-.2]) is None
+    low, high = _event_mean_interval([-.3, -.2, -.1])
+    assert low <= -.2 <= high < 0
+    mixed_low, mixed_high = _event_mean_interval([-.2, .2])
+    assert mixed_low < 0 < mixed_high

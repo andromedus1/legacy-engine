@@ -192,3 +192,25 @@ The review found the prior construction, direct-observation preservation, physic
 quarantine handling sound; 119 focused checks passed. Complete accepted fixes and verify them
 without a second standard review pass. The separate refresh-insights work continues on unaffected
 publication/template regions; it cannot change the projection while this experiment is frozen.
+
+## Accepted-fix verification and restarted experiment
+
+Source commit `91a36f1` contains the accepted code corrections. A checkpointed byte copy of
+`data/legacy.duckdb` was made under a read lock for this experiment, SHA-256
+`82011023b61848c52748d595336291ee815d168bdb08df8f1d6cb146c1f2c9da`, stored as
+`data/benchmarks/deck-rankings-evaluation-v1/source.duckdb`. No heldout results were inspected.
+Six forecast-only jobs restarted against that immutable input. Later report/template work does
+not alter their projection or taxonomy functions.
+
+Four integrated freeze/phase tests now verify exact parent point/cell parity and provenance,
+future-fact/cache invariance, registry binding, reuse of sealed artifacts between phases, and
+configuration mismatch rejection. The initial full CI pass was green on both Python versions;
+the implementation worker also reports 4,151 local suite passes and one skip. Final-source CI
+will cover the remaining integrated changes.
+
+The comparison adds a deterministic paired-event bootstrap interval for the event-average loss
+difference (2,000 resamples, seed 730022). Events receive equal weight for this stability check;
+the primary proper score remains match-weighted. No interval is claimed from fewer than two
+events. Markdown now shows this distinction and the independent performance/floor call counts
+across origins; detailed per-method floor followups remain in the JSON. These diagnostics do not
+create a significance or publication requirement. Fifteen focused evaluator/integration checks pass.

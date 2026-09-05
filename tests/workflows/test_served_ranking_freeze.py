@@ -129,3 +129,29 @@ def test_heldout_replay_rejects_changed_parent_color_registry(corpus, tmp_path):
             color_splits_path=colors, expected_color_splits_sha256=expected,
             card_metadata_policy=evaluation.DEFAULT_CARD_METADATA_POLICY,
         )
+
+
+def test_public_phases_reuse_frozen_forecasts_and_reject_changed_config(corpus, tmp_path, monkeypatch):
+    source, _colors = corpus
+    root = tmp_path / "experiment"
+    origin = ("2026-07-13", "2026-07-20", "2026-06-29")
+    frozen = freeze(source, root / "2026-07-13--2026-07-20")
+
+    def unexpected_rebuild(*args, **kwargs):
+        pytest.fail("a sealed origin must be reused, not rebuilt between experiment phases")
+
+    monkeypatch.setattr(evaluation, "build_origin_snapshot", unexpected_rebuild)
+    sealed = evaluation.run_served_model_evaluation(
+        source, root, origins=(origin,), draws=64, phase="freeze",
+    )
+    assert sealed["prediction_artifacts"] == [frozen["artifact_sha256"]]
+    result = evaluation.run_served_model_evaluation(
+        source, root, origins=(origin,), draws=64, phase="development",
+    )
+    assert result["origins"][0]["total_support_matches"] == 3
+    assert (root / "development-summary.json").is_file()
+    assert not (root / "development-selection.json").exists()
+    with pytest.raises(ValueError, match="configuration"):
+        evaluation.run_served_model_evaluation(
+            source, root, origins=(origin,), draws=65, phase="freeze",
+        )

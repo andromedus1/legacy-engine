@@ -16,6 +16,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 import math
+import random
 from pathlib import Path
 import subprocess
 from typing import Any
@@ -772,6 +773,33 @@ def _markdown_summary(summary: Mapping[str, Any]) -> str:
             f"{weighted.get('log_loss') if weighted.get('log_loss') is not None else 'n/a'} | "
             f"{weighted.get('brier') if weighted.get('brier') is not None else 'n/a'} |"
         )
+    lines.extend([
+        "", "Event-level comparison (equal event weight; negative favors the candidate):",
+        "", "| Method | Mean log-loss difference [95% bootstrap interval] | Improved / worsened events |",
+        "|---|---:|---:|",
+    ])
+    for method, aggregate in methods.items():
+        if method == "1":
+            continue
+        paired = aggregate["event_paired_stability"]
+        mean = paired["mean_log_loss_difference_vs_scale_1"]
+        interval = paired.get("mean_difference_interval_95")
+        estimate = f"{mean:+.5f}" if mean is not None else "unavailable"
+        if interval is not None:
+            estimate += f" [{interval[0]:+.5f}, {interval[1]:+.5f}]"
+        else:
+            estimate += " [interval unavailable]"
+        lines.append(
+            f"| {method} | {estimate} | {paired['improved_events']} / {paired['worsened_events']} |"
+        )
+    lines.extend(["", "Independent leaders across origins (counts are origins, not probabilities):", ""])
+    for method, aggregate in methods.items():
+        calls = []
+        for objective in ("performance", "floor"):
+            counts = aggregate[f"{objective}_order_sensitivity"]["top_call_counts"]
+            names = ", ".join(f"{name} ({count})" for name, count in counts.items()) or "unavailable"
+            calls.append(f"{objective}: {names}")
+        lines.append(f"- {method} — " + "; ".join(calls))
     lines.extend(["", "| Origin | Method | total matches | common cases | log loss | Brier |", "|---|---|---:|---:|---:|---:|"])
     for origin in summary.get("origins", []):
         fold = origin["fold"]
@@ -952,6 +980,18 @@ def _stdev(values: Sequence[float]) -> float | None:
     return math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
 
 
+def _event_mean_interval(differences: Sequence[float]) -> list[float] | None:
+    """Bootstrap the event-average paired difference; no interval from one event."""
+    if len(differences) < 2:
+        return None
+    rng = random.Random(730_022)
+    means = sorted(
+        sum(rng.choices(differences, k=len(differences))) / len(differences)
+        for _ in range(2_000)
+    )
+    return [means[49], means[1_949]]
+
+
 def _phase_evidence(evaluated: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     method_names = sorted({
         str(method)
@@ -1028,6 +1068,8 @@ def _phase_evidence(evaluated: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 "events": len(event_differences),
                 "mean_log_loss_difference_vs_scale_1": _mean(event_differences),
                 "stdev_log_loss_difference_vs_scale_1": _stdev(event_differences),
+                "mean_difference_interval_95": _event_mean_interval(event_differences),
+                "interval_method": "paired-event percentile bootstrap; equal event weight, 2000 draws",
                 "improved_events": sum(value < 0 for value in event_differences),
                 "worsened_events": sum(value > 0 for value in event_differences),
                 "records": event_records,
