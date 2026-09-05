@@ -1843,55 +1843,16 @@ def _publish_deck_rankings(
         raise ValueError("field_override requires its validated field_scenario identity")
 
     def scenario_for_rows(key: str) -> FieldDistribution | None:
-        """Map parent scenario shares onto camp rows without losing unknown mass."""
+        """Return the field keyed by the opponent axis used by these ledgers.
+
+        Camp rows have full camp labels as subjects, but their matchup cells are
+        deliberately against parent labels.  The local field therefore stays
+        parent-keyed for the camp projection; full-camp display shares and
+        global candidate presence are assembled separately below.
+        """
         if field_override is None:
             return None
-        if key == "arch":
-            return field_override
-        camp_shares: dict[str, float] = {}
-        camp_counts: dict[str, int] | None = {} if field_override.counts is not None else None
-        for label, share in field_override.shares.items():
-            camp_rows = [
-                row for row in blob.get("camps", ())
-                if row.get("parent") == label
-            ]
-            if not camp_rows:
-                # Preserve a positive scenario mass when this taxonomy label
-                # has no current camp breakdown.  Its cells will be explicit
-                # weak priors rather than silently disappearing.
-                camp_shares[label] = camp_shares.get(label, 0.0) + share
-                if camp_counts is not None:
-                    camp_counts[label] = field_override.counts.get(label, 0)
-                continue
-            fractions = recent.camp_fractions.get(label, {})
-            allocated = 0.0
-            for row in camp_rows:
-                camp = row["camp"]
-                fraction = float(fractions.get(camp, 0.0))
-                camp_shares[camp] = camp_shares.get(camp, 0.0) + share * fraction
-                allocated += fraction
-                if camp_counts is not None:
-                    parent_count = field_override.counts.get(label, 0)
-                    camp_counts[camp] = camp_counts.get(camp, 0) + round(parent_count * fraction)
-            if allocated < 1.0 - 1e-12:
-                # The remainder is unknown camp composition and must stay in
-                # the modeled field for floor/performance weighting.
-                unknown = f"{label} (unmapped camp)"
-                camp_shares[unknown] = camp_shares.get(unknown, 0.0) + share * (1.0 - allocated)
-                if camp_counts is not None:
-                    camp_counts[unknown] = max(1, round(field_override.counts.get(label, 0) * (1.0 - allocated)))
-        no_data = frozenset(
-            label for label in camp_shares
-            if label in field_override.no_data or "(unmapped camp)" in label
-        )
-        return FieldDistribution(
-            shares=camp_shares,
-            field_source=field_override.field_source,
-            counts=camp_counts,
-            no_data=no_data,
-            warnings=field_override.warnings,
-            regime_currency=field_override.regime_currency,
-        )
+        return field_override
 
     def normalized(raw, row, source_notes, *, local_shares=None, global_presence=None):
         toughest = next((c for c in raw["cells"] if c["opponent"] == raw["worst_opponent"]), None)
@@ -1959,14 +1920,24 @@ def _publish_deck_rankings(
     for key, interval in (("arch", parent_interval), ("camps", camp_interval)):
         rows = blob[key]
         overrides, notes, override_identities, presence = {}, {}, {}, {}
+        display_shares = {}
         details = {}
         for row in rows:
             subject = row["subject"]
             if key == "camps":
                 fraction = recent.camp_fractions.get(row["parent"], {}).get(row["camp"], 0.0)
                 presence[subject] = shares.get(row["parent"], 0.0) * fraction
+                if field_override is not None:
+                    # The camp table identifies full subject labels.  This
+                    # display-only map may follow the current camp breakdown;
+                    # it must not replace the parent-keyed opponent field above.
+                    display_shares[subject] = (
+                        field_override.shares.get(row["parent"], 0.0) * fraction
+                    )
             else:
                 presence[subject] = shares.get(subject, 0.0) if recent.exact_counts.get(subject, 0) else 0.0
+                if field_override is not None:
+                    display_shares[subject] = field_override.shares.get(subject, 0.0)
             # Classifier residue is field mass, never a deck recommendation.
             if subject in {"Unknown", "Conflict"} or subject.startswith("Conflict("):
                 presence[subject] = 0.0
@@ -2019,6 +1990,7 @@ def _publish_deck_rankings(
                         }
         row_field_override = scenario_for_rows(key)
         row_shares = row_field_override.shares if row_field_override is not None else shares
+        row_display_shares = display_shares if row_field_override is not None else None
         if row_shares:
             row_measurements = {row["subject"]: _row_measurements(row) for row in rows}
             projection = project_ranking_rows(
@@ -2048,7 +2020,7 @@ def _publish_deck_rankings(
             for row in rows:
                 row["decision"] = normalized(
                     projection["rows"][row["subject"]], row, notes,
-                    local_shares=row_shares if row_field_override is not None else None,
+                    local_shares=row_display_shares,
                     global_presence=presence,
                 )
                 for cell in row["decision"]["cells"]:
@@ -2122,6 +2094,8 @@ def _publish_deck_rankings(
         if scenario_unmapped:
             reason += "; unmapped positive scenario mass: " + ", ".join(scenario_unmapped)
         for plan in plans:
+            plan["global_field_share"] = plan["field_share"]
+            plan["field_share"] = plan_shares[plan["id"]]
             plan["decision"] = None
             plan["scenario_unavailable"] = reason
 

@@ -35,6 +35,8 @@ import pytest
 
 from legacy_engine.advisory.ranking_benchmark import BenchmarkEvaluationSummary, content_sha256
 from legacy_engine.advisory.best_call_targets import ReportTarget
+from legacy_engine.advisory.field_scenario import load_field_scenario
+from legacy_engine.advisory.recent_field import build_recent_field
 
 from legacy_engine.analytics.affectedness import archetype_valid_since
 from legacy_engine.analytics.eras.ensemble import EntityEras, EraBoundary
@@ -457,6 +459,98 @@ def test_current_projection_ignores_legacy_gates_and_reconciles_full_field():
     candidates = [r for r in loose["arch"] if r["decision"]["eligible"]]
     floor_leader = min(candidates, key=lambda r: (-r["decision"]["floor"], -r["decision"]["performance"], r["subject"]))
     assert loose["meta"]["deck_rankings"]["floor_call"] == floor_leader["subject"]
+
+
+def test_local_camp_projection_keeps_parent_field_and_full_camp_presence(tmp_path):
+    con = script_con()
+    try:
+        field_path = tmp_path / "local-field.txt"
+        field_path.write_text(
+            "0.67 Doomsday 2\n0.33 Painter 1\n", encoding="utf-8",
+        )
+        scenario = load_field_scenario(con, field_path)
+        blob = _blob(con, ground_n=3)
+        original_plan_shares = {
+            plan["id"]: plan["field_share"] for plan in blob["plans"]
+        }
+        recent = build_recent_field(con, since=_FIELD_SINCE, until="2026-05-26")
+        rbcr._publish_deck_rankings(
+            con,
+            blob,
+            field_override=scenario.projection_field(),
+            field_scenario=scenario,
+        )
+
+        camp_inputs = blob["_deck_ranking_projection_inputs"]["camps"]
+        camp_field = camp_inputs["field_override"]
+        assert camp_field.shares == scenario.shares
+        assert camp_field.counts == scenario.posterior_counts
+        assert set(camp_field.shares) == set(PARENTS)
+        assert all("[" not in label for label in camp_field.shares)
+
+        camp_subjects = {row["subject"] for row in blob["camps"]}
+        assert set(camp_inputs["candidate_presence"]) == camp_subjects
+        assert all("[" in subject for subject in camp_subjects)
+        for row in blob["camps"]:
+            decision = row["decision"]
+            assert decision["global_field_share"] == pytest.approx(
+                camp_inputs["candidate_presence"][row["subject"]],
+            )
+            assert decision["active"] == (
+                camp_inputs["candidate_presence"][row["subject"]] > 0
+            )
+            assert decision["scenario_field_share"] == pytest.approx(
+                scenario.shares[row["parent"]]
+                * recent.camp_fractions.get(row["parent"], {}).get(row["camp"], 0.0),
+            )
+        assert blob["plans"]
+        for plan in blob["plans"]:
+            expected_share = sum(
+                scenario.shares.get(member["archetype"], 0.0)
+                for member in plan["members"]
+            )
+            assert plan["field_share"] == pytest.approx(expected_share)
+            assert plan["global_field_share"] == pytest.approx(
+                original_plan_shares[plan["id"]],
+            )
+            assert plan["decision"] is None
+            assert plan["scenario_unavailable"].startswith("unavailable:")
+    finally:
+        con.close()
+
+
+@pytest.mark.parametrize(
+    ("field_text", "expected_counts"),
+    (
+        ("1.0 Doomsday\n", None),
+        ("1.0 Painter 1\n", {"Painter": 1.0}),
+    ),
+)
+def test_local_camp_projection_handles_share_only_and_single_count_parent(
+    tmp_path, field_text, expected_counts,
+):
+    """Camp cells use parent opponents even for sparse local fields."""
+    con = script_con()
+    try:
+        field_path = tmp_path / "sparse-local-field.txt"
+        field_path.write_text(field_text, encoding="utf-8")
+        scenario = load_field_scenario(con, field_path)
+        blob = _blob(con, ground_n=3)
+        rbcr._publish_deck_rankings(
+            con,
+            blob,
+            field_override=scenario.projection_field(),
+            field_scenario=scenario,
+        )
+
+        camp_field = blob["_deck_ranking_projection_inputs"]["camps"]["field_override"]
+        assert camp_field.shares == scenario.shares
+        assert camp_field.counts == expected_counts
+        assert all("[" not in label for label in camp_field.shares)
+        assert all(row["decision"] is not None for row in blob["camps"])
+    finally:
+        con.close()
+
 
 # ---------------------------------------------------------------------------
 # The retired per-parent path, reconstructed verbatim (the parity reference)

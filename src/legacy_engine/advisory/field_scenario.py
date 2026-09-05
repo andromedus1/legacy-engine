@@ -173,9 +173,10 @@ def load_field_scenario(
     """Read and validate one private custom-field file without mutating the DB.
 
     Per-line counts are treated as supplied observations only when every field
-    row has a count.  ``# effective_n`` remains a concentration declaration and
-    its declared total is retained even when the legacy allocator's minimum-one
-    rule makes the integer effective counts sum to a different value.
+    row has a count.  A coincident ``# effective_n`` header is ignored, matching
+    the field parser's per-line-count precedence.  A header on a share-only
+    field remains a concentration declaration, even when the legacy allocator's
+    minimum-one rule makes its integer allocation sum to a different value.
     """
     source = Path(path)
     if not source.is_file():
@@ -198,6 +199,11 @@ def load_field_scenario(
         known_archetypes=known,
         strict_counts=True,
     )
+    # ``_load_field`` intentionally gives terminal per-line counts precedence
+    # over the optional header.  Do not let the provenance adapter re-apply an
+    # ignored header by rescaling those supplied observations.
+    if has_counts:
+        declared_effective_n = None
     if field.counts is not None and any(share <= 0.0 for share in field.shares.values()):
         raise ValueError(
             "custom field rows with counts require a positive share for every archetype"

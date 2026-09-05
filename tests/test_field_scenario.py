@@ -73,6 +73,23 @@ def test_effective_n_declared_total_is_retained_when_minimum_one_allocation_over
     assert sum(scenario.projection_field().counts.values()) == pytest.approx(2)
 
 
+def test_per_line_counts_ignore_effective_n_header_without_rescaling(tmp_path, con):
+    path = tmp_path / "counted-with-header.txt"
+    path.write_text(
+        "# effective_n: 2\n0.5 Known Deck 50\n0.5 Other Deck 50\n",
+        encoding="utf-8",
+    )
+    scenario = load_field_scenario(
+        con, path, known_archetypes=frozenset({"Known Deck", "Other Deck"}),
+    )
+
+    assert scenario.count_basis == "supplied-observations"
+    assert scenario.declared_effective_n is None
+    assert scenario.supplied_total == 100
+    assert scenario.effective_count_total == 100
+    assert sum(scenario.posterior_counts.values()) == pytest.approx(100)
+
+
 def test_strict_scenario_rejects_synthetic_missing_counts_before_loading(tmp_path, con):
     path = tmp_path / "mixed.txt"
     path.write_text("0.6 Known Deck 6\n0.4 Affinity Combo\n", encoding="utf-8")
