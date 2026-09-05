@@ -17,7 +17,7 @@ decisions:
   - "The current field uses a provisional 28-day exponential half-life over the observed ban-regime slice. The denominator is published deck lists, not a census of entrants. Integer observed counts, decay-weighted counts, effective sample size, and bounded transition prior counts remain separate."
   - "Clean interval evidence may override a cell once. The override keeps the actual MatchupCell prior_strength and its interval/source provenance; it is not pooled again with overlapping fallback evidence."
   - "The mature positioning estimator and future-only benchmark remain frozen reference surfaces. Their outputs do not validate or promote this current descriptive projection."
-  - "scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic. Separate --served-model mode freezes the shared production projection before later outcomes, compares fixed prior scales and a conditional opponent-plan prior challenger, and reports evidence without selecting or publishing a method."
+  - "scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic. Separate --served-model phases seal all six predictions before development scoring and require a sealed development selection before confirmation outcomes open; no phase publishes a method."
   - "The generated page is disposable. Edit the tracked script or template, then regenerate decks/deck-rankings.html; do not hand-edit the output."
 ---
 
@@ -110,15 +110,22 @@ not certify this new current method.
 scores fixed 14-, 28-, 56-day, and uniform methods on chronological complete-day folds without
 tuning; its optional matchup pass remains the limited pre-cutoff adaptive baseline.
 
-`--served-model --output-dir <path>` instead evaluates the current Deck Rankings projection. For
-each declared origin it creates a raw pre-cutoff snapshot, refits the projection under retrospective
-fixed-parent taxonomy, and seals the prediction artifact before any later outcomes are loaded. This
-is parent-only: card availability is observed-by-cutoff where release dates are unavailable, and
-the fixed taxonomy does not reconstruct the label knowledge an operator would have had at the
-cutoff. The same outcome-blind card-metadata quarantine applies to training and held-out data for
-every method, with hard ceilings of `.5%` of decks and `2%` of rounds. Raw and retained denominators,
-evidence, and hashes remain visible; quarantine excludes unresolved whole decks rather than repairing
-metadata.
+`--served-model --output-dir <path>` instead evaluates the current Deck Rankings projection through
+optional `--phase freeze|development|confirmation|all`; the default is `development`. Freeze only
+seals artifacts. Development creates raw pre-cutoff snapshots and seals predictions for all six
+declared origins before loading outcomes for its first three. Confirmation validates and reuses that
+exact configuration, requires `--selected-method <method>`, writes an immutable development-selection
+artifact, and only then opens the final three horizons. `all` is the combined convenience phase and
+also requires the selected method.
+
+The taxonomy is parent-only but includes the production color split that labels Energy as Boros
+Energy or Mardu Energy. Parent rules and the color-split registry are hash-pinned across freeze and
+evaluation; camps are disabled. Card availability is observed-by-cutoff where release dates are
+unavailable, and retrospective fixed-parent labeling does not reconstruct the label knowledge an
+operator had at the cutoff. The same outcome-blind card-metadata quarantine applies to training and
+held-out data for every method, with hard ceilings of `.5%` of decks and `2%` of rounds. Raw and
+retained denominators, evidence, and hashes remain visible; quarantine excludes unresolved whole
+decks rather than repairing metadata.
 
 The declared comparison includes production scale `1`, fixed prior-strength sensitivities `.5` and
 `2`, and `opponent-plan-prior-v1`. The challenger conditionally borrows a prior from cutoff-safe
@@ -126,9 +133,13 @@ evidence for opponents assigned to the same primary strategic plan while preserv
 cell's direct wins/n and selected-source identity. Outputs retain source/config hashes and report log
 loss, Brier score, calibration, support strata, reciprocity, paired event log-loss differences,
 performance/floor order, and later support for the baseline's named floor pairings. Missing forecasts
-and unavailable floor outcomes stay visible. These are diagnostic scores and sensitivity evidence;
-the experiment is pending, no production change has been selected, and the evaluator has no
-publication or deployment gate.
+and unavailable floor outcomes stay visible. Each frozen cell also carries the exact selected view,
+its observation match-id digest, admitted components and windows, analysis clock, status, and
+concentration evidence. Existing predictions are reused only when their fold, protocol, requested
+scales/draws, taxonomy, quarantine policy, strategic-plan registry, manifest, snapshot, and artifact
+hashes still match. These are diagnostic scores and sensitivity evidence; the prior run was stopped
+before scoring when its taxonomy defect was found, the corrected experiment is pending, no production
+change has been selected, and the evaluator has no publication or deployment gate.
 
 The operational status schema may report `useful` when the generated artifact contains supported
 performance/floor estimates and a practical call, even when evidence is thin or the current method

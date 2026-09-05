@@ -313,14 +313,23 @@ Rankings projection before it reads later outcomes:
   --served-model --output-dir data/benchmarks/deck-rankings-evaluation-v1
 ```
 
+The optional `--phase` separates artifact freezing, development scoring, and confirmation scoring
+(or runs both scoring phases with `all`); it defaults to `development`, which seals predictions for
+all six declared origins before scoring the first three. Run confirmation later with
+`--phase confirmation --selected-method <method>`.
+Confirmation reuses the sealed predictions only after validating their requested configuration and
+seals the development decision before it opens the final three horizons.
+
 The served-model experiment compares the production prior scale `1` with fixed `.5` and `2`
 sensitivities and the conditional `opponent-plan-prior-v1` challenger on one prediction grid. It
 reports log loss, Brier score, calibration, support strata, reciprocity, paired event differences,
 and later evidence for the named floor pairings. The run is parent-only and uses observed-by-cutoff
-card availability where release dates are unavailable. Its outcome-blind card-metadata quarantine
-applies the same fixed ceilings to every method (at most `.5%` of decks and `2%` of rounds), records
-raw and retained ledgers, and does not repair metadata. Results are diagnostic: no experiment result
-or production change has been selected, and this command has no publication or deployment gate.
+card availability where release dates are unavailable. The hash-pinned parent taxonomy includes the
+production Energy color split into Boros Energy and Mardu Energy; camps remain disabled. Each frozen
+cell retains its selected view, match-id digest, and admitted windows. The outcome-blind card-metadata
+quarantine applies the same fixed ceilings to every method (at most `.5%` of decks and `2%` of rounds),
+records raw and retained ledgers, and does not repair metadata. Results are diagnostic: no experiment
+result or production change has been selected, and this command has no publication or deployment gate.
 
 `meta_view.py` is the **meta view** (where the field is, how it's moving, what's
 best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
