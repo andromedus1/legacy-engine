@@ -132,3 +132,27 @@ selection and final-source CI remain explicit closure requirements, and no produ
 change is made yet. The next feature depends on the now-stable published projection contract,
 not on which fixed challenger wins. Its presentation implementation can therefore proceed while
 this review and experiment finish, preserving the approved delivery priorities.
+
+## Standard independent review — accepted corrections
+
+One fresh-context Sol xhigh review requested changes. Claude peer authentication was unavailable;
+this was same-harness independent review, not cross-model evidence. All six findings are accepted:
+
+- Replay and hash the production color-split registry in training and heldout classification
+  (Energy must remain Boros/Mardu). The first six-origin freeze was stopped before any score or
+  heldout outcome was opened; its partial snapshots are not evaluation evidence.
+- Separate public freeze/development/confirmation phases and seal the development decision before
+  reading confirmation. This protects experimental interpretation, not report publication.
+- Preserve each interval override's selected-view identity, components/windows, and match digest
+  in the shared handoff and frozen per-cell provenance.
+- Require frozen digests and reject duplicate forecast cells.
+- Report all methods' named-floor followups, match-weighted aggregates, event stability/uncertainty,
+  and independent performance/floor sensitivity with a concise conclusion.
+- Add one real file-backed freeze regression for production parity, cutoff-day/future-fact
+  invariance, and parent taxonomy binding. Host owns this isolated test; the implementation worker
+  owns the code fixes.
+
+The review found the prior construction, direct-observation preservation, physical rematches, and
+quarantine handling sound; 119 focused checks passed. Complete accepted fixes and verify them
+without a second standard review pass. The separate refresh-insights work continues on unaffected
+publication/template regions; it cannot change the projection while this experiment is frozen.
