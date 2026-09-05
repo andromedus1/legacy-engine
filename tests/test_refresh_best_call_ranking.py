@@ -1101,18 +1101,18 @@ class TestMainEndToEnd:
           state.key='performance'; render();
           const persisted=document.getElementById('t-arch').innerHTML;
           return {performance,floor,ledger,opened,persisted,
-            picks:document.getElementById('priorities').innerHTML};
+            table:document.getElementById('t-arch').innerHTML};
         })()
         """)
         assert result["performance"] == ["Fast", "Safe"]
         assert result["floor"] == ["Safe", "Fast"]
-        assert 'Fast' in result["picks"] and 'Safe' in result["picks"]
-        assert '<span class="badge">Prior</span>' in result["picks"]
-        assert 'Toughest: Combo' in result["picks"]
+        assert 'Fast' in result["table"] and 'Safe' in result["table"]
+        assert '<span class="badge">Prior</span>' in result["table"]
+        assert '<td>Combo</td>' in result["table"]
         assert '42.0%' in result["ledger"] and '1–1' in result["ledger"]
         assert '&lt;unsafe&gt;' in result["ledger"] and '<unsafe>' not in result["ledger"]
         assert 'n&lt;8' in result["ledger"]
-        assert 'Toughest pairing 95% 37.0–57.0' in result["picks"]
+        assert 'Pairing: 37.0–57.0' in result["table"]
         assert 'Minimum across all opponents: 95% 1.0–15.0%' in result["ledger"]
         assert 'detail-a-0' in result["opened"] and 'detail-a-0' in result["persisted"]
 
@@ -1137,21 +1137,21 @@ class TestMainEndToEnd:
           const coverage=D.arch.map(r=>floorCoverage(decision(r)));
           document.getElementById('min-floor-coverage').listeners.input({target:{value:'75'}});
           const covered=sortedRows(D.arch).map(r=>r.subject);
-          const picks=document.getElementById('priorities').innerHTML;
+          const table=document.getElementById('t-arch').innerHTML;
           const map=document.getElementById('scatter-card').innerHTML;
           const tradeoff=viewTradeoff(D.arch[2],filteredRows(D.arch));
           const tip=mapTooltipHtml(D.arch[2]);
           document.getElementById('min-matchup-n').listeners.input({target:{value:'25'}});
           const highN=sortedRows(D.arch).map(r=>r.subject);
           document.getElementById('min-matchup-n').listeners.input({target:{value:'1'}});
-          return {coverage,covered,picks,map,tradeoff,tip,highN,
+          return {coverage,covered,table,map,tradeoff,tip,highN,
             restored:sortedRows(D.arch).map(r=>r.subject),
             unchanged:before===JSON.stringify(D.arch.map(r=>r.decision))};
         })()
         """)
         assert result["coverage"] == pytest.approx([0,.7,1])
         assert result["covered"] == ["Deep"]
-        assert 'Deep' in result["picks"] and 'Thin' not in result["picks"]
+        assert 'Deep' in result["table"] and 'Thin' not in result["table"]
         assert result["map"].count('data-point=') == 1 and result["tradeoff"]
         assert result["highN"] == []
         assert result["restored"] == ["Thin","Mixed","Deep"]

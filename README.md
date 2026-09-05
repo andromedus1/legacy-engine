@@ -354,11 +354,11 @@ inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plu
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
 
-Deck Rankings pairs performance and matchup-floor cards with an agency map, strategic plans,
-archetype/camp tables, and expandable matchups. Coverage/n filters narrow the shared view; map
+Deck Rankings compares performance and matchup floor in sortable archetype/camp tables, alongside
+an agency map, strategic plans, and expandable matchups. Coverage/n filters narrow the shared view; map
 tooltips show matchup records, intervals, and evidence support. Performance is the complete-field weighted mean of per-cell posterior
-means; the floor is the minimum non-mirror posterior mean. Performance and floor have independent
-leaders, with performance breaking floor ties. Point estimates remain visible when cells
+means; the floor is the minimum non-mirror posterior mean. The tables sort performance and floor
+independently. Point estimates remain visible when cells
 are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source
 window. The page is descriptive and does not claim that its current method has passed the legacy
 future-only benchmark.

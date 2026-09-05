@@ -79,9 +79,9 @@ denominator is explicitly `published-list`; completeness of those lists is unver
 support contributes bounded integer prior counts to effective field concentration while remaining
 separate from observed counts and recent presence.
 
-The page opens with two equal-priority cards: the performance leader and the independent floor
-leader. Performance breaks ties among equal floors. The visible floor range names the toughest
-pairing's cell interval; the all-opponent minimum-floor interval remains in evidence details.
+The sortable archetype and camp tables compare performance and matchup floor independently. The
+visible floor range names the toughest pairing's cell interval; the all-opponent minimum-floor
+interval remains in evidence details.
 Coverage/n controls filter the shared view; n defines which matchups count toward coverage.
 The map marks tradeoffs among shown decks, with hover/focus/tap tooltips. The strategic-plan, archetype, and camp
 surfaces remain available, with camps retaining their parent/camp presentation and plan cells
