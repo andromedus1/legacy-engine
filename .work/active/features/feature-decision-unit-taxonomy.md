@@ -1,7 +1,7 @@
 ---
 id: feature-decision-unit-taxonomy
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, advisory]
 parent: null
 depends_on: [feature-ranking-refresh-insights]
@@ -176,3 +176,13 @@ that report. Eldrazi's pure averaging uplift is only 0.62pp, despite its much la
 parent-versus-camp floor gap. The diagnostic must preserve this distinction: fitted priors and
 evidence windows can explain a parent gap independently of mixing builds. These are descriptive
 point-estimate checks to ground implementation, not new taxonomy decisions or validation claims.
+
+## Implementation dispatch
+
+Refresh-insight code is verified and at review. One Luna xhigh worker owns the decision-unit
+diagnostic module, read-only audit CLI, publication attachment after projection, existing
+archetype-disclosure rendering, and focused tests. Historical forecasts run independently; do
+not change compute_blob, _publish_deck_rankings, classification, or posterior code. Earlier
+imported gate proposals in this item are historical grounding only: the current design is a
+descriptive diagnostic with no taxonomy or publication gate. Host owns actual artifact refresh,
+review coordination, and final source verification.
