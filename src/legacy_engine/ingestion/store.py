@@ -651,6 +651,15 @@ def load_tournament(con: duckdb.DuckDBPyConnection, tr: TournamentResult) -> str
     # Idempotent refresh: clear this tournament's child rows, then re-insert.
     for table in ("decks", "deck_cards", "rounds", "standings"):
         con.execute(f"DELETE FROM {table} WHERE tournament_id = ?", [tid])
+    # Incremental variant assignments are keyed by tournament + deck index. A changed cache
+    # payload can reuse an index for a different deck/archetype, so stale assignments must not
+    # survive the fact-row replacement. The table is created lazily by the discovery path.
+    try:
+        con.execute(
+            "DELETE FROM variant_incremental_assignments WHERE tournament_id = ?", [tid]
+        )
+    except duckdb.CatalogException:
+        pass
 
     deck_rows = []
     card_rows = []
