@@ -1,8 +1,8 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-09-05T21:49:32Z'
+generated_at: '2026-09-05T22:47:44Z'
 generated_from: frontmatter
-total_docs: 32
+total_docs: 33
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
@@ -22,6 +22,15 @@ documents:
   consumer_hint: Read before refreshing or interpreting the Deck Rankings page — the
     current performance and matchup-floor projection, its field basis, and its evidence
     boundaries.
+- path: docs/analysis/doomsday-variant-rankings.md
+  title: Doomsday Variant Rankings — refresh runbook
+  type: design
+  kind: planning
+  updated: '2026-09-05'
+  status: active
+  consumer_hint: Read before refreshing or interpreting the Doomsday Variant Rankings
+    report — its exclusive cohort rules, evidence ledgers, current-field projection,
+    and uncertainty limits.
 - path: docs/analysis/meta-deck-analysis-loop.md
   title: The meta-deck analysis loop
   type: design
