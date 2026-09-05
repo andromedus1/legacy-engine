@@ -1,7 +1,7 @@
 ---
 id: story-sort-superarchetype-columns
 kind: story
-stage: review
+stage: done
 tags: [analytics, ui]
 parent: null
 depends_on: []
@@ -49,3 +49,13 @@ at desktop and 390px widths. No permanent low-value test added for this small UI
 Documentation scan found no stale assertions; no foundation update needed. Global refresh
 is running; saved local output was atomically regenerated from its existing analytical
 payload using the updated tracked template.
+
+## Bounded inline review
+Approve: one host pass checked sort/display value parity (including local unavailable
+plans), missing-last behavior, deterministic ties, expansion pairing, escaping, focus,
+and narrow CSS scope. No blockers or adjacent findings. No independent reviewer was
+used for this standalone story. No public API or foundation contract changed.
+The superarchetype matchup rows also measure 27.3px; original archetype rows measured
+55.8px. Both canonical and saved local outputs have been atomically regenerated using
+the tracked template and existing payloads. The already-running scheduled global refresh
+will complete normal publication/status reconciliation independently of this display change.
