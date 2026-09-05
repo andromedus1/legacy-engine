@@ -46,6 +46,38 @@ class FieldScenario:
     def counts(self) -> dict[str, int] | None:
         return None if self.field.counts is None else dict(self.field.counts)
 
+    @property
+    def posterior_counts(self) -> dict[str, float] | None:
+        """Return concentration counts with a declared effective-N total.
+
+        The legacy parser allocates at least one count to every label, so a
+        small ``# effective_n`` can intentionally overshoot when materialized
+        as integers.  Keep those integers for provenance while scaling the
+        counts used by the posterior back to the declared concentration.
+        """
+        if self.field.counts is None:
+            return None
+        counts = {label: float(value) for label, value in self.field.counts.items()}
+        if self.declared_effective_n is None:
+            return counts
+        total = sum(counts.values())
+        if total <= 0:
+            return counts
+        factor = float(self.declared_effective_n) / total
+        return {label: value * factor for label, value in counts.items()}
+
+    def projection_field(self) -> FieldDistribution:
+        """Return the field object used by ranking, preserving source metadata."""
+        counts = self.posterior_counts
+        return FieldDistribution(
+            shares=dict(self.field.shares),
+            field_source=self.field.field_source,
+            counts=None if counts is None else counts,
+            no_data=self.field.no_data,
+            warnings=self.field.warnings,
+            regime_currency=self.field.regime_currency,
+        )
+
     def identity(self) -> dict[str, Any]:
         """Stable identity used to keep refresh comparisons scenario-specific."""
         return {
@@ -73,6 +105,7 @@ class FieldScenario:
                 dict(sorted(self.field.counts.items()))
                 if self.field.counts is not None else None
             ),
+            "posterior_counts": self.posterior_counts,
             "unknown_opponents": list(self.unknown_opponents),
             "unknown_share": self.unknown_share,
             "warnings": list(self.warnings),
@@ -165,6 +198,10 @@ def load_field_scenario(
         known_archetypes=known,
         strict_counts=True,
     )
+    if field.counts is not None and any(share <= 0.0 for share in field.shares.values()):
+        raise ValueError(
+            "custom field rows with counts require a positive share for every archetype"
+        )
     if has_counts:
         count_basis = "supplied-observations"
         supplied_counts: dict[str, int] | None = dict(supplied)
@@ -215,7 +252,7 @@ def scenario_projection_inputs(
     """
     return {
         "shares": dict(scenario.field.shares),
-        "counts": None if scenario.field.counts is None else dict(scenario.field.counts),
+        "counts": scenario.posterior_counts,
         "candidate_presence": dict(global_presence),
         "field_scenario": scenario.model_dump(),
     }

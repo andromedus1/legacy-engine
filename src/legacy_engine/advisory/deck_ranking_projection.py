@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from legacy_engine.advisory.deck_ranking import rank_matchup_rows
+from legacy_engine.advisory.field import FieldDistribution
 from legacy_engine.advisory.ranking_measurement import (
     RankingCellMeasurement,
     RankingCellSource,
@@ -124,6 +125,7 @@ def project_ranking_rows(
     rows: Mapping[str, Sequence[RankingCellMeasurement]],
     shares: Mapping[str, float],
     *,
+    field_override: FieldDistribution | None = None,
     counts: Mapping[str, float] | None = None,
     candidate_presence: Mapping[str, float] | None = None,
     cell_overrides: Mapping[tuple[str, str], MatchupCell] | None = None,
@@ -146,6 +148,16 @@ def project_ranking_rows(
     records the value used by the posterior.
     """
     scale = _validate_prior_scale(prior_scale)
+    # ``shares`` identifies the current/global field used for eligibility and
+    # comparison callers.  A scenario changes only the field posterior; the
+    # caller supplies ``candidate_presence`` separately so a local room cannot
+    # make a globally supported recommendation disappear.
+    projection_shares = (
+        field_override.shares if field_override is not None else shares
+    )
+    projection_counts = (
+        field_override.counts if field_override is not None else counts
+    )
     overrides = {} if cell_overrides is None else dict(cell_overrides)
     sources = {} if override_sources is None else dict(override_sources)
     identities = {} if override_identities is None else dict(override_identities)
@@ -195,7 +207,7 @@ def project_ranking_rows(
             else:  # pragma: no cover - defensive for unusual model implementations
                 rewritten.append(measurement)
             resolved[key] = (original, source.kind, source)
-        for opponent in shares:
+        for opponent in projection_shares:
             if opponent in seen_opponents or (subject, opponent) in overrides:
                 continue
             key = (subject, opponent)
@@ -220,8 +232,8 @@ def project_ranking_rows(
 
     result = rank_matchup_rows(
         working,
-        shares,
-        counts=counts,
+        projection_shares,
+        counts=projection_counts,
         candidate_presence=candidate_presence,
         cell_overrides=overrides,
         override_sources=sources,
@@ -271,6 +283,17 @@ def project_ranking_rows(
                     "strength": prior_strength,
                 }
     result["prior_scale"] = scale
+    if field_override is not None:
+        result["global_field"] = {
+            "shares": dict(shares),
+            "counts": None if counts is None else dict(counts),
+        }
+        result["field_override"] = {
+            "shares": dict(field_override.shares),
+            "counts": None if field_override.counts is None else dict(field_override.counts),
+            "field_source": field_override.field_source,
+            "no_data": sorted(field_override.no_data),
+        }
     result["method"] = {
         **result["method"],
         "prior_scale": scale,

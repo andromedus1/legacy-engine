@@ -26,7 +26,8 @@ from pathlib import Path
 
 import duckdb
 
-from legacy_engine.advisory.field import build_custom_field, build_transition_field
+from legacy_engine.advisory.field import FieldDistribution, build_custom_field, build_transition_field
+from legacy_engine.advisory.field_scenario import FieldScenario, load_field_scenario
 from legacy_engine.advisory.best_call_evidence import (
     best_available_direct_view,
     build_report_evidence,
@@ -1812,7 +1813,15 @@ def _diagnostic_pair_keys(rows: list[dict], *, limit: int) -> set[tuple[str, str
 
 
 
-def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=None):
+def _publish_deck_rankings(
+    con,
+    blob,
+    *,
+    parent_interval=None,
+    camp_interval=None,
+    field_override: FieldDistribution | None = None,
+    field_scenario: FieldScenario | None = None,
+):
     """Project the current decision model after the frozen legacy evidence ledger."""
     from legacy_engine.advisory.deck_ranking_projection import project_ranking_rows
     from legacy_engine.advisory.recent_field import build_recent_field
@@ -1830,8 +1839,65 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
     total = sum(counts.values())
     shares = {label: n / total for label, n in counts.items() if n > 0} if total else {}
 
-    def normalized(raw, row, source_notes):
+    if field_override is not None and field_scenario is None:
+        raise ValueError("field_override requires its validated field_scenario identity")
+
+    def scenario_for_rows(key: str) -> FieldDistribution | None:
+        """Map parent scenario shares onto camp rows without losing unknown mass."""
+        if field_override is None:
+            return None
+        if key == "arch":
+            return field_override
+        camp_shares: dict[str, float] = {}
+        camp_counts: dict[str, int] | None = {} if field_override.counts is not None else None
+        for label, share in field_override.shares.items():
+            camp_rows = [
+                row for row in blob.get("camps", ())
+                if row.get("parent") == label
+            ]
+            if not camp_rows:
+                # Preserve a positive scenario mass when this taxonomy label
+                # has no current camp breakdown.  Its cells will be explicit
+                # weak priors rather than silently disappearing.
+                camp_shares[label] = camp_shares.get(label, 0.0) + share
+                if camp_counts is not None:
+                    camp_counts[label] = field_override.counts.get(label, 0)
+                continue
+            fractions = recent.camp_fractions.get(label, {})
+            allocated = 0.0
+            for row in camp_rows:
+                camp = row["camp"]
+                fraction = float(fractions.get(camp, 0.0))
+                camp_shares[camp] = camp_shares.get(camp, 0.0) + share * fraction
+                allocated += fraction
+                if camp_counts is not None:
+                    parent_count = field_override.counts.get(label, 0)
+                    camp_counts[camp] = camp_counts.get(camp, 0) + round(parent_count * fraction)
+            if allocated < 1.0 - 1e-12:
+                # The remainder is unknown camp composition and must stay in
+                # the modeled field for floor/performance weighting.
+                unknown = f"{label} (unmapped camp)"
+                camp_shares[unknown] = camp_shares.get(unknown, 0.0) + share * (1.0 - allocated)
+                if camp_counts is not None:
+                    camp_counts[unknown] = max(1, round(field_override.counts.get(label, 0) * (1.0 - allocated)))
+        no_data = frozenset(
+            label for label in camp_shares
+            if label in field_override.no_data or "(unmapped camp)" in label
+        )
+        return FieldDistribution(
+            shares=camp_shares,
+            field_source=field_override.field_source,
+            counts=camp_counts,
+            no_data=no_data,
+            warnings=field_override.warnings,
+            regime_currency=field_override.regime_currency,
+        )
+
+    def normalized(raw, row, source_notes, *, local_shares=None, global_presence=None):
         toughest = next((c for c in raw["cells"] if c["opponent"] == raw["worst_opponent"]), None)
+        is_scenario = local_shares is not None
+        scenario_share = float(local_shares.get(row["subject"], 0.0)) if is_scenario else raw["subject_field_share"]
+        global_share = raw["subject_field_share"] if global_presence is None else float(global_presence.get(row["subject"], 0.0))
         result = {
             "performance": raw["performance"], "floor": raw["floor"],
             "performance_low": raw["performance_interval"][0],
@@ -1842,14 +1908,17 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
             "worst_low": toughest["ci_low"] if toughest else None,
             "worst_high": toughest["ci_high"] if toughest else None,
             "coverage": raw["nonmirror_coverage"],
-            "field_share": raw["subject_field_share"],
-            "active": raw["subject_field_share"] > 0,
+            "field_share": scenario_share,
+            "active": global_share > 0,
             "eligible": raw["eligible"],
             "pareto": raw["pareto"],
             "p_above_even": raw["p_performance_gt_0_5"],
             "bad_matchup_share": raw["bad_matchup_field_exposure"],
             "cells": [],
         }
+        if is_scenario:
+            result["scenario_field_share"] = scenario_share
+            result["global_field_share"] = global_share
         for cell in raw["cells"]:
             if cell["is_mirror"]:
                 continue
@@ -1867,6 +1936,26 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
         return result
 
     projection_inputs = {}
+    scenario_comparisons: dict[str, dict[str, object]] = {}
+
+    def projection_calls(projection):
+        eligible = [
+            row for row in projection["rows"].values()
+            if row.get("eligible")
+        ]
+        performance = sorted(
+            eligible,
+            key=lambda row: (-row["performance"], row["subject"]),
+        )
+        floor = sorted(
+            (row for row in eligible if row.get("floor") is not None),
+            key=lambda row: (-row["floor"], -row["performance"], row["subject"]),
+        )
+        return {
+            "performance": performance[0]["subject"] if performance else None,
+            "floor": floor[0]["subject"] if floor else None,
+        }
+
     for key, interval in (("arch", parent_interval), ("camps", camp_interval)):
         rows = blob[key]
         overrides, notes, override_identities, presence = {}, {}, {}, {}
@@ -1886,7 +1975,10 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 if source:
                     notes[(subject, cell["opp"])] = "since " + (source.get("since") or "full history")
             if interval is not None:
-                for opponent in shares:
+                interval_labels = dict(shares)
+                if field_override is not None:
+                    interval_labels.update(field_override.shares)
+                for opponent in interval_labels:
                     if (subject, opponent) not in interval.evidence:
                         continue
                     direct, basis = best_available_direct_view(interval, subject, opponent)
@@ -1925,24 +2017,51 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                                 if concentration.max_event_share is not None and concentration.max_event_share >= .4 else None
                             ),
                         }
-        if shares:
+        row_field_override = scenario_for_rows(key)
+        row_shares = row_field_override.shares if row_field_override is not None else shares
+        if row_shares:
+            row_measurements = {row["subject"]: _row_measurements(row) for row in rows}
             projection = project_ranking_rows(
-                {row["subject"]: _row_measurements(row) for row in rows},
-                shares, counts=counts, candidate_presence=presence,
+                row_measurements,
+                shares,
+                field_override=row_field_override,
+                counts=counts,
+                candidate_presence=presence,
                 cell_overrides=overrides,
                 override_sources={k: notes[k] for k in overrides},
                 override_identities=override_identities,
             )
+            if row_field_override is not None:
+                global_projection = project_ranking_rows(
+                    row_measurements,
+                    shares,
+                    counts=counts,
+                    candidate_presence=presence,
+                    cell_overrides=overrides,
+                    override_sources={k: notes[k] for k in overrides},
+                    override_identities=override_identities,
+                )
+                scenario_comparisons[key] = {
+                    "global": projection_calls(global_projection),
+                    "scenario": projection_calls(projection),
+                }
             for row in rows:
-                row["decision"] = normalized(projection["rows"][row["subject"]], row, notes)
+                row["decision"] = normalized(
+                    projection["rows"][row["subject"]], row, notes,
+                    local_shares=row_shares if row_field_override is not None else None,
+                    global_presence=presence,
+                )
                 for cell in row["decision"]["cells"]:
                     cell.update(details.get((row["subject"], cell["opponent"]), {}))
                 # Retain classifier residue visibly at its true field share, but ineligible.
                 if row["subject"] in shares and presence[row["subject"]] == 0:
-                    row["decision"]["field_share"] = shares[row["subject"]]
+                    row["decision"]["field_share"] = (
+                        row_shares.get(row["subject"], 0.0)
+                        if row_field_override is not None else shares[row["subject"]]
+                    )
                     row["decision"]["active"] = recent.exact_counts.get(row["subject"], 0) > 0
             projection_inputs[key] = {
-                "rows": {row["subject"]: _row_measurements(row) for row in rows},
+                "rows": row_measurements,
                 "shares": dict(shares),
                 "counts": dict(counts),
                 "candidate_presence": dict(presence),
@@ -1953,6 +2072,7 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 # not to the evaluator handoff.
                 "override_sources": {k: notes[k] for k in overrides},
                 "override_identities": dict(override_identities),
+                "field_override": row_field_override,
             }
 
     # Private handoff for the evaluator: the production projection has already
@@ -1962,7 +2082,21 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
 
     # Strategy-plan cells are direct aggregates, not averages of archetype estimates.
     plans = blob.get("plans", [])
-    plan_shares = {p["id"]: sum(shares.get(m["archetype"], 0.0) for m in p["members"]) for p in plans}
+    plan_assignments = {
+        m["archetype"] for p in plans for m in p.get("members", ())
+    }
+    scenario_unmapped = (
+        tuple(sorted(label for label in field_override.shares if label not in plan_assignments))
+        if field_override is not None else ()
+    )
+    plan_field_shares = field_override.shares if field_override is not None else shares
+    plan_shares = {p["id"]: sum(plan_field_shares.get(m["archetype"], 0.0) for m in p["members"]) for p in plans}
+    plan_counts = None
+    if field_override is not None and field_override.counts is not None and not scenario_unmapped:
+        plan_counts = {
+            p["id"]: sum(field_override.counts.get(m["archetype"], 0) for m in p["members"])
+            for p in plans
+        }
     plan_cells = {}
     plan_labels = {p["id"]: p["label"] for p in plans}
     for plan in plans:
@@ -1971,9 +2105,9 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 plan_cells[(plan["id"], cell["opponent_id"])] = build_cell(
                     plan["id"], cell["opponent_id"], cell["wins"], cell["n"],
                 )
-    if sum(plan_shares.values()) > 0:
+    if field_override is None and sum(plan_shares.values()) > 0:
         plan_projection = project_ranking_rows(
-            {p["id"]: () for p in plans}, plan_shares,
+            {p["id"]: () for p in plans}, plan_shares, counts=plan_counts,
             cell_overrides=plan_cells,
         )
         for plan in plans:
@@ -1983,6 +2117,13 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
             for cell in plan["decision"]["cells"]:
                 cell["opponent"] = plan_labels.get(cell["opponent"], cell["opponent"])
                 cell["source"] = "since " + meta["field_since"]
+    elif field_override is not None:
+        reason = "unavailable: custom field plan cells lack a coherent composition-specific aggregate"
+        if scenario_unmapped:
+            reason += "; unmapped positive scenario mass: " + ", ".join(scenario_unmapped)
+        for plan in plans:
+            plan["decision"] = None
+            plan["scenario_unavailable"] = reason
 
     eligible = [r for r in blob["arch"] if r.get("decision", {}).get("eligible")]
     ordered = sorted(eligible, key=lambda r: (-r["decision"]["performance"], r["subject"]))
@@ -1990,18 +2131,39 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
     floor_candidates = [r for r in ordered if r["decision"]["floor"] is not None]
     floor_order = sorted(floor_candidates, key=lambda r: (-r["decision"]["floor"], -r["decision"]["performance"], r["subject"]))
     sources = ", ".join(f"{name}: {entry.exact_decks} lists" for name, entry in recent.source_breakdown.items())
+    field_payload = {
+        **recent.as_dict(), "shares": shares, "prior_counts": prior_counts,
+        "description": f"Published-list field, {recent.half_life_days:g}-day recency half-life (provisional). "
+            f"{recent.exact_observed_decks} observed lists; effective observed sample {recent.effective_sample_size:.0f}; "
+            f"{sum(prior_counts.values())} historical pseudo-lists. Source coverage is not a census of entrants. {sources}",
+    }
+    if field_override is not None:
+        field_payload.update({
+            "shares": dict(field_override.shares),
+            "counts": None if field_override.counts is None else dict(field_override.counts),
+            "scenario": True,
+            "description": (
+                f"Scenario field: {field_scenario.label}; supplied field shares are used for "
+                "posterior weighting. Global published-list observations remain separate."
+            ),
+            "global_shares": shares,
+        })
     meta["deck_rankings"] = {
         "method_id": "deck-rankings-v1", "performance_call": best["subject"] if best else None,
         "floor_call": floor_order[0]["subject"] if floor_order else None,
         "performance_order": [r["subject"] for r in ordered],
         "floor_order": [r["subject"] for r in floor_order],
-        "field": {
-            **recent.as_dict(), "shares": shares, "prior_counts": prior_counts,
-            "description": f"Published-list field, {recent.half_life_days:g}-day recency half-life (provisional). "
-                f"{recent.exact_observed_decks} observed lists; effective observed sample {recent.effective_sample_size:.0f}; "
-                f"{sum(prior_counts.values())} historical pseudo-lists. Source coverage is not a census of entrants. {sources}",
-        },
+        "field": field_payload,
     }
+    if field_scenario is not None:
+        scenario_payload = field_scenario.model_dump()
+        scenario_payload["global_observed_field"] = {
+            "shares": dict(shares),
+            "counts": dict(counts),
+            "observed_lists": recent.exact_observed_decks,
+        }
+        scenario_payload["global_vs_scenario"] = scenario_comparisons
+        meta["field_scenario"] = scenario_payload
     old_utility = meta.get("report_utility") or meta.get("ranking_utility")
     if old_utility is not None:
         # Update operational usefulness from the same decisions actually rendered above.
@@ -2031,6 +2193,8 @@ def generate_ranking(
     *,
     db_path: Path,
     out_path: Path,
+    field_path: Path | None = None,
+    field_label: str | None = None,
     field_since: str | None = None,
     ground_n: int = 8,
     top_k: int = 8,
@@ -2042,6 +2206,10 @@ def generate_ranking(
     target: ReportTarget | None = None,
 ) -> dict:
     """Compute and write the ranking page; the CLI is only argument presentation."""
+    if field_path is not None and Path(out_path).resolve() == DEFAULT_OUT.resolve():
+        raise ValueError(
+            "custom field reports require a separate output path; the canonical global report is protected"
+        )
     if target is not None and data_until is not None:
         raise ValueError("pass target or data_until, not both")
     if target is not None and field_since is not None and field_since != target.field_since.isoformat():
@@ -2073,6 +2241,10 @@ def generate_ranking(
                 raise ValueError(
                     "current target effective cutoff must be one day after the frozen corpus maximum"
                 )
+        field_scenario = (
+            load_field_scenario(con, Path(field_path), label=field_label)
+            if field_path is not None else None
+        )
         superarchetypes = None if not include_superarchetypes else read_superarchetype_members(con)
         blob = compute_blob(
             con, field_since=effective_since, ground_n=ground_n, top_k=top_k,
@@ -2257,7 +2429,17 @@ def generate_ranking(
                 "  compact report projection: "
                 f"{time.perf_counter() - projection_started:.1f}s"
             )
-        _publish_deck_rankings(con, blob, parent_interval=parent_interval, camp_interval=camp_interval)
+        _publish_deck_rankings(
+            con,
+            blob,
+            parent_interval=parent_interval,
+            camp_interval=camp_interval,
+            field_override=(
+                field_scenario.projection_field()
+                if field_scenario is not None else None
+            ),
+            field_scenario=field_scenario,
+        )
         # Build diagnostics consume the final projected rows so their matchup
         # labels and shares match the disclosure.  They are descriptive
         # additions and are excluded from the ranking authority payload above.
@@ -2356,7 +2538,10 @@ def generate_ranking(
             for row in blob[key]
         ]
     page_blob["plans"] = [
-        {name: row[name] for name in ("id", "label", "description", "members", "field_share", "decision") if name in row}
+        {name: row[name] for name in (
+            "id", "label", "description", "members", "field_share", "decision",
+            "scenario_unavailable",
+        ) if name in row}
         for row in blob.get("plans", [])
     ]
     rendered = template.replace("__D_BLOB__", _json_for_script(page_blob), 1)
@@ -2459,6 +2644,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", default=str(DUCKDB_PATH))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
+    ap.add_argument("--field", default=None,
+                    help="private expected-field file; requires an output path separate from the global report")
+    ap.add_argument("--field-label", default=None,
+                    help="visible label for --field (default: input filename stem)")
     ap.add_argument("--field-since", default=None,
                     help="legacy field-window override (typed targets derive their confirmed regime)")
     ap.add_argument("--ground-n", type=int, default=8)
@@ -2487,6 +2676,8 @@ def main() -> None:
     target = _cli_target(args)
     blob = generate_ranking(
         db_path=Path(args.db), out_path=out,
+        field_path=Path(args.field) if args.field else None,
+        field_label=args.field_label,
         field_since=None if target is not None else args.field_since,
         ground_n=args.ground_n, top_k=args.top_k, cover_min=args.cover_min,
         min_row_share=args.min_row_share,

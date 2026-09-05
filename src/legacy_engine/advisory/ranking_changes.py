@@ -10,6 +10,8 @@ share.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
+import json
 import math
 from typing import Any
 
@@ -40,6 +42,28 @@ def _number(value: object) -> float | None:
 
 def _ordered_unique(values: Sequence[object]) -> list[str]:
     return sorted({value for value in values if isinstance(value, str) and value})
+
+
+def _scenario_identity(meta: Mapping[str, Any], deck_rankings: Mapping[str, Any]) -> str:
+    """Return a stable comparison identity for global or a custom field scenario."""
+    raw = meta.get("field_scenario")
+    if isinstance(raw, Mapping):
+        identity = raw.get("identity") if isinstance(raw.get("identity"), Mapping) else {
+            key: raw.get(key)
+            for key in (
+                "kind", "label", "source_sha256", "shares", "count_basis",
+                "supplied_total", "declared_effective_n", "effective_count_total",
+            )
+            if key in raw
+        }
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
+        return "custom:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return (
+        _text(meta.get("scenario"))
+        or _text(meta.get("scenario_id"))
+        or _text(deck_rankings.get("scenario"))
+        or "global"
+    )
 
 
 def _decision(row: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -292,12 +316,7 @@ def ranking_snapshot(blob: Mapping[str, Any]) -> dict[str, Any]:
     method_id = _text(deck_rankings.get("method_id")) or _text(meta.get("method_id"))
     field_since = _text(meta.get("field_since"))
     corpus_max = _text(meta.get("corpus_max"))
-    scenario = (
-        _text(meta.get("scenario"))
-        or _text(meta.get("scenario_id"))
-        or _text(deck_rankings.get("scenario"))
-        or "global"
-    )
+    scenario = _scenario_identity(meta, deck_rankings)
     regime = _text(meta.get("regime_card")) or _text(meta.get("regime"))
     observed_field_n = _number(meta.get("observed_field_n"))
     if observed_field_n is None:

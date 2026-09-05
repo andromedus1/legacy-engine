@@ -85,6 +85,29 @@ def test_snapshot_captures_global_inputs_and_implicit_mirrors():
     assert snapshot["cell_means"]["Alpha"] == {"Beta": 0.55}
 
 
+def test_custom_field_snapshots_bind_refresh_comparison_to_scenario_identity():
+    blob = _blob(
+        shares={"Alpha": 0.6, "Beta": 0.4},
+        cells={"Alpha": {"Beta": 0.55}, "Beta": {"Alpha": 0.45}},
+    )
+    blob["meta"]["field_scenario"] = {
+        "kind": "custom", "label": "Saved room", "source_sha256": "source-a",
+        "shares": {"Alpha": 0.6, "Beta": 0.4},
+    }
+    same = ranking_snapshot(blob)
+    changed = dict(blob)
+    changed["meta"] = {**blob["meta"], "field_scenario": {
+        **blob["meta"]["field_scenario"], "source_sha256": "source-b",
+    }}
+    other = ranking_snapshot(changed)
+
+    assert same["scenario"].startswith("custom:")
+    assert same["scenario"] != other["scenario"]
+    result = compare_ranking_snapshots(other, same)
+    assert result["status"] == "incompatible"
+    assert "scenario" in result["reason"]
+
+
 def test_first_and_same_data_publications_are_honest():
     first = _snap(
         shares={"Alpha": 0.6, "Beta": 0.4},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from legacy_engine.advisory.deck_ranking import rank_matchup_rows
+from legacy_engine.advisory.field import build_custom_field
 from legacy_engine.advisory.plan_borrowing import PlanBorrowingPrior
 from legacy_engine.advisory.deck_ranking_projection import project_ranking_rows
 from legacy_engine.advisory.ranking_measurement import RankingCellMeasurement, RankingCellSource
@@ -136,6 +137,30 @@ def test_prior_overlay_can_replace_absent_cell_weak_prior_without_observations()
     assert (cell["wins"], cell["n"]) == (0, 0)
     assert cell["source_kind"] == "missing"
     assert cell["mean"] == pytest.approx(0.8)
+
+
+def test_field_override_reweights_cells_without_changing_global_candidate_presence() -> None:
+    source = _source("Absent locally", "Room", 9, 10, strength=2)
+    scenario = build_custom_field(
+        {"Room": 1.0}, known_archetypes=frozenset({"Room"}), counts={"Room": 20}
+    )
+    projected = project_ranking_rows(
+        {"Absent locally": [_measurement("Absent locally", "Room", era=source)]},
+        {"Other global deck": 1.0},
+        field_override=scenario,
+        candidate_presence={"Absent locally": 0.25},
+        draws=30,
+        seed=3,
+    )
+
+    row = projected["rows"]["Absent locally"]
+    cell = row["cells"][0]
+    assert row["eligible"] is True
+    assert row["subject_field_share"] == pytest.approx(0.25)
+    assert projected["field"]["shares"] == {"Room": 1.0}
+    assert projected["global_field"]["shares"] == {"Other global deck": 1.0}
+    assert projected["field_override"]["counts"] == {"Room": 20}
+    assert cell["field_share"] == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize("scale", (0, -1, float("inf"), float("nan")))

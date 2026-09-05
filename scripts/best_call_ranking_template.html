@@ -55,7 +55,7 @@ if(fieldScenario){
  const supplied=fieldScenario.supplied_total==null?'shares only':`${Number(fieldScenario.supplied_total).toLocaleString()} supplied players`;
  const unknown=(fieldScenario.unknown_opponents || []).length;
  document.getElementById('scenario-caption').hidden=false;
- document.getElementById('scenario-caption').textContent=`Expected field: ${fieldScenario.label} · ${supplied}${unknown ? ` · ${unknown} unmapped opponent${unknown===1?'':'s'}`} · scored with the current model`;
+ document.getElementById('scenario-caption').textContent=`Expected field: ${fieldScenario.label} · ${supplied}${unknown ? ` · ${unknown} unmapped opponent${unknown===1?'':'s'}` : ''} · scored with the current model`;
 }
 const refreshChanges = M.refresh_changes || {};
 function renderRefreshChanges(){
@@ -262,7 +262,8 @@ const mapTip=document.getElementById('agency-tooltip');
 function mapTooltipHtml(r){
  const d=decision(r),cells=d.cells || [],worst=cells.find(c=>c.opponent===d.worst_opponent),supported=cells.filter(c=>c.n>=state.minN).length;
  const n=cells.reduce((sum,c)=>sum+c.n,0),observed=(field.exact_counts || {})[r.subject];
- return `<div class="tip-title">${escT(r.subject)}${viewTradeoff(r,filteredRows(D.arch))?'<span class="badge frontier">tradeoff</span>':''}</div><dl><dt>Performance</dt><dd>${pct(d.performance)}<small>95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</small></dd><dt>Matchup floor</dt><dd>${pct(d.floor)}<small>Pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small></dd><dt>Toughest pairing</dt><dd>${escT(d.worst_opponent || '—')}<small>${worst && worst.n?`${worst.wins}–${worst.n-worst.wins} (n=${worst.n})`:'Prior only'}</small></dd><dt>Floor coverage</dt><dd>${pct(floorCoverage(d))} at n ≥ ${state.minN}<small>${supported}/${cells.length} matchups</small></dd><dt>Match sample</dt><dd>${n.toLocaleString()} non-mirror matches</dd><dt>Meta share</dt><dd>${pct(d.field_share)}${observed!=null?`<small>${observed.toLocaleString()} observed lists</small>`:''}</dd></dl>`;
+ const shareLabel=fieldScenario?'Scenario share':'Meta share',observedLabel=fieldScenario?'global observed lists':'observed lists';
+ return `<div class="tip-title">${escT(r.subject)}${viewTradeoff(r,filteredRows(D.arch))?'<span class="badge frontier">tradeoff</span>':''}</div><dl><dt>Performance</dt><dd>${pct(d.performance)}<small>95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</small></dd><dt>Matchup floor</dt><dd>${pct(d.floor)}<small>Pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small></dd><dt>Toughest pairing</dt><dd>${escT(d.worst_opponent || '—')}<small>${worst && worst.n?`${worst.wins}–${worst.n-worst.wins} (n=${worst.n})`:'Prior only'}</small></dd><dt>Floor coverage</dt><dd>${pct(floorCoverage(d))} at n ≥ ${state.minN}<small>${supported}/${cells.length} matchups</small></dd><dt>Match sample</dt><dd>${n.toLocaleString()} non-mirror matches</dd><dt>${shareLabel}</dt><dd>${pct(d.field_share)}${observed!=null?`<small>${observed.toLocaleString()} ${observedLabel}</small>`:''}</dd></dl>`;
 }
 function placeMapTip(x,y){const rect=mapTip.getBoundingClientRect();mapTip.style.left=Math.max(8,Math.min(x+14,window.innerWidth-rect.width-8))+'px';mapTip.style.top=Math.max(8,y+14+rect.height>window.innerHeight?y-rect.height-14:y+14)+'px';}
 function showMapTip(r,el,event){mapTip.innerHTML=mapTooltipHtml(r);mapTip.hidden=false;el.setAttribute('aria-describedby','agency-tooltip');const rect=el.getBoundingClientRect();placeMapTip(event?event.clientX:rect.right,event?event.clientY:rect.top);}

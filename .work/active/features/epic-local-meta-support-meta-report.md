@@ -67,3 +67,27 @@ incomplete declared evidence must fail before replacing a report.
 
 The saved sample's end date is unspecified: its documented period starts after May 18. Label the
 example "Saved post-May 18 field (107 players)" rather than inventing a May collection date.
+
+## Implementation notes (2026-09-05)
+
+- Added `advisory.field_scenario.load_field_scenario` as a thin adapter over the existing field
+  grammar. It records source hash, label, supplied counts, declared effective concentration,
+  unknown positive mass, and a stable scenario identity. Declared effective-N concentrations are
+  scaled back after the legacy minimum-one allocator so the posterior uses the declared total;
+  materialized counts remain available as provenance.
+- Added `field_override` to the shared ranking projection. It reweights the same selected matchup
+  cells and weak 50% named priors while receiving global current-corpus presence separately for
+  candidate eligibility. The publisher maps parent scenario shares onto camp rows, retains
+  unmapped camp mass, and omits strategic-plan estimates with an explicit unavailable reason until
+  composition-specific plan cells can be formed coherently.
+- `refresh_best_call_ranking.py` accepts `--field` and `--field-label`, validates before compute
+  and atomic output replacement, and refuses the canonical global output for custom scenarios.
+  Custom reports carry `meta.field_scenario`, global observed-field provenance, and compact
+  global-versus-scenario calls. Refresh snapshots hash the stable scenario identity.
+- Added the dated saved input `decks/local-field-saved-post-may18-107.txt`, preserving four
+  explicitly unmapped Affinity Combo players and historical labels such as Energy. No actual
+  corpus result is claimed here; the saved input is a private current-model scenario.
+- Focused verification: field-scenario/parser, projection, refresh comparison, report, and
+  evaluator compatibility tests pass (74 selected tests at the last run); Ruff passes on all
+  touched Python files. Full corpus generation and final browser/integration checks remain
+  pending host verification.
