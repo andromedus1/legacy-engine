@@ -18,6 +18,7 @@
 <body><main>
 <header><div><h1>Deck Rankings</h1><p class="subtitle">Find your strongest deck. Know its toughest pairing.</p></div><nav><a href="#archetypes">Archetypes</a> · <a href="#camps">Camps</a> · <a href="#method">Method</a></nav></header>
 <p id="freshness" class="muted"></p>
+<p id="scenario-caption" class="notice" hidden></p>
 <div id="target-control" class="target-control" hidden><label for="report-target">Analysis</label><select id="report-target"></select><span id="target-mode" class="badge"></span><span id="target-status" aria-live="polite"></span><ul id="target-unavailable" class="target-unavailable"></ul></div>
 <div class="toolbar evidence-controls" role="group" aria-label="Evidence filters"><label for="min-floor-coverage">Minimum floor coverage <input id="min-floor-coverage" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%</label><label for="min-matchup-n">Minimum matchup n <input id="min-matchup-n" type="number" min="1" step="1" value="8" inputmode="numeric"></label><small class="muted">Coverage counts matchups meeting your n. Filters select the decks shown; estimates use the same model.</small></div>
 <section class="priorities" id="priorities" aria-label="Performance and matchup floor"></section>
@@ -48,7 +49,14 @@ const escA = escT;
 const model = M.deck_rankings || {};
 const validation = M.benchmark_validation || {status:'not-run', artifact_id:null};
 const field = model.field || {};
+const fieldScenario = M.field_scenario || null;
 document.getElementById('freshness').textContent = `Results through ${M.corpus_max} · ${(M.observed_field_n || M.field_decks || 0).toLocaleString()} published lists since ${M.field_since} · Estimates, with 95% ranges`;
+if(fieldScenario){
+ const supplied=fieldScenario.supplied_total==null?'shares only':`${Number(fieldScenario.supplied_total).toLocaleString()} supplied players`;
+ const unknown=(fieldScenario.unknown_opponents || []).length;
+ document.getElementById('scenario-caption').hidden=false;
+ document.getElementById('scenario-caption').textContent=`Expected field: ${fieldScenario.label} · ${supplied}${unknown ? ` · ${unknown} unmapped opponent${unknown===1?'':'s'}`} · scored with the current model`;
+}
 const refreshChanges = M.refresh_changes || {};
 function renderRefreshChanges(){
  const comparison=refreshChanges.comparison || {},from=comparison.from,to=comparison.to || M.corpus_max;
@@ -70,7 +78,7 @@ if(study){
   const changes=phase.call_changes[method];
   return `<tr><td>${escT(phase.label)}</td><td>${escT(names[method] || method)}</td><td>${phase.matches}</td><td>${score(s.log_loss)}</td><td>${score(s.brier)}</td><td>${changes?`${changes.performance}/${phase.origins} · ${changes.floor}/${phase.origins}`:'Reference'}</td></tr>`;
  })).join('');
- document.getElementById('validation-summary').innerHTML=`<b>Historical method check</b><br>${escT(study.scope)}; ${escT(study.phases[0].since)} through ${escT(study.phases.at(-1).until)} (exclusive). Lower scores are better. Call changes count performance · floor leaders versus the current prior.<div class="table-scroll"><table class="ledger"><thead><tr><th>Period</th><th>Prior</th><th>Matches</th><th>Log loss</th><th>Brier</th><th>Call changes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+ document.getElementById('validation-summary').innerHTML=`<b>Historical method check</b><br>${escT(study.scope)}; ${escT(study.phases[0].since)} through ${escT(study.phases.at(-1).until)} (exclusive). Lower scores are better. Call changes count performance · floor leaders versus the current prior.<div class="table-scroll"><table class="ledger"><thead><tr><th>Period</th><th>Prior</th><th>Weighted matches</th><th>Log loss</th><th>Brier</th><th>Call changes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 document.getElementById('audit').textContent = [
  `Method: ${model.method_id || 'unavailable'}`,
@@ -141,7 +149,7 @@ function cellRows(cells){return [...cells].sort((a,b)=>b.share-a.share || a.oppo
 }).join('');}
 function campLink(label){
  const row=(D.camps || []).find(c=>c.subject===label);
- return row ? `<a href="#detail-c-${escA(row._idx)}">${escT(label)}</a>` : escT(label);
+ return row ? `<a href="#detail-c-${escA(row._idx)}" data-camp-link="${escA(row._idx)}">${escT(label)}</a>` : escT(label);
 }
 function slots(value){return value==null?'—':Number(value).toFixed(1);}
 function decisionUnitHtml(r){
@@ -158,27 +166,30 @@ function decisionUnitHtml(r){
  }).join('');
  const pairRows=(composition.camp_pairs || []).map(pair=>{
   const main=pair.main || {},side=pair.side || {},pilot=pair.pilot_overlap || {};
-  return `<tr><td>${campLink(pair.camp_a)} · ${campLink(pair.camp_b)}</td><td>${slots(main.slot_distance)}</td><td>${slots(side.slot_distance)}</td><td>${main.card_coverage_a==null?'—':pct(main.card_coverage_a)} / ${main.card_coverage_b==null?'—':pct(main.card_coverage_b)}</td><td>${pilot.jaccard==null?'—':pct(pilot.jaccard)} (${pilot.overlap ?? 0}/${pilot.union ?? 0})</td></tr>`;
+  return `<tr><td>${campLink(pair.camp_a)} · ${campLink(pair.camp_b)}</td><td>${slots(main.slot_distance)}</td><td>${slots(side.slot_distance)}</td><td>${main.card_lists_a ?? 0}/${main.list_count_a ?? 0} · ${main.card_lists_b ?? 0}/${main.list_count_b ?? 0}</td><td>${side.card_lists_a ?? 0}/${side.list_count_a ?? 0} · ${side.card_lists_b ?? 0}/${side.list_count_b ?? 0}</td><td title="${pilot.a ?? 0} / ${pilot.b ?? 0} known pilots; ${pilot.unknown_records_a ?? 0} / ${pilot.unknown_records_b ?? 0} lists without handles">${pilot.jaccard==null?'—':pct(pilot.jaccard)+` (${pilot.overlap}/${pilot.union})`}</td></tr>`;
  }).join('');
  const summary=floor.available
-  ? `Current camp coverage ${pct(floor.current_camp_coverage)} · modeled parent coverage ${pct(floor.modeled_parent_coverage)} · floor lift from pooling ${pp(floor.pooling_uplift)} · parent/build floor gap ${pp(floor.parent_minus_weighted_camp_floor)}`
+  ? `Pooling lifts the floor ${pp(floor.pooling_uplift)} · parent/build gap ${pp(floor.parent_minus_weighted_camp_floor)} · builds cover ${pct(floor.current_camp_coverage)} of this archetype`
   : `Unavailable: ${escT(floor.unavailable_reason || 'insufficient common evidence')}`;
  const floors=campRows ? `<div class="table-scroll"><table class="ledger"><thead><tr><th>Build</th><th>Lists</th><th>Share</th><th>Floor</th><th>Toughest pairing</th><th>n</th><th>Prior</th></tr></thead><tbody>${campRows || '<tr><td colspan="7">No camp floor rows available.</td></tr>'}</tbody></table></div>` : '';
- const pairs=pairRows ? `<details><summary>Composition and pilot overlap</summary><div class="table-scroll"><table class="ledger"><thead><tr><th>Build pair</th><th>Main slots</th><th>Side slots</th><th>Card records</th><th>Pilots · Jaccard</th></tr></thead><tbody>${pairRows || '<tr><td colspan="5">No camp pairs available.</td></tr>'}</tbody></table></div><p class="muted">Slot distance is 0.5 × the sum of absolute mean-copy differences, reported by zone. Pilot overlap is source-scoped after normalizing handles; unknown handles are excluded.</p></details>` : '';
- return `<details class="method"><summary>Build decision units</summary><p class="muted">Descriptive parent-versus-camp diagnostic; it does not change taxonomy or ranking authority. Floor lifts are percentage points (pp); n and prior columns describe support.</p><p>${summary}</p>${floors}${pairs}</details>`;
+ const pairs=pairRows ? `<details><summary>Composition and pilot overlap</summary><div class="table-scroll"><table class="ledger"><thead><tr><th>Build pair</th><th>Main slots</th><th>Side slots</th><th>Main lists A · B</th><th>Side lists A · B</th><th>Pilot overlap</th></tr></thead><tbody>${pairRows || '<tr><td colspan="5">No camp pairs available.</td></tr>'}</tbody></table></div><p class="muted">Slots compare average card copies. List counts show records available / total. Pilot overlap uses known handles within each source.</p></details>` : '';
+ return `<details class="method"><summary>Build differences</summary><p>${summary}</p>${floors}${pairs}</details>`;
 }
 function detailHtml(r){
  const d=decision(r), cells=d.cells || [];
  const info=`<div class="detail-meta"><span>Performance ${pct(d.performance)} · 95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</span><span>Floor ${pct(d.floor)} · toughest pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</span><span>${pct(d.coverage)} direct evidence</span></div>`;
- const ledger=`<div class="table-scroll"><table class="ledger"><thead><tr><th>Matchup</th><th>Field</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div>`;
+ const ledger=`<div class="table-scroll"><table class="ledger"><thead><tr><th>Matchup</th><th>${fieldTableLabel}</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div>`;
  const plans=(r.plan_cells || []).map(c=>`<span class="member">${escT(c.opponent)} ${pct(c.p)} · ${c.wins}–${c.losses}</span>`).join('');
  const minimum=`Minimum across all opponents: 95% ${fmtP(d.floor_low)}–${fmtP(d.floor_high)}%. This includes uncertainty about which pairing is worst.`;
  const provenance=cells.filter(c=>c.prior_source || c.concentration_warning || c.intervals).map(c=>`${c.opponent}: ${c.prior_source || c.source}${c.prior_strength!=null?' · prior '+pct(c.prior_mean)+' / '+c.prior_strength.toFixed(1)+' pseudo-matches':''}${c.intervals?' · '+c.intervals:''}${c.concentration_warning?' · '+c.concentration_warning:''}`).join('\n');
  return info+ledger+decisionUnitHtml(r)+(plans?`<details class="method"><summary>Against strategic plans</summary><div class="members">${plans}</div></details>`:'')+`<details class="method"><summary>Evidence details</summary><div class="audit">${escT(minimum+'\n'+(provenance || 'No additional historical evidence.'))}</div></details>`;
 }
-const columns=[['Deck',null],['Performance','performance'],['Matchup floor','floor'],['Toughest pairing',null],['Floor coverage','coverage'],['Meta','field_share']];
+const fieldColumnLabel=fieldScenario?'Scenario share':'Meta';
+const fieldTableLabel=fieldScenario?'Scenario share':'Field';
+const columns=[['Deck',null],['Performance','performance'],['Matchup floor','floor'],['Toughest pairing',null],['Floor coverage','coverage'],[fieldColumnLabel,'field_share']];
 function tableHtml(rows,kind){
  const selected=sortedRows(rows),peers=filteredRows(rows);
+ if(kind==='c' && state.revealedCamp!=null){const linked=rows.find(r=>r._idx===state.revealedCamp);if(linked && !selected.includes(linked))selected.push(linked);}
  let html='<thead><tr>'+columns.map(([label,key])=>`<th>${key?`<button data-sort="${key}">${label}${key===state.key?(state.dir<0?' ↓':' ↑'):''}</button>`:label}</th>`).join('')+'</tr></thead><tbody>';
  selected.forEach(r=>{
   const d=decision(r),id=kind+'-'+r._idx,open=state.expanded.has(id);
@@ -193,6 +204,13 @@ function renderTable(id,rows,kind){
  el.querySelectorAll('button[data-sort]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.sort;state.dir=state.key===k?-state.dir:-1;state.key=k;render();}));
  el.querySelectorAll('button[data-row]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.row;state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);render();const next=el.querySelector(`button[data-row="${CSS.escape(id)}"]`);if(next)next.focus();}));
 }
+document.addEventListener('click',e=>{
+ const link=e.target.closest('[data-camp-link]');if(!link)return;
+ e.preventDefault();const idx=Number(link.dataset.campLink),id='c-'+idx;
+ state.revealedCamp=idx;state.expanded.add(id);renderTable('t-camp',D.camps,'c');
+ document.querySelector(`button[data-row="${id}"]`)?.focus();
+ document.getElementById('detail-'+id)?.scrollIntoView({block:'start'});
+});
 function render(){renderTable('t-arch',D.arch,'a');renderTable('t-camp',D.camps,'c');document.getElementById('sort-performance').setAttribute('aria-pressed',state.key==='performance');document.getElementById('sort-floor').setAttribute('aria-pressed',state.key==='floor');document.getElementById('ranking-count').textContent=sortedRows(D.arch).length+' archetypes · '+sortedRows(D.camps).length+' camps';renderPriorities();renderPlans();scatter();}
 function renderPriorities(){
  const rows=sortedRows(D.arch).filter(r=>decision(r).eligible);
@@ -205,11 +223,12 @@ function renderPriorities(){
 }
 function renderPlans(){
  const plans=(D.plans || []).filter(p=>floorCoverage(p.decision || {})+1e-12>=state.minCoverage);
- const html='<thead><tr><th>Plan</th><th>Performance</th><th>Floor vs plans</th><th>Floor coverage</th><th>Meta</th></tr></thead><tbody>'+plans.map(p=>{
+ const html='<thead><tr><th>Plan</th><th>Performance</th><th>Floor vs plans</th><th>Floor coverage</th><th>'+fieldColumnLabel+'</th></tr></thead><tbody>'+plans.map(p=>{
+  if(p.scenario_unavailable)return `<tr><td>${escT(p.label)}</td><td colspan="4" class="empty">${escT(p.scenario_unavailable)}</td></tr>`;
   const id='p-'+p.id,open=state.expanded.has(id), d=p.decision || {};
   const members=(p.members || []).map(m=>`<span class="member">${escT(m.archetype)}</span>`).join('');
   const cells=d.cells || [];
-  return `<tr><td><button class="row-toggle" data-plan="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(p.label)}</button></td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share ?? p.field_share)}</td></tr>`+(open?`<tr class="detail" id="detail-${escA(id)}"><td colspan="5"><p>${escT(p.description)}</p><div class="members">${members}</div><div class="table-scroll"><table class="ledger"><thead><tr><th>Opponent plan</th><th>Field</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div></td></tr>`:'');
+  return `<tr><td><button class="row-toggle" data-plan="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(p.label)}</button></td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share ?? p.field_share)}</td></tr>`+(open?`<tr class="detail" id="detail-${escA(id)}"><td colspan="5"><p>${escT(p.description)}</p><div class="members">${members}</div><div class="table-scroll"><table class="ledger"><thead><tr><th>Opponent plan</th><th>${fieldTableLabel}</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div></td></tr>`:'');
  }).join('')+(plans.length?'':'<tr><td colspan="5" class="empty">No plans match these filters.</td></tr>')+'</tbody>';
  const el=document.getElementById('t-plan');el.innerHTML=html;
  el.querySelectorAll('button[data-plan]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.plan;state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);renderPlans();const next=el.querySelector(`button[data-plan="${CSS.escape(id)}"]`);if(next)next.focus();}));

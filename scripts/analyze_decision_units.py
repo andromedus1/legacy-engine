@@ -63,7 +63,7 @@ def _md(result: dict[str, Any]) -> str:
         "",
         "Descriptive diagnostic only; taxonomy and ranking authority are unchanged.",
         "",
-        "| Parent | Current share | Camps | Coverage | Pooling uplift | Parent − camp floor | Attention |",
+        "| Parent | Current share | Camps | Opponent coverage | Pooling uplift | Parent − camp floor | Attention |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in result.get("parents", ()):
@@ -71,7 +71,7 @@ def _md(result: dict[str, Any]) -> str:
         parent = str(item.get("parent", "")).replace("|", "\\|")
         lines.append(
             f"| {parent} | {_pct(item.get('current_parent_share'))} "
-            f"| {item.get('camp_count', 0)} | {_pct(floor.get('modeled_parent_coverage'))} "
+            f"| {item.get('camp_count', 0)} | {_pct(floor.get('common_opponent_coverage'))} "
             f"| {_pp(floor.get('pooling_uplift'))} "
             f"| {_pp(floor.get('parent_minus_weighted_camp_floor'))} "
             f"| {_pct(item.get('attention'))} |"

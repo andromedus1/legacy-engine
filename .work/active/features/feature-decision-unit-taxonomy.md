@@ -208,3 +208,24 @@ reproduced the previously grounded pure uplifts: Jeskai Midrange 3.62pp, Azorius
 2.28pp, Show and Tell 1.94pp, Dimir Tempo 1.13pp, and Eldrazi 0.62pp. This audit did not inspect
 heldout outcomes or alter the source database; canonical refresh and browser review remain
 host-owned.
+
+## Standard review and accepted corrections
+
+One fresh Sol xhigh review requested four corrections, all accepted: require two current builds
+for a pooling comparison; preserve missing per-build floor/pilot evidence as unavailable;
+make camp links actually reveal their destination; and name opponent/main/side coverage accurately.
+The host also enforces the design's full positive-share external-field contract: missing cells
+prevent that exact pooling comparison rather than silently narrowing its opponent set. Individual
+complete build floors stay visible; this never suppresses parent rankings. Source-scoped pilot
+identity still uses the established None/blank handling, without guessed sentinel names.
+
+The corrected actual audit has 29 parents and 16 comparisons with two current builds, rather than
+counting 11 singleton cases as evidence of zero pooling uplift. Azorius Midrange has the highest
+field-share-weighted diagnostic attention. Main/side record denominators are separate. The
+expanded disclosure now says “Build differences” and omits repeated implementation qualifiers.
+
+Verification: 50 existing diagnostic/publication tests passed; two additional meaningful
+singleton/missing-pilot tests pass (9 diagnostic tests total). Chromium verified the actual
+Jeskai Midrange disclosure and that its camp link expands/focuses the destination, with no JS
+errors. Final combined CI remains pending. Standard pass count is one; accepted fixes require
+verification, not a second independent review.

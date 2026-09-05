@@ -54,8 +54,9 @@ def test_parent_is_excluded_and_missing_opponents_are_not_zero_filled():
     assert result["common_opponents"] == ["Opp A"]
     assert result["missing_opponents"] == ["Opp B"]
     assert result["external_opponent_count"] == 2
-    assert result["modeled_parent_coverage"] == pytest.approx(0.3 / 0.8)
-    assert result["available"] is True
+    assert result["common_opponent_coverage"] == pytest.approx(0.3 / 0.8)
+    assert result["available"] is False
+    assert result["camps"][1]["floor"] is None
 
 
 def test_floor_comparison_degrades_honestly_without_weighted_common_cells():
@@ -65,6 +66,30 @@ def test_floor_comparison_degrades_honestly_without_weighted_common_cells():
     assert result["available"] is False
     assert "pooling_uplift" not in result
     assert "unavailable_reason" in result
+
+
+def test_single_current_build_has_a_floor_but_no_pooling_comparison():
+    parent = _row("P", [_cell("A", .5), _cell("B", .5)])
+    active = _row("P [active]", [_cell("A", .6), _cell("B", .4)], share=.2)
+    inactive = _row("P [inactive]", [_cell("A", .9)], share=0)
+    result = decision_units.compare_build_floors(parent, [active, inactive], {"A": .5, "B": .5})
+    assert not result["available"]
+    assert "pooling_uplift" not in result
+    assert result["camps"][0]["floor"] == .4
+    assert result["camps"][1]["floor"] is None
+
+
+def test_pilot_overlap_requires_known_handles_in_both_cohorts():
+    unknown = [{"source": "MTGO", "player": None}, {"source": "MTGO", "player": " "}]
+    known = [{"source": "MTGO", "player": "Alice"}]
+    result = decision_units._pilot_summary(unknown, known)
+    assert result["jaccard"] is None
+    assert result["records_a"] == result["unknown_records_a"] == 2
+    assert result["a"] == 0 and result["b"] == 1
+    # Matching text across two sources does not establish a shared identity.
+    other_source = [{"source": "paper", "player": " ALICE "}]
+    assert decision_units._pilot_summary(known, other_source)["jaccard"] == 0
+    assert decision_units._pilot_summary(known, known)["jaccard"] == 1
 
 
 def _analysis_blob() -> dict:
@@ -176,7 +201,7 @@ def test_template_escapes_decision_unit_camp_and_opponent_labels():
             },
             "decision_units": {
                 "floor_comparison": {
-                    "available": True, "modeled_parent_coverage": 1,
+                    "available": True, "common_opponent_coverage": 1,
                     "pooling_uplift": .1, "parent_minus_weighted_camp_floor": .2,
                     "camp_weights": {f"P [{unsafe_camp}]": 1},
                     "camps": [{

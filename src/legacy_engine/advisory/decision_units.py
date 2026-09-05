@@ -120,17 +120,16 @@ def _toughest(cells: Mapping[str, Mapping[str, Any]], opponents: Iterable[str]) 
 
 
 def _camp_floor(camp: Mapping[str, Any], opponents: Iterable[str]) -> dict[str, Any] | None:
+    opponents = tuple(opponents)
     cells = _cell_values(camp)
-    toughest = _toughest(cells, opponents)
-    if toughest is None:
-        return None
+    toughest = _toughest(cells, opponents) if opponents and all(opp in cells for opp in opponents) else None
     return {
         "camp": _label(camp),
         "camp_name": camp.get("camp", _label(camp)),
         "parent": camp.get("parent"),
-        "floor": toughest["mean"],
+        "floor": toughest["mean"] if toughest else None,
         "toughest_pairing": toughest,
-        "direct_n": toughest["n"],
+        "direct_n": toughest["n"] if toughest else None,
         "total_direct_n": sum(_cell_n(cells[opponent]) for opponent in opponents if opponent in cells),
         "current_list_count": _current_list_count(camp),
         "field_share": _finite(camp.get("field_share")) or 0.0,
@@ -184,9 +183,9 @@ def compare_build_floors(
     common_mass = sum(positive_external[opponent] for opponent in common)
     coverage = common_mass / external_mass if external_mass else 0.0
 
-    floors = [_camp_floor(camp, common) for camp in included_camps]
-    all_floors = [_camp_floor(camp, common) for camp in camp_rows]
-    available = bool(common and camp_weights and all(item is not None for item in floors))
+    floors = [_camp_floor(camp, candidate_opponents) for camp in included_camps]
+    all_floors = [_camp_floor(camp, candidate_opponents) for camp in camp_rows]
+    available = bool(common and not missing and len(included_camps) >= 2)
     parent_share = _share(parent, shares, parent_label) if isinstance(parent, Mapping) else (
         _finite(shares.get(parent_label)) or 0.0
     )
@@ -199,7 +198,7 @@ def compare_build_floors(
         "common_opponent_count": len(common),
         "external_field_share": external_mass,
         "common_field_share": common_mass,
-        "modeled_parent_coverage": coverage,
+        "common_opponent_coverage": coverage,
         "camp_weights": camp_weights,
         "included_camp_count": len(included_camps),
         "current_camp_share": sum(camp_weights_raw.values()),
@@ -216,9 +215,9 @@ def compare_build_floors(
     }
     if not available:
         base["unavailable_reason"] = (
-            "no common positive-share opponent cells across parent and all camps"
-            if common
-            else "no common positive-share opponent cells"
+            "fewer than two current builds" if len(included_camps) < 2 else
+            "missing opponent cells: " + ", ".join(missing) if missing else
+            "no positive-share external opponents"
         )
         return base
 
@@ -367,7 +366,11 @@ def _pilot_summary(records_a: list[dict[str, Any]], records_b: list[dict[str, An
         "b": len(right),
         "overlap": len(intersection),
         "union": len(union),
-        "jaccard": len(intersection) / len(union) if union else None,
+        "jaccard": len(intersection) / len(union) if left and right else None,
+        "records_a": len(records_a),
+        "records_b": len(records_b),
+        "unknown_records_a": sum(not normalize_player(record.get("player")) for record in records_a),
+        "unknown_records_b": sum(not normalize_player(record.get("player")) for record in records_b),
         "unknown_excluded": True,
     }
 
