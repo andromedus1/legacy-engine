@@ -1056,7 +1056,8 @@ def build_family_payload(registry, cluster_cells, archetype_rows, *, top_k, cove
 
 def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                  regime_card, parents, superarchetypes=None, benchmark_validation=None,
-                 data_until: str | None = None, ban_events=None):
+                 data_until: str | None = None, ban_events=None,
+                 include_plans: bool = True):
     date_clause = " where substr(date,1,10) < ?" if data_until else ""
     corpus_max = con.execute(f"select max(substr(date,1,10)) from tournaments{date_clause}", [data_until] if data_until else []).fetchone()[0]
     if corpus_max is None:
@@ -1425,58 +1426,67 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
     print(f"  camp sweep total: {time.perf_counter() - t_camp:.1f}s "
           f"({len(camps_out)} camp rows)", flush=True)
 
-    # Strategic intent is a separate curated semantic layer. Recompute it from
-    # decisive match tallies rather than averaging any rendered row statistic.
-    plan_registry = load_strategic_plan_registry()
-    plan_matches = compute_match_results(con, since=field_since, until=data_until)
-    plan_result = aggregate_strategic_plan_results(
-        plan_matches,
-        plan_registry,
-        current_archetypes=[row["subject"] for row in arch_out],
-        ground_n=ground_n,
-        since=field_since,
-    )
-    archetype_plan_cells = aggregate_archetype_vs_plan_results(
-        plan_matches,
-        plan_registry,
-        current_archetypes=[row["subject"] for row in arch_out],
-        ground_n=ground_n,
-    )
-    assignment_by_archetype = {
-        assignment.archetype: assignment for assignment in plan_registry.assignments
-    }
-    for row in arch_out:
-        assignment = assignment_by_archetype[row["subject"]]
-        row["strategic_plan"] = {
-            "primary": assignment.primary,
-            "secondary": list(assignment.secondary),
+    # Strategic intent is a separate curated semantic layer.  Retrospective
+    # parent-only evaluation explicitly disables it: a strategy-plan registry
+    # is current composition knowledge, not an origin-local parent taxonomy.
+    if include_plans:
+        plan_registry = load_strategic_plan_registry()
+        plan_matches = compute_match_results(con, since=field_since, until=data_until)
+        plan_result = aggregate_strategic_plan_results(
+            plan_matches,
+            plan_registry,
+            current_archetypes=[row["subject"] for row in arch_out],
+            ground_n=ground_n,
+            since=field_since,
+        )
+        archetype_plan_cells = aggregate_archetype_vs_plan_results(
+            plan_matches,
+            plan_registry,
+            current_archetypes=[row["subject"] for row in arch_out],
+            ground_n=ground_n,
+        )
+        assignment_by_archetype = {
+            assignment.archetype: assignment for assignment in plan_registry.assignments
         }
-        row["plan_cells"] = []
-        for plan in plan_registry.plans:
-            cell = archetype_plan_cells[(row["subject"], plan.id)]
-            row["plan_cells"].append({
-                "opponent_id": plan.id,
-                "opponent": plan.label,
-                "wins": cell.wins,
-                "losses": cell.losses,
-                "mirror_n": cell.mirror_n,
-                "n": cell.n,
-                "raw": r4(cell.raw),
-                "p": r4(cell.shrunk),
-                "measured": cell.measured,
-                "same_primary_plan": plan.id == assignment.primary,
-                "since": field_since,
-                "provenance": plan_matches.provenance,
-            })
-    plans = build_strategic_plan_payload(
-        plan_result, arch_out, top_k=top_k, cover_min=cover_min,
-    )
-    for plan in plans:
-        plan["methodology"] = {
-            "grounding": plan_grounding_payload(
-                plan, ground_n=ground_n, top_k=top_k, cover_min=cover_min,
-            )
-        }
+        for row in arch_out:
+            assignment = assignment_by_archetype[row["subject"]]
+            row["strategic_plan"] = {
+                "primary": assignment.primary,
+                "secondary": list(assignment.secondary),
+            }
+            row["plan_cells"] = []
+            for plan in plan_registry.plans:
+                cell = archetype_plan_cells[(row["subject"], plan.id)]
+                row["plan_cells"].append({
+                    "opponent_id": plan.id,
+                    "opponent": plan.label,
+                    "wins": cell.wins,
+                    "losses": cell.losses,
+                    "mirror_n": cell.mirror_n,
+                    "n": cell.n,
+                    "raw": r4(cell.raw),
+                    "p": r4(cell.shrunk),
+                    "measured": cell.measured,
+                    "same_primary_plan": plan.id == assignment.primary,
+                    "since": field_since,
+                    "provenance": plan_matches.provenance,
+                })
+        plans = build_strategic_plan_payload(
+            plan_result, arch_out, top_k=top_k, cover_min=cover_min,
+        )
+        for plan in plans:
+            plan["methodology"] = {
+                "grounding": plan_grounding_payload(
+                    plan, ground_n=ground_n, top_k=top_k, cover_min=cover_min,
+                )
+            }
+    else:
+        plan_registry = None
+        plan_result = None
+        plans = []
+        for row in arch_out:
+            row["strategic_plan"] = {"primary": None, "secondary": []}
+            row["plan_cells"] = []
 
     production_order = production_recommendation_order({
         row["subject"]: (row["grounded"], row["recent_4wk"], row["agency"])
@@ -1524,6 +1534,20 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
         practical_ranked_actions=practical_order,
     )
     validate_ranking_utility(utility)
+    strategic_audit = (
+        (
+            f"// strategic plans: registry v{plan_registry.schema_version}, "
+            f"{len(plan_registry.assignments)} assignments; "
+            f"{plan_result.decisive_matches} decisive matches "
+            f"({plan_result.same_plan_matches} same-plan), "
+            f"{plan_result.omitted_matches} omitted; window since {field_since}",
+            f"// archetype vs strategic plans: {len(arch_out)} archetypes × "
+            f"{len(plan_registry.plans)} primary opponent plans from underlying decisive "
+            "matches; archetype mirrors contribute structural 50% context",
+        )
+        if plan_registry is not None and plan_result is not None
+        else ("// strategic plans: disabled for retrospective parent-only evaluation",)
+    )
 
     blob = {
         "meta": {
@@ -1593,14 +1617,7 @@ def compute_blob(con, *, field_since, ground_n, top_k, cover_min, min_row_share,
                 f"seed {LEAN_SEED}, temperature {LEAN_TEMPERATURE:.2f}, precision scale "
                 f"{LEAN_PRECISION_SCALE:.0f}; raw / CI-gated / ban-scoped / era-only "
                 "rank stability; gated agency remains authoritative",
-                f"// strategic plans: registry v{plan_registry.schema_version}, "
-                f"{len(plan_registry.assignments)} assignments; "
-                f"{plan_result.decisive_matches} decisive matches "
-                f"({plan_result.same_plan_matches} same-plan), "
-                f"{plan_result.omitted_matches} omitted; window since {field_since}",
-                f"// archetype vs strategic plans: {len(arch_out)} archetypes × "
-                f"{len(plan_registry.plans)} primary opponent plans from underlying decisive "
-                "matches; archetype mirrors contribute structural 50% context",
+                *strategic_audit,
             ],
         },
         "arch": arch_out,
@@ -1741,7 +1758,7 @@ def _diagnostic_pair_keys(rows: list[dict], *, limit: int) -> set[tuple[str, str
 
 def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=None):
     """Project the current decision model after the frozen legacy evidence ledger."""
-    from legacy_engine.advisory.deck_ranking import rank_matchup_rows
+    from legacy_engine.advisory.deck_ranking_projection import project_ranking_rows
     from legacy_engine.advisory.recent_field import build_recent_field
     from legacy_engine.analytics.matchup import build_cell
 
@@ -1786,10 +1803,14 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 "high": cell["ci_high"], "wins": cell["wins"], "n": cell["n"],
                 "prior_source": cell["prior_source"],
                 "prior_mean": cell["prior_mean"], "prior_strength": cell["prior_strength"],
+                "prior_strength_original": cell.get("prior_strength_original", cell["prior_strength"]),
+                "prior_strength_effective": cell.get("prior_strength_effective", cell["prior_strength"]),
+                "prior_contribution_fraction": cell.get("prior_contribution_fraction"),
                 "source": source_notes.get((row["subject"], cell["opponent"]), cell["source_kind"]),
             })
         return result
 
+    projection_inputs = {}
     for key, interval in (("arch", parent_interval), ("camps", camp_interval)):
         rows = blob[key]
         overrides, notes, presence = {}, {}, {}
@@ -1833,7 +1854,7 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                             ),
                         }
         if shares:
-            projection = rank_matchup_rows(
+            projection = project_ranking_rows(
                 {row["subject"]: _row_measurements(row) for row in rows},
                 shares, counts=counts, candidate_presence=presence,
                 cell_overrides=overrides, override_sources={k: notes[k] for k in overrides},
@@ -1846,6 +1867,19 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                 if row["subject"] in shares and presence[row["subject"]] == 0:
                     row["decision"]["field_share"] = shares[row["subject"]]
                     row["decision"]["active"] = recent.exact_counts.get(row["subject"], 0) > 0
+            projection_inputs[key] = {
+                "rows": {row["subject"]: _row_measurements(row) for row in rows},
+                "shares": dict(shares),
+                "counts": dict(counts),
+                "candidate_presence": dict(presence),
+                "cell_overrides": dict(overrides),
+                "override_sources": dict(notes),
+            }
+
+    # Private handoff for the evaluator: the production projection has already
+    # resolved interval overrides above, so a challenger can replay precisely
+    # those typed inputs without duplicating publisher selection logic.
+    blob["_deck_ranking_projection_inputs"] = projection_inputs
 
     # Strategy-plan cells are direct aggregates, not averages of archetype estimates.
     plans = blob.get("plans", [])
@@ -1859,7 +1893,7 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
                     plan["id"], cell["opponent_id"], cell["wins"], cell["n"],
                 )
     if sum(plan_shares.values()) > 0:
-        plan_projection = rank_matchup_rows(
+        plan_projection = project_ranking_rows(
             {p["id"]: () for p in plans}, plan_shares,
             cell_overrides=plan_cells,
         )
@@ -2145,6 +2179,10 @@ def generate_ranking(
                 f"{time.perf_counter() - projection_started:.1f}s"
             )
         _publish_deck_rankings(con, blob, parent_interval=parent_interval, camp_interval=camp_interval)
+        # The evaluator consumes this typed handoff directly when it calls the
+        # publisher. It must never enter the JSON/page blob, since it contains
+        # Pydantic source objects rather than browser data.
+        blob.pop("_deck_ranking_projection_inputs", None)
     finally:
         con.close()
 

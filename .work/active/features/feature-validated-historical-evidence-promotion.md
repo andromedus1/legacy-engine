@@ -6,6 +6,7 @@ tags: [analytics, advisory]
 parent: null
 depends_on: [feature-deck-rankings]
 release_binding: null
+gate_origin: null
 created: 2026-08-17
 updated: 2026-09-05
 ---
@@ -52,6 +53,35 @@ Production-versus-evaluator parity on identical snapshot inputs; n0 fitted versu
 
 ## Risks
 Prior-strength comparison isolates borrowing intensity, not every possible family model; do not overclaim it. Conditional intervals omit fitted-prior uncertainty. Exact recurrent certificates cannot be borrowed backward from current state. Snapshot evaluation is expensive, so use six predeclared nonoverlapping short horizons initially and preserve completed artifacts. If a snapshot fails due to real missing metadata, surface its precise exclusion/support rather than silently changing cases across methods.
+
+## Implementation record
+
+The shared production handoff is implemented in `src/legacy_engine/advisory/deck_ranking_projection.py`.
+It resolves the interval override first, then era, then fallback, materializes the named weak prior
+for absent cells, and scales only the selected prior strength for the fixed sensitivity methods.
+Each projected cell carries its original/effective prior strength, prior contribution fraction, and
+serialized source identity. `scripts/refresh_best_call_ranking.py` uses this handoff for the page;
+retrospective evaluation passes `include_plans=False` so current strategic-plan composition is not
+projected backward.
+
+`src/legacy_engine/workflows/deck_ranking_evaluation.py` freezes a raw cutoff snapshot, refits its
+parent era state, builds the same interval/current source ledger, and writes a hashed prediction
+artifact before loading later outcomes. `scripts/evaluate_deck_rankings.py --served-model` retains
+the field diagnostic mode and adds the served-model run. Focused projection and scoring contracts
+pass (`tests/test_deck_ranking_projection.py` and
+`tests/workflows/test_deck_ranking_evaluation.py`); the existing ranking, refresh, evaluator CLI,
+and snapshot suites also pass. The actual-corpus run is owned by the host and remains pending
+verification.
+
+## Predeclared served-model origins
+
+The host experiment is fixed before heldout outcomes are opened. Development origins are
+`2026-07-13→2026-07-20`, `2026-07-20→2026-07-27`, and `2026-07-27→2026-08-03`, each with
+`regime_start=2026-06-29`. Confirmation origins are `2026-08-17→2026-08-24`,
+`2026-08-24→2026-08-31`, and `2026-08-31→2026-09-04`, each with `regime_start=2026-08-10`.
+All origins compare prior scales `(1, 0.5, 2)` on the same frozen candidate/opponent grid.
+Confirmation outcomes must remain unopened until all origin prediction artifacts are sealed; no
+scale is selected from confirmation results.
 
 ## Ownership
 One Luna xhigh implementation worker owns this feature's new shared projection/evaluator modules, evaluator CLI, production generator integration, and relevant tests; no nested agents. Host owns actual-corpus experiment execution, documentation, operational triage, and later-feature design. Standard review is the default. Keep one feature implementation commit and no push; host handles PR publication under project authorization.

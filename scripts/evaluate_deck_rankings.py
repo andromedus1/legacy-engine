@@ -373,18 +373,72 @@ def evaluate_chronologically(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True, help="DuckDB path")
-    parser.add_argument("--since", required=True, help="inclusive first event date")
-    parser.add_argument("--until", required=True, help="exclusive final event date")
+    parser.add_argument("--since", required=False, help="inclusive first event date")
+    parser.add_argument("--until", required=False, help="exclusive final event date")
     parser.add_argument("--provenance", default=None, help="optional tournaments.provenance filter")
     parser.add_argument(
         "--no-matchups", action="store_true", help="skip the optional adaptive matchup pass"
+    )
+    parser.add_argument(
+        "--served-model", action="store_true",
+        help="freeze and score the current served Deck Rankings model on declared origins",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path,
+        help="artifact directory for --served-model (for example data/benchmarks/deck-rankings-evaluation-v1)",
+    )
+    parser.add_argument(
+        "--origin", action="append", metavar="CUTOFF,UNTIL,REGIME_START",
+        help="one predeclared served-model origin; repeat to replace the six defaults",
+    )
+    parser.add_argument(
+        "--prior-scale", action="append", type=float, dest="prior_scales",
+        help="fixed prior-strength sensitivity scale; repeat (defaults to 1,0.5,2)",
+    )
+    parser.add_argument(
+        "--draws", type=int, default=2_000,
+        help="posterior draws for --served-model (default: 2000)",
     )
     parser.add_argument("--json", action="store_true", help="emit one JSON document")
     return parser
 
 
+def _parse_origin(value: str) -> tuple[str, str, str]:
+    parts = tuple(part.strip() for part in value.split(","))
+    if len(parts) != 3 or not all(parts):
+        raise ValueError("--origin must be CUTOFF,UNTIL,REGIME_START")
+    return parts
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.served_model:
+        if args.output_dir is None:
+            raise SystemExit("--served-model requires --output-dir")
+        from legacy_engine.workflows.deck_ranking_evaluation import (
+            DECLARED_ORIGINS,
+            _markdown_summary,
+            run_served_model_evaluation,
+        )
+        try:
+            origins = (
+                tuple(_parse_origin(value) for value in args.origin)
+                if args.origin else DECLARED_ORIGINS
+            )
+            scales = tuple(args.prior_scales) if args.prior_scales else (1.0, 0.5, 2.0)
+            summary = run_served_model_evaluation(
+                args.db, args.output_dir, origins=origins,
+                prior_scales=scales, draws=args.draws,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        if args.json:
+            print(json.dumps(summary, indent=2, sort_keys=True))
+        else:
+            print(_markdown_summary(summary))
+        return 0
+    if args.since is None or args.until is None:
+        raise SystemExit("field diagnostics require --since and --until")
     con = duckdb.connect(str(args.db), read_only=True)
     try:
         result = evaluate_chronologically(
