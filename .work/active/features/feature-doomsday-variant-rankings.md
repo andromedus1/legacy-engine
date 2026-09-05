@@ -1,7 +1,7 @@
 ---
 id: feature-doomsday-variant-rankings
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui]
 parent: null
 depends_on: [feature-deck-rankings]
@@ -97,6 +97,12 @@ feature review and PR/CI. No child story fanout: extraction/model/render form on
   full minimum interval, direct field coverage and prior-backed mass. No best-deck tile.
   Mark historical-only / sparse / no-round-evidence states plainly. This model is not
   directly comparable numerically with the richer global ranking's fitted priors.
+- Also show published non-League tournament standings W-L-D and decisive win rate,
+  joined uniquely by normalized player/event, for subject lists legal at cutoff.
+  These totals can include opponents whose lists/rounds are missing or now banned;
+  label this denominator separately from the compatible external matchup rounds.
+  Never convert League 5-0 publications into tournament standings. Both evidence
+  views select these records by date. Show record count and pilots for each ledger.
 - Include up to three recent distinct exact registered 75s per cohort, preferring
   current legal registrations, with date, pilot, event, source URL, recorded finish,
   canonical main/side cards/hash and copyable Moxfield text. Label old evidence; league
@@ -129,3 +135,42 @@ The largest risks are confusing 5-0 publications with match outcomes, classifyin
 cycler as a green splash, silently importing banned shells, and making unseen 50% cells
 look like demonstrated good matchups. Visible denominators/date bands and exact cohort
 rules address those risks without withholding useful estimates.
+
+## Implementation dispatch
+One Luna xhigh worker owns extraction, model, renderer, template and focused tests;
+host owns documentation, live generation, browser verification and standard review.
+The ranking dependency is archived done. No child dependencies or cycles. Standard
+review weight is the workflow default. Existing unrelated uv.lock and Hogaak work
+are outside scope. The read-only probe found current Esper standings of 5–4 but no
+resolved rounds, motivating the separate standings ledger above. Probe counts are
+diagnostics, not hardcoded expected report totals (final both-side legality and
+external-field filtering may reduce them).
+
+
+## Implementation and verification (2026-09-05)
+Luna xhigh produced the initial cohesive module, publisher, template and five
+fixture tests. Host completed the effective-count schema correction, exact 60+15
+selection, date/input validation, verified whole-event alias exclusion, and
+compact table/map integration. No taxonomy, source database, scheduled default,
+or older field-guide artifacts changed. The read-only alias check compares all
+four fact tables only within same-date/name/non-League MTGO numeric-id groups;
+it removed 31 duplicated event URLs. Shared ingestion/global field correction is
+parked as bug-mtgo-event-url-alias-duplicates; this report inherits the supplied
+field apart from its declared Doomsday exclusion and exposes that limitation.
+
+Actual generation: decks/doomsday-variant-rankings.html, through September 3,
+current field since August 10. Compatible matchup n: Dimir 320, Esper 20, Sultai
+Veil 71, Grixis Squelcher 12, four-color W/G 5, white/no-Teferi 2. Current-only
+rounds: Dimir 8, Sultai Veil 3. Published current event records retain Dimir 65–39,
+Esper 5–4, Sultai 10–5, W/G 3–3, green/no-Veil 6–6 with their distinct denominator.
+Grixis has nine registrations, latest June 27; its 19–6 published event record
+comes from four records and must not be interpreted as twelve resolved rounds.
+
+Verification: 13 focused hermetic tests; 79 combined focused/related/kernel tests
+pass; changed-file ruff and diff checks pass. Real Chromium checks cover all seven
+sorts, expansion retention, filters leaving estimates unchanged, hover/focus/Escape
+tooltips, exact75 clipboard text, current/history toggle, and desktop/mobile/dark
+layout. Expanded matchup row height is 24.6px; no JS errors or mobile body overflow.
+README, runbook and foundation entries updated; generated knowledge index has
+zero errors and six pre-existing warnings. Independent standard review and CI
+remain required before closure.
