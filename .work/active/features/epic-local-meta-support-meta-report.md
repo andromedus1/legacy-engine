@@ -42,3 +42,14 @@ Options: a separate local-meta report; an in-browser second ranking engine; or a
 
 ## Testing and risks
 Use a synthetic field reversal to prove a globally absent-from-room candidate can become performance/floor leader. Test shares/counts, normalization, unknown positive mass, exact mirrors, zero mass, scenario-specific floor support, no invented observed counts, invalid input preserving existing output, global-output protection, and unchanged global default. Browser checks verify both cards, tooltips, evidence filters, camps, and scenario labeling. Historical aliases in saved local fields are not silently remapped: unknowns remain visible until grounded taxonomy mapping exists. Standard independent feature review and final combined CI complete this delivery; the parent epic's deferred geographic work stays open.
+
+## Saved-scenario grounding
+
+No newer expected shares have been supplied in response to the optional early question. Use the
+saved May sample as the starting scenario, clearly dated. Its file describes 107 players but
+contains only 103, excluding four unclassified Affinity Combo players. For the demonstration,
+write a separate dated scenario input that retains the supplied 103 counts and adds the documented
+four as an explicitly unclassified opponent with a weak prior. This preserves all 107 players
+without inventing an archetype mapping or changing the existing saved input. Use counts/107 for
+shares rather than the original rounded decimals. Label the output as a historical sample scored
+with the current model; keep original historical labels, including any now-unmatched labels.
