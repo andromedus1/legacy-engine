@@ -100,7 +100,7 @@ class TestErasRun:
     ):
         db_path = _build_eras_db(tmp_path)
         lock_dir = tmp_path / "locks"
-        ranking_path = tmp_path / "decks" / "best-deck-best-call-ranking.html"
+        ranking_path = tmp_path / "decks" / "deck-rankings.html"
         monkeypatch.setattr("legacy_engine.config.OPS_LOCK_DIR", lock_dir)
         monkeypatch.setattr("legacy_engine.config.PROJECT_ROOT", tmp_path)
         expected = decision_refresh_lock_path(
@@ -118,7 +118,7 @@ class TestErasRun:
     ):
         db_path = _build_eras_db(tmp_path)
         lock_dir = tmp_path / "locks"
-        ranking_path = tmp_path / "decks" / "best-deck-best-call-ranking.html"
+        ranking_path = tmp_path / "decks" / "deck-rankings.html"
         monkeypatch.setattr("legacy_engine.config.OPS_LOCK_DIR", lock_dir)
         monkeypatch.setattr("legacy_engine.config.PROJECT_ROOT", tmp_path)
         expected = decision_refresh_lock_path(

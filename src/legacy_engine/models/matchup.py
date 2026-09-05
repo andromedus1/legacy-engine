@@ -81,4 +81,5 @@ class MatchupCell(LegacyEngineModel):
     display: bool = True  # False when n<30 (speculative gate): hide rate, show "n=X, insufficient"
     prior_mean: float | None = None  # what p_shrunk was shrunk toward (additive)
     prior_source: str | None = None  # "marginal" | "parent cell (leave-camp-out)" | cross-era label
+    prior_strength: float = 15.0  # total Beta prior pseudo-count (additive)
     concentration: CellConcentration | None = None

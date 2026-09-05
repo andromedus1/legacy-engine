@@ -16,10 +16,11 @@ decisions:
   - "Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and matchups are first-class, unlike edh-engine's 4-player goldfish framing."
   - "Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped by date for historical analysis."
   - "Per-entity stable eras: every per-archetype/per-camp statistic uses the entity's own detected and certified set of compatible time intervals, not just one global ban regime or monotone suffix; bans and releases nominate disturbances, confirmed affectedness remains a hard boundary, and every windowed figure names the admitted intervals and evidence provenance."
-  - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. Superarchetypes expose pooled strategy-family evidence with labeled provenance and intra-cluster flags; they remain an exploratory navigation/explanation layer while archetype-level Best Call stays decision-authoritative until the future-only benchmark passes."
+  - "Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes, curated overrides) → parent archetype → camp. Superarchetypes support internal context and strategic-plan navigation; the Deck Rankings page makes performance and worst-matchup floor equally visible while the mature Agency/P(best) projection and benchmark remain frozen reference surfaces."
+  - "Deck Rankings is a current descriptive decision projection: full-field posterior mean performance and the minimum non-mirror posterior matchup mean are shown with intervals, provenance, and Pareto tradeoffs. Performance and floor have independent leaders, with performance breaking floor ties."
   - "Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads, per-deck findings, consensus decklists with primers — persists across sessions and is surfaced automatically; advice is grounded in a user profile (decks played, collection, local meta). maintainer-first now, multi-user-ready by design: the profile is data, not code."
 created: 2026-05-29
-updated: 2026-08-16
+updated: 2026-09-05
 related:
   - {slug: docs/SPEC.md, relationship: refines}
   - {slug: docs/ARCHITECTURE.md, relationship: refines}
@@ -45,7 +46,8 @@ scattered "This Week in Legacy" articles; matchup knowledge lives in Discord and
 
 - Track the metagame from raw tournament results under a *consistent, auditable* **three-level** archetype taxonomy — superarchetype (strategy cluster) above, parent archetype in the middle, data-driven subarchetype (camp) below — so decks that share a label but play differently are not pooled into one matchup row or one card-win-rate denominator, while strategy families provide explicitly exploratory pooled context where specific labels are too thin to speak on their own
 - Window every per-entity statistic to that entity's own **certified stable-era intervals** — bans *and* new-card releases rebuild decks mid-regime, so pooling across an incompatible disturbance mixes generations of the same label into one number; compatible historical pockets may be recovered across excluded gaps, but each figure must name the admitted intervals, their certification, and the disturbance or evidence rule that excludes each gap
-- Compute matchup matrices and a deck's **expected win rate against the weighted field**
+- Compute matchup matrices, a deck's **expected win rate against the weighted field**, and its
+  highest defensible worst-matchup floor
 - Recommend a sideboard package that maximally covers the expected field (hosers → targets)
 - Measure how fast and consistently a deck executes its plan (goldfish clock) and aggregate that into a **meta-speed distribution**
 - Separate **online vs paper** metagames, which diverge materially
@@ -89,11 +91,11 @@ projected) meta. Analytically guided: the knowledge layer finds gaps, deck-mecha
 constrains the build, simulation and matchup data validate candidates.
 
 **4. Meta Attack / Advisory** *(the Legacy-specific differentiator)* — *how to attack the field.*
-A **meta-positioning score** (expected win rate vs the weighted field), a **sideboard recommender**
-(hoser→target bipartite graph solved as weighted set-cover over the expected field, including the
-anti-hate second order), and a **"what to play" advisor** (proactive vs reactive, best-deck vs
-best-metagame-call). Lets a competitive player supply their *expected local field* and get an
-actionable read.
+The `decks/deck-rankings.html` landing page puts full-field posterior performance and the minimum
+non-mirror matchup floor side by side, with conditional intervals, source provenance, and Pareto
+tradeoffs. Its performance and floor calls are independent, with performance breaking floor ties.
+The existing meta-positioning score, sideboard recommender (hoser→target weighted set-cover), and
+"what to play" advisor remain available for deck-specific and local-field questions.
 
 **Cross-cutting: the persistent coach.** The pillars' outputs do not evaporate at the end of a
 session. Meta knowledge (tier reads, matchup insight, field trends), per-deck critical findings,

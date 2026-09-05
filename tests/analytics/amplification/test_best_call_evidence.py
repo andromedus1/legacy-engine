@@ -46,6 +46,9 @@ def _exact_target(interval_matrix, amplification_run) -> ReportTarget:
 
 
 def _patch_ranking_inputs(monkeypatch, module, interval_matrix, run, template_path=None):
+    # This fixture isolates exact-run attachment; the real decision projection is
+    # exercised with a complete corpus in test_refresh_best_call_ranking.
+    monkeypatch.setattr(module, "_publish_deck_rankings", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(module, "staged_split_parents", lambda: ())
     monkeypatch.setattr(module, "read_superarchetype_members", lambda _con: None)
     monkeypatch.setattr(

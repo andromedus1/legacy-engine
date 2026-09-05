@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-17T21:46:14Z'
+generated_at: '2026-09-05T16:20:46Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -32,8 +32,11 @@ documents:
       of ingestion/. goldfish/ is the deferred pillar; only goldfish-validated candidate-validation
       remains
 
-      deferred behind it. Local ops runs the decision refresh and detection-only format
-      monitor under one
+      deferred behind it. The generated Deck Rankings landing page adds a separate
+      posterior field-performance
+
+      and matchup-floor projection beside the mature advisory estimators. Local ops
+      runs the decision refresh and detection-only format monitor under one
 
       artifact lock; human `eras confirm` remains the only B&R acceptance authority.
 
@@ -92,21 +95,30 @@ documents:
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
-    - 'SUPERARCHETYPES (built; exploratory Best Call authority): analytics/superarchetype/
-      adds the third taxonomy level above parent archetype. An offline `superarchetype
-      run` preview clusters archetypes on staple-stripped maindeck core sets (Jaccard
-      + average-linkage agglomerative, AU multiscale-bootstrap cut over resampled
-      card features; definers >=30 decks/>=8 core cards, the tail assigned by mean
-      Jaccard dissimilarity to cluster definers) and explicit `--promote` persists
-      a reviewed derived registry merged under a package-shipped curated override
-      registry (hybrid-derived-curated-registry + curated-json-resource-loader). Clustering
+    - 'SUPERARCHETYPES (built; internal context): analytics/superarchetype/ adds the
+      third taxonomy level above parent archetype. An offline `superarchetype run`
+      preview clusters archetypes on staple-stripped maindeck core sets (Jaccard +
+      average-linkage agglomerative, AU multiscale-bootstrap cut over resampled card
+      features; definers >=30 decks/>=8 core cards, the tail assigned by mean Jaccard
+      dissimilarity to cluster definers) and explicit `--promote` persists a reviewed
+      derived registry merged under a package-shipped curated override registry. Clustering
       reads deck_cards ONLY — never rounds — so the cut can never be tuned against
-      the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT axis
-      one more level (camp -> parent -> cluster, extending _pool_opponent_tallies)
-      and gains one shrinkage rung between the leave-camp-out parent cell and the
-      subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird
-      and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
-      gate. Empty/absent registry is byte-identical to today (gated-additive).'
+      matchup coverage. matchup.py coarsens the opponent axis and adds the random-effects
+      shrinkage rung; the resulting n_eff feeds the existing tier/display gate. Deck
+      Rankings keeps composition-derived family evidence internal and exposes curated
+      strategic plans plus exact matchup ledgers.'
+    - 'DECK RANKINGS PROJECTION: advisory/deck_ranking.py consumes typed matchup measurements
+      and normalized field shares to compute conditional Beta posterior cell means,
+      full-field performance, the non-mirror minimum floor, seeded draw intervals,
+      evidence coverage, and Pareto status. Performance and floor have independent
+      leaders, with performance breaking floor ties; the visible floor range names
+      the toughest cell while the all-opponent minimum interval remains diagnostic.
+      advisory/recent_field.py builds the half-open observed field with a provisional
+      28-day exponential half-life, published-list denominator, exact integer sightings,
+      weighted counts, Kish ESS, source composition, camps, and movement. scripts/refresh_best_call_ranking.py::_publish_deck_rankings
+      applies clean interval cells once as overrides while retaining each cell''s
+      actual prior_strength and provenance; scripts/refresh_decision_data.py publishes
+      the default decks/deck-rankings.html artifact.'
     - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
       as the current/fallback projection. The built recurrent validation surface freezes
       cutoff-safe recurrent origins from a hash-bound parent benchmark plan, validates
@@ -126,171 +138,45 @@ documents:
       acknowledgement suppresses unchanged evidence only; `eras confirm` remains the
       sole supported ban-registration authority.'
   docs/analysis/best-call-ranking.md:
-    summary: 'Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored,
-      fully
+    summary: 'Runbook for decks/deck-rankings.html, a self-contained generated landing
+      page. The
 
-      regenerable). One tracked script recomputes the page from the DuckDB corpus
-      through a
+      refresh script retains the mature Best Call evidence ledger and adds a separately
 
-      tracked HTML template: scripts/refresh_best_call_ranking.py +
+      named current projection whose two visible priorities are full-field performance
 
-      scripts/best_call_ranking_template.html. Defines gated Agency % as the default
-
-      authority, the opt-in seeded posterior lean, grounded/current strata, rank stability
-
-      and paths to grounding, the cross-camp P(best) column, and the five-plan strategic
-
-      taxonomy, including exact archetype-versus-plan evidence in every archetype
-      dropdown;
-
-      the page itself carries the authoritative definitional prose. Typed report targets
-      may
-
-      add diagnostic-only recurrent interval and amplification evidence without changing
-      the
-
-      mature ranking payload. The normal current refresh automatically uses localized
-      clean
-
-      direct intervals, keeps exact post-ban observations beside transition-stabilized
-
-      decision shares, and publishes a compact first-read estimate/provenance summary.
-
-      Exclusive-cutoff “Today’s model” siblings remain available in a failure-safe
-      offline bundle.
+      and the highest worst-matchup floor.
 
       '
     decisions:
-    - 'Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page''s
-      single ranking number; theory under test: maximum agency = most fun.'
-    - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred;
-      the fallback pools matches since the last ban that affected either deck (BA
-      label, archetype_valid_since) — full-corpus FC only when neither deck was ever
-      ban-affected. The Nadu rule: a banned engine''s matches never inflate a row
-      (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28).'
-    - Every measured cell (n>=8 by default) can set the floor using its shrunk estimate;
-      this exposes apparent holes sooner. Because better-covered decks have more chances
-      to reveal a low matchup, ungrounded agency remains an explicit upper bound and
-      must be read with measured coverage. Blowouts classify on the raw observed rate
-      after the same measured-cell gate.
-    - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass
-      covered; ungrounded rows are labeled leans (agency shown as an upper bound),
-      and sorting never intermixes strata.
-    - 'Gated Agency remains the default and authoritative ranking number. The opt-in
-      seeded posterior lean is diagnostic only: it uses the era candidate regardless
-      of n, falls back only when the era candidate is absent, uses Jeffreys cells
-      for resolved evidence, a weak row-centred prior for unresolved cells, and continuous
-      field-share × precision weighting; it reports Q25, median, and 95% CI.'
-    - Rank stability compares raw, CI-gated, ban-scoped, and era-only variants within
-      each peer table; rank spans are shown only when all four variants rank the row.
-      Interactive n changes mark generated stability and grounding paths stale, while
-      the posterior lean remains independent of the interactive gate.
-    - Grounding paths collect every shortfall among the top-k opponents first, then
-      prioritize remaining cells by share gained per additional match until the coverage
-      target; the page displays the first three actions plus a remainder count and
-      total projected matches/coverage. Plan rows expose grounding paths but do not
-      expose lean or stability.
-    - 'Field basis separates observation from decision: --field-since defaults to
-      the latest confirmed ban event, so observed presence is exactly post-ban; when
-      that slice is thin, effective decision shares add a bounded preceding-regime
-      prior after removing affected archetypes. % of meta and matchup weights use
-      those effective counts; the observed-field sample tier uses the observed count.'
-    - Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform
-      multi-split matrix per distinct ban-fallback date) — numerically identical to
-      per-parent split builds (parity-tested at engine and script level, ~25x cheaper),
-      keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows.
-    - Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps
-      + unsplit field archetypes on the page-used cells; candidacy is gated at the
-      same coverage threshold that suppresses display (<5% measured coverage -> n/a
-      + reason) because zero-coverage candidates otherwise absorb the whole argmax
-      as imputation noise; S* labels full-field values below 85% coverage.
-    - 'Strategic plans are a curated, independent five-plan taxonomy: every current-field
-      archetype has exactly one primary plan for mutually exclusive match-level aggregation
-      and may carry secondary labels for hybrid explanation only. Plan cells pool
-      decisive matches directly rather than averaging archetype rates.'
-    - 'Strategic-plan same-plan play is structural 50% context: the diagonal displays
-      zero directional wins, losses, and n, while observed_n separately reports cross-archetype
-      same-plan matches and mirror_n reports mirror context. It contributes to adjusted
-      field WR but is never measured, never sets the floor, and is excluded from the
-      external-coverage denominator. External plan cells use the page''s n>=8 measured
-      gate; grounding requires the top external plans measured and >=80% external
-      field-share coverage.'
-    - Every archetype dropdown begins with five Against strategic plans cells built
-      directly from that archetype's decisive non-mirror MatchResults, grouped by
-      opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's
-      uniform field window/provenance, and measured/thin state. Exact-archetype mirrors
-      are reported separately as mirror_n and shown only as structural 50% context;
-      they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured
-      gate. The exact archetype ledger remains below.
-    - 'Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes
-      stay internal to matrix construction and statistical borrowing — no page-visible
-      dropdown payload, family lean, family range, or presentation audit line. A COLOUR
-      SPLIT is archetype-level: the curated registry rewrites decks.archetype at label
-      time, so each branch earns its own archetype row, its own field share, and its
-      own column in every OTHER archetype''s ledger. Camps stay subject-side only
-      (the multi-split matrix pools the opponent side back to parent), so a distinction
-      that changes how opponents must play against you belongs in a colour split,
-      not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland
-      black.'
-    - The output page is gitignored and disposable; the template + refresh script
-      are the tracked artifacts — regenerate, don't hand-edit (data changes go in
-      the script, presentation changes in the template).
-    - Every ranking row is derived from a typed selected-cell ledger. Its serialized
-      replay must reproduce adjusted field WR exactly; a mismatch suppresses the headline.
-      A strict-common-era estimate is shown separately as a divergence diagnostic
-      and is never averaged into the adaptive headline.
-    - Every row reports floor observability at n>=10 and display-grade n>=30 independently
-      of the interactive page gate. Zero display-grade cells means floor unobserved;
-      missing bad matchups are not evidence of none. Event/month concentration >=40%
-      is labeled on measured selected cells, never automatically corrected away.
-    - The benchmark protocol freezes the exact fold schedule and as-of B&R ledger.
-      Claim coverage uses classified held-out deck mass, while field-weighted regret
-      includes structural 50% mirror utility and requires a stable event-bootstrap
-      oracle. Deterministic artifacts allow byte-identical replay and refuse different
-      content.
-    - Benchmark launch requires a zero-gap card-metadata preflight at every planned
-      training cutoff on the same derived copy; exact Scryfall/current aliases and
-      evidence-backed provider serialization may resolve names, while ambiguous, truncated,
-      and manual candidates remain fail-closed.
-    - The generated page names its future-only validation status and summary artifact
-      id. No supplied summary is shown as not-run; a supplied canonical summary remains
-      honestly not-evaluable, descriptive, or predictive-claim-supported.
-    - Recurrent interval and amplification evidence is diagnostic-only. The attachment
-      exposes current-only, certified-expanded, and added-history views plus six named
-      challenger slots, while a canonical authority-payload digest proves that Agency,
-      candidacy, P(best), ordering, and every mature row metric are unchanged.
-    - 'The normal current refresh needs no manual evidence run ids: it builds typed
-      exact direct evidence even when certification/amplification artifact tables
-      are absent, keeps post-ban counts as the observed presence claim, uses transition-stabilized
-      decision shares for ranking weights, and localizes a ban to affected matchup
-      edges. A card/cohort''s corpus fallback is its global first-seen date across
-      all archetypes. Fantasticar-affected edges exclude [2026-06-20, 2026-08-10),
-      with clean pre-history bounded by the last confirmed ban before exposure plus
-      any earlier stored disturbance; unaffected edges retain compatible history.'
-    - The first-read archetype table publishes a covered-field direct matchup estimate,
-      direct n, clean-history n, provenance, confidence, and proof status separately.
-      Localized/certified provenance requires actual selected added-history observations;
-      zero added history is current-direct. A proof-grade call exists iff grounded
-      rows exist. Full typed evidence remains available to Python/store consumers;
-      offline HTML embeds only four highest-share opponent ledgers per supported row,
-      with digests/counts instead of raw match-id arrays and no global pair universe.
-    - Parents may consume an exact certification run; camps remain current-only and
-      cannot acquire certified historical intervals or added-history observations.
-      Missing, invalid, non-final, future, unpromoted, or guard-mismatched certificates
-      abstain with named reasons rather than widening evidence.
-    - 'An explicitly requested amplification run is exact-run only: no latest-run
-      lookup or approximate reuse. Missing or mismatched corpus, clock, certificate,
-      direct baselines, profile registry/order, fit identities, match-set digests,
-      or comparison audit fails generation before atomic replacement; omitting the
-      run is a valid typed not-assessed state.'
-    - A retrospective report target uses an exclusive data_until cutoff, the latest
-      confirmed ban boundary strictly before that cutoff, and the label Today’s model
-      because taxonomy/configuration are current at knowledge_as_of. It is never represented
-      as what the engine knew then.
-    - A report bundle stages every available page and its escaped manifest before
-      publication, replaces historical siblings before the canonical current page,
-      and restores the complete prior bundle after any replacement failure. Unavailable
-      targets have reasons but no href and remain disabled in navigation.
+    - Performance is the field-share-weighted mean of per-cell posterior means, including
+      structural 50% mirrors; floor is the minimum posterior mean across non-mirror
+      current-field opponents.
+    - The performance interval and all-opponent minimum-floor interval use seeded
+      posterior draws; the visible floor range is the named toughest pairing's cell
+      interval, while the all-opponent minimum interval remains available in evidence
+      details.
+    - Performance and floor have independent leaders. The floor leader maximizes the
+      floor among eligible rows, with performance breaking floor ties; both are independent
+      table sorts, and Pareto rows show the efficient frontier.
+    - Every valid cell contributes an estimate. Prior-only and uncertain cells remain
+      visible with W-L/n, interval, prior strength, prior provenance, source kind,
+      and source window; prior-only rows are not recommendation candidates.
+    - The current field uses a provisional 28-day exponential half-life over the observed
+      ban-regime slice. The denominator is published deck lists, not a census of entrants.
+      Integer observed counts, decay-weighted counts, effective sample size, and bounded
+      transition prior counts remain separate.
+    - Clean interval evidence may override a cell once. The override keeps the actual
+      MatchupCell prior_strength and its interval/source provenance; it is not pooled
+      again with overlapping fallback evidence.
+    - The mature positioning estimator and future-only benchmark remain frozen reference
+      surfaces. Their outputs do not validate or promote this current descriptive
+      projection.
+    - 'scripts/evaluate_deck_rankings.py is a retrospective diagnostic: it compares
+      fixed field half-lives chronologically and optionally scores a limited matchup
+      baseline. It is not an exact production replay or a deployment gate.'
+    - The generated page is disposable. Edit the tracked script or template, then
+      regenerate decks/deck-rankings.html; do not hand-edit the output.
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo
@@ -361,10 +247,14 @@ documents:
       affectedness remains a hard boundary, and every windowed figure names the admitted
       intervals and evidence provenance.'
     - 'Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes,
-      curated overrides) → parent archetype → camp. Superarchetypes expose pooled
-      strategy-family evidence with labeled provenance and intra-cluster flags; they
-      remain an exploratory navigation/explanation layer while archetype-level Best
-      Call stays decision-authoritative until the future-only benchmark passes.'
+      curated overrides) → parent archetype → camp. Superarchetypes support internal
+      context and strategic-plan navigation; the Deck Rankings page makes performance
+      and worst-matchup floor equally visible while the mature Agency/P(best) projection
+      and benchmark remain frozen reference surfaces.'
+    - 'Deck Rankings is a current descriptive decision projection: full-field posterior
+      mean performance and the minimum non-mirror posterior matchup mean are shown
+      with intervals, provenance, and Pareto tradeoffs. Performance and floor have
+      independent leaders, with performance breaking floor ties.'
     - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
       per-deck findings, consensus decklists with primers — persists across sessions
       and is surfaced automatically; advice is grounded in a user profile (decks played,
@@ -391,8 +281,8 @@ documents:
       compiled not re-derived) and adds Legacy-specific ones: legality is live data,
       always label the
 
-      meta-% definition and online/paper basis, confidence-gate every stat, and treat
-      the advisory layer
+      meta-% definition and online/paper basis, uncertainty-qualify every stat, and
+      treat the advisory layer
 
       as a first-class product.
 
@@ -408,8 +298,9 @@ documents:
       list changes ~quarterly and history must stay correct.
     - Never an unlabeled meta-% — always state the definition (raw/top-cut/winrate-weighted)
       and the online/paper/blend basis; they diverge materially.
-    - Confidence-gate every derived stat — sample size + CI on matchup cells; low-n
-      flagged, not silently shown.
+    - Uncertainty qualifies strength and wording, not permission to speak — sample
+      size, intervals, priors, and provenance accompany every estimate; low-n and
+      prior-only values remain visible with honest labels.
     - Advisory is first-class — 'how to attack the field' is a headline product surface,
       not a footnote to descriptive stats.
     - Ban-regime-aware windowing is the default, and the window is always stated —
@@ -471,7 +362,8 @@ documents:
       generation modes), and non-functional requirements (reproducibility, version-stamped
       legality,
 
-      sample-size confidence gating, honest-degrade policy).
+      sample-size confidence metadata, uncertainty-qualified language, and honest-degrade
+      policy).
 
       '
     decisions:
@@ -497,8 +389,9 @@ documents:
     - Meta-% is computed under multiple definitions (raw entry count, top-cut presence,
       win-rate-weighted) and every report is labeled online/paper/blend — never a
       single unlabeled number.
-    - Matchup cells and any derived stat carry sample-size + confidence metadata;
-      low-n cells (n<100) are flagged, reusing edh-engine's confidence-metadata pattern.
+    - Matchup cells and derived stats carry sample size, intervals, provenance, and
+      uncertainty metadata; low-n and prior-only values remain visible with qualified
+      wording rather than being silently suppressed.
     - 'Reproducibility is an NFR: deterministic given inputs+seed; all external data
       pre-fetched and cached; legality validated against a dated BanListSnapshot.'
     - Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML
@@ -532,8 +425,20 @@ documents:
       and the display gate, gated on concentration (m_eff = 1/HHI >= 2.0, max member
       share <= 0.60) and heterogeneity (I-squared bands, with I-squared treated as
       ONE-SIDED evidence). Typed family cells carry labeled provenance and intra-cluster
-      flags; the Best Call page keeps them exploratory and ledger/navigation-only
-      until the future-only decision benchmark passes.'
+      flags; Deck Rankings uses strategic-plan and exact matchup views while keeping
+      composition-derived family evidence internal.'
+    - 'DECK RANKINGS: `advisory/deck_ranking.py` computes full-field posterior mean
+      performance and the minimum non-mirror posterior mean floor, with draw-based
+      intervals, prior provenance, direct-evidence coverage, and Pareto status. Performance
+      and floor have independent leaders, with performance breaking floor ties; the
+      visible floor range is the named toughest cell while the all-opponent minimum
+      interval remains diagnostic. `advisory/recent_field.py` supplies a provisional
+      28-day recency-weighted published-list field; observed integer counts remain
+      separate from weighted/effective counts and transition prior counts.'
+    - 'DECK RANKINGS VALIDATION BOUNDARY: the current projection is descriptive. The
+      mature positioning estimator and future-only benchmark remain frozen references;
+      `scripts/evaluate_deck_rankings.py` is a retrospective field-method diagnostic
+      with an optional limited matchup baseline, not exact production validation.'
     - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters
       exactly ten estimators with production-ci-gated as the production-CI primary;
       retrospective-fixed-parent (frozen parent-rules identity) and dated contemporaneous

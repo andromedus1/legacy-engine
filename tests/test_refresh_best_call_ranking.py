@@ -426,6 +426,35 @@ def _blob(con, *, ground_n=3, min_row_share=0.001):
     )
 
 
+
+def test_current_projection_ignores_legacy_gates_and_reconciles_full_field():
+    con = script_con()
+    try:
+        loose, strict = _blob(con, ground_n=3), _blob(con, ground_n=30)
+        rbcr._publish_deck_rankings(con, loose)
+        rbcr._publish_deck_rankings(con, strict)
+    finally:
+        con.close()
+    for key in ("arch", "camps"):
+        left = {r["subject"]: r["decision"] for r in loose[key]}
+        right = {r["subject"]: r["decision"] for r in strict[key]}
+        assert left == right
+        for subject, d in left.items():
+            field = loose["meta"]["deck_rankings"]["field"]["shares"]
+            mirror = field.get(subject, 0.0)
+            assert sum(c["share"] for c in d["cells"]) + mirror == pytest.approx(1)
+            assert d["performance"] == pytest.approx(
+                sum(c["share"] * c["mean"] for c in d["cells"]) + .5 * mirror
+            )
+            if d["cells"]:
+                worst = min(d["cells"], key=lambda c: (c["mean"], c["opponent"]))
+                assert d["floor"] == worst["mean"]
+                assert d["worst_low"] == worst["low"]
+                assert d["worst_high"] == worst["high"]
+    candidates = [r for r in loose["arch"] if r["decision"]["eligible"]]
+    floor_leader = min(candidates, key=lambda r: (-r["decision"]["floor"], -r["decision"]["performance"], r["subject"]))
+    assert loose["meta"]["deck_rankings"]["floor_call"] == floor_leader["subject"]
+
 # ---------------------------------------------------------------------------
 # The retired per-parent path, reconstructed verbatim (the parity reference)
 # ---------------------------------------------------------------------------
@@ -905,206 +934,58 @@ class TestMainEndToEnd:
         rbcr.main()
         assert direct_path.read_bytes() == cli_path.read_bytes()
 
-    def test_blowouts_are_classified_from_raw_measured_win_rate(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "if (!c.measured || c.raw == null" in template
-        assert "if (c.raw < 0.40)" in template
-        assert "else if (c.raw < 0.45)" in template
-        assert "if (c.p != null && c.p < 0.40)" not in template
-        assert "else if (c.p != null && c.p < 0.45)" not in template
-
-    def test_positive_matchup_highlights_use_symmetric_raw_wr_bands(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "else if (c.raw > 0.60)" in template
-        assert 'class=\\"edge-dominant\\"' in template
-        assert "else if (c.raw >= 0.55)" in template
-        assert 'class=\\"edge\\"' in template
-        assert "dominant (&gt;60%)" in template
-        assert "edge (55–60%)" in template
-
-    def test_measurement_honesty_surfaces_are_rendered(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "fixed generated-threshold reconciliation" in template
-        assert "display-grade floor" in template
-        assert "floorObservabilityHtml" in template
-        assert "c.concentration_warning" in template
-        assert 'title="${escA(c.concentration_warning)}">⚠ concentrated</span>' in template
-        assert '<div class="evidence-warn">${escT(c.concentration_warning)}</div>' not in template
-
-    def test_interactive_gate_labels_generated_evidence_and_disables_grouping(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "function rankingEvidenceIsCurrent(r)" in template
-        assert "function canGroupRankingEvidence(rows)" in template
-        assert "generated n=${D.meta.ground_n}" in template
-        assert "control.disabled = stale" in template
-        assert "groupByRankingEvidence = false" in template
-        assert "camp && groupByRankingEvidence && generatedEvidenceCurrent" in template
-
-    def test_executed_browser_defaults_ties_and_disclosure_state(self):
-        cell = {
-            "opp": "Opponent", "share": 1.0, "p": 0.55, "raw": 0.55,
-            "ci_low": 0.4, "ci_high": 0.7, "n": 8, "tier": "speculative",
-            "measured": True, "window": "era", "concentration_warning": None,
-        }
-        camp = {
-            "_idx": 0, "parent": "Parent", "camp": "Camp", "subject": "Parent [Camp]",
-            "grounded": True, "recent_4wk": 10, "agency": 0.55, "adj": 0.55,
-            "floor": 0.55, "floor_opp": "Opponent", "coverage": 1.0,
-            "field_share": 0.1, "since": None, "cells": [cell], "p_best": 0.2,
-            "s_cov": 1.0, "s_q": 0.55, "s_caveated": False,
-            "ranking_evidence": {
-                "stratum": "grounded", "measured_share": 1.0,
-                "imputed_share": 0.0, "eligible": True, "reason": None,
-            },
-            "reconciliation": None, "floor_observability": None, "methodology": {},
-            "best_available_estimate": {
-                "estimate": 0.56, "direct_match_n": 19, "added_history_n": 11,
-                "estimated_cells": 1, "total_cells": 2, "field_coverage": 0.63,
-                "basis": "localized-clean-direct", "confidence": "moderate",
-                "proof_grade": False,
-            },
-        }
-        arch = {
-            **camp, "subject": "Parent", "parent": None, "camp": None,
-        }
-        blob = {
-            "meta": {
-                "ground_n": 8, "top_k": 1, "cover_min": 0.5, "rank": {"quantile": 0.25},
-                "field_since": "2026-01-01", "field_decks": 100, "corpus_max": "2026-01-31",
-                "regime_card": None, "audit": [
-                    "// ranking evidence: 1 eligible, 1 quarantined",
-                    "// [warn] ranking subject Empty Camp: no resolved page-used matchup cells; P(best)=n/a",
-                ],
-            },
-            "arch": [arch], "camps": [camp], "plans": [],
-            "report_target": {
-                "target_id": "before-test", "label": "Before hostile </option>",
-                "mode_label": "Today's model", "data_until": "2026-01-31",
-                "effective_data_until": "2026-01-31",
-                "knowledge_as_of": "2026-08-16T00:00:00+00:00",
-            },
-        }
+    def test_dual_priorities_sorting_thin_cells_and_escaping(self):
+        # The approved dual-objective report replaces gate/stratum/toggle controls.
+        # Exercise the new behavior rather than pinning old explanatory prose.
+        def row(name, performance, floor, idx, active=True):
+            return {"subject": name, "_idx": idx, "decision": {
+                "performance": performance, "performance_low": performance-.05,
+                "performance_high": performance+.05, "floor": floor,
+                "floor_low": .01, "floor_high": .15,
+                "worst_low": floor-.10, "worst_high": floor+.10,
+                "field_share": .2, "coverage": .4, "active": active,
+                "eligible": active, "pareto": active, "worst_opponent": "Combo",
+                "cells": [{"opponent": "<unsafe>", "share": .2, "mean": .42,
+                           "low": .2, "high": .65, "wins": 1, "n": 2,
+                           "source": "since 2026-01-01"}],
+            }}
+        blob = {"meta": {"corpus_max": "2026-09-01", "field_since": "2026-08-10"},
+                "arch": [row("Fast", .55, .38, 0), row("Safe", .51, .47, 1),
+                         row("Inactive", .60, .49, 2, False)], "camps": [], "plans": []}
         result = _run_template_javascript(blob, r"""
-(() => {
-  const initial = {
-    interactiveN: D.camps[0]._interactiveN,
-    pbest: pbestHtml(D.camps[0]),
-    sortValue: CAMP_COLS[5].get(D.camps[0]),
-    row: rowHtml(D.camps[0], 0, true),
-    campHeaders: CAMP_COLS.length,
-    campCells: (rowHtml(D.camps[0], 0, true).match(/<td/g) || []).length,
-    archHeaders: COLS.length,
-    archCells: (rowHtml(D.arch[0], 0, false).match(/<td/g) || []).length,
-  };
-  const tied = {
-    subject: "Deck", cells: [
-      {opp:"Zulu",share:.5,p:.55,raw:.55,n:8,measured:true},
-      {opp:"Alpha",share:.5,p:.55,raw:.55,n:7,measured:false},
-    ], plan_cells: [],
-  };
-  recalcRow(tied, 8);
-  const toggle = {attrs:{}, setAttribute(k,v){this.attrs[k]=String(v);}};
-  setRowDisclosureState(toggle, true);
-  const expanded = toggle.attrs["aria-expanded"];
-  setRowDisclosureState(toggle, false);
-  recalcRow(D.camps[0], 9);
-  return {
-    initial, tiedGrounded: tied.grounded, expanded,
-    collapsed: toggle.attrs["aria-expanded"], stalePbest: pbestHtml(D.camps[0]),
-    targetControlHidden: document.getElementById("target-control").hidden,
-    targetOption: document.getElementById("report-target").children[0].textContent,
-    targetMode: document.getElementById("target-mode").textContent,
-    targetStatus: document.getElementById("target-status").textContent,
-    headerAudit: document.getElementById("audit").textContent,
-    warningSummary: document.getElementById("ranking-subject-warning-summary").textContent,
-    warningLines: document.getElementById("ranking-subject-warning-lines").textContent,
-  };
-})()
-""")
-        assert result["initial"]["interactiveN"] == 8
-        assert result["initial"]["sortValue"] == pytest.approx(0.2)
-        assert result["initial"]["pbest"].startswith("20.0%")
-        assert result["initial"]["campCells"] == result["initial"]["campHeaders"]
-        assert result["initial"]["archCells"] == result["initial"]["archHeaders"]
-        assert "56.0%" in result["initial"]["row"]
-        assert "covered-field estimate" in result["initial"]["row"]
-        assert "clean history + current" in result["initial"]["row"]
-        assert "estimate shown · not proof-grade" in result["initial"]["row"]
-        assert result["targetControlHidden"] is False
-        assert "Before hostile </option>" in result["targetOption"]
-        assert result["targetMode"] == "Today’s model"
-        assert result["targetStatus"].startswith("Exclusive data cutoff")
-        assert "ranking evidence: 1 eligible" in result["headerAudit"]
-        assert "[warn] ranking subject" not in result["headerAudit"]
-        assert result["warningSummary"] == "Ranking exclusions and diagnostics (1)"
-        assert "[warn] ranking subject Empty Camp" in result["warningLines"]
-        assert 'aria-expanded="false"' in result["initial"]["row"]
-        assert 'aria-controls="row-detail-c-0"' in result["initial"]["row"]
-        assert result["tiedGrounded"] is False
-        assert result["expanded"] == "true"
-        assert result["collapsed"] == "false"
-        assert result["stalePbest"].startswith("n/a")
+        (() => {
+          const performance = sortedRows(D.arch).map(r=>r.subject);
+          state.key='floor'; render();
+          const floor = sortedRows(D.arch).map(r=>r.subject);
+          const ledger=detailHtml(D.arch[0]);
+          state.expanded.add('a-0'); render();
+          const opened=document.getElementById('t-arch').innerHTML;
+          state.key='performance'; render();
+          const persisted=document.getElementById('t-arch').innerHTML;
+          return {performance,floor,ledger,opened,persisted,
+            picks:document.getElementById('priorities').innerHTML};
+        })()
+        """)
+        assert result["performance"] == ["Fast", "Safe"]
+        assert result["floor"] == ["Safe", "Fast"]
+        assert 'Fast' in result["picks"] and 'Safe' in result["picks"]
+        assert '42.0%' in result["ledger"] and '1–1' in result["ledger"]
+        assert '&lt;unsafe&gt;' in result["ledger"] and '<unsafe>' not in result["ledger"]
+        assert 'Thin' in result["ledger"]
+        assert 'Toughest pairing 95% 37.0–57.0' in result["picks"]
+        assert 'Minimum across all opponents: 95% 1.0–15.0%' in result["ledger"]
+        assert 'detail-a-0' in result["opened"] and 'detail-a-0' in result["persisted"]
 
-    def test_evidence_column_and_opt_in_grouping_are_accessible_and_value_preserving(self):
+    def test_concise_report_preserves_named_surfaces(self):
         template = rbcr.TEMPLATE_PATH.read_text()
-        assert 'id="ranking-strata"' in template
-        assert 'aria-pressed="false"' in template
-        assert "function evidenceHtml(r)" in template
-        assert "groupByRankingEvidence" in template
-        assert "visibleRows.filter(r => (r.ranking_evidence || {}).stratum === label)" in template
-        assert "renderTable(\"t-camp\", D.camps, true)" in template
-
-    def test_methodology_control_is_accessible_and_keeps_authority_boundaries(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert 'id="first-read"' not in template
-        assert "renderPracticalFirstRead" not in template
-        assert 'id="methodology-view"' in template
-        assert 'aria-label="Ranking methodology view"' in template
-        assert 'id="methodology-status" class="methodology-status" aria-live="polite"' in template
-        assert "let usePosteriorLean = false" in template
-        assert "Posterior lean diagnostic active; gated candidacy and P(best) unchanged" in template
-        assert "tableState[\"t-arch\"].col = 2" in template
-        assert "tableState[\"t-camp\"].col = 2" in template
-
-    def test_methodology_copy_distinguishes_decision_field_and_direct_estimates(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "transition-stabilized decision field" in template
-        assert "field-basis line below reports both observed" in template
-        assert "affected archetypes are" in template
-        assert "excluded from that preceding-regime prior" in template
-        assert "A field reset does not erase matchup history" in template
-        assert "Direct matchup estimate is diagnostic" in template
-        assert "exact union of eligible clean intervals" in template
-        assert "does not change Agency, its floor, grounding" in template
-        assert "P(best), or ordering" in template
-        assert "preceding-regime camp fraction" in template
-        assert "parent is represented only by transition-prior decks" in template
-
-    def test_ranking_subject_warnings_are_in_a_bottom_disclosure_not_the_header(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        warning_id = 'id="ranking-subject-warnings"'
-        assert warning_id in template
-        assert template.index("<h2>Subarchetypes (camps)</h2>") < template.index(warning_id)
-        assert "const rankingSubjectWarnings = (M.audit || []).filter" in template
-        assert "const headerAudit = (M.audit || []).filter" in template
-        assert "document.getElementById(\"ranking-subject-warning-lines\").textContent" in template
-
-    def test_stability_and_grounding_mark_generated_gate_staleness(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "function stabilityHtml(r)" in template
-        assert "function groundingPathHtml(r)" in template
-        assert "if (!rankingEvidenceIsCurrent(r))" in template
-        assert "stale — generated at n=${D.meta.ground_n}" in template
-        assert "additional cells not shown" in template
-        assert "total additional matches" in template
-
-    def test_lean_diagnostic_exposes_interval_imputation_and_divergence(self):
-        template = rbcr.TEMPLATE_PATH.read_text()
-        assert "function leanDetailHtml(r)" in template
-        assert "Q25 diagnostic posterior" in template
-        assert "95% ${fmtP(lean.ci_low)}–${fmtP(lean.ci_high)}" in template
-        assert "resolved /" in template
-        assert "gated−lean" in template
+        assert '<title>Deck Rankings</title>' in template
+        for anchor in ('scatter-card', 't-plan', 't-arch', 't-camp', 'method'):
+            assert f'id="{anchor}"' in template
+        assert '95% conditional posterior intervals' in template
+        assert 'posterior lean (diagnostic)' not in template.lower()
+        assert 'id="sample-arch"' not in template
+        assert 'id="sort-performance"' in template and 'id="sort-floor"' in template
+        assert 'aria-controls=' in template
 
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
         db_path = tmp_path / "best-call.duckdb"
@@ -1126,24 +1007,15 @@ class TestMainEndToEnd:
         rbcr.main()
         html = out_path.read_text()
         assert "__D_BLOB__" not in html  # the blob was spliced
-        assert '"p_best"' in html
+        assert '"p_best"' not in html  # retired diagnostics do not bloat the reading surface
         assert "// multi-split: one pass over" in html
-        assert "P(best)" in html  # the camp table column ships in the template
-        assert 'position: sticky' in html
-        assert 'id="coverage-arch"' in html
-        assert 'id="coverage-camp"' in html
-        assert 'id="sample-plan"' in html
-        assert 'id="sample-arch"' in html
-        assert 'id="sample-camp"' in html
-        assert 'class="hint" role="note"' in html
-        assert 'class="hint-label">Interactive tables' in html
-        assert "function selectCell(c, minN)" in html
-        assert "function recalcRow(r, minN)" in html
-        assert "function recalcPlan(r, minN)" in html
-        assert 'class="${cls} expander plan-expander"' in html
-        assert 'el.querySelectorAll("tr.plan-expander")' in html
-        assert "event.stopPropagation()" in html
-        assert 'rows.filter(r => r.coverage >= st.minCoverage)' in html
+        assert '<title>Deck Rankings</title>' in html
+        assert 'position:sticky' in html
+        assert '"decision": {' in html
+        assert 'id="sort-performance"' in html
+        assert 'id="sort-floor"' in html
+        assert 'id="deck-search"' in html
+        assert '"method_id": "deck-rankings-v1"' in html
 
     def _render(self, tmp_path, db_name, out_name, *, registry=None, extra_argv=(),
                 monkeypatch=None):
@@ -1177,19 +1049,19 @@ class TestMainEndToEnd:
             registry=_hero_registry(), monkeypatch=monkeypatch,
         )
         assert '"plan_cells": [' in html
-        assert '"strategic_plan": {' in html
+        assert '"plans": [' in html
+        assert 'Superarchetypes / strategic plans' in html
         assert "Against strategic plans" in html
-        assert "Exact archetype matchups" in html
+        assert "Toughest pairing" in html
         assert "saCellHtml" not in html
         assert '"sa":' not in html
         assert "// superarchetype fallback:" not in html
-        assert ".table-scroll > table > thead > tr > th { position: sticky" in html
+        assert "position:sticky" in html
         assert ".plan-ledger thead" not in html
-        assert 'id="coverage-plan"' in html
         assert 'id="t-plan"' in html
-        assert 'class="plan-toggle"' in html
+        assert 'class="row-toggle"' in html
         assert 'aria-expanded=' in html and 'aria-controls=' in html
-        assert 'function planDetailHtml' in html
+        assert 'function renderPlans' in html
         assert '"plans": [' in html
         assert 'id="taxonomy-root"' not in html
         assert 'id="family-heatmap"' not in html
@@ -1248,8 +1120,8 @@ class TestEvidenceTargetIntegration:
         assert blob["meta"]["report_utility"]["estimated_rows"] > 0
         assert all("best_available_estimate" in row for row in blob["arch"])
         rendered = out_path.read_text()
-        assert "direct matchup estimate" in rendered
-        assert "covered-field estimate" in rendered
+        assert "Performance" in rendered and "Matchup floor" in rendered
+        assert "against the full modeled field" in rendered
 
     def test_current_target_attaches_diagnostics_without_changing_authority(
         self, tmp_path
@@ -1273,7 +1145,7 @@ class TestEvidenceTargetIntegration:
             ground_n=3,
         )
         assert rbcr.canonical_json(rbcr._authority_payload(attached)) == rbcr.canonical_json(
-            baseline
+            rbcr._authority_payload(baseline)
         )
         assert attached["evidence"]["status"] == "not-assessed"
         assert "pairs" not in attached["evidence"]
@@ -1306,7 +1178,7 @@ class TestEvidenceTargetIntegration:
         rendered = target_path.read_text()
         assert "Current </script><script>alert(1)</script>" not in rendered
         assert "\\u003c/script\\u003e" in rendered
-        assert "Evidence diagnostics — diagnostic only" in rendered
+        assert "Evidence details" in rendered
 
     def test_retrospective_blob_is_invariant_to_cutoff_date_and_future_rows(
         self, tmp_path

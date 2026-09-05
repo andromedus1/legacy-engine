@@ -1,7 +1,7 @@
 ---
 id: feature-deck-rankings
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory, ui]
 parent: null
 depends_on: []
@@ -46,4 +46,18 @@ Focused analytical and report tests, browser interaction verification with spars
 One cohesive feature split by disjoint write ownership: posterior module/model, recent-field/evaluation modules, host generator/UI/refresh integration. Workers use Luna xhigh per implement-orchestrator; host retains integration context. Standard independent feature review after integrated verification. No child stories needed; ownership units are in this body and one feature commit captures integration.
 
 ## Mockups
-Pending concise refinement of the existing report at `.mockups/screens/feature-deck-rankings/`.
+Selected: option-1, clear priorities, explicitly approved by Andrew on 2026-09-05. Reference: `.mockups/screens/feature-deck-rankings/index.html`.
+
+## Implementation and verification
+- Implemented `deck-rankings-v1`: complete-field posterior performance, independent highest-floor leader, compatible history once per cell, exact prior strength, and recency-weighted published-list field. Legacy evaluators remain unchanged.
+- Actual browser inspection confirmed desktop/mobile rendering, no page errors or horizontal overflow, search, independent sorting, matchup disclosures, and strategic-plan expansion. Floor display now pairs its point estimate with the named toughest-cell interval; draw-wise minimum uncertainty remains in evidence details. This presentation avoids conflating two distinct statistical quantities.
+- Removed the arbitrary two-percentage-point performance restriction from the floor leader so the user’s priorities remain independent. Both calls are interpretable alongside the efficient frontier and direct-evidence share.
+- The template and serialized reading payload omit retired diagnostic bloat; analytical return values preserve frozen legacy contracts.
+- First full suite: 4,107 passed, 1 skipped, 2 exact-run fixture failures caused by mocking the old generator boundary. Fixtures now isolate exact-run attachment explicitly; focused integration/evidence verification passes after that repair. A new integration test proves legacy gate changes do not change current decisions, reconciles full-field means, and verifies toughest-cell intervals and the floor call.
+- Fixed half-life evaluation: 105 chronological complete-day folds, 6,648 published held-out decks, requested 2026-05-18 through 2026-09-05. Mean log loss: 14d 4.40745, 28d 4.41766, 56d 4.42696, uniform 4.43926. Brier: .96414, .96503, .96557, .96619 respectively. This supports recency weighting descriptively; 28d remains provisional and was not retuned on these outcomes. No claim of production deck-ranking validation.
+- A full scheduled refresh is running with the tracked duplicate-assignment recovery fix; status publication and final refreshed artifact remain to verify.
+
+- Integrated report/evidence tests: 49 passed. Full rerun remains in progress. Scheduled refresh published a 5.25 MB report successfully (down from 41.47 MB), with 66 current archetypes and 53 camps. Its degraded status is due to four pre-existing/operator era-release alerts, not a failed pipeline step. Final browser checks passed at desktop/mobile widths.
+
+- Final full local suite: 4,110 passed, 1 skipped (Python 3.13). New modules pass Ruff correctness rules. Knowledge index regeneration: 32 docs, 0 errors, 6 existing structural warnings.
+- Independent review: attempted Claude Opus via peeragent, which failed before review because OAuth had expired; same-harness fresh-context Sol xhigh fallback is running.

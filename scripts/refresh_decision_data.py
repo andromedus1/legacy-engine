@@ -12,7 +12,7 @@ SCRIPT_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(SCRIPT_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_PROJECT_ROOT))
 
-DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
+DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "deck-rankings.html"
 
 
 def run_manual_refresh(*, db_path: Path, out_path: Path, lock_dir: Path, ports):
