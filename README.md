@@ -301,6 +301,12 @@ Standalone analysis helpers that sit alongside the CLI:
 .venv/bin/python scripts/refresh_best_call_ranking.py
 # writes decks/deck-rankings.html
 
+# Score a private expected field with the same model and a separate output.
+.venv/bin/python scripts/refresh_best_call_ranking.py \
+  --field decks/local-field-saved-post-may18-107.txt \
+  --field-label "Saved post-May 18 field (107 players)" \
+  --out decks/deck-rankings-local-saved.html
+
 # Audit parent-versus-build decision units from the generated page and source DB.
 .venv/bin/python scripts/analyze_decision_units.py \
   --db data/legacy.duckdb --report decks/deck-rankings.html --format markdown
@@ -356,6 +362,14 @@ leaders, with performance breaking floor ties. Point estimates remain visible wh
 are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source
 window. The page is descriptive and does not claim that its current method has passed the legacy
 future-only benchmark.
+
+Passing `--field` reweights the same selected matchup cells for a private expected field while
+keeping candidate eligibility tied to the current global corpus. Counted rows are supplied scenario
+observations, `# effective_n` is concentration evidence, and share-only rows stay fixed weights.
+Unknown opponents retain their positive mass as weak-prior cells. The command requires a separate
+`--out`, labels global observations separately, and reports global-versus-scenario performance and
+floor calls; the scheduled global page remains unchanged. Local strategic-plan shares remain visible,
+but their projections are unavailable until composition-specific plan aggregates exist.
 
 Each refresh also compares the previous compatible published page and shows up to three observations:
 the largest field-share movement, the largest modeled beneficiary, and any changed performance or

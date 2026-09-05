@@ -87,6 +87,31 @@ The map marks tradeoffs among shown decks, with hover/focus/tap tooltips. The st
 surfaces remain available, with camps retaining their parent/camp presentation and plan cells
 remaining direct match aggregates.
 
+## Expected-field reports
+
+Use the same projection for a private expected field by supplying a separate output:
+
+```bash
+.venv/bin/python scripts/refresh_best_call_ranking.py \
+  --field decks/local-field-saved-post-may18-107.txt \
+  --field-label "Saved post-May 18 field (107 players)" \
+  --out decks/deck-rankings-local-saved.html
+```
+
+The saved sample has no supplied end date and is historical evidence scored with the current model;
+its 107 counted players include four explicitly unmapped Affinity Combo players. The input uses the
+established `<share> <archetype> [count]` grammar. Every row must include a count for a supplied-
+observation scenario; `# effective_n` instead declares concentration, and rows without either remain
+fixed weights.
+
+The page records the file hash, evidence basis, unknown opponents, and global-versus-scenario
+performance/floor calls. Scenario shares and counts reweight the existing cells; global current-corpus
+presence still determines which decks can be recommended, so a playable deck need not appear among
+the expected opponents. Positive unknown mass remains as weak-prior cells. Strategic-plan shares stay
+visible, but every local plan projection is explicitly unavailable because the global plan cells
+cannot be coherently reweighted within plan composition. Custom runs cannot replace
+`decks/deck-rankings.html`, and refresh comparisons require the same scenario identity.
+
 ## Refresh changes
 
 After projecting the current page, the publisher reads the prior page's embedded JSON without
@@ -197,6 +222,7 @@ observed ESS; prior pseudo-lists stay separate. The legacy integer total remains
 
 - `src/legacy_engine/advisory/deck_ranking.py` — posterior rows, intervals, floor, and Pareto status.
 - `src/legacy_engine/advisory/recent_field.py` — dated field observations and evidence accounting.
+- `src/legacy_engine/advisory/field_scenario.py` — private expected-field validation and provenance.
 - `src/legacy_engine/advisory/ranking_changes.py` — successive-publication comparison and attribution.
 - `src/legacy_engine/advisory/decision_units.py` — parent/build floor, composition, and pilot diagnostics.
 - `scripts/refresh_best_call_ranking.py` — legacy ledger plus current projection and publication.
