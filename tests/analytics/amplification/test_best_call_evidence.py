@@ -55,7 +55,12 @@ def _patch_ranking_inputs(monkeypatch, module, interval_matrix, run, template_pa
         module,
         "compute_blob",
         lambda *_args, **_kwargs: {
-            "meta": {"current_4wk": "2026-03-01"},
+            "meta": {
+                "current_4wk": "2026-03-01",
+                "field_since": "2026-03-01",
+                "corpus_max": "2026-03-31",
+                "deck_rankings": {"field": {"shares": {"B": 1.0}}},
+            },
             "arch": [{
                 "subject": "A",
                 "agency": 0.5,
