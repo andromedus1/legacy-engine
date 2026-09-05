@@ -164,3 +164,15 @@ Options: a fleet-wide hypothesis-test gate that edits taxonomy; an offline prose
 
 ## Testing and risks
 Synthetic crossing matchup profiles establish averaging uplift, common opponent/mirror treatment, and separation from parent-estimator differences. Test missing cell, single camp, zero current support, main-only/side-only differences, missing deck cards, normalized/source-scoped pilot overlap, HTML escaping, and current cutoff isolation. Inspect the real report/browser expansion and actual candidate audit. Existing camp naming quality is separate backlog work; use exact labels rather than renaming by guess. One standard independent feature review follows verified implementation.
+
+## Current report grounding (2026-09-05)
+
+A read-only calculation from the published Deck Rankings payload, excluding the parent from
+every build's common positive-share opponent set, separates pure averaging uplift from the
+parent-versus-build gap. The mixed matchup vector's minimum exceeds the weighted average of
+build minima by 3.62pp for Jeskai Midrange, 2.28pp for Azorius Midrange, 1.94pp for Show and Tell,
+and 1.13pp for Dimir Tempo. Each has two included camps and 100% modeled parent coverage in
+that report. Eldrazi's pure averaging uplift is only 0.62pp, despite its much larger raw
+parent-versus-camp floor gap. The diagnostic must preserve this distinction: fitted priors and
+evidence windows can explain a parent gap independently of mixing builds. These are descriptive
+point-estimate checks to ground implementation, not new taxonomy decisions or validation claims.
