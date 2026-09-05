@@ -1,53 +1,13 @@
 #!/usr/bin/env python3
-"""Refresh the Best Deck / Best Call agency ranking page (self-contained HTML, offline).
+"""Refresh Deck Rankings as a self-contained, regenerable HTML report.
 
-Recomputes the page's embedded data blob from the DuckDB corpus and renders it
-through ``scripts/best_call_ranking_template.html`` (the tracked template; the
-output page in ``decks/`` is gitignored and fully regenerable).
+The decision projection uses one posterior per matchup, recency-weighted current
+field shares, full-field performance, and the lowest non-mirror matchup mean.
+Compatible clean history is admitted once per pair; evidence labels never gate
+estimates. Frozen legacy metrics remain available to historical evaluators.
 
-Method (the page's definitional card is the authoritative prose):
-  - Field basis: the current ban-regime window (default ``--field-since`` = the
-    latest confirmed ban event date); shares = archetype window decks / window decks.
-  - Rows: ``build_adaptive_matrix``/``build_matrix`` inclusion at
-    ``--min-row-share`` (share of marginal match involvement, NOT meta share).
-  - Cells vs every current-field opponent: era-windowed cell preferred when its
-    n >= ``--ground-n``; else the fallback cell when ITS n >= ground-n; else the era
-    cell kept honestly thin. measured = n >= ground-n.
-  - Fallback window (the Nadu rule): the fallback pools matches since the LAST BAN THAT
-    AFFECTED EITHER DECK in the pair (``archetype_valid_since`` — ran a banned card in
-    >=25% of pre-ban decks), labeled ``BA <date>``; a true full-corpus ``FC`` cell exists
-    only when neither deck was ever ban-affected. A banned engine's matches (Nadu
-    Cephalid, Candelabra Forge) can never inflate a row — in either direction.
-  - adj field WR = field-share-weighted p_shrunk over n>=1 cells (normalized).
-  - floor = min p_shrunk over every measured cell (n >= ``--ground-n``); agency =
-    min(adj, floor). Coverage + the upper-bound label carry incomplete-floor uncertainty.
-  - coverage = measured share-mass / total opponent share-mass; grounded = the
-    top-``--top-k`` field opponents all measured AND coverage >= ``--cover-min``.
-  - Methodology diagnostics: a seeded precision-weighted posterior smooth floor with no
-    sample cliff, complete-only rank spans across four predeclared projections, and a
-    rate-free path-to-grounding agenda. Gated agency and P(best) remain authoritative.
-  - Camps: ONE multi-split adaptive matrix over every staged parent in the discovery
-    registry (``build_multi_split_adaptive`` — camp cells field-for-field identical to
-    the per-parent split builds, parity-tested), plus one multi-split fallback matrix
-    per distinct ban-scoped window date serving all parents at once; camp field share =
-    parent share x camp fraction among the parent's window decks.
-  - Cross-camp P(best): ONE shared-field MC (``rank_decks``) with candidates = all camp
-    labels + unsplit field archetypes and a parent-level Dirichlet field (fixed seed) —
-    P(best) is comparable across camps of DIFFERENT parents because every candidate is
-    scored against the same sampled field. The MC ranks on the PAGE-USED cells (the
-    ledger's own era-preferred, ban-scoped-fallback selection), so the column shares the
-    page's Nadu-rule windows and its coverage-suppression honesty gates.
-  - Strategic plans: curated primary-plan assignments aggregate decisive matches directly;
-    plan rows and each archetype's five plan cells never average rendered archetype rates.
-    Same-plan diagonals are structural 50% context, not measured evidence or floor inputs.
-  - Superarchetypes remain internal matrix context only: the page emits no family payload,
-    lean, range, or ranking input. ``apply_superarchetype_priors=False`` keeps the page's
-    archetype/camp row metrics independent of that optional registry.
-
-Run after every data refresh cycle (refresh all -> label -> discover apply x N ->
-eras run) — the matchup matrices read eras + variants, so refresh THIS page LAST:
-
-  .venv/bin/python scripts/refresh_best_call_ranking.py
+Run after ingestion, labeling, staged camps, and era certification:
+    .venv/bin/python scripts/refresh_best_call_ranking.py
 
 Runbook: docs/analysis/best-call-ranking.md
 """
@@ -140,7 +100,7 @@ from legacy_engine.models.matchup import MatchupCell
 from legacy_engine.confidence import tier_for_sample
 
 TEMPLATE_PATH = Path(__file__).parent / "best_call_ranking_template.html"
-DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "best-deck-best-call-ranking.html"
+DEFAULT_OUT = Path(__file__).parent.parent / "decks" / "deck-rankings.html"
 
 # Fixed MC seed so the cross-camp P(best) column is reproducible run-to-run on the same
 # corpus (rank_decks is deterministic under a fixed seed; a refresh changes numbers only
@@ -206,12 +166,12 @@ def _authority_payload(blob: dict) -> dict:
     for key, value in blob.items():
         if key in {"evidence", "report_target"}:
             continue
-        if key in {"arch", "camps"}:
+        if key in {"arch", "camps", "plans"}:
             payload[key] = [
                 {
                     row_key: copy.deepcopy(row_value)
                     for row_key, row_value in row.items()
-                    if row_key not in {"diagnostic_evidence", "best_available_estimate"}
+                    if row_key not in {"diagnostic_evidence", "best_available_estimate", "decision"}
                 }
                 for row in value
             ]
@@ -221,6 +181,7 @@ def _authority_payload(blob: dict) -> dict:
     meta.pop("target_data_audit", None)
     meta.pop("evidence_audit", None)
     meta.pop("report_utility", None)
+    meta.pop("deck_rankings", None)
     return payload
 
 
@@ -1777,6 +1738,182 @@ def _diagnostic_pair_keys(rows: list[dict], *, limit: int) -> set[tuple[str, str
     return result
 
 
+
+def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=None):
+    """Project the current decision model after the frozen legacy evidence ledger."""
+    from legacy_engine.advisory.deck_ranking import rank_matchup_rows
+    from legacy_engine.advisory.recent_field import build_recent_field
+    from legacy_engine.analytics.matchup import build_cell
+
+    meta = blob["meta"]
+    until = (dt.date.fromisoformat(meta["corpus_max"]) + dt.timedelta(days=1)).isoformat()
+    recent = build_recent_field(con, since=meta["field_since"], until=until)
+    # Exact prior pseudo-counts were already bounded and ban-filtered by the transition builder.
+    prior_counts = {row["subject"]: row.get("prior_count", 0) for row in blob["arch"]}
+    counts = dict(recent.effective_counts)
+    for label, value in prior_counts.items():
+        if value > 0:
+            counts[label] = counts.get(label, 0.0) + value
+    total = sum(counts.values())
+    shares = {label: n / total for label, n in counts.items() if n > 0} if total else {}
+
+    def normalized(raw, row, source_notes):
+        toughest = next((c for c in raw["cells"] if c["opponent"] == raw["worst_opponent"]), None)
+        result = {
+            "performance": raw["performance"], "floor": raw["floor"],
+            "performance_low": raw["performance_interval"][0],
+            "performance_high": raw["performance_interval"][1],
+            "floor_low": raw["floor_interval"][0] if raw["floor_interval"] else None,
+            "floor_high": raw["floor_interval"][1] if raw["floor_interval"] else None,
+            "worst_opponent": raw["worst_opponent"],
+            "worst_low": toughest["ci_low"] if toughest else None,
+            "worst_high": toughest["ci_high"] if toughest else None,
+            "coverage": raw["nonmirror_coverage"],
+            "field_share": raw["subject_field_share"],
+            "active": raw["subject_field_share"] > 0,
+            "eligible": raw["eligible"],
+            "pareto": raw["pareto"],
+            "p_above_even": raw["p_performance_gt_0_5"],
+            "bad_matchup_share": raw["bad_matchup_field_exposure"],
+            "cells": [],
+        }
+        for cell in raw["cells"]:
+            if cell["is_mirror"]:
+                continue
+            result["cells"].append({
+                "opponent": cell["opponent"], "share": cell["field_share"],
+                "mean": cell["mean"], "low": cell["ci_low"],
+                "high": cell["ci_high"], "wins": cell["wins"], "n": cell["n"],
+                "prior_source": cell["prior_source"],
+                "prior_mean": cell["prior_mean"], "prior_strength": cell["prior_strength"],
+                "source": source_notes.get((row["subject"], cell["opponent"]), cell["source_kind"]),
+            })
+        return result
+
+    for key, interval in (("arch", parent_interval), ("camps", camp_interval)):
+        rows = blob[key]
+        overrides, notes, presence = {}, {}, {}
+        details = {}
+        for row in rows:
+            subject = row["subject"]
+            if key == "camps":
+                fraction = recent.camp_fractions.get(row["parent"], {}).get(row["camp"], 0.0)
+                presence[subject] = shares.get(row["parent"], 0.0) * fraction
+            else:
+                presence[subject] = shares.get(subject, 0.0) if recent.exact_counts.get(subject, 0) else 0.0
+            # Classifier residue is field mass, never a deck recommendation.
+            if subject in {"Unknown", "Conflict"} or subject.startswith("Conflict("):
+                presence[subject] = 0.0
+            for cell in row["cells"]:
+                source = cell.get("ledger", {}).get("era") or cell.get("ledger", {}).get("fallback")
+                if source:
+                    notes[(subject, cell["opp"])] = "since " + (source.get("since") or "full history")
+            if interval is not None:
+                for opponent in shares:
+                    if (subject, opponent) not in interval.evidence:
+                        continue
+                    direct, basis = best_available_direct_view(interval, subject, opponent)
+                    if direct is not None and direct.cell is not None and direct.cell.n > 0:
+                        overrides[(subject, opponent)] = direct.cell
+                        notes[(subject, opponent)] = basis
+                        from legacy_engine.analytics.match_results import intersect_pair_eligibility
+                        pair = intersect_pair_eligibility(
+                            interval.selected_outcomes.entity_eligibility[subject],
+                            interval.selected_outcomes.entity_eligibility[opponent],
+                        )
+                        atoms = pair.expanded if direct.kind == "certified-expanded" else pair.current
+                        admitted = set(direct.pair_component_ids)
+                        ranges = [f"[{atom.start or 'start'}, {atom.end})" for atom in atoms if atom.component_id in admitted]
+                        concentration = direct.concentration
+                        details[(subject, opponent)] = {
+                            "intervals": ", ".join(ranges),
+                            "concentration_warning": (
+                                f"{concentration.max_event_share:.0%} from event {concentration.max_event_id}"
+                                if concentration.max_event_share is not None and concentration.max_event_share >= .4 else None
+                            ),
+                        }
+        if shares:
+            projection = rank_matchup_rows(
+                {row["subject"]: _row_measurements(row) for row in rows},
+                shares, counts=counts, candidate_presence=presence,
+                cell_overrides=overrides, override_sources={k: notes[k] for k in overrides},
+            )
+            for row in rows:
+                row["decision"] = normalized(projection["rows"][row["subject"]], row, notes)
+                for cell in row["decision"]["cells"]:
+                    cell.update(details.get((row["subject"], cell["opponent"]), {}))
+                # Retain classifier residue visibly at its true field share, but ineligible.
+                if row["subject"] in shares and presence[row["subject"]] == 0:
+                    row["decision"]["field_share"] = shares[row["subject"]]
+                    row["decision"]["active"] = recent.exact_counts.get(row["subject"], 0) > 0
+
+    # Strategy-plan cells are direct aggregates, not averages of archetype estimates.
+    plans = blob.get("plans", [])
+    plan_shares = {p["id"]: sum(shares.get(m["archetype"], 0.0) for m in p["members"]) for p in plans}
+    plan_cells = {}
+    plan_labels = {p["id"]: p["label"] for p in plans}
+    for plan in plans:
+        for cell in plan["cells"]:
+            if not cell["structural_same_plan"]:
+                plan_cells[(plan["id"], cell["opponent_id"])] = build_cell(
+                    plan["id"], cell["opponent_id"], cell["wins"], cell["n"],
+                )
+    if sum(plan_shares.values()) > 0:
+        plan_projection = rank_matchup_rows(
+            {p["id"]: () for p in plans}, plan_shares,
+            cell_overrides=plan_cells,
+        )
+        for plan in plans:
+            raw = plan_projection["rows"][plan["id"]]
+            plan["decision"] = normalized(raw, {"subject": plan["id"]}, {})
+            plan["decision"]["worst_opponent"] = plan_labels.get(raw["worst_opponent"], raw["worst_opponent"])
+            for cell in plan["decision"]["cells"]:
+                cell["opponent"] = plan_labels.get(cell["opponent"], cell["opponent"])
+                cell["source"] = "since " + meta["field_since"]
+
+    eligible = [r for r in blob["arch"] if r.get("decision", {}).get("eligible")]
+    ordered = sorted(eligible, key=lambda r: (-r["decision"]["performance"], r["subject"]))
+    best = ordered[0] if ordered else None
+    floor_candidates = [r for r in ordered if r["decision"]["floor"] is not None]
+    floor_order = sorted(floor_candidates, key=lambda r: (-r["decision"]["floor"], -r["decision"]["performance"], r["subject"]))
+    sources = ", ".join(f"{name}: {entry.exact_decks} lists" for name, entry in recent.source_breakdown.items())
+    meta["deck_rankings"] = {
+        "method_id": "deck-rankings-v1", "performance_call": best["subject"] if best else None,
+        "floor_call": floor_order[0]["subject"] if floor_order else None,
+        "performance_order": [r["subject"] for r in ordered],
+        "floor_order": [r["subject"] for r in floor_order],
+        "field": {
+            **recent.as_dict(), "shares": shares, "prior_counts": prior_counts,
+            "description": f"Published-list field, {recent.half_life_days:g}-day recency half-life (provisional). "
+                f"{recent.exact_observed_decks} observed lists; effective observed sample {recent.effective_sample_size:.0f}; "
+                f"{sum(prior_counts.values())} historical pseudo-lists. Source coverage is not a census of entrants. {sources}",
+        },
+    }
+    old_utility = meta.get("report_utility") or meta.get("ranking_utility")
+    if old_utility is not None:
+        # Update operational usefulness from the same decisions actually rendered above.
+        visible_cells = [c for r in blob["arch"] for c in r.get("decision", {}).get("cells", []) if c["n"] > 0]
+        visible = len(visible_cells)
+        affected = sum(c["source"] == "localized-clean-direct" for c in visible_cells)
+        utility = RankingUtilitySummary.model_validate({
+            **old_utility, "supported_rows": len(eligible), "estimated_rows": len(eligible),
+            "observed_field_n": recent.exact_observed_decks,
+            "observed_field_ess": recent.effective_sample_size,
+            "prior_strength": int(sum(prior_counts.values())),
+            "effective_field_n": recent.exact_observed_decks + int(sum(prior_counts.values())),
+            "grounded_rows": 0, "proof_grade_call": None, "transition_prior_rows": 0,
+            "visible_estimate_cells": visible, "affected_estimate_cells": affected,
+            "unaffected_estimate_cells": visible - affected,
+            "practical_call": best["subject"] if best else None,
+            "practical_ranked_actions": tuple(r["subject"] for r in ordered),
+            "rendered_shortlist_rows": len({r["subject"] for r in (best, floor_order[0] if floor_order else None) if r}),
+            "status": "useful" if eligible else "unavailable",
+            "reasons": (f"{len(eligible)} supported performance/floor estimates; uncertainty is shown per row",),
+        })
+        validate_ranking_utility(utility)
+        meta["report_utility"] = utility.model_dump(mode="json")
+
+
 def generate_ranking(
     *,
     db_path: Path,
@@ -1832,6 +1969,7 @@ def generate_ranking(
             data_until=requested_until,
             ban_events=ban_events,
         )
+        parent_interval = camp_interval = None
         if target is not None:
             evidence_started = time.perf_counter()
             authority_payload = _authority_payload(blob)
@@ -2006,13 +2144,26 @@ def generate_ranking(
                 "  compact report projection: "
                 f"{time.perf_counter() - projection_started:.1f}s"
             )
+        _publish_deck_rankings(con, blob, parent_interval=parent_interval, camp_interval=camp_interval)
     finally:
         con.close()
 
     template = TEMPLATE_PATH.read_text()
     assert "__D_BLOB__" in template, f"placeholder missing in {TEMPLATE_PATH}"
     render_started = time.perf_counter()
-    rendered = template.replace("__D_BLOB__", _json_for_script(blob), 1)
+    # Serialize the reading surface only. The returned analytical blob preserves
+    # frozen diagnostics for evaluators; the offline page does not consume them.
+    page_blob = dict(blob)
+    for key in ("arch", "camps"):
+        page_blob[key] = [
+            {name: row[name] for name in ("subject", "_idx", "parent", "camp", "decision", "plan_cells") if name in row}
+            for row in blob[key]
+        ]
+    page_blob["plans"] = [
+        {name: row[name] for name in ("id", "label", "description", "members", "field_share", "decision") if name in row}
+        for row in blob.get("plans", [])
+    ]
+    rendered = template.replace("__D_BLOB__", _json_for_script(page_blob), 1)
     _atomic_write_text(out_path, rendered)
     print(
         f"  report serialization/write: {time.perf_counter() - render_started:.1f}s "

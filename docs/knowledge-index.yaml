@@ -1,6 +1,6 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-17T21:46:14Z'
+generated_at: '2026-09-05T17:33:06Z'
 generated_from: frontmatter
 total_docs: 32
 documents:
@@ -8,20 +8,20 @@ documents:
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-08-16'
+  updated: '2026-09-05'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four
     research streams.
 - path: docs/analysis/best-call-ranking.md
-  title: Best Deck / Best Call agency ranking — refresh runbook
+  title: Deck Rankings — refresh runbook
   type: design
   kind: planning
-  updated: '2026-08-17'
+  updated: '2026-09-05'
   status: active
-  consumer_hint: Read before refreshing or interpreting the Best Deck / Best Call
-    agency ranking page — the one-command refresh runbook, the metric definitions,
-    and the honesty gates baked into the page.
+  consumer_hint: Read before refreshing or interpreting the Deck Rankings page — the
+    current performance and matchup-floor projection, its field basis, and its evidence
+    boundaries.
 - path: docs/analysis/meta-deck-analysis-loop.md
   title: The meta-deck analysis loop
   type: design
@@ -35,7 +35,7 @@ documents:
   title: 'Vision: legacy-engine'
   type: north-star
   kind: planning
-  updated: '2026-08-16'
+  updated: '2026-09-05'
   consumer_hint: Read first — the why and what of legacy-engine. Vision, problem,
     principles pointer, and the four-pillar domain model for the Legacy analytics
     platform.
@@ -43,7 +43,7 @@ documents:
   title: 'Principles: legacy-engine'
   type: principles
   kind: planning
-  updated: '2026-06-13'
+  updated: '2026-09-05'
   consumer_hint: Read when making a design or modeling trade-off — the decision heuristics
     specific to legacy-engine (beyond generic best practice).
 - path: docs/research-plan.md
@@ -57,7 +57,7 @@ documents:
   title: 'Spec: legacy-engine'
   type: spec
   kind: planning
-  updated: '2026-08-16'
+  updated: '2026-09-05'
   consumer_hint: Read when scoping what to build — the capabilities, domain entities,
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).

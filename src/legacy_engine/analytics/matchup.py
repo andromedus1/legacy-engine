@@ -194,6 +194,7 @@ def build_cell(
         display=display,
         prior_mean=prior_mean,
         prior_source=prior_source,
+        prior_strength=prior_strength,
         concentration=concentration,
     )
 

@@ -85,7 +85,7 @@ def build_refresh_launch_agent_spec(
         stderr_path=root / "data" / "ops" / "logs" / "refresh.err.log",
         lock_path=decision_refresh_lock_path(
             root / "data" / "legacy.duckdb",
-            root / "decks" / "best-deck-best-call-ranking.html",
+            root / "decks" / "deck-rankings.html",
             lock_dir=root / "data" / "ops" / "locks",
         ),
     )

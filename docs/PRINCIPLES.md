@@ -7,7 +7,7 @@ summary: |
   Project-specific decision heuristics for legacy-engine. Inherits edh-engine's analytics principles
   (analytics is the product, data-driven over vibes, rules-correct at the fidelity claimed, knowledge
   compiled not re-derived) and adds Legacy-specific ones: legality is live data, always label the
-  meta-% definition and online/paper basis, confidence-gate every stat, and treat the advisory layer
+  meta-% definition and online/paper basis, uncertainty-qualify every stat, and treat the advisory layer
   as a first-class product.
 decisions:
   - "Analytics is the product — infrastructure is justified only by the analytical questions it unlocks."
@@ -15,11 +15,11 @@ decisions:
   - "Rules-correct at the fidelity claimed — the goldfish track simplifies transparently and carries confidence metadata; never wrong-but-fast."
   - "Legality is live data — validate against a dated BanListSnapshot; the banned list changes ~quarterly and history must stay correct."
   - "Never an unlabeled meta-% — always state the definition (raw/top-cut/winrate-weighted) and the online/paper/blend basis; they diverge materially."
-  - "Confidence-gate every derived stat — sample size + CI on matchup cells; low-n flagged, not silently shown."
+  - "Uncertainty qualifies strength and wording, not permission to speak — sample size, intervals, priors, and provenance accompany every estimate; low-n and prior-only values remain visible with honest labels."
   - "Advisory is first-class — 'how to attack the field' is a headline product surface, not a footnote to descriptive stats."
   - "Ban-regime-aware windowing is the default, and the window is always stated — adaptive for matrix-backed surfaces, uniform for explicit --regime/--since windows, full for deck-based descriptive surfaces; a thin window may never silently claim depth it doesn't have."
 created: 2026-05-29
-updated: 2026-06-13
+updated: 2026-09-05
 related:
   - {slug: docs/VISION.md, relationship: depends-on}
   - {slug: docs/ARCHITECTURE.md, relationship: parallel-to}
@@ -64,10 +64,12 @@ win-rate-weighted — and **online and paper metagames diverge materially**. Eve
 its definition and its online/paper/blend basis. Compute % ourselves from raw finishes; never trust a
 single aggregator's headline number.
 
-### 7. Confidence-gate every derived stat
-Matchup cells and aggregates carry sample size and a confidence interval. Low-sample cells (n<100) are
-flagged, not silently presented as fact. Reuses edh-engine's `established | evolving | speculative`
-confidence-metadata pattern.
+### 7. Uncertainty qualifies strength and wording, not permission to speak
+Matchup cells and aggregates carry sample size, intervals, priors, and source provenance. Low-sample,
+prior-only, and incompletely observed cells stay visible with qualified language and a clear evidence
+description. Existing legacy reports may retain their established display gates; the Deck Rankings
+projection does not suppress a new point estimate because support is thin. It labels uncertainty and
+keeps prior-only rows out of recommendations.
 
 ### 8. Advisory is first-class
 "How to attack the field" — positioning score, sideboard recommendation, what-to-play — is a headline
@@ -87,6 +89,8 @@ default for matrix-backed surfaces: matchups, positioning, gaps, sideboard plans
 (an explicit `--regime`/`--since` window, degraded to full corpus + banner when thin), and **full**
 (`--all-time`, or deck-based descriptive surfaces whose thinness shows via confidence tiers). A
 surface MUST echo its resolved window and thinness; a thin window may never silently claim depth it
-doesn't have. Where two surfaces legitimately use different windows (a current-regime consensus list
+doesn't have. The Deck Rankings projection is a separately named current method: it uses the observed
+ban-regime field with a provisional 28-day recency weighting while its matchup cells retain their own
+clean interval/fallback provenance. Where two surfaces legitimately use different windows (a current-regime consensus list
 read alongside an adaptive matchup matrix), the divergence is stated, never silent. New surfaces are
 audited against this checklist before they ship.

@@ -527,7 +527,7 @@ def ops() -> None:
 @click.option("--db", type=click.Path(dir_okay=False), default=None,
               help="DuckDB path (defaults to the configured analytical cache).")
 @click.option("--out", type=click.Path(dir_okay=False), default=None,
-              help="Ranking HTML path (defaults to decks/best-deck-best-call-ranking.html).")
+              help="Ranking HTML path (defaults to decks/deck-rankings.html).")
 @click.option("--status-dir", type=click.Path(file_okay=False), default=None,
               help="Operational status directory (defaults to data/ops/status).")
 @click.option("--monitor-state-path", type=click.Path(dir_okay=False), default=None,
@@ -578,12 +578,12 @@ def ops_scheduled_refresh(
         out_path=(
             Path(out).resolve()
             if out
-            else PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html"
+            else PROJECT_ROOT / "decks" / "deck-rankings.html"
         ),
         status_dir=resolved_status_dir,
         lock_path=decision_refresh_lock_path(
             Path(db).resolve() if db else DUCKDB_PATH,
-            Path(out).resolve() if out else PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html",
+            Path(out).resolve() if out else PROJECT_ROOT / "decks" / "deck-rankings.html",
             lock_dir=OPS_LOCK_DIR,
         ),
         clock=lambda: datetime.now(timezone.utc),
@@ -8308,7 +8308,7 @@ def eras_run(db: str | None, provenance: str | None, alpha: float, verbose: bool
     db_path = Path(db).resolve() if db else DUCKDB_PATH
     lock_path = decision_refresh_lock_path(
         db_path,
-        PROJECT_ROOT / "decks" / "best-deck-best-call-ranking.html",
+        PROJECT_ROOT / "decks" / "deck-rankings.html",
         lock_dir=OPS_LOCK_DIR,
     )
     try:

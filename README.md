@@ -2,13 +2,13 @@
 
 A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data: *"What is the meta, how do I attack it, and how do I tune my deck?"*
 
-legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every deck
-under a consistent three-level taxonomy (**superarchetype → parent archetype → data-driven camp**),
-detects each deck's **stable eras** from the corpus itself (bans *and* releases rebuild decks —
-every statistic windows to the largest stretch of still-solid data and names the disturbance that
-bounds it), and computes the metagame, matchup matrix, and field-aware advice on top — every number
-labeled, sample-gated, and traceable to its source. Thin or absent signal is always surfaced and
-labeled, never silently zeroed or blended away.
+The default refreshed analysis is [Deck Rankings](decks/deck-rankings.html), a generated local
+page with independent performance and matchup-floor rankings.
+
+legacy-engine ingests tournament results, labels decks with a three-level taxonomy
+(**superarchetype → parent archetype → camp**), and tracks changes caused by bans, releases,
+and deck evolution. Deck Rankings combines current observations with compatible history;
+thin evidence and prior estimates stay visible with their uncertainty and sources.
 
 It is the sibling of **edh-engine** (which does the same for cEDH), reusing that platform's
 three-data-layer architecture adapted to a 1v1, best-of-3, sideboarded, 60-card eternal format.
@@ -25,7 +25,8 @@ All four draw from the same data layers; they answer different questions.
 3. **Deck Generation** — consensus baseline (mode 1) + field-tuning (mode 2) + gap-discovery (mode 3)
    + export are built; only goldfish-validated candidate-validation is deferred pending the `goldfish/` pillar.
 4. **Meta Attack / Advisory** *(the Legacy-specific differentiator)* — *how to attack the field*: a
-   meta-positioning score (expected win rate vs the weighted field), a sideboard recommender with an
+   meta-positioning score (expected win rate vs the weighted field), the Deck Rankings landing page
+   (full-field performance plus highest worst-matchup floor), a sideboard recommender with an
    impact-decomposed, explainable, slot-ROI-aware scoring model, and a what-to-play advisor
    (proactive/reactive, best-deck vs best-call).
 
@@ -55,8 +56,8 @@ pillar remains deferred:
 | Per-entity stable-era detection (`eras run|list|explain|confirm` — change-point ensemble, fleet FDR, ban/release attribution, BOCPD drift alarm) | ✅ built |
 | Era-aware analytics & advisory (stable_since is the DEFAULT per-cell window; detection-derived global field era; ban-only fallback, loudly labeled) | ✅ built |
 | Hierarchical + cross-era cell shrinkage (camp → leave-camp-out parent → superarchetype → marginal priors; thin new-era cells anchor to their own pre-disturbance value, labeled) | ✅ built |
-| Meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
-| Best Deck / Best Call review page (archetype-ranking authority; exploratory family evidence shown separately) | ✅ built |
+| Legacy meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
+| Deck Rankings landing page (`decks/deck-rankings.html`; performance, matchup floor, intervals, Pareto tradeoffs) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
@@ -94,8 +95,9 @@ Three data layers feed the analytical pillars:
 Raw mirrored JSON (under `data/`, git-ignored) is the **reproducible source of truth**; an embedded,
 rebuildable **DuckDB** (`data/legacy.duckdb`) is the analytical layer for the matchup-matrix and
 meta-share join workloads. The engine makes **no network calls at analysis time** — all external data
-is fetched once and mirrored. Every derived stat carries a confidence tier (`established` / `evolving` /
-`speculative`) and a sample size, and meta-% is never emitted unlabeled.
+is fetched once and mirrored. Derived stats carry an evidence basis: confidence tier where the
+surface defines one, and otherwise sample size, interval, prior, or provenance; meta-% is never
+emitted unlabeled.
 
 ## Install
 
@@ -295,10 +297,15 @@ Standalone analysis helpers that sit alongside the CLI:
 ```
 
 ```bash
-# Refresh the standalone Best Deck / Best Call review page (generated and git-ignored).
+# Refresh the standalone Deck Rankings review page (generated and git-ignored).
 .venv/bin/python scripts/refresh_best_call_ranking.py
-# writes decks/best-deck-best-call-ranking.html
+# writes decks/deck-rankings.html
 ```
+
+The full refresh uses `scripts/refresh_decision_data.py`; the focused script name is retained for
+callers and scheduler wiring. `scripts/evaluate_deck_rankings.py` is an optional retrospective
+diagnostic for fixed field half-lives, with a limited optional matchup baseline. It does not exactly
+replay production interval overrides and does not validate or gate the current Deck Rankings method.
 
 `meta_view.py` is the **meta view** (where the field is, how it's moving, what's
 best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
@@ -311,10 +318,19 @@ inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plu
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
 
-The Best Deck / Best Call page nests family, parent archetype, and camp views; includes a family
-heatmap and deterministic group descriptions; and keeps family-level evidence explicitly
-exploratory. Its ranking authority remains at the parent-archetype level. Matchup bands use raw
-win rate: **Blowout** <40%, **Half** 40–45%, **Edge** 55–60% inclusive, and **Dominant** >60%.
+Deck Rankings pairs performance and matchup-floor cards with an agency map, strategic plans,
+archetype/camp tables, and expandable matchups. Coverage/n filters narrow the shared view; map
+tooltips show matchup records, intervals, and evidence support. Performance is the complete-field weighted mean of per-cell posterior
+means; the floor is the minimum non-mirror posterior mean. Performance and floor have independent
+leaders, with performance breaking floor ties. Point estimates remain visible when cells
+are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source
+window. The page is descriptive and does not claim that its current method has passed the legacy
+future-only benchmark.
+
+The mature `advise positioning` command remains a separate legacy estimator with its established
+Agency/P(best), evidence strata, adaptive windowing, and `--provenance` behavior. Historical
+matchup bands on that surface use raw win rate: **Blowout** <40%, **Half** 40–45%, **Edge** 55–60%
+inclusive, and **Dominant** >60%.
 
 Each leaf takes `-v/--verbose`; all `advise` leaves and `report matchups|meta` take
 `--provenance [online|paper|all]` and a `--db` path. Every emitted number is labeled with its
