@@ -1,7 +1,7 @@
 ---
 id: epic-local-meta-support-meta-report
 kind: feature
-stage: review
+stage: implementing
 tags: [analytics, advisory]
 parent: epic-local-meta-support
 depends_on: [feature-decision-unit-taxonomy]
@@ -95,3 +95,18 @@ example "Saved post-May 18 field (107 players)" rather than inventing a May coll
 Verified implementation committed as 678c619 (32 final focused tests; earlier integration set
 99 passed; Ruff and diff checks clean). Advance to standard fresh feature review while host owns
 actual-corpus generation, browser checks, and final CI. Parent geography scope remains open.
+
+## Standard review corrections
+
+One fresh Sol xhigh pass found four blockers, all accepted: camp rows must keep parent opponent
+labels rather than remap them to variant names; row counts must take precedence over effective_n;
+global-versus-scenario calls/shares must be visible; and local plan shares must actually be
+attached and rendered. Commits 6187320 and 0286d6f implement those corrections with targeted
+publisher/parser/presentation regressions. Local plan estimates stay unavailable; the plan share
+column and mapped-field coverage remain useful and explicit.
+
+Host contract verification identified an additional eligibility edge: candidate support was still
+being counted only against scenario opponents. A wholly unfamiliar field could therefore remove
+all globally supported candidates. The remaining correction preserves the global eligible set
+while retaining zero local direct coverage and honest weak priors. No new publication gate.
+Standard pass count is one; closure follows verification of this named fix set, not another review.
