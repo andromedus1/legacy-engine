@@ -43,9 +43,13 @@ def _artifact(*, floor_pairings: list[dict] | None = None) -> dict:
     return payload
 
 
-def _match(*, won: bool = True, event: str = "event-1", a: str = "A", b: str = "B") -> dict:
+def _match(
+    *, won: bool = True, event: str = "event-1", a: str = "A", b: str = "B",
+    match_idx: int | None = None,
+) -> dict:
     return {
         "event_id": event, "subject": a, "opponent": b,
+        "match_idx": match_idx,
         "subject_player_key": f"{event}-a", "opponent_player_key": f"{event}-b",
         "subject_won": won, "exclusion_reason": None,
     }
@@ -84,6 +88,22 @@ def test_duplicate_reverse_rows_are_one_physical_match_and_unknown_labels_are_mi
     floor = result["floor_evidence"][0]
     assert floor["available"] is False
     assert floor["matches"] == 0
+
+
+def test_match_idx_preserves_same_player_rematches_and_deduplicates_reverse_rows() -> None:
+    first = _match(match_idx=1)
+    first_reverse = {
+        **first, "subject": "B", "opponent": "A",
+        "subject_player_key": first["opponent_player_key"],
+        "opponent_player_key": first["subject_player_key"],
+        "subject_won": False,
+    }
+    rematch = _match(match_idx=2, won=False)
+    result = evaluate_ranking_origin(_artifact(), [first, first_reverse, rematch])
+    baseline = result["methods"]["1"]
+    assert result["total_support_matches"] == 2
+    assert baseline["scored_matches"] == 2
+    assert baseline["common_case_matches"] == 2
 
 
 def test_tampered_frozen_artifact_fails_closed() -> None:

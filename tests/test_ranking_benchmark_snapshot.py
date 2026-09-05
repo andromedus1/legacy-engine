@@ -188,6 +188,33 @@ def test_quarantine_heldout_outcomes_bind_ledger_and_retained_hash(tmp_path):
     assert outcomes.card_metadata_quarantine_sha256 == outcomes.card_metadata_quarantine.digest
 
 
+def test_quarantine_heldout_outcomes_honors_excluded_round_identity(tmp_path):
+    source = _source_db(tmp_path / "source.duckdb")
+    con = store.connect(source)
+    con.execute(
+        "UPDATE deck_cards SET name='Unresolved' "
+        "WHERE tournament_id='future' AND deck_idx=0"
+    )
+    # Keep the single affected round below the fixed two-percent round ceiling.
+    con.executemany(
+        "INSERT INTO decks VALUES (?, ?, ?, ?, ?, ?)",
+        [("future", index, f"ghost-{index}", "", None, None) for index in range(2, 202)],
+    )
+    con.executemany(
+        "INSERT INTO rounds VALUES (?, ?, ?, ?, ?)",
+        [("future", index, f"missing-{index}", f"other-{index}", "2-0")
+         for index in range(1, 101)],
+    )
+    con.close()
+    policy = CardMetadataPolicy(
+        mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+    )
+    outcomes = load_heldout_outcomes(source, _fold(), card_metadata_policy=policy)
+    affected = next(match for match in outcomes.matches if match.match_idx == 0)
+    assert affected.exclusion_reason == "card-metadata-unresolved"
+    assert affected.match_idx == 0
+
+
 def test_heldout_outcome_and_stored_label_mutations_do_not_change_ledger_digest(tmp_path):
     one = _source_db(tmp_path / "one.duckdb", future_result="2-0")
     two = _source_db(tmp_path / "two.duckdb", future_result="0-2")

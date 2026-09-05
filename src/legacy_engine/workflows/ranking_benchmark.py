@@ -742,6 +742,7 @@ def load_heldout_outcomes(
         excluded_decks = {
             (item.tournament_id, item.deck_idx) for item in quarantine.excluded_decks
         } if quarantine is not None else set()
+        excluded_rounds = set(quarantine.excluded_round_keys) if quarantine is not None else set()
         if taxonomy_mode == "contemporaneous":
             if taxonomy_snapshot is None:
                 raise ValueError("contemporaneous held-out classification requires a taxonomy snapshot")
@@ -774,7 +775,7 @@ def load_heldout_outcomes(
               SELECT tournament_id, lower(trim(player)) AS norm
               FROM decks GROUP BY tournament_id, lower(trim(player)) HAVING count(*) > 1
             )
-            SELECT t.id, substr(t.date,1,10), coalesce(t.provenance,''),
+            SELECT t.id, r.match_idx, substr(t.date,1,10), coalesce(t.provenance,''),
                    r.player1, r.player2, r.result,
                    d1.deck_idx, d2.deck_idx, d1.archetype, d2.archetype,
                    du1.norm IS NOT NULL, du2.norm IS NOT NULL
@@ -796,12 +797,15 @@ def load_heldout_outcomes(
         con.close()
     heldout: list[HeldoutMatch] = []
     for (
-        event_id, event_date, provenance, player1, player2, result,
+        event_id, match_idx, event_date, provenance, player1, player2, result,
         deck1, deck2, arch1, arch2, amb1, amb2,
     ) in rows:
         deck_key1 = (str(event_id), int(deck1)) if deck1 is not None else None
         deck_key2 = (str(event_id), int(deck2)) if deck2 is not None else None
-        card_excluded = deck_key1 in excluded_decks or deck_key2 in excluded_decks
+        card_excluded = (
+            deck_key1 in excluded_decks or deck_key2 in excluded_decks
+            or (str(event_id), int(match_idx)) in excluded_rounds
+        )
         arch1 = classified.get(deck_key1) if deck_key1 is not None else None
         arch2 = classified.get(deck_key2) if deck_key2 is not None else None
         outcome = parse_match_result(result)
@@ -824,7 +828,8 @@ def load_heldout_outcomes(
             subject_player, opponent_player = player1, player2
             subject_won = outcome is not None and outcome.winner == "p1"
         heldout.append(HeldoutMatch(
-            event_id=str(event_id), event_date=str(event_date), provenance=str(provenance),
+            event_id=str(event_id), match_idx=int(match_idx),
+            event_date=str(event_date), provenance=str(provenance),
             subject=subject, opponent=opponent,
             subject_player_key=normalize_player(subject_player) or None,
             opponent_player_key=normalize_player(opponent_player) or None,

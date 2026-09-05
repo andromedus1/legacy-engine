@@ -24,12 +24,16 @@ import duckdb
 from legacy_engine.advisory.deck_ranking_projection import project_ranking_rows
 from legacy_engine.advisory.ranking_benchmark import (
     BenchmarkFold,
+    CardMetadataPolicy,
     HeldoutOutcomes,
     atomic_write_canonical,
     content_sha256,
 )
+from legacy_engine.advisory.plan_borrowing import build_plan_borrowing_priors
 from legacy_engine.analytics.eras.consume import AnalysisClock
+from legacy_engine.analytics.amplification.corpus import build_interval_evidence_corpus
 from legacy_engine.ingestion.banlist import BAN_EVENTS
+from legacy_engine.analytics.strategy_plan import load_strategic_plan_registry
 from legacy_engine.workflows.ranking_benchmark import (
     build_origin_snapshot,
     load_heldout_outcomes,
@@ -41,6 +45,11 @@ DEFAULT_GROUND_N = 8
 DEFAULT_TOP_K = 8
 DEFAULT_COVER_MIN = 0.8
 DEFAULT_MIN_ROW_SHARE = 0.001
+DEFAULT_PLAN_PRIOR_STRENGTH_CAP = 15.0
+DEFAULT_CARD_METADATA_POLICY = CardMetadataPolicy(
+    mode="quarantine-unresolved-decks", max_deck_fraction=0.005, max_round_fraction=0.02,
+)
+PLAN_BORROWING_METHOD = "opponent-plan-prior-v1"
 _LOG_EPSILON = 1e-12
 _SCALE_DIGITS = 12
 
@@ -123,13 +132,39 @@ def _fold(cutoff: str, evaluation_until: str, regime_start: str) -> BenchmarkFol
 def _protocol_hash(
     fold: BenchmarkFold, scales: Sequence[float], draws: int,
 ) -> str:
+    registry = load_strategic_plan_registry()
     return content_sha256({
         "protocol_id": "deck-ranking-evaluation-v1",
         "fold": fold.model_dump(mode="json"),
         "prior_scales": list(scales), "draws": draws,
+        "plan_prior": {
+            "method": PLAN_BORROWING_METHOD,
+            "strength_cap": DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
+            "registry_sha256": _registry_sha256(registry),
+        },
+        "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
         "taxonomy_mode": "retrospective-fixed-parent",
         "ground_n": DEFAULT_GROUND_N, "top_k": DEFAULT_TOP_K,
         "cover_min": DEFAULT_COVER_MIN, "min_row_share": DEFAULT_MIN_ROW_SHARE,
+    })
+
+
+def _registry_sha256(registry: object) -> str:
+    """Hash the semantic primary-plan registry that binds the challenger."""
+    return content_sha256({
+        "schema_version": registry.schema_version,
+        "plans": [
+            {"id": item.id, "label": item.label, "description": item.description}
+            for item in registry.plans
+        ],
+        "assignments": [
+            {
+                "archetype": item.archetype,
+                "primary": item.primary,
+                "secondary": list(item.secondary),
+            }
+            for item in registry.assignments
+        ],
     })
 
 
@@ -188,6 +223,7 @@ def _production_inputs(snapshot_db: Path, fold: BenchmarkFold, *, draws: int):
         # This is the production report projection, including its corpus-max+1
         # recency anchor, transition pseudo-count construction, interval source
         # selection, and positive-n overrides.
+        interval_corpus = build_interval_evidence_corpus(interval)
         refresh._publish_deck_rankings(con, blob, parent_interval=interval)
         handoff = blob.get("_deck_ranking_projection_inputs", {}).get("arch")
         if not handoff:
@@ -196,7 +232,30 @@ def _production_inputs(snapshot_db: Path, fold: BenchmarkFold, *, draws: int):
         shares = {str(label): float(value) for label, value in handoff["shares"].items()}
         counts = {str(label): float(value) for label, value in handoff["counts"].items()}
         presence = {str(label): float(value) for label, value in handoff["candidate_presence"].items()}
-        return blob, rows, shares, counts, presence, handoff
+        registry = load_strategic_plan_registry()
+        primary_plans = {
+            assignment.archetype: assignment.primary
+            for assignment in registry.assignments
+        }
+        target_pairs = tuple(
+            (subject, opponent)
+            for subject in rows
+            for opponent in shares
+            if subject != opponent
+        )
+        plan_priors = build_plan_borrowing_priors(
+            interval_corpus, primary_plans, target_pairs,
+            strength_cap=DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
+        )
+        plan_context = {
+            "corpus": interval_corpus,
+            "registry": registry,
+            "primary_plans": primary_plans,
+            "registry_sha256": _registry_sha256(registry),
+            "target_pairs": target_pairs,
+            "priors": plan_priors,
+        }
+        return blob, rows, shares, counts, presence, handoff, plan_context
     finally:
         con.close()
 
@@ -207,7 +266,7 @@ def _forecast_payload(projection: Mapping[str, Any]) -> dict[str, Any]:
     for subject in sorted(rows):
         row = rows[subject]
         for cell in row["cells"]:
-            cells.append({
+            payload = {
                 "subject": subject,
                 "opponent": cell["opponent"],
                 "probability": float(cell["mean"]),
@@ -219,7 +278,10 @@ def _forecast_payload(projection: Mapping[str, Any]) -> dict[str, Any]:
                 "prior_strength_effective": float(cell["prior_strength_effective"]),
                 "prior_contribution_fraction": float(cell["prior_contribution_fraction"]),
                 "is_mirror": bool(cell["is_mirror"]),
-            })
+            }
+            if cell.get("borrowed_prior") is not None:
+                payload["borrowed_prior"] = cell["borrowed_prior"]
+            cells.append(payload)
     floor_pairs = [
         {"subject": subject, "opponent": row["worst_opponent"],
          "support_n": next(
@@ -261,6 +323,7 @@ def freeze_ranking_origin(
     manifest = build_origin_snapshot(
         Path(source_db), snapshot, fold=fold, protocol_hash=protocol_hash,
         taxonomy_mode="retrospective-fixed-parent",
+        card_metadata_policy=DEFAULT_CARD_METADATA_POLICY,
         ban_events=tuple(
             (event[0].isoformat(), event[1], event[2])
             for event in BAN_EVENTS if event[0].isoformat() < fold.cutoff
@@ -268,7 +331,7 @@ def freeze_ranking_origin(
     )
     manifest_sha = content_sha256(manifest)
     atomic_write_canonical(manifest_path, manifest)
-    _blob, rows, shares, counts, presence, handoff = _production_inputs(
+    _blob, rows, shares, counts, presence, handoff, plan_context = _production_inputs(
         snapshot, fold, draws=draws,
     )
     projections = {
@@ -280,6 +343,13 @@ def freeze_ranking_origin(
         )
         for scale in scales
     }
+    projections[PLAN_BORROWING_METHOD] = project_ranking_rows(
+        rows, shares, counts=counts, candidate_presence=presence,
+        cell_overrides=handoff["cell_overrides"],
+        override_sources=handoff["override_sources"],
+        prior_overrides=plan_context["priors"],
+        draws=draws, seed=730_021,
+    )
     metadata = {
         "protocol_id": "deck-ranking-evaluation-v1",
         "protocol_hash": protocol_hash,
@@ -288,6 +358,20 @@ def freeze_ranking_origin(
         "training_facts_sha256": manifest.training_facts_sha256,
         "rules_sha256": manifest.rules_sha256,
         "taxonomy_mode": "retrospective-fixed-parent",
+        "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
+        "training_card_metadata_quarantine": (
+            manifest.card_metadata_quarantine.model_dump(mode="json")
+            if manifest.card_metadata_quarantine is not None else None
+        ),
+        "plan_prior": {
+            "method": PLAN_BORROWING_METHOD,
+            "strength_cap": DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
+            "registry_sha256": plan_context["registry_sha256"],
+            "corpus_id": plan_context["corpus"].corpus_id,
+            "corpus_pair_evidence_sha256": plan_context["corpus"].pair_evidence_sha256,
+            "target_pairs_sha256": content_sha256(plan_context["target_pairs"]),
+            "prior_count": len(plan_context["priors"]),
+        },
         "code_commit": _code_commit(),
         # The timestamp names the forecast cutoff rather than wall-clock run
         # time, keeping identical source/config replays content-addressable.
@@ -297,6 +381,12 @@ def freeze_ranking_origin(
             "ground_n": DEFAULT_GROUND_N, "top_k": DEFAULT_TOP_K,
             "cover_min": DEFAULT_COVER_MIN, "min_row_share": DEFAULT_MIN_ROW_SHARE,
             "seed": 730_021,
+            "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
+            "plan_prior": {
+                "method": PLAN_BORROWING_METHOD,
+                "strength_cap": DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
+                "registry_sha256": plan_context["registry_sha256"],
+            },
         },
         "fold": fold.model_dump(mode="json"),
     }
@@ -380,10 +470,20 @@ def _physical_matches(outcomes: Sequence[Any]) -> tuple[tuple[Any, str | None], 
         reason = _field(outcome, "exclusion_reason")
         if subject is not None and opponent is not None and subject == opponent:
             continue
+        match_idx = _field(outcome, "match_idx")
         player_a = _field(outcome, "subject_player_key")
         player_b = _field(outcome, "opponent_player_key")
         event = str(_field(outcome, "event_id", ""))
-        if player_a and player_b:
+        if match_idx is not None:
+            # The source rounds table's match_idx is the only safe identity for
+            # rematches between the same players in one event.
+            key = (event, f"match_idx:{match_idx}", "")
+            if key in seen:
+                continue
+            seen.add(key)
+        elif player_a and player_b:
+            # Hand-authored adapters predating match_idx retain the conservative
+            # player-pair fallback; actual heldout rows always carry match_idx.
             key = (event, *sorted((str(player_a), str(player_b))))
             if key in seen:
                 continue
@@ -442,6 +542,10 @@ def evaluate_ranking_origin(
     _validate_frozen_predictions(forecasts)
     methods = forecasts["forecasts"]
     outcome_rows = _outcome_rows(outcomes)
+    heldout_quarantine = (
+        outcomes.card_metadata_quarantine
+        if isinstance(outcomes, HeldoutOutcomes) else None
+    )
     mirror_count = sum(
         1 for item in outcome_rows
         if _field(item, "subject") is not None
@@ -603,9 +707,22 @@ def evaluate_ranking_origin(
         "scoring": {
             "physical_match_weight": 1.0,
             "directed_match_weight": 0.5,
+            "common_case_definition": "both directed forecast cells are present for one physical match",
             "mirrors": "excluded",
             "missing_forecasts": "unavailable and retained in total support; never a zero loss",
-            "duplicate_physical_matches": "deduplicated by event and player pair when player keys exist",
+            "duplicate_physical_matches": (
+                "deduplicated by event/match_idx; legacy hand adapters fall back to event/player pair"
+            ),
+        },
+        "card_metadata": {
+            "policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
+            "heldout_quarantine": (
+                heldout_quarantine.model_dump(mode="json")
+                if heldout_quarantine is not None else None
+            ),
+            "ledger_sha256": (
+                heldout_quarantine.digest if heldout_quarantine is not None else None
+            ),
         },
     }
 
@@ -663,6 +780,7 @@ def run_served_model_evaluation(
         outcomes = load_heldout_outcomes(
             Path(source_db), fold,
             expected_rules_sha256=artifact["metadata"]["rules_sha256"],
+            card_metadata_policy=DEFAULT_CARD_METADATA_POLICY,
         )
         evaluation = evaluate_ranking_origin(artifact, outcomes)
         eval_path = root / f"{fold.cutoff}--{fold.evaluation_until}" / "evaluation.json"
@@ -672,6 +790,12 @@ def run_served_model_evaluation(
         "protocol_id": "deck-ranking-evaluation-v1",
         "origins_declared": [list(item) for item in origins],
         "prior_scales": list(scales), "draws": draws,
+        "card_metadata_policy": DEFAULT_CARD_METADATA_POLICY.model_dump(mode="json"),
+        "plan_prior": {
+            "method": PLAN_BORROWING_METHOD,
+            "strength_cap": DEFAULT_PLAN_PRIOR_STRENGTH_CAP,
+            "registry_sha256": _registry_sha256(load_strategic_plan_registry()),
+        },
         "status": "complete",
         "origins": evaluated,
     }
@@ -684,6 +808,7 @@ def run_served_model_evaluation(
 
 
 __all__ = [
-    "DEFAULT_PRIOR_SCALES", "DECLARED_ORIGINS", "evaluate_ranking_origin",
-    "freeze_ranking_origin", "run_served_model_evaluation",
+    "DEFAULT_CARD_METADATA_POLICY", "DEFAULT_PLAN_PRIOR_STRENGTH_CAP",
+    "DEFAULT_PRIOR_SCALES", "DECLARED_ORIGINS", "PLAN_BORROWING_METHOD",
+    "evaluate_ranking_origin", "freeze_ranking_origin", "run_served_model_evaluation",
 ]

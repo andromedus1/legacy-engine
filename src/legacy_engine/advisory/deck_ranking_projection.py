@@ -8,6 +8,7 @@ does not implement a second ranking estimator.
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -60,6 +61,47 @@ def _missing_cell(subject: str, opponent: str, scale: float) -> MatchupCell:
     )
 
 
+def _prior_values(prior: object) -> tuple[float, float]:
+    """Read a challenger prior without coupling the kernel to its dataclass."""
+    if isinstance(prior, Mapping):
+        mean_value, strength_value = prior.get("mean"), prior.get("strength")
+    else:
+        mean_value = getattr(prior, "mean", None)
+        strength_value = getattr(prior, "strength", None)
+    try:
+        mean = float(mean_value)
+        strength = float(strength_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("prior override must expose finite mean and strength") from exc
+    if not math.isfinite(mean) or not 0.0 <= mean <= 1.0:
+        raise ValueError("prior override mean must be finite and between 0 and 1")
+    if not math.isfinite(strength) or strength <= 0.0:
+        raise ValueError("prior override strength must be finite and positive")
+    return mean, strength
+
+
+def _prior_payload(prior: object) -> dict[str, Any]:
+    """Keep challenger provenance serializable in the frozen prediction grid."""
+    if isinstance(prior, Mapping):
+        return dict(prior)
+    if hasattr(prior, "model_dump"):
+        return prior.model_dump(mode="json")
+    if is_dataclass(prior):
+        return asdict(prior)
+    return {
+        key: getattr(prior, key)
+        for key in ("mean", "strength", "source", "selection_sha256", "corpus_id")
+        if hasattr(prior, key)
+    }
+
+
+def _overlay_prior(cell: MatchupCell, prior: object) -> MatchupCell:
+    mean, strength = _prior_values(prior)
+    # Keep the selected cell's observed W/n and source label.  The challenger is
+    # a conditional prior overlay, not a second observation ledger.
+    return cell.model_copy(update={"prior_mean": mean, "prior_strength": strength})
+
+
 def _source_identity(
     source: RankingCellSource | None,
     *,
@@ -86,6 +128,7 @@ def project_ranking_rows(
     candidate_presence: Mapping[str, float] | None = None,
     cell_overrides: Mapping[tuple[str, str], MatchupCell] | None = None,
     override_sources: Mapping[tuple[str, str], str] | None = None,
+    prior_overrides: Mapping[tuple[str, str], object] | None = None,
     prior_scale: float = 1.0,
     draws: int = 10_000,
     seed: int = 730_021,
@@ -94,14 +137,17 @@ def project_ranking_rows(
 
     ``prior_scale`` is a fixed sensitivity parameter.  It scales the selected
     cell's actual Beta prior strength, including the named weak prior for an
-    absent cell.  The default is exactly the production kernel's prior.  The
-    input ledger is never mutated; source identity in each output cell refers
-    to the unscaled source while ``prior_strength_effective`` records the value
-    used by the posterior.
+    absent cell.  ``prior_overrides`` optionally replaces only the Beta prior
+    mean/strength for a challenger; observed wins/n and selected source
+    identity remain unchanged.  The default is exactly the production kernel's
+    prior.  The input ledger is never mutated; source identity in each output
+    cell refers to the unscaled source while ``prior_strength_effective``
+    records the value used by the posterior.
     """
     scale = _validate_prior_scale(prior_scale)
     overrides = {} if cell_overrides is None else dict(cell_overrides)
     sources = {} if override_sources is None else dict(override_sources)
+    priors = {} if prior_overrides is None else dict(prior_overrides)
     working: dict[str, tuple[RankingCellMeasurement, ...]] = {}
     resolved: dict[tuple[str, str], tuple[MatchupCell | None, str, RankingCellSource | None]] = {}
 
@@ -115,6 +161,8 @@ def project_ranking_rows(
                 original = overrides[key]
                 source_kind = sources.get(key, "interval-override")
                 effective = _scaled_cell(original, scale)
+                if key in priors:
+                    effective = _overlay_prior(effective, priors[key])
                 overrides[key] = effective
                 resolved[key] = (original, source_kind, None)
                 rewritten.append(measurement)
@@ -125,6 +173,8 @@ def project_ranking_rows(
                 # A concrete n=0 cell lets rank_matchup_rows use the same named
                 # weak prior while retaining its existing ``missing`` source kind.
                 missing = _missing_cell(subject, measurement.opponent, scale)
+                if key in priors:
+                    missing = _overlay_prior(missing, priors[key])
                 overrides[key] = missing
                 sources[key] = "missing"
                 resolved[key] = (None, "missing", None)
@@ -133,6 +183,8 @@ def project_ranking_rows(
 
             original = source.cell
             effective = _scaled_cell(original, scale)
+            if key in priors:
+                effective = _overlay_prior(effective, priors[key])
             replacement = source.model_copy(update={"cell": effective})
             if measurement.era is source:
                 rewritten.append(measurement.model_copy(update={"era": replacement}))
@@ -145,7 +197,10 @@ def project_ranking_rows(
             if opponent in seen_opponents or (subject, opponent) in overrides:
                 continue
             key = (subject, opponent)
-            overrides[key] = _missing_cell(subject, opponent, scale)
+            missing = _missing_cell(subject, opponent, scale)
+            if key in priors:
+                missing = _overlay_prior(missing, priors[key])
+            overrides[key] = missing
             sources[key] = "missing"
             resolved[key] = (None, "missing", None)
         working[subject] = tuple(rewritten)
@@ -156,7 +211,10 @@ def project_ranking_rows(
         if key not in resolved:
             source_kind = sources.get(key, "interval-override")
             resolved[key] = (original, source_kind, None)
-            overrides[key] = _scaled_cell(original, scale)
+            effective = _scaled_cell(original, scale)
+            if key in priors:
+                effective = _overlay_prior(effective, priors[key])
+            overrides[key] = effective
 
     result = rank_matchup_rows(
         working,
@@ -191,12 +249,28 @@ def project_ranking_rows(
                     source, source_kind=source_kind, cell=original,
                 ),
             })
+            if key in priors:
+                prior = priors[key]
+                prior_mean, prior_strength = _prior_values(prior)
+                cell["selected_prior_mean"] = (
+                    _MISSING_PRIOR_MEAN if original is None or original.prior_mean is None
+                    else float(original.prior_mean)
+                )
+                cell["selected_prior_strength"] = original_strength
+                cell["borrowed_prior"] = {
+                    **_prior_payload(prior),
+                    "mean": prior_mean,
+                    "strength": prior_strength,
+                }
     result["prior_scale"] = scale
     result["method"] = {
         **result["method"],
         "prior_scale": scale,
         "source_resolution": "era if present, otherwise fallback; explicit override first",
         "prior_contribution": "effective prior strength / (effective prior strength + n)",
+        "prior_overlay": (
+            "optional conditional challenger prior; direct wins/n and selected source identity are preserved"
+        ),
     }
     return result
 

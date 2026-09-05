@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from legacy_engine.advisory.deck_ranking import rank_matchup_rows
+from legacy_engine.advisory.plan_borrowing import PlanBorrowingPrior
 from legacy_engine.advisory.deck_ranking_projection import project_ranking_rows
 from legacy_engine.advisory.ranking_measurement import RankingCellMeasurement, RankingCellSource
 from legacy_engine.analytics.matchup import build_cell
@@ -100,6 +101,41 @@ def test_interval_override_is_resolved_before_kernel_for_every_scale() -> None:
     assert cell["source_kind"] == "localized-interval"
     assert cell["wins"] == 8 and cell["n"] == 8
     assert cell["mean"] == pytest.approx((15 * 0.5 + 8) / 23)
+
+
+def test_prior_overlay_preserves_selected_observations_and_source_identity() -> None:
+    source = _source("A", "B", 1, 3, strength=20)
+    prior = PlanBorrowingPrior(
+        mean=0.9, strength=4, donor_wins=3, donor_n=4, donor_events=2,
+        donor_opponents=2, history_donor_n=1, source="plan donor",
+        selection_sha256="selection", corpus_id="corpus",
+    )
+    projected = project_ranking_rows(
+        {"A": [_measurement("A", "B", era=source)]},
+        {"A": 0.5, "B": 0.5}, prior_overrides={("A", "B"): prior}, draws=30, seed=3,
+    )
+    cell = next(cell for cell in projected["rows"]["A"]["cells"] if cell["opponent"] == "B")
+    assert (cell["wins"], cell["n"]) == (1, 3)
+    assert cell["source_identity"]["kind"] == "era"
+    assert cell["selected_prior_strength"] == 20
+    assert cell["borrowed_prior"]["selection_sha256"] == "selection"
+    assert cell["mean"] == pytest.approx((1 + 4 * 0.9) / 7)
+
+
+def test_prior_overlay_can_replace_absent_cell_weak_prior_without_observations() -> None:
+    prior = PlanBorrowingPrior(
+        mean=0.8, strength=5, donor_wins=4, donor_n=5, donor_events=3,
+        donor_opponents=2, history_donor_n=2, source="plan donor",
+        selection_sha256="selection", corpus_id="corpus",
+    )
+    projected = project_ranking_rows(
+        {"A": []}, {"A": 0.5, "B": 0.5},
+        prior_overrides={("A", "B"): prior}, draws=30, seed=3,
+    )
+    cell = next(cell for cell in projected["rows"]["A"]["cells"] if cell["opponent"] == "B")
+    assert (cell["wins"], cell["n"]) == (0, 0)
+    assert cell["source_kind"] == "missing"
+    assert cell["mean"] == pytest.approx(0.8)
 
 
 @pytest.mark.parametrize("scale", (0, -1, float("inf"), float("nan")))

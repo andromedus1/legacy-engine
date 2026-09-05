@@ -73,6 +73,14 @@ pass (`tests/test_deck_ranking_projection.py` and
 and snapshot suites also pass. The actual-corpus run is owned by the host and remains pending
 verification.
 
+The fixed `opponent-plan-prior-v1` challenger now reuses the exact parent interval corpus and
+curated primary-plan registry. It overlays only conditional prior mean/strength, records donor and
+selection hashes in each frozen cell, and omits no-donor targets so the fitted baseline is exact.
+The evaluator uses the fixed `quarantine-unresolved-decks` policy with 0.5% deck and 2% round
+ceilings for both training snapshots and heldout reads; policy and ledgers are bound in manifests,
+prediction metadata, evaluations, and the summary. Heldout rows carry source `match_idx`, so
+same-player rematches remain separate while reverse duplicates are counted once.
+
 ## Predeclared served-model origins
 
 The host experiment is fixed before heldout outcomes are opened. Development origins are

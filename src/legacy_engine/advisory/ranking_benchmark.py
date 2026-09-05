@@ -271,6 +271,7 @@ class ExternalRankingSnapshot(LegacyEngineModel):
 
 class HeldoutMatch(LegacyEngineModel):
     event_id: str
+    match_idx: int | None = None
     event_date: str
     provenance: str
     subject: str | None
