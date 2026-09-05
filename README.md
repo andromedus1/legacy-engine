@@ -5,6 +5,11 @@ A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers
 The default refreshed analysis is [Deck Rankings](decks/deck-rankings.html), a generated local
 page with independent performance and matchup-floor rankings.
 
+The separate [Doomsday Variant Rankings runbook](docs/analysis/doomsday-variant-rankings.md)
+documents the manually generated Esper/Teferi, Sultai/Veil, Grixis/Squelcher, Dimir, and residual
+comparison. After refreshing its existing database and global-field inputs, build it with
+`.venv/bin/python scripts/refresh_doomsday_variant_rankings.py`.
+
 legacy-engine ingests tournament results, labels decks with a three-level taxonomy
 (**superarchetype → parent archetype → camp**), and tracks changes caused by bans, releases,
 and deck evolution. Deck Rankings combines current observations with compatible history;
