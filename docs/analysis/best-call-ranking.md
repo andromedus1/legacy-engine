@@ -87,6 +87,45 @@ The map marks tradeoffs among shown decks, with hover/focus/tap tooltips. The st
 surfaces remain available, with camps retaining their parent/camp presentation and plan cells
 remaining direct match aggregates.
 
+## Refresh changes
+
+After projecting the current page, the publisher reads the prior page's embedded JSON without
+executing the HTML. Compatible snapshots share method, scenario, regime, and field start. The page
+shows at most three observations: largest visible field movement, largest modeled performance
+beneficiary, and changed performance/floor calls. For each candidate with the full union of required
+opponent forecasts, performance movement is exactly decomposed into symmetric field-weight and
+matchup-estimate terms. A floor explanation names a changed minimum pairing or positive-support set;
+field-share magnitudes do not explain floor movement when opponent support is unchanged.
+
+First publication starts a baseline; analytically equal inputs report no change. Incompatible or
+malformed prior payloads and missing forecasts remain explicit while the new page stays publishable.
+The comparison snapshot uses the same atomic HTML publication, and refresh diagnostics are excluded
+from the ranking-authority invariant.
+
+## Build decision units
+
+Expanded parent rows compare at least two current camp rows on the full positive-share external-opponent
+set, excluding the parent. The disclosure separates pure pooling uplift—minimum of the camp-weighted
+matchup vector minus the weighted camp minima—from the actual parent/build floor gap, which can also
+reflect priors or evidence windows. Missing opponent cells remain unavailable. Camp weights,
+common-opponent field coverage, toughest pairing, n, and prior fraction stay visible, including `n=0`
+cells.
+
+Composition uses `0.5 × Σ|mean copies A − mean copies B|` separately for main and side decks, with
+within-camp radius and separate main/side card-record denominators. Pilot overlap uses source-scoped
+normalized handles, reports known and missing-handle denominators, and is unavailable if either build
+has no known pilot. The disclosure never promotes a camp or changes the parent call. For a
+read-only JSON or Markdown audit of the generated page, run:
+
+```bash
+.venv/bin/python scripts/analyze_decision_units.py \
+  --db data/legacy.duckdb --report decks/deck-rankings.html --format markdown
+```
+
+The 2026-08-10 through 2026-09-04 audit found 29 parents and 16 exact two-current-build comparisons.
+The largest grounded pure pooling uplifts were Jeskai Midrange 3.62pp, Azorius Midrange 2.28pp,
+Show and Tell 1.94pp, and Dimir Tempo 1.13pp; these point-estimate diagnostics did not change taxonomy.
+
 ## Evidence and interpretation
 
 There is no point-estimate threshold that suppresses a new projection estimate. A row can show
@@ -137,9 +176,16 @@ and unavailable floor outcomes stay visible. Each frozen cell also carries the e
 its observation match-id digest, admitted components and windows, analysis clock, status, and
 concentration evidence. Existing predictions are reused only when their fold, protocol, requested
 scales/draws, taxonomy, quarantine policy, strategic-plan registry, manifest, snapshot, and artifact
-hashes still match. These are diagnostic scores and sensitivity evidence; the prior run was stopped
-before scoring when its taxonomy defect was found, the corrected experiment is pending, no production
-change has been selected, and the evaluator has no publication or deployment gate.
+hashes still match.
+
+Development scored 347.5 weighted half-match cases and selected scale `2`: log loss was `0.690337`
+versus `0.696988` for scale `1`, and Brier was `0.248590` versus `0.251759`. Confirmation scored 92
+weighted cases and slightly reversed that result: scale `1` had log loss `0.685469` and Brier
+`0.246262`, versus `0.686405` and `0.246695` for scale `2`. The independent scale-`2` leaders stayed
+unchanged at all six origins; scale `.5` and the plan challenger changed calls but did not improve
+the proper scores. Production therefore retains scale `1`. The generated page may load the sealed
+confirmation artifact into its Method disclosure; the evaluator has no publication or deployment
+gate.
 
 The operational status schema may report `useful` when the generated artifact contains supported
 performance/floor estimates and a practical call, even when evidence is thin or the current method
@@ -151,6 +197,8 @@ observed ESS; prior pseudo-lists stay separate. The legacy integer total remains
 
 - `src/legacy_engine/advisory/deck_ranking.py` — posterior rows, intervals, floor, and Pareto status.
 - `src/legacy_engine/advisory/recent_field.py` — dated field observations and evidence accounting.
+- `src/legacy_engine/advisory/ranking_changes.py` — successive-publication comparison and attribution.
+- `src/legacy_engine/advisory/decision_units.py` — parent/build floor, composition, and pilot diagnostics.
 - `scripts/refresh_best_call_ranking.py` — legacy ledger plus current projection and publication.
 - `scripts/refresh_decision_data.py` — full refresh composition and default publication path.
 - `scripts/evaluate_deck_rankings.py` — default field diagnostic and frozen served-model evaluation.

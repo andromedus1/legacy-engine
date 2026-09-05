@@ -57,7 +57,7 @@ pillar remains deferred:
 | Era-aware analytics & advisory (stable_since is the DEFAULT per-cell window; detection-derived global field era; ban-only fallback, loudly labeled) | ✅ built |
 | Hierarchical + cross-era cell shrinkage (camp → leave-camp-out parent → superarchetype → marginal priors; thin new-era cells anchor to their own pre-disturbance value, labeled) | ✅ built |
 | Legacy meta-positioning score (Bayesian Monte-Carlo, custom field, best-call vs best-deck; `--list-granular` S_granular overlay) | ✅ built |
-| Deck Rankings landing page (`decks/deck-rankings.html`; performance, matchup floor, intervals, Pareto tradeoffs) | ✅ built |
+| Deck Rankings landing page (`decks/deck-rankings.html`; performance/floor, refresh changes, build diagnostics, Pareto tradeoffs) | ✅ built |
 | Sideboard recommender (weighted max-coverage: PuLP/CBC ILP + greedy + anti-hate; collection-aware; considering/bubble pool) | ✅ built |
 | Two-stage core+hedge sideboard (`advise sideboard --smart`) — natural-budget dedicated core (no padding, may return <15) + diversity-preferring hedge in the flex slots; commit/insurance labels + coverage curve + uncovered-field tail | ✅ built |
 | Impact-decomposed sideboard scoring (centrality × symmetry × castability × draw-probability vs derived/curated archetype linchpins; per-card breakdown, coverage% diagnostic, slot-ROI/punt table) | ✅ built |
@@ -300,6 +300,10 @@ Standalone analysis helpers that sit alongside the CLI:
 # Refresh the standalone Deck Rankings review page (generated and git-ignored).
 .venv/bin/python scripts/refresh_best_call_ranking.py
 # writes decks/deck-rankings.html
+
+# Audit parent-versus-build decision units from the generated page and source DB.
+.venv/bin/python scripts/analyze_decision_units.py \
+  --db data/legacy.duckdb --report decks/deck-rankings.html --format markdown
 ```
 
 The full refresh uses `scripts/refresh_decision_data.py`; the focused script name is retained for
@@ -320,7 +324,7 @@ all six declared origins before scoring the first three. Run confirmation later 
 Confirmation reuses the sealed predictions only after validating their requested configuration and
 seals the development decision before it opens the final three horizons.
 
-The served-model experiment compares the production prior scale `1` with fixed `.5` and `2`
+The served-model evaluation compares the production prior scale `1` with fixed `.5` and `2`
 sensitivities and the conditional `opponent-plan-prior-v1` challenger on one prediction grid. It
 reports log loss, Brier score, calibration, support strata, reciprocity, paired event differences,
 and later evidence for the named floor pairings. The run is parent-only and uses observed-by-cutoff
@@ -328,8 +332,10 @@ card availability where release dates are unavailable. The hash-pinned parent ta
 production Energy color split into Boros Energy and Mardu Energy; camps remain disabled. Each frozen
 cell retains its selected view, match-id digest, and admitted windows. The outcome-blind card-metadata
 quarantine applies the same fixed ceilings to every method (at most `.5%` of decks and `2%` of rounds),
-records raw and retained ledgers, and does not repair metadata. Results are diagnostic: no experiment
-result or production change has been selected, and this command has no publication or deployment gate.
+records raw and retained ledgers, and does not repair metadata. Development selected scale `2`, but
+confirmation slightly favored the current scale `1` on both proper scores, so production retains
+scale `1`. The generated page can disclose the dated scores and call sensitivity; the evaluator has
+no publication or deployment gate.
 
 `meta_view.py` is the **meta view** (where the field is, how it's moving, what's
 best-positioned over time); `deck_vs_cohort_viz.py` is the **my-deck view** (how one
@@ -350,6 +356,14 @@ leaders, with performance breaking floor ties. Point estimates remain visible wh
 are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source
 window. The page is descriptive and does not claim that its current method has passed the legacy
 future-only benchmark.
+
+Each refresh also compares the previous compatible published page and shows up to three observations:
+the largest field-share movement, the largest modeled beneficiary, and any changed performance or
+floor call. Performance changes are split arithmetically into field-weight and matchup-estimate
+contributions; missing forecasts, new baselines, and incompatible scenarios remain explicit.
+Expanded archetype rows add a parent-versus-build diagnostic with camp floors, common-opponent coverage,
+pooling uplift, separate main/side slot distances, card-record coverage, and source-scoped normalized
+pilot overlap. These disclosures do not alter the page's parent ranking or taxonomy.
 
 The mature `advise positioning` command remains a separate legacy estimator with its established
 Agency/P(best), evidence strata, adaptive windowing, and `--provenance` behavior. Historical
