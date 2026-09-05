@@ -1169,7 +1169,6 @@ class TestMainEndToEnd:
         assert '95% conditional posterior intervals' in template
         assert 'posterior lean (diagnostic)' not in template.lower()
         assert 'id="sample-arch"' not in template
-        assert 'id="sort-performance"' in template and 'id="sort-floor"' in template
         assert 'aria-controls=' in template
 
     def test_main_renders_the_page_from_a_tmp_db(self, tmp_path, monkeypatch):
@@ -1197,8 +1196,6 @@ class TestMainEndToEnd:
         assert '<title>Deck Rankings</title>' in html
         assert 'position:sticky' in html
         assert '"decision": {' in html
-        assert 'id="sort-performance"' in html
-        assert 'id="sort-floor"' in html
         assert 'id="deck-search"' in html
         assert '"method_id": "deck-rankings-v1"' in html
 

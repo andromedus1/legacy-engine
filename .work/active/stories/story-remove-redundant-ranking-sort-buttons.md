@@ -1,7 +1,7 @@
 ---
 id: story-remove-redundant-ranking-sort-buttons
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, ui]
 parent: null
 depends_on: []
@@ -22,3 +22,12 @@ Inline implementation and bounded standalone review, reusing existing UI without
 mock. Regenerate both reports from unchanged payloads using the tracked template.
 Verify header sorts and remaining controls in desktop/mobile Chromium, and run the
 existing report tests. Documentation already describes column-based comparisons.
+
+## Verification and bounded inline review
+Removed both controls, label, listeners, render-time lookups and unused pressed styling.
+Only assertions for the deleted control IDs were removed; behavioral sorting tests remain.
+48 existing report tests pass. Chromium verified both regenerated reports at 1440px and
+390px: header sorting in both directions, search, inactive/tradeoff filters, counts and
+no JS errors or page overflow. Analytical payloads are unchanged. Diff check passes.
+Bounded host review approves the narrow removal; no independent reviewer or new tests
+needed. No stale documentation assertions or adjacent issues found.
