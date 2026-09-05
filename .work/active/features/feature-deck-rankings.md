@@ -1,7 +1,7 @@
 ---
 id: feature-deck-rankings
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, ui]
 parent: null
 depends_on: []
@@ -87,17 +87,38 @@ coverage selects visible rows, and the same subset drives map and independent le
 retain the coherent posterior definition. Restore a concise hover/focus/tap tooltip with intervals,
 worst pairing/record/prior status, coverage, match count, and field share. Reuse existing controls
 and disclosure styling; no new visual direction or independent review round is needed for these
-user-review corrections. Prior implementation CI passed on Python3.11 and3.13; the13 job passed
+user-review corrections. Prior implementation CI passed on Python 3.11 and3.13; the13 job passed
 its retry after one runner timeout. Verify the refinement through focused JS/browser checks and CI.
 
 - Refinement verification:43 focused report tests pass, including a new JS test proving support
   filtering leaves posterior values unchanged, updates leaders/map, recomputes tradeoffs among
   shown candidates, and escapes tooltip content. Desktop hover, keyboard/Enter/Escape, empty
   state, coverage/n/filter reset, frontier, and disclosure checks pass against actual corpus data.
-  The map narrows64→13 candidates at40% coverage/n8 and restores64 on reset. Mobile tap tooltip
+  The map narrows64→13 candidates at40% coverage/n8 and restores 64 on reset. Mobile tap tooltip
   stays within390×844 viewport; page has no unintended overflow or JS errors. Controls reuse
   the reviewed44px pattern; touch map points have44px hit areas and fine-pointer hover uses dots.
 
 - Final integration correction: normalize the strategic-plan toughest-opponent label alongside
   its cell labels so prior-floor badges resolve correctly. The report integration regression
-  checks that every named plan floor resolves to its supporting cell; all43 report tests pass.
+  checks that every named plan floor resolves to its supporting cell; all 43 report tests pass.
+
+## Final artifact verification
+Implementation snapshot: `105e36914d5aa2d3a09ba4d19dca45f648a07407`. Scheduled refresh
+completed at 2026-09-05T17:48:47Z, attempt `dfaa5c246eee482faa63ba52d5298b36`.
+All pipeline steps succeeded; degraded operational status consists of four existing pending
+era/release operator alerts. Published results cover the corpus through 2026-09-03.
+`decks/deck-rankings.html` is 6,211,674 bytes; SHA256
+`2a72125c3209db0e02dcadb8b293ce45108ed7a472bfb818cc932d954100d524` matches the status record.
+Exact published-file browser checks passed desktop hover/focus/Enter/Escape, mobile tap and
+viewport-clamped tooltip, 44px evidence inputs, coverage/n controls, empty state, reset,
+unchanged posterior payload, and no JS errors or unintended horizontal overflow.
+All five strategic plans resolve their named toughest pairing to the corresponding evidence
+cell. The 64-point map filters to 13 at 40% coverage/n8 and restores 64 on reset.
+
+## Review closure
+Approved after the single standard independent review and verification of all accepted findings
+and user-requested interaction refinements. CI run 33981805258 passed on Python 3.11 (9m27s)
+and Python 3.13 (9m16s) for final implementation commit 105e369. No unresolved review findings
+remain. The exact final report, status digest, and desktop/mobile interactions are verified above.
+PR 91: https://github.com/andromedus1/legacy-engine/pull/91 (draft against the exact local
+baseline; existing main-branch history divergence remains outside this feature).
