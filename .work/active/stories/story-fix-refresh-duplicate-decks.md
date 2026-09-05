@@ -1,7 +1,7 @@
 ---
 id: story-fix-refresh-duplicate-decks
 kind: story
-stage: review
+stage: done
 tags: [bug, ingestion, archetype]
 parent: null
 depends_on: []
@@ -66,3 +66,15 @@ cross-parent row before writing the authoritative assignment.
   (`29 parents; 20,953 exact; 16,835 incremental`) and left 0 stale target assignments. No live
   database or network refresh was run.
 - Adjacent issues parked: none.
+
+## Review (2026-09-05)
+
+**Verdict**: Approve.
+
+**Blockers**: none. **Important**: none. **Nits**: none. **Rejected**: none.
+
+**Notes**: Bounded inline standalone-story review; no independent reviewer. Inspected
+replacement invalidation, cross-parent ownership filtering, parameterized deletes, absent lazy
+table handling, and both failing-before/passing-after reproductions. Full suite: 4,110 passed,
+1 skipped. The actual scheduled refresh now passes staged camps and publishes Deck Rankings;
+remaining degraded status names operator era/release alerts rather than an execution failure.
