@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh every evidence input and write the Best Deck / Best Call ranking last."""
+"""Refresh every evidence input and write the Deck Rankings ranking last."""
 
 from __future__ import annotations
 

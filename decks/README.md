@@ -4,7 +4,7 @@ Working decklists and field files for deck-prep (`scripts/deck-prep.sh`).
 
 ## Generated review artifact
 
-- `best-deck-best-call-ranking.html` — local, git-ignored Best Deck / Best Call review page.
+- `deck-rankings.html` — local, git-ignored Deck Rankings review page.
   Refresh it with `.venv/bin/python scripts/refresh_best_call_ranking.py`; it is generated from
   the local analytics data and should be reviewed, not hand-edited.
 

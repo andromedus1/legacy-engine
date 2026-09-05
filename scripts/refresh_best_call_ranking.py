@@ -1896,6 +1896,10 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
         affected = sum(c["source"] == "localized-clean-direct" for c in visible_cells)
         utility = RankingUtilitySummary.model_validate({
             **old_utility, "supported_rows": len(eligible), "estimated_rows": len(eligible),
+            "observed_field_n": recent.exact_observed_decks,
+            "observed_field_ess": recent.effective_sample_size,
+            "prior_strength": int(sum(prior_counts.values())),
+            "effective_field_n": recent.exact_observed_decks + int(sum(prior_counts.values())),
             "grounded_rows": 0, "proof_grade_call": None, "transition_prior_rows": 0,
             "visible_estimate_cells": visible, "affected_estimate_cells": affected,
             "unaffected_estimate_cells": visible - affected,

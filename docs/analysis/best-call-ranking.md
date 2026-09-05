@@ -55,8 +55,8 @@ attached diagnostically.
 
 `src/legacy_engine/advisory/deck_ranking.py::rank_matchup_rows` receives the typed matchup ledger
 and field shares. For each row it computes a conditional Beta posterior from `wins`, `n`,
-`prior_mean`, and the cell’s actual `prior_strength`. A missing cell uses a weak Beta(1, 1) 50%
-prior. The cell’s analytic posterior mean is the point estimate. Draws use the same posterior and
+`prior_mean`, and the cell’s actual `prior_strength`. A supplied cell with zero direct results retains its fitted prior; only an absent ledger cell
+uses a weak Beta(1, 1) 50% prior. The cell’s analytic posterior mean is the point estimate. Draws use the same posterior and
 seeded RNG to produce 95% performance intervals, 95% minimum-floor intervals, probability that
 performance exceeds 50%, and expected exposure to cells below the descriptive 45% marker.
 
@@ -89,7 +89,7 @@ remaining direct match aggregates.
 ## Evidence and interpretation
 
 There is no point-estimate threshold that suppresses a new projection estimate. A row can show
-posterior values from direct evidence, clean historical evidence, or the weak missing-cell prior.
+posterior values from direct evidence, clean historical evidence, or fitted/weak priors without direct results.
 Rows without direct support are labeled `prior only` and are excluded from the two calls; inactive
 classifier labels retain their field context but are not current deck recommendations. Expand a row
 to inspect opponent, field share, posterior interval, W-L/n, source window, prior source, and clean
@@ -114,7 +114,8 @@ field/prior composition, or recommendation projection.
 The operational status schema may report `useful` when the generated artifact contains supported
 performance/floor estimates and a practical call, even when evidence is thin or the current method
 has no validation claim. Inspect `legacy-engine ops status` for the artifact path, digest, utility
-summary, and any pending action before intervening.
+summary, and any pending action before intervening. `effective_observed` is the recency-weighted
+observed ESS; prior pseudo-lists stay separate. The legacy integer total remains in stored status.
 
 ## Related code and docs
 

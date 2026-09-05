@@ -21,7 +21,7 @@ Implement the September 5 methodology review and Andrew's correction: performanc
 - Performance is the full-field posterior expected match win rate. Floor is the minimum posterior mean across non-mirror current-field opponents, with a posterior interval of the minimum. Show the efficient frontier/tradeoff rather than blending objectives or claiming no bad matchups are proven.
 - Use every valid observation continuously. Evidence thresholds describe support; they do not suppress estimates or choose the source for the new decision view. Prior-only rows are visible but not recommended. Preserve integrity/ban boundaries.
 - Current field uses exponential recency weighting (28-day half-life, explicitly provisional) on the observed ban-regime slice, retains bounded transition support, and labels the denominator as published lists unless completeness is established. Raw sightings stay exact and separate from effective evidence.
-- One cell posterior supplies estimates, intervals, field performance and floor. Carry the actual prior strength; missing cells retain a weak 50% prior. Use compatible clean interval data once each when supplied; avoid pooling overlapping fallback/current evidence.
+- One cell posterior supplies estimates, intervals, field performance and floor. Carry the actual prior strength; supplied zero-observation cells retain their fitted prior, while absent ledger cells use a weak 50% prior. Use compatible clean interval data once each when supplied; avoid pooling overlapping fallback/current evidence.
 - Existing frozen benchmark estimators remain reproducible. Add a separately named current-method evaluation rather than attributing old validation to new rankings. Chronological scoring and sensitivity to field half-life compare against simple baselines; report results without a pass prerequisite for descriptive output.
 - No new external dependencies. All changes reversible in a PR; preserve unrelated Hogaak research, indexes, and uv.lock edits.
 
@@ -61,3 +61,20 @@ Selected: option-1, clear priorities, explicitly approved by Andrew on 2026-09-0
 
 - Final full local suite: 4,110 passed, 1 skipped (Python 3.13). New modules pass Ruff correctness rules. Knowledge index regeneration: 32 docs, 0 errors, 6 existing structural warnings.
 - Independent review: attempted Claude Opus via peeragent, which failed before review because OAuth had expired; same-harness fresh-context Sol xhigh fallback is running.
+
+## Review findings and corrections
+- Regenerate from the final Python snapshot and recheck browser behavior/status digest. Earlier long-running refreshes had loaded source before late edits.
+- Clarify supplied zero-observation cells retain fitted priors; absent ledger cells alone use Beta(1,1). Added a numerical regression, prior-floor badge and named toughest opponent on the floor card; corrected stale MatchupCell documentation.
+- Add explicit `observed_field_ess` to utility status; raw observed and prior integer counts remain separate. Legacy integer totals retain their stored compatibility semantics but no longer stand in for current effective evidence in status/refresh text.
+- Update current decks index and remaining live names. Mobile controls have 44px hit areas; the agency map scrolls at readable size instead of shrinking its type to approximately4px.
+- CI exposed two non-hermetic pre-existing tests. The report integration test now injects the fixture’s staged parents instead of reading the ignored local registry. Removed an unused-file immutability test: it read an ignored historical protocol before and after a loader that never accesses that file; its missing data dependency failed clean checkouts and the test covered no loader behavior. Existing registered-protocol and base-hash tests retain the actual immutability/identity contracts.
+
+
+## Independent review (2026-09-05)
+Standard weight, exactly one completed fresh-context Sol xhigh pass over `b8c24fa..176ae76`;
+preferred Claude authentication failed before reviewing. Initial verdict: request changes.
+Accepted the two blockers (prior-floor disclosure and final source/artifact alignment) and all
+three important findings (utility ESS accounting, mobile hit areas/chart legibility, canonical
+entry points). The named code/docs/UI fixes are implemented; 98 focused tests pass. Final
+scheduled regeneration, browser measurements, and CI remain closure requirements. No second
+review pass is required. No deferred findings or backlog items remain from this review.

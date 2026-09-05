@@ -170,3 +170,18 @@ def test_ineligible_prior_only_peer_does_not_dominate_eligible_frontier():
 def test_invalid_inputs_fail_loudly(rows, shares, kwargs, message):
     with pytest.raises(ValueError, match=message):
         rank_matchup_rows(rows, shares, **kwargs)
+
+
+def test_zero_observation_fitted_prior_is_distinct_from_absent_ledger_cell():
+    fitted = _source("A", "B", 0, 0, prior_mean=.4, prior_strength=20)
+    result = rank_matchup_rows(
+        {"A": [_measurement("A", "B", .5, era=fitted)]},
+        {"B": .5, "C": .5}, draws=100,
+    )["rows"]["A"]
+    cells = {cell["opponent"]: cell for cell in result["cells"]}
+    assert cells["B"]["mean"] == pytest.approx(.4)
+    assert cells["B"]["prior_strength"] == 20
+    assert cells["C"]["mean"] == .5
+    assert cells["C"]["prior_strength"] == 2
+    assert result["nonmirror_coverage"] == 0
+    assert not result["eligible"]

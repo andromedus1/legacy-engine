@@ -225,10 +225,15 @@ def job_status_audit_lines(
         lines.append(f"// ranking: not written ({ranking.ranking_path})")
     if ranking.ranking_utility is not None:
         utility = ranking.ranking_utility
+        effective = (
+            f"effective_observed={utility['observed_field_ess']:.1f} · prior={utility.get('prior_strength', 0)}"
+            if utility.get("observed_field_ess") is not None
+            else f"effective={utility.get('effective_field_n', 'n/a')}"
+        )
         lines.append(
             f"// ranking utility: {utility.get('status', 'unknown')} · "
             f"observed={utility.get('observed_field_n', 'n/a')} · "
-            f"effective={utility.get('effective_field_n', 'n/a')} · "
+            f"{effective} · "
             f"estimates={utility.get('estimated_rows', 'n/a')}/"
             f"{utility.get('supported_rows', 'n/a')} · "
             f"proof={utility.get('grounded_rows', 'n/a')}/"

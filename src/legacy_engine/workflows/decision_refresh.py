@@ -1,4 +1,4 @@
-"""Composed refresh for every input consumed by the Best Deck / Best Call ranking."""
+"""Composed refresh for every input consumed by the Deck Rankings ranking."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from datetime import date, datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Protocol
+
+from pydantic import Field
 
 from legacy_engine.ingestion.card_coverage import CardCoverageReport
 from legacy_engine.models.base import LegacyEngineModel
@@ -64,7 +66,8 @@ class RankingUtilitySummary(LegacyEngineModel):
     """Typed publication contract for the generated ranking's evidence usefulness."""
 
     observed_field_n: int
-    effective_field_n: int
+    effective_field_n: int  # observed integer lists + prior pseudo-lists (legacy count total)
+    observed_field_ess: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     prior_strength: int
     affected_clamp_count: int
     supported_rows: int
@@ -310,9 +313,13 @@ def decision_refresh_audit_lines(result: DecisionRefreshResult) -> tuple[str, ..
         lines.append(f"// ranking: {result.ranking_output}")
     if result.ranking_utility is not None:
         utility = result.ranking_utility
+        effective = (
+            f"effective_observed={utility.observed_field_ess:.1f}"
+            if utility.observed_field_ess is not None else f"effective={utility.effective_field_n}"
+        )
         lines.append(
             f"// ranking utility: {utility.status}; observed={utility.observed_field_n}, "
-            f"effective={utility.effective_field_n}, prior={utility.prior_strength}, "
+            f"{effective}, prior={utility.prior_strength}, "
             f"supported={utility.supported_rows}, grounded={utility.grounded_rows}, "
             f"practical={utility.practical_call or 'none'}"
         )

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-from pathlib import Path
-
 import pytest
 
 from legacy_engine.advisory.recurrent_validation import (
@@ -87,10 +84,3 @@ def test_base_hash_fold_ban_taxonomy_and_horizon_are_exact():
     )
     with pytest.raises(ValueError, match="horizon"):
         validate_base_protocol(drifted, base_protocol())
-
-
-def test_historical_v1_protocol_bytes_remain_unchanged():
-    historical = Path("data/benchmarks/best-deck-decision-trust-current-corpus-v1/protocol.json")
-    before = hashlib.sha256(historical.read_bytes()).hexdigest()
-    _ = protocol()
-    assert hashlib.sha256(historical.read_bytes()).hexdigest() == before

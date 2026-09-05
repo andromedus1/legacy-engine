@@ -451,6 +451,8 @@ def test_current_projection_ignores_legacy_gates_and_reconciles_full_field():
                 assert d["floor"] == worst["mean"]
                 assert d["worst_low"] == worst["low"]
                 assert d["worst_high"] == worst["high"]
+    utility = loose["meta"]["report_utility"]
+    assert utility["observed_field_ess"] == loose["meta"]["deck_rankings"]["field"]["effective_sample_size"]
     candidates = [r for r in loose["arch"] if r["decision"]["eligible"]]
     floor_leader = min(candidates, key=lambda r: (-r["decision"]["floor"], -r["decision"]["performance"], r["subject"]))
     assert loose["meta"]["deck_rankings"]["floor_call"] == floor_leader["subject"]
@@ -945,7 +947,10 @@ class TestMainEndToEnd:
                 "worst_low": floor-.10, "worst_high": floor+.10,
                 "field_share": .2, "coverage": .4, "active": active,
                 "eligible": active, "pareto": active, "worst_opponent": "Combo",
-                "cells": [{"opponent": "<unsafe>", "share": .2, "mean": .42,
+                "cells": [{"opponent": "Combo", "share": .2, "mean": floor,
+                           "low": floor-.1, "high": floor+.1, "wins": 0, "n": 0,
+                           "source": "historical prior"},
+                          {"opponent": "<unsafe>", "share": .2, "mean": .42,
                            "low": .2, "high": .65, "wins": 1, "n": 2,
                            "source": "since 2026-01-01"}],
             }}
@@ -969,6 +974,8 @@ class TestMainEndToEnd:
         assert result["performance"] == ["Fast", "Safe"]
         assert result["floor"] == ["Safe", "Fast"]
         assert 'Fast' in result["picks"] and 'Safe' in result["picks"]
+        assert '<span class="badge">Prior</span>' in result["picks"]
+        assert 'Toughest: Combo' in result["picks"]
         assert '42.0%' in result["ledger"] and '1–1' in result["ledger"]
         assert '&lt;unsafe&gt;' in result["ledger"] and '<unsafe>' not in result["ledger"]
         assert 'Thin' in result["ledger"]
@@ -1124,8 +1131,9 @@ class TestEvidenceTargetIntegration:
         assert "against the full modeled field" in rendered
 
     def test_current_target_attaches_diagnostics_without_changing_authority(
-        self, tmp_path
+        self, tmp_path, monkeypatch
     ):
+        monkeypatch.setattr(rbcr, "staged_split_parents", lambda: sorted(PARENTS))
         db_path = tmp_path / "ranking.duckdb"
         con = store.connect(db_path)
         _build_fixture(con)

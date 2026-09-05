@@ -129,10 +129,12 @@ class TestStatusAuditLines:
         assert "attempt-1" in lines[1]
         assert "sha256=abc123" in lines[3]
 
-    def test_full_output_separates_visible_estimates_from_proof_and_recovery(self, tmp_path):
+    @pytest.mark.parametrize("ess", [None, 9.25])
+    def test_full_output_separates_visible_estimates_from_proof_and_recovery(self, tmp_path, ess):
         path = tmp_path / "status.json"
         utility = {
             "status": "useful", "observed_field_n": 12, "effective_field_n": 12,
+            "observed_field_ess": ess, "prior_strength": 0,
             "estimated_rows": 4, "supported_rows": 4, "grounded_rows": 1,
             "localized_history_matches": 37, "practical_call": "Tempo",
         }
@@ -147,6 +149,7 @@ class TestStatusAuditLines:
         assert "estimates=4/4" in utility_line
         assert "proof=1/4" in utility_line
         assert "recovered=37" in utility_line
+        assert ("effective=12" if ess is None else "effective_observed=9.2 · prior=0") in utility_line
 
     def test_unhealthy_brief_output_names_reason(self, tmp_path):
         path = tmp_path / "status.json"

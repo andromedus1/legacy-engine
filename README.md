@@ -297,7 +297,7 @@ Standalone analysis helpers that sit alongside the CLI:
 ```
 
 ```bash
-# Refresh the standalone Best Deck / Best Call review page (generated and git-ignored).
+# Refresh the standalone Deck Rankings review page (generated and git-ignored).
 .venv/bin/python scripts/refresh_best_call_ranking.py
 # writes decks/deck-rankings.html
 ```
