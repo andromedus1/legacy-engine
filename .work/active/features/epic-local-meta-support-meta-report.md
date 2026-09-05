@@ -1,11 +1,12 @@
 ---
 id: epic-local-meta-support-meta-report
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, advisory]
 parent: epic-local-meta-support
 depends_on: [feature-decision-unit-taxonomy]
 release_binding: null
+gate_origin: null
 created: 2026-06-29
 updated: 2026-09-05
 ---

@@ -101,6 +101,8 @@ def _load_field(
     provenance: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    known_archetypes: frozenset[str] | None = None,
+    strict_counts: bool = False,
 ) -> FieldDistribution:
     """Custom field from ``field_text`` else the global field.
 
@@ -224,6 +226,12 @@ def _load_field(
     # Resolve counts: prefer per-line counts; fall back to effective_n header.
     resolved_counts: dict[str, int] | None = None
 
+    if strict_counts and has_per_line_counts and has_missing_row_count:
+        raise ValueError(
+            "_load_field: strict count mode requires a count on every field row; "
+            "synthetic count=1 fallback is not supplied evidence"
+        )
+
     if has_per_line_counts:
         if effective_n is not None:
             log.warning(
@@ -266,6 +274,7 @@ def _load_field(
     return build_custom_field(
         shares,
         counts=resolved_counts,
+        known_archetypes=known_archetypes,
         regime_currency=regime_currency,
     )
 
