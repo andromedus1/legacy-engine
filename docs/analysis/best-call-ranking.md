@@ -79,13 +79,14 @@ denominator is explicitly `published-list`; completeness of those lists is unver
 support contributes bounded integer prior counts to effective field concentration while remaining
 separate from observed counts and recent presence.
 
-The sortable archetype and camp tables compare performance and matchup floor independently. The
-visible floor range names the toughest pairing's cell interval; the all-opponent minimum-floor
-interval remains in evidence details.
-Coverage/n controls filter the shared view; n defines which matchups count toward coverage.
-The map marks tradeoffs among shown decks, with hover/focus/tap tooltips. The strategic-plan, archetype, and camp
-surfaces remain available, with camps retaining their parent/camp presentation and plan cells
-remaining direct match aggregates.
+The archetype and camp tables carry the performance and floor calls as independent sortable
+columns. The strategic-plan table also makes all five headers sortable: plan, performance, floor,
+coverage, and field share. The visible floor range names the toughest pairing's cell interval; the
+all-opponent minimum-floor interval remains in Evidence details. Coverage/n controls filter the
+shared view, and n defines which matchups count toward coverage. Compact row dropdowns expose the
+matchup ledger without displacing the comparison table. The map marks tradeoffs among shown decks,
+with hover/focus/tap tooltips. Camps retain their parent/camp presentation, and plan cells remain
+direct match aggregates.
 
 ## Expected-field reports
 
@@ -208,9 +209,10 @@ versus `0.696988` for scale `1`, and Brier was `0.248590` versus `0.251759`. Con
 weighted cases and slightly reversed that result: scale `1` had log loss `0.685469` and Brier
 `0.246262`, versus `0.686405` and `0.246695` for scale `2`. The independent scale-`2` leaders stayed
 unchanged at all six origins; scale `.5` and the plan challenger changed calls but did not improve
-the proper scores. Production therefore retains scale `1`. The generated page may load the sealed
-confirmation artifact into its Method disclosure; the evaluator has no publication or deployment
-gate.
+the proper scores. The declared current prior therefore remains scale `1`; this choice was retained
+after the development/confirmation experiment rather than selected from confirmation alone. The
+generated page may load the sealed confirmation artifact into its Method disclosure; the evaluator
+has no publication or deployment gate.
 
 The operational status schema may report `useful` when the generated artifact contains supported
 performance/floor estimates and a practical call, even when evidence is thin or the current method

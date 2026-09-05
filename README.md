@@ -36,8 +36,8 @@ for how it's built.
 ## Status
 
 The **observed-data spine, meta analytics, three-level taxonomy, stable-era detection, deck
-generation, advisory differentiator, and local visualization layer** are built and tested
-(**3,540 passing**, with one skip — the optional UMAP extra — and no xfails). Only the goldfish-simulation
+generation, advisory differentiator, and local visualization layer** are built and covered by the
+repository's current checks. Only the goldfish-simulation
 pillar remains deferred:
 
 | Capability | State |
@@ -354,14 +354,34 @@ inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plu
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
 
-Deck Rankings compares performance and matchup floor in sortable archetype/camp tables, alongside
-an agency map, strategic plans, and expandable matchups. Coverage/n filters narrow the shared view; map
-tooltips show matchup records, intervals, and evidence support. Performance is the complete-field weighted mean of per-cell posterior
-means; the floor is the minimum non-mirror posterior mean. The tables sort performance and floor
-independently. Point estimates remain visible when cells
-are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source
-window. The page is descriptive and does not claim that its current method has passed the legacy
-future-only benchmark.
+### Deck Rankings method
+
+Deck Rankings keeps field composition and matchup evidence separate. The current field is an
+exponentially weighted view of published deck lists in the observed ban-regime slice, using a
+provisional 28-day half-life. It is a distribution of published lists, not a census of tournament
+entrants. Integer sightings, decay-weighted counts, effective sample size, and bounded transition
+prior support remain distinct in the output.
+
+Each directed matchup cell draws on compatible history selected for that pairing. Its estimate is
+the mean of a Beta posterior formed from wins, total matches, prior mean, and the cell's retained
+prior strength; an absent cell receives the weak Beta(1, 1) fallback. Clean interval evidence can
+replace a cell once without being pooled again with overlapping fallback evidence. Thin and
+prior-only cells stay visible with their 95% interval, W-L/n, prior provenance, and source window.
+
+Performance and floor are independent views of those cells. Performance is the current-field
+weighted mean of all cell posterior means, including a structural 50% mirror. Floor is the minimum
+posterior mean over non-mirror opponents with positive field share. Their leaders and table sorts
+are independent; the floor range beside a row belongs to its named toughest pairing, while the
+posterior interval for the minimum across all opponents remains in Evidence details.
+
+The page presents the calls through sortable archetype and camp columns, an agency map, and a
+strategic-plan table whose five headers are sortable. Coverage/n filters narrow the shared view,
+and compact row dropdowns expose matchup records, intervals, and evidence support. The current
+production prior scale remains `1` after the sealed development/confirmation comparison: development
+selected scale `2`, while confirmation slightly favored scale `1` on both proper scores. This is a
+descriptive projection; the evaluator supplies evidence and does not act as a publication gate. See
+the [Deck Rankings refresh and interpretation runbook](docs/analysis/best-call-ranking.md) for the
+full evidence boundaries and reproducible commands.
 
 Passing `--field` reweights the same selected matchup cells for a private expected field while
 keeping candidate eligibility tied to the current global corpus. Counted rows are supplied scenario
@@ -399,8 +419,9 @@ fail loudly rather than returning empty results.
 This project is built with a research-grounded, substrate-driven workflow:
 
 - **`docs/`** — the knowledge layer: `VISION.md`, `SPEC.md`, `ARCHITECTURE.md`, `PRINCIPLES.md`, and
-  domain briefs under `docs/briefs/`. A two-layer knowledge index (`docs/knowledge-index*.yaml`) is
-  generated from doc frontmatter.
+  domain briefs under `docs/briefs/`. A three-layer knowledge index (`docs/knowledge-index-nav.yaml`,
+  `docs/knowledge-index.yaml`, and `docs/knowledge-index-detail.yaml`) is generated from doc
+  frontmatter.
 - **`.work/`** — the work substrate: epics → features → stories as markdown items with YAML
   frontmatter, queried via `.work/bin/work-view`. Work flows design → implement → review per item.
 - Every feature ships with tests; docs describe present intent (rolling-foundation).
@@ -429,7 +450,7 @@ src/legacy_engine/
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
 scripts/       # standalone helpers: knowledge-index gen; viz + Best Call refresh helpers
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
-tests/         # pytest suite (3,540 passing; one optional-extra skip; no xfails)
+tests/         # hermetic pytest suite; CI/current checks are authoritative
 ```
 
 ## Contributing

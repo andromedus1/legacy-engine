@@ -1308,7 +1308,6 @@ class TestEvidenceTargetIntegration:
         assert all("best_available_estimate" in row for row in blob["arch"])
         rendered = out_path.read_text()
         assert "Performance" in rendered and "Matchup floor" in rendered
-        assert "against the full modeled field" in rendered
 
     def test_current_target_attaches_diagnostics_without_changing_authority(
         self, tmp_path, monkeypatch

@@ -1,7 +1,7 @@
 ---
 id: story-ranking-methodology-session-wrap
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, docs, ui]
 parent: null
 depends_on: []
@@ -32,3 +32,23 @@ unrelated uv.lock/Hogaak work, and leave main's older integration history separa
 succeeded at 21:20:28 UTC; report corpus_max is September 3, with 1,105 published lists
 since August 10. Two existing era alarms remain pending confirmation data. UI-only
 rerenders preserve that analytical snapshot; saved local shares are historical.
+
+## Completion and bounded inline review
+Expanded the existing Method disclosure with source selection, decisive-round inclusion,
+recent field versus pair-specific historical windows, retained Beta priors, field and
+matchup uncertainty, plan/build interpretation, local scenarios and the sealed evaluation.
+Its dates, list/source counts and effective sample size come from the report payload.
+README/runbook now describe the current UI and methodology; stale test-count and two-layer
+index claims are removed. Index regeneration: zero errors, six pre-existing warnings.
+
+48 report tests pass. A test's exact old explanatory sentence failed after the prose edit;
+removed that low-value copy assertion, retaining its typed-evidence/publication checks.
+Chromium checks passed for both regenerated pages at 1440px/390px, including source counts,
+evaluation rows, sorting, no removed controls, no page overflow or JS errors. Screenshot
+inspected; analytical payloads unchanged. No new research or model change was needed.
+
+Bounded host review approves: methodology claims checked against recent_field,
+match_results, best_call_evidence, deck_ranking_projection and deck_ranking code and the
+sealed experiment. README edits received targeted doc-worker verification. No independent
+code reviewer was used for this standalone story. Repository synchronization uses the
+existing task PR; main's older baseline history and unrelated local work remain separate.
