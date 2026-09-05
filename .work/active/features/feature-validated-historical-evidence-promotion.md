@@ -1,7 +1,7 @@
 ---
 id: feature-validated-historical-evidence-promotion
 kind: feature
-stage: implementing
+stage: review
 tags: [analytics, advisory]
 parent: null
 depends_on: [feature-deck-rankings]
@@ -122,3 +122,13 @@ pending; the baseline production prior is unchanged.
 
 The single standard independent implementation review runs alongside the forecast freezes.
 Actual-corpus results, review fixes, and CI remain required for final feature closure.
+
+## Review boundary
+
+Shared projection, fixed challengers, snapshot/heldout policy, and evaluator implementation are
+verified (28 focused tests and 85 regression tests); the initial CI pass is green on Python 3.11
+and 3.13. Advance the code to review while the real-corpus forecast freezes run. Empirical
+selection and final-source CI remain explicit closure requirements, and no production borrowing
+change is made yet. The next feature depends on the now-stable published projection contract,
+not on which fixed challenger wins. Its presentation implementation can therefore proceed while
+this review and experiment finish, preserving the approved delivery priorities.
