@@ -102,6 +102,9 @@ def _fixture_db() -> duckdb.DuckDBPyConnection:
         con.execute("INSERT INTO tournaments VALUES (?, ?, ?, ?, 'Legacy', 'fixture', 'online')", [event_id, name, event_date, f"https://fixture/{event_id}"])
 
     def deck(event_id: str, idx: int, player: str, archetype: str, main: dict[str, int], side: dict[str, int] | None = None, result: str = "4-0") -> None:
+        if main:
+            main = dict(main)
+            main["Island"] = main.get("Island", 0) + max(0, 60 - sum(main.values()))
         con.execute("INSERT INTO decks VALUES (?, ?, ?, ?, ?, NULL)", [event_id, idx, player, result, archetype])
         for board, cards in (("main", main), ("side", side or {})):
             for card, count in cards.items():
@@ -314,3 +317,61 @@ def test_missing_field_cutoff_cannot_silently_use_newer_database_dates():
     del payload['meta']['deck_rankings']['field']['until']
     with pytest.raises(ValueError, match='exclusive until'):
         build_variant_report(_fixture_db(), payload, draws=10)
+
+
+@pytest.mark.parametrize('bad_date', ['2026-01-01junk', '2026-01-01T08:00:00+00:00', '20260101', '2026-02-30'])
+def test_public_since_rejects_noncanonical_or_invalid_dates(bad_date):
+    with pytest.raises(ValueError, match='YYYY-MM-DD'):
+        build_variant_report(_fixture_db(), _global_payload(), since=bad_date, draws=10)
+
+
+@pytest.mark.parametrize('key', ['since', 'until'])
+def test_field_dates_reject_trailing_garbage(key):
+    payload = _global_payload()
+    payload['meta']['deck_rankings']['field'][key] += 'junk'
+    with pytest.raises(ValueError, match='YYYY-MM-DD'):
+        build_variant_report(_fixture_db(), payload, draws=10)
+
+
+@pytest.mark.parametrize('subject', [False, True])
+@pytest.mark.parametrize('defect', ['under60', 'side65', 'nonpositive', 'unknown_board'])
+def test_impossible_lists_never_become_round_evidence_in_either_orientation(subject, defect):
+    con = _fixture_db()
+    _copy_event(con, 'e2', 'malformed')
+    idx = 0 if subject else 1
+    if defect == 'under60':
+        con.execute("UPDATE deck_cards SET count=count-1 WHERE tournament_id='malformed' AND deck_idx=? AND name='Island' AND board='main'", [idx])
+    elif defect == 'side65':
+        con.execute("DELETE FROM deck_cards WHERE tournament_id='malformed' AND deck_idx=?", [idx])
+        con.execute("INSERT INTO deck_cards VALUES ('malformed', ?, 'side', 'Island', 65)", [idx])
+    elif defect == 'nonpositive':
+        con.execute("INSERT INTO deck_cards VALUES ('malformed', ?, 'side', 'Lightning Bolt', 0)", [idx])
+    else:
+        con.execute("INSERT INTO deck_cards VALUES ('malformed', ?, 'unknown', 'Lightning Bolt', 1)", [idx])
+    report = build_variant_report(con, _global_payload(), draws=10)
+    row = _row(report, 'all', 'sultai_veil')
+    assert row['decision']['round_n'] == 6
+    counts = report['views']['all']['round_audit']['counts']
+    assert counts['malformed_subject_list' if subject else 'malformed_opponent_list'] >= 1
+    # Standings need the subject's plausible list; unknown opponent completeness
+    # does not erase that separately published record.
+    assert row['standings']['record'] == ('6-4-0' if subject else '8-5-0')
+    con.execute("UPDATE rounds SET player1=player2,player2=player1 WHERE tournament_id='malformed'")
+    flipped = build_variant_report(con, _global_payload(), draws=10)
+    assert _row(flipped, 'all', 'sultai_veil')['decision']['round_n'] == 6
+
+
+@pytest.mark.parametrize('main_size', [61, 80])
+def test_plausible_larger_maindecks_and_short_sideboards_remain_evidence(main_size):
+    con = _fixture_db()
+    con.execute("UPDATE deck_cards SET count=count+? WHERE tournament_id='e2' AND deck_idx=0 AND name='Island' AND board='main'", [main_size - 60])
+    report = build_variant_report(con, _global_payload(), draws=10)
+    assert _row(report, 'all', 'sultai_veil')['decision']['round_n'] == 6
+    assert _row(report, 'all', 'sultai_veil')['standings']['record'] == '6-4-0'
+
+
+def test_invalid_duplicate_registration_does_not_make_standings_join_unique():
+    con = _fixture_db()
+    con.execute("DELETE FROM deck_cards WHERE tournament_id='ambiguous' AND deck_idx=1")
+    report = build_variant_report(con, _global_payload(), draws=10)
+    assert _row(report, 'all', 'sultai_veil')['standings']['record'] == '6-4-0'

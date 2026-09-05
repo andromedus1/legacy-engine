@@ -274,6 +274,7 @@ class _Registration:
     cards_present: bool = True
     classification: VariantClassification | None = None
     banned_cards: tuple[str, ...] = ()
+    list_errors: tuple[str, ...] = ()
 
     @property
     def player_norm(self) -> str:
@@ -281,7 +282,7 @@ class _Registration:
 
     @property
     def legal(self) -> bool:
-        return not self.banned_cards
+        return not self.banned_cards and not self.list_errors
 
     @property
     def list_hash(self) -> str:
@@ -296,6 +297,15 @@ def _iso_date(value: Any) -> date:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+def _public_date(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError(f"{name} must be a YYYY-MM-DD date")
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid YYYY-MM-DD date") from exc
 
 
 def _global_field(global_payload: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, float] | None, dict[str, Any]]:
@@ -347,8 +357,8 @@ def _global_field(global_payload: Mapping[str, Any]) -> tuple[dict[str, float], 
         "removed_mass": removed_mass / total,
         "retained_mass": retained_mass / total,
         "counts_source": count_source,
-        "since": field.get("since") or meta_since,
-        "until": field.get("until"),
+        "since": _public_date(field.get("since") or meta_since, "field.since"),
+        "until": _public_date(field.get("until"), "field.until (exclusive until)"),
         "description": "Current external field with Doomsday family mass removed once and renormalized; Unknown retained.",
     }
     return shares, counts, field_info
@@ -370,6 +380,7 @@ def _load_registrations(con: duckdb.DuckDBPyConnection, since: str, until: str) 
         [since, until],
     ).fetchall()
     boards: dict[tuple[str, int], dict[str, int]] = defaultdict(dict)
+    board_errors: dict[tuple[str, int], list[str]] = defaultdict(list)
     board_rows = con.execute(
         """SELECT tournament_id, deck_idx, lower(board), name, count
              FROM deck_cards
@@ -378,9 +389,13 @@ def _load_registrations(con: duckdb.DuckDBPyConnection, since: str, until: str) 
         [since, until],
     ).fetchall()
     for tid, idx, board, name, count in board_rows:
-        if not isinstance(name, str) or not name.strip():
-            continue
         key = (str(tid), int(idx))
+        if not isinstance(name, str) or not name.strip():
+            board_errors[key].append("missing card name")
+            continue
+        if board not in {"main", "maindeck", "side", "sideboard"}:
+            board_errors[key].append(f"unknown board: {board}")
+            continue
         board_key = "side" if str(board) in {"side", "sideboard"} else "main"
         boards.setdefault(key, {})[("side:" if board_key == "side" else "main:") + name.strip()] = int(count or 0)
     # Keep board maps separate without a second SQL query; the prefixed key is
@@ -412,6 +427,10 @@ def _load_registrations(con: duckdb.DuckDBPyConnection, since: str, until: str) 
             event_uri=str(uri), source=str(source), provenance=str(provenance), deck_idx=int(idx),
             player=str(player), result=str(result), archetype=str(archetype) if archetype is not None else None,
             mainboard=main, sideboard=side, cards_present=key in split_boards,
+            list_errors=tuple(board_errors[key]
+                + (["maindeck below 60 cards"] if sum(main.values()) < 60 else [])
+                + (["sideboard above 15 cards"] if sum(side.values()) > 15 else [])
+                + (["nonpositive card count"] if any(n <= 0 for n in (*main.values(), *side.values())) else [])),
         ))
     return registrations, split_boards, metadata
 
@@ -513,16 +532,17 @@ def _standings(con: duckdb.DuckDBPyConnection, registrations: list[_Registration
         rows = []
     standings_by_key: dict[tuple[str, str], list[tuple[Any, ...]]] = defaultdict(list)
     for row in rows:
-        standings_by_key[(str(row[0]), str(row[1] or "").strip().casefold())].append(row)
+        standings_by_key[(str(row[0]), normalize_player(row[1]))].append(row)
     regs_by_key: dict[tuple[str, str], list[_Registration]] = defaultdict(list)
     for reg in registrations:
-        if reg.classification and reg.classification.variant_id in cohort_ids and reg.legal:
-            regs_by_key[(reg.event_id, reg.player_norm)].append(reg)
+        regs_by_key[(reg.event_id, reg.player_norm)].append(reg)
     out = {cohort: _empty_standings() for cohort in cohort_ids}
     for key, regs in regs_by_key.items():
         if len(regs) != 1 or not standings_by_key.get(key):
             continue
         reg = regs[0]
+        if not reg.legal or not reg.classification or reg.classification.variant_id not in cohort_ids:
+            continue
         if _is_league(reg) or len(standings_by_key[key]) != 1:
             continue
         row = standings_by_key[key][0]
@@ -639,6 +659,12 @@ def _attach_rounds(
         if not opponent.cards_present:
             counts["missing_opponent_list"] += 1
             continue
+        if candidate.list_errors:
+            counts["malformed_subject_list"] += 1
+            continue
+        if opponent.list_errors:
+            counts["malformed_opponent_list"] += 1
+            continue
         if not candidate.legal:
             counts["banned_subject"] += 1
             continue
@@ -747,7 +773,7 @@ def _view_payload(
     tallies, round_audit, round_counts = _attach_rounds(
         con, selected_all, shares, since=since, until=until, cutoff=cutoff,
     )
-    standings = _standings(con, selected, set(cohort_ids))
+    standings = _standings(con, selected_all, set(cohort_ids))
     projection = _projection(cohort_ids, tallies, shares, counts, draws=draws, seed=seed, since=since)
     legal_counts = Counter(reg.classification.variant_id for reg in selected if reg.classification and reg.legal and reg.classification.variant_id in VARIANT_REGISTRY)
     total_legal = sum(legal_counts.values())
@@ -812,8 +838,7 @@ def build_variant_report(
     draws: int = _DEFAULT_DRAWS,
 ) -> dict[str, Any]:
     """Build the complete Doomsday variant report from a read-only connection."""
-    if not isinstance(since, str):
-        raise ValueError("since must be an ISO date string")
+    since = _public_date(since, "since")
     start = _iso_date(since)
     if draws < 1:
         raise ValueError("draws must be positive")
@@ -823,6 +848,8 @@ def build_variant_report(
         raise ValueError("global field requires explicit since and exclusive until dates")
     until = str(field_until)[:10]
     cutoff = _iso_date(until) - timedelta(days=1)
+    if field_info["since"] >= until:
+        raise ValueError("field.since must precede field.until")
     if start >= _iso_date(until):
         raise ValueError("since must precede the global field cutoff")
     registrations, _boards, metadata = _load_registrations(con, since, until)
@@ -833,6 +860,11 @@ def build_variant_report(
         "unclassifiable": [], "partial_metadata": [], "malformed": [],
         "banned_registrations": 0, "banned_doomsday_registrations": 0,
         "event_aliases": aliases,
+        "invalid_list_count": sum(bool(reg.list_errors) for reg in registrations),
+        "invalid_doomsday_lists": [
+            {"event_id": reg.event_id, "deck_idx": reg.deck_idx, "errors": list(reg.list_errors)}
+            for reg in registrations if reg.archetype == "Doomsday" and reg.list_errors
+        ],
     }
     for reg in registrations:
         reg.banned_cards = _banned_cards(reg, snapshot)

@@ -1,7 +1,7 @@
 ---
 id: feature-doomsday-variant-rankings
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory, ui]
 parent: null
 depends_on: [feature-deck-rankings]
@@ -174,3 +174,32 @@ layout. Expanded matchup row height is 24.6px; no JS errors or mobile body overf
 README, runbook and foundation entries updated; generated knowledge index has
 zero errors and six pre-existing warnings. Independent standard review and CI
 remain required before closure.
+
+
+## Review (2026-09-05)
+**Verdict:** Approve after verified corrections. Standard weight, one balanced
+fresh Sol xhigh same-harness pass; no second independent review.
+
+**Blockers resolved:** (1) Nonempty card fragments were incorrectly accepted as
+complete lists. Ledger eligibility now requires main >=60, side <=15, positive
+counts and known board labels on both round participants and the standings
+subject. Valid 61/80-card mains and short sideboards remain eligible. The live
+Melee 403459 malformed Black Stompy list is excluded, restoring that Sultai cell
+to an unseen prior; Sultai compatible n is 70, with every current record unchanged.
+There are 33 implausible corpus lists and zero Doomsday subject lists excluded by
+this check. Ambiguous registrations remain ambiguous before eligibility filters.
+(2) Public since and field dates now strictly validate canonical YYYY-MM-DD and
+reject suffix garbage, impossible dates and reversed field windows.
+
+**Other findings:** None. The scoped system/module documentation consistency
+check found only the two contradictions above; runbook and doc-review-report.md
+now match the corrected behavior. No new thresholds on statistical support.
+
+**Verification:** 30 focused regressions; 96 integrated focused/related/kernel
+tests; changed-file Ruff and diff checks pass. Real source-case exclusion and
+recomputed payload verified. Chromium rechecked all seven sorts, 24.6px matchup
+rows, current-observation counts, coherent view/filter behavior, exact75 clipboard,
+keyboard tooltips, escaping of untrusted source-date text, and mobile/dark layout.
+Full CI run 33997017752 passed on Python 3.11 and 3.13. PR #93 carries the final
+commit's required checks; keep it draft until those checks pass. The generated
+HTML is local-only and rebuildable; source DB/global report remain read-only.
