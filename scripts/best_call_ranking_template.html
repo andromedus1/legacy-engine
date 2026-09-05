@@ -32,7 +32,7 @@
 <p><b>Performance</b> is expected match win rate against the full modeled field, including mirrors at 50%. <b>Matchup floor</b> is the lowest matchup estimate against any non-mirror opponent in that field. The high-floor pick maximizes floor independently; performance breaks ties. Blue tradeoffs are decks for which no shown eligible peer is better on both measures.</p>
 <p>Every valid matchup observation contributes. Compatible history supplies partial pooling; uncertain and unobserved matchups remain estimates. Ranges are 95% conditional posterior intervals. The range beside the floor belongs to the named toughest pairing. Uncertainty in the minimum across all opponents is available under Evidence details; it also allows for unobserved bad pairings. Neither a high estimate nor missing bad results guarantees no bad matchups.</p>
 <p><b>Floor coverage</b> is the non-mirror field share meeting your minimum matchup n. Matchups below that threshold still use their observations and fitted priors; absent ledger cells use a weak 50% prior. Estimates condition on fitted historical priors and do not capture every pilot, event, or source-selection effect. Records and source windows are available in each dropdown.</p>
-<p id="field-basis"></p><p id="validation-summary"></p>
+<p id="field-basis"></p><div id="validation-summary"></div>
 <details><summary>Refresh & evidence details</summary><div class="audit" id="audit"></div></details>
 </details>
 </main>
@@ -62,7 +62,16 @@ function renderRefreshChanges(){
 }
 renderRefreshChanges();
 document.getElementById('field-basis').textContent = field.description || 'Field shares describe published lists, not a census of tournament entrants. Recent lists receive more weight; observed counts remain separate from historical prior support.';
-document.getElementById('validation-summary').textContent = 'Current method: descriptive; historical evaluation does not certify the strongest deck. Previous method benchmark: '+validation.status+'.';
+const study=M.served_evaluation;
+if(study){
+ const names={'1':'Current prior','0.5':'Half prior','2':'Double prior','opponent-plan-prior-v1':'Plan borrowing'};
+ const score=x=>x==null?'—':Number(x).toFixed(4);
+ const rows=(study.phases || []).flatMap(phase=>Object.entries(phase.methods).map(([method,s])=>{
+  const changes=phase.call_changes[method];
+  return `<tr><td>${escT(phase.label)}</td><td>${escT(names[method] || method)}</td><td>${phase.matches}</td><td>${score(s.log_loss)}</td><td>${score(s.brier)}</td><td>${changes?`${changes.performance}/${phase.origins} · ${changes.floor}/${phase.origins}`:'Reference'}</td></tr>`;
+ })).join('');
+ document.getElementById('validation-summary').innerHTML=`<b>Historical method check</b><br>${escT(study.scope)}; ${escT(study.phases[0].since)} through ${escT(study.phases.at(-1).until)} (exclusive). Lower scores are better. Call changes count performance · floor leaders versus the current prior.<div class="table-scroll"><table class="ledger"><thead><tr><th>Period</th><th>Prior</th><th>Matches</th><th>Log loss</th><th>Brier</th><th>Call changes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
 document.getElementById('audit').textContent = [
  `Method: ${model.method_id || 'unavailable'}`,
  `Previous method future-only validation: ${validation.status}; artifact ${validation.artifact_id || "none"}`,

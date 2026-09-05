@@ -2294,6 +2294,17 @@ def generate_ranking(
     finally:
         con.close()
 
+    from legacy_engine.workflows.deck_ranking_evaluation import served_evaluation_disclosure
+
+    evaluation_path = Path(__file__).parent.parent / "data/benchmarks/deck-rankings-evaluation-v1/confirmation-summary.json"
+    try:
+        study = served_evaluation_disclosure(evaluation_path)
+    except (ValueError, KeyError, TypeError) as exc:
+        print(f"  historical evaluation disclosure unavailable: {exc}")
+        study = None
+    if study and study["method_id"] == blob.get("meta", {}).get("deck_rankings", {}).get("method_id"):
+        blob["meta"]["served_evaluation"] = study
+
     current_snapshot = ranking_snapshot(blob)
     try:
         previous_blob = read_published_ranking(out_path)
