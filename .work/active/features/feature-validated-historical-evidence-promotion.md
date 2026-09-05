@@ -214,3 +214,19 @@ the primary proper score remains match-weighted. No interval is claimed from few
 events. Markdown now shows this distinction and the independent performance/floor call counts
 across origins; detailed per-method floor followups remain in the JSON. These diagnostics do not
 create a significance or publication requirement. Fifteen focused evaluator/integration checks pass.
+
+## Development selection — sealed before confirmation outcomes
+
+All six prediction artifacts completed before the development phase was scored. The development
+comparison selected **prior scale 2**: match-weighted log loss 0.690337 versus baseline
+0.696988 and half-strength 0.708919; Brier 0.248590 versus baseline 0.251759. The plan-donor
+challenger scored worse than baseline (log loss 0.703727; Brier 0.254790), so it is not selected.
+Double strength improved all three development origins, and 22 of 32 paired event means;
+equal-event mean delta -0.00833 with 95% bootstrap interval [-0.01437, -0.00248].
+The development score uses 347.5 directed half-match weights from 420 eligible physical
+matches; 326 have both directions forecast. All methods use identical forecast availability.
+Performance and floor leaders were unchanged by strength scaling at all three origins.
+
+This selection is recorded before opening any confirmation scores. Next: seal candidate `2`
+against the development artifact and evaluate the three fixed August confirmation horizons.
+Production remains at scale 1 until those outcomes are inspected; no confirmation tuning.
