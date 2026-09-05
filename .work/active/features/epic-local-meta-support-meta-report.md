@@ -53,3 +53,16 @@ four as an explicitly unclassified opponent with a weak prior. This preserves al
 without inventing an archetype mapping or changing the existing saved input. Use counts/107 for
 shares rather than the original rounded decimals. Label the output as a historical sample scored
 with the current model; keep original historical labels, including any now-unmatched labels.
+
+## Parser integration constraints
+
+The existing `_load_field` fills missing per-row counts with synthetic ones when any other row
+has a count. The new ranking surface must not present those as supplied observations. Reuse the
+parser grammar, adding an opt-in strict count contract for this caller if needed; preserve
+established legacy callers. Treat `effective_n` explicitly as an effective concentration, not
+observed players, and preserve its declared total (the current minimum-one integer allocation
+can overshoot small totals). Share-only inputs remain valid fixed-weight scenarios. Invalid or
+incomplete declared evidence must fail before replacing a report.
+
+The saved sample's end date is unspecified: its documented period starts after May 18. Label the
+example "Saved post-May 18 field (107 players)" rather than inventing a May collection date.
