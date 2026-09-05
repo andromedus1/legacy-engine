@@ -1,7 +1,7 @@
 ---
 id: feature-ranking-refresh-insights
 kind: feature
-stage: drafting
+stage: implementing
 tags: [analytics, advisory]
 parent: null
 depends_on: [feature-validated-historical-evidence-promotion]
@@ -42,4 +42,13 @@ Options: a separate snapshot database; a sidecar JSON with a two-file publicatio
 - `scripts/best_call_ranking_template.html`: render concise escaped insight text and comparison dates into one existing-style card, retaining all existing controls/map/table behavior.
 
 ## Testing and risks
-Test first/unchanged/regime/method/scenario states, old/new directions, new-opponent missing forecast, Shapley arithmetic identity, fixed-support floor invariance to weight magnitudes, and truncation to three observations. Integration test successive writes plus simulated failed publication preserving the previous source. Node/desktop/mobile checks cover escaping, readability, and prior controls. Sparse changes are observations, not a claim of statistical significance. Review once at standard weight after prior feature implementation and actual evaluation verify.
+Test first/unchanged/regime/method/scenario states, old/new directions, new-opponent missing forecast, Shapley arithmetic identity, fixed-support floor invariance to weight magnitudes, and truncation to three observations. Integration test successive writes plus simulated failed publication preserving the previous source. Node/desktop/mobile checks cover escaping, readability, and prior controls. Sparse changes are observations, not a claim of statistical significance. Review once at standard weight after integrated feature verification.
+
+## Implementation dispatch
+
+The shared projection/evaluator code is verified and at review; its actual-corpus experiment runs
+in parallel. Refresh comparisons consume the fixed report payload and do not depend on the
+eventual borrowing selection. One Luna xhigh worker owns the pure comparison module, publication
+read/attach seam, template card, and focused tests. Do not change compute_blob, the projection,
+or historical evaluation code while forecast freezes run. Existing card styling is reused under
+the approved existing-component mock exception. Host retains empirical selection and PR/CI.
