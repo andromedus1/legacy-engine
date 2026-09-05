@@ -1,7 +1,7 @@
 ---
 id: bug-ranking-evaluation-override-source-keys
 kind: story
-stage: implementing
+stage: done
 parent: feature-validated-historical-evidence-promotion
 depends_on: [feature-deck-rankings]
 release_binding: null
@@ -24,3 +24,12 @@ override_sources keys must exactly match cell_overrides; ordinary source notes r
 publication ledger. Apply the same selection already used by the publisher. Verification is the
 real freeze regression plus focused projection checks. No new abstraction or API behavior is
 needed. The evaluator worker owns this repair alongside accepted provenance changes.
+
+## Verification
+
+The private handoff now filters source labels to the exact override keys. Three integrated
+file-backed freeze tests pass (0.96s), including production parent point/cell parity, preserved
+Boros/Mardu labels and per-cell match/window identity, exclusive cutoff-day exclusion, invariant
+forecasts after future raw/live-cache mutation, and changed-registry rejection. The first failing
+run demonstrated the product error before this repair. Parent feature review already owns the
+integrated acceptance; no separate child review is needed.
