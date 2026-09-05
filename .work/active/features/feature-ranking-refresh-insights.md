@@ -62,3 +62,25 @@ the approved existing-component mock exception. Host retains empirical selection
 - Simplification: refresh inputs are persisted in the existing `meta.refresh_changes.snapshot`; no second store, computation path, or UI control was introduced.
 - Discrepancies from design: the additive `meta.refresh_changes` field is excluded from `_authority_payload` so diagnostic publication metadata cannot alter the ranking authority invariant.
 - Adjacent issues parked: none.
+
+## Standard review and accepted fixes
+
+One fresh-context Sol xhigh review requested changes; the Claude peer remained unavailable, so
+this was same-harness independent review. All findings were accepted and verified:
+
+- Changed performance calls now show the relative field-weight and matchup-estimate shift when
+  both candidate decompositions exist, including when both decks declined.
+- Observed-count-only refreshes remain analytically unchanged; the zero-observation guard stays
+  separate.
+- A recognized payload missing rows, field shares, or comparison dates is malformed comparison
+  input, not a clean baseline.
+- Removed the unused per-candidate support list (about 160KB in the current snapshot).
+- Missing attribution for an unrelated candidate cannot displace a valid changed recommendation
+  or exact beneficiary insight. Full unavailable details remain in the payload.
+
+57 focused comparison/publication checks pass. The reviewer also verified that the live page's
+cell ledger reconstructs eligible performance values with structural mirrors to floating-point
+precision, and found escaping, static filter behavior, periods, and atomic publication sound.
+No second standard review is required; final combined CI/browser verification remains pending.
+Implementation commits were briefly amended concurrently by the two workers; host checked that
+all content survived in `9864a58` and `91a36f1`. Subsequent work uses new commits only.

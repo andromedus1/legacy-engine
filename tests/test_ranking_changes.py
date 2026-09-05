@@ -241,3 +241,43 @@ def test_reader_uses_json_decoder_and_distinguishes_legacy_and_malformed(tmp_pat
     )
     with pytest.raises(module.PublishedRankingPayloadError, match="malformed"):
         module.read_published_ranking(path)
+
+
+def test_count_only_refresh_is_unchanged_and_snapshot_omits_derived_support():
+    kwargs = dict(shares={"Alpha": .6, "Beta": .4},
+                  cells={"Alpha": {"Beta": .55}, "Beta": {"Alpha": .45}})
+    previous = _snap(**kwargs, observed_field_n=100)
+    current = _snap(**kwargs, observed_field_n=101)
+    assert compare_ranking_snapshots(current, previous)["status"] == "unchanged"
+    assert all("support" not in row for row in current["candidates"].values())
+
+
+def test_changed_call_explains_relative_shift_when_both_decks_decline():
+    previous = _snap(shares={"Room": 1}, cells={"Alpha": {"Room": .60}, "Beta": {"Room": .58}})
+    current = _snap(shares={"Room": 1}, cells={"Alpha": {"Room": .52}, "Beta": {"Room": .54}},
+                    performance_call="Beta")
+    result = compare_ranking_snapshots(current, previous)
+    recommendation = next(item for item in result["insights"] if item["type"] == "recommendation")
+    assert "Alpha → Beta" in recommendation["text"]
+    assert "field +0.0pp" in recommendation["text"]
+    assert "matchup estimates +4.0pp" in recommendation["text"]
+
+
+def test_recognized_empty_payload_is_malformed_not_a_new_baseline(tmp_path):
+    module = _script_module()
+    path = tmp_path / "empty.html"
+    path.write_text('const D = {"meta":{"deck_rankings":{"method_id":"deck-rankings-v1"}},"arch":[]};')
+    with pytest.raises(module.PublishedRankingPayloadError, match="missing rows"):
+        module.read_published_ranking(path)
+
+
+def test_unavailable_other_candidate_does_not_hide_valid_changed_recommendation():
+    previous = _snap(shares={"Room": .5, "Other": .5},
+                     cells={"Alpha": {"Room": .6, "Other": .6}, "Beta": {"Room": .5, "Other": .5},
+                            "Gone": {"Room": .4}})
+    current = _snap(shares={"Room": .7, "Other": .3},
+                    cells={"Alpha": {"Room": .6, "Other": .6}, "Beta": {"Room": .7, "Other": .7}},
+                    performance_call="Beta")
+    result = compare_ranking_snapshots(current, previous)
+    assert result["unavailable_attributions"]
+    assert {item["type"] for item in result["insights"]} == {"field_movement", "beneficiary", "recommendation"}

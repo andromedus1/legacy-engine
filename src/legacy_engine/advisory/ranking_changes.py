@@ -259,6 +259,8 @@ def ranking_snapshot(blob: Mapping[str, Any]) -> dict[str, Any]:
     if not deck_rankings and not rows:
         raise RankingSnapshotError("ranking report has no recognized deck-ranking payload")
     shares = _field_shares(blob, rows)
+    if not rows or not shares or not _text(meta.get("field_since")) or not _text(meta.get("corpus_max")):
+        raise RankingSnapshotError("ranking report is missing rows, field shares, or comparison dates")
     cell_means: dict[str, dict[str, float]] = {}
     candidates: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -282,10 +284,6 @@ def ranking_snapshot(blob: Mapping[str, Any]) -> dict[str, Any]:
             "performance": _number(decision.get("performance")),
             "floor": _number(decision.get("floor")),
             "worst_opponent": _text(decision.get("worst_opponent") or decision.get("floor_opp")),
-            "support": sorted(
-                opponent for opponent, value in shares.items()
-                if value > 0 and opponent != subject
-            ),
         }
     calls = {
         "performance": _text(deck_rankings.get("performance_call")),
@@ -364,9 +362,11 @@ def _previous_observed_field_is_empty(snapshot: Mapping[str, Any]) -> bool:
 def _analytical_equal(current: Mapping[str, Any], previous: Mapping[str, Any]) -> bool:
     """Compare inputs while treating the corpus cutoff as the period label."""
     return {
-        key: value for key, value in current.items() if key != "corpus_max"
+        key: value for key, value in current.items()
+        if key not in {"corpus_max", "observed_field_n"}
     } == {
-        key: value for key, value in previous.items() if key != "corpus_max"
+        key: value for key, value in previous.items()
+        if key not in {"corpus_max", "observed_field_n"}
     }
 
 
@@ -480,8 +480,21 @@ def compare_ranking_snapshots(
                 }
                 old_detail = _recommendation(previous, old_call) if isinstance(old_call, str) else {}
                 new_detail = _recommendation(current, new_call) if isinstance(new_call, str) else {}
+                old_change = decompositions.get(old_call, unavailable_call)
+                new_change = decompositions.get(new_call, unavailable_call)
+                if old_change.get("available") and new_change.get("available"):
+                    field_shift = new_change["field_contribution"] - old_change["field_contribution"]
+                    matchup_shift = new_change["matchup_contribution"] - old_change["matchup_contribution"]
+                    parts.append(
+                        f"relative shift: field {_pp(field_shift)}, matchup estimates {_pp(matchup_shift)}"
+                    )
+                elif new_change.get("available"):
+                    parts.append(
+                        f"{new_call}: field {_pp(new_change['field_contribution'])}, "
+                        f"matchup estimates {_pp(new_change['matchup_contribution'])}"
+                    )
                 evidence["calls"][key].update({
-                    "old_attribution": decompositions.get(old_call, unavailable_call),
+                    "old_attribution": old_change,
                     "new_attribution": decompositions.get(new_call, unavailable_call),
                     "performance_attribution": decompositions.get(new_call, unavailable_call),
                     "old_performance": old_detail.get("performance"),
@@ -538,9 +551,9 @@ def compare_ranking_snapshots(
             + "."
         )
         if not any(item["type"] == "unavailable" for item in insights):
-            if len(insights) >= _MAX_INSIGHTS:
-                insights[-1] = _unavailable_insight(unavailable_text)
-            else:
+            # Gaps for other candidates do not displace a valid changed call
+            # or exact beneficiary attribution. Full gap details stay in JSON.
+            if len(insights) < _MAX_INSIGHTS:
                 insights.append(_unavailable_insight(unavailable_text))
     if not insights:
         result["reason"] = "analytical values changed below the report's one-decimal percentage-point scale"
