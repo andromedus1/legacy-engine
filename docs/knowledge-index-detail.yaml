@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-09-05T19:11:06Z'
+generated_at: '2026-09-05T20:40:48Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -114,25 +114,24 @@ documents:
       Rankings keeps composition-derived family evidence internal and exposes curated
       strategic plans plus exact matchup ledgers.'
     - 'DECK RANKINGS PROJECTION: advisory/deck_ranking.py consumes typed matchup measurements
-      and normalized field shares to compute conditional Beta posterior cell means,
-      full-field performance, the non-mirror minimum floor, seeded draw intervals,
-      evidence coverage, and Pareto status. Performance and floor have independent
-      leaders, with performance breaking floor ties; the visible floor range names
-      the toughest cell while the all-opponent minimum interval remains diagnostic.
-      advisory/recent_field.py builds the half-open observed field with a provisional
-      28-day exponential half-life, published-list denominator, exact integer sightings,
-      weighted counts, Kish ESS, source composition, camps, and movement. scripts/refresh_best_call_ranking.py::_publish_deck_rankings
-      applies clean interval cells once as overrides while retaining each cell''s
-      actual prior_strength and provenance; scripts/refresh_decision_data.py publishes
-      the default decks/deck-rankings.html artifact.'
+      and normalized field shares to compute conditional Beta posterior cells, full-field
+      performance, the non-mirror floor, seeded intervals, coverage, and Pareto status.
+      advisory/recent_field.py supplies the provisional 28-day published-list field;
+      advisory/field_scenario.py validates an optional private override while retaining
+      global candidate presence. The atomic publisher attaches scenario provenance/comparison,
+      successive-snapshot changes, and parent/build diagnostics outside the ranking
+      authority payload. Local strategic-plan shares remain visible, but projections
+      are unavailable until composition-specific aggregates exist.'
     - 'SERVED DECK RANKINGS EVALUATION: scripts/evaluate_deck_rankings.py --served-model
-      freezes cutoff-refitted raw snapshots and shared production projections for
-      every declared retrospective fixed-parent origin before later outcomes are loaded.
-      Fixed prior-strength scales 1/.5/2 and the conditional opponent-plan-prior-v1
-      challenger share a cell grid and outcome-blind card-metadata quarantine policy;
-      scored evidence includes proper scores, support/calibration/reciprocity, paired
-      event differences, ranking order, and named-floor follow-up. The experiment
-      is pending and has no selection, apply, publication, or deployment path.'
+      has freeze, development (default), and confirmation phases. All six predictions
+      are sealed before development scoring; confirmation validates and reuses their
+      bound configuration and seals --selected-method from development before future
+      outcomes open. Retrospective production parent rules and the color-split registry
+      are hash-pinned, including Boros/Mardu Energy, while camps remain disabled.
+      Fixed scales 1/.5/2 and opponent-plan-prior-v1 retain the chosen cell view,
+      match digest, and windows. Development selected scale 2; confirmation slightly
+      favored scale 1, which remains in production. Dated score disclosure is read-only,
+      with no apply or publication path.'
     - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
       as the current/fallback projection. The built recurrent validation surface freezes
       cutoff-safe recurrent origins from a hash-bound parent benchmark plan, validates
@@ -187,9 +186,9 @@ documents:
       surfaces. Their outputs do not validate or promote this current descriptive
       projection.
     - scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic.
-      Separate --served-model mode freezes the shared production projection before
-      later outcomes, compares fixed prior scales and a conditional opponent-plan
-      prior challenger, and reports evidence without selecting or publishing a method.
+      Separate --served-model phases seal all six predictions before development scoring
+      and require a sealed development selection before confirmation outcomes open;
+      no phase publishes a method.
     - The generated page is disposable. Edit the tracked script or template, then
       regenerate decks/deck-rankings.html; do not hand-edit the output.
   docs/analysis/meta-deck-analysis-loop.md:
@@ -443,21 +442,22 @@ documents:
       flags; Deck Rankings uses strategic-plan and exact matchup views while keeping
       composition-derived family evidence internal.'
     - 'DECK RANKINGS: `advisory/deck_ranking.py` computes full-field posterior mean
-      performance and the minimum non-mirror posterior mean floor, with draw-based
-      intervals, prior provenance, direct-evidence coverage, and Pareto status. Performance
-      and floor have independent leaders, with performance breaking floor ties; the
-      visible floor range is the named toughest cell while the all-opponent minimum
-      interval remains diagnostic. `advisory/recent_field.py` supplies a provisional
-      28-day recency-weighted published-list field; observed integer counts remain
-      separate from weighted/effective counts and transition prior counts.'
+      performance and the non-mirror floor, with intervals, prior provenance, coverage,
+      and Pareto status. A private field override reweights the same cells while global
+      corpus presence retains candidate eligibility; local strategic-plan projections
+      remain unavailable until composition-specific aggregates exist. Successive compatible
+      publications add deterministic field/matchup attribution and changed-call observations;
+      expanded rows add descriptive parent-versus-build diagnostics. These additions
+      remain outside ranking authority and taxonomy.'
     - 'DECK RANKINGS EVALUATION BOUNDARY: the current projection remains descriptive.
-      `scripts/evaluate_deck_rankings.py` retains its default field-method diagnostic
-      and optional limited matchup baseline; separate `--served-model` mode freezes
-      the shared production projection from cutoff-refitted retrospective fixed-parent
-      snapshots before opening later outcomes. It compares fixed prior scales 1/.5/2
-      and the conditional opponent-plan-prior-v1 challenger, reports proper scores/support/floor
-      sensitivity, and has no publication gate. The experiment is pending; no result
-      or production change has been selected.'
+      `scripts/evaluate_deck_rankings.py` retains its default field-method diagnostic;
+      separate `--served-model` phases freeze all six cutoff-refitted predictions
+      before development scoring, then require a sealed development selection before
+      confirmation outcomes open. The hash-pinned production parent taxonomy includes
+      color splits while camps remain disabled. Development selected scale 2, but
+      confirmation slightly favored the current scale 1 on log loss and Brier, so
+      production retains scale 1. The page may disclose dated scores and call sensitivity;
+      evaluation has no publication gate.'
     - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters
       exactly ten estimators with production-ci-gated as the production-CI primary;
       retrospective-fixed-parent (frozen parent-rules identity) and dated contemporaneous

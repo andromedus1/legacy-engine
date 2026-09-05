@@ -19,16 +19,17 @@
 <header><div><h1>Deck Rankings</h1><p class="subtitle">Find your strongest deck. Know its toughest pairing.</p></div><nav><a href="#archetypes">Archetypes</a> · <a href="#camps">Camps</a> · <a href="#method">Method</a></nav></header>
 <p id="freshness" class="muted"></p>
 <p id="scenario-caption" class="notice" hidden></p>
+<p id="scenario-comparison" class="muted" hidden></p>
 <div id="target-control" class="target-control" hidden><label for="report-target">Analysis</label><select id="report-target"></select><span id="target-mode" class="badge"></span><span id="target-status" aria-live="polite"></span><ul id="target-unavailable" class="target-unavailable"></ul></div>
 <div class="toolbar evidence-controls" role="group" aria-label="Evidence filters"><label for="min-floor-coverage">Minimum floor coverage <input id="min-floor-coverage" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%</label><label for="min-matchup-n">Minimum matchup n <input id="min-matchup-n" type="number" min="1" step="1" value="8" inputmode="numeric"></label><small class="muted">Coverage counts matchups meeting your n. Filters select the decks shown; estimates use the same model.</small></div>
 <section class="priorities" id="priorities" aria-label="Performance and matchup floor"></section>
 <section class="card refresh-card" id="refresh-changes" aria-labelledby="refresh-changes-title"><div class="pick-label">Published field comparison</div><h2 id="refresh-changes-title">What changed</h2><p id="refresh-comparison" class="muted"></p><ol id="refresh-insights"></ol></section>
 <h2>Agency map</h2><div class="card" id="scatter-card"></div>
 <p class="map-caption">Right = stronger performance. Up = higher matchup floor. Blue marks the best tradeoffs among shown decks; dot size follows field share.</p>
-<h2>Superarchetypes / strategic plans</h2><p class="muted">The field by game plan. Expand for member decks and matchups.</p><div class="card table-scroll"><table id="t-plan"></table></div>
+<h2>Superarchetypes / strategic plans</h2><p class="muted" id="plan-caption">The field by game plan. Expand for member decks and matchups.</p><div class="card table-scroll"><table id="t-plan"></table></div>
 <div class="toolbar" role="group" aria-label="Rankings controls"><span>Rank by</span><button id="sort-performance" aria-pressed="true">Performance</button><button id="sort-floor" aria-pressed="false">Matchup floor</button><input id="deck-search" type="search" aria-label="Find a deck" placeholder="Find a deck…"><label><input type="checkbox" id="show-inactive">Include inactive decks</label><label><input type="checkbox" id="frontier-only">Best tradeoffs only</label><span id="ranking-count" class="muted" aria-live="polite"></span></div>
 <h2 id="archetypes">Archetypes</h2><div class="card table-scroll"><table id="t-arch"></table></div>
-<h2 id="camps">Subarchetypes (camps)</h2><div class="card table-scroll"><table id="t-camp"></table></div>
+<h2 id="camps">Subarchetypes (camps)</h2><p id="camp-scenario-comparison" class="muted" hidden></p><div class="card table-scroll"><table id="t-camp"></table></div>
 <details id="method" class="card method"><summary>Method & sources</summary>
 <p><b>Performance</b> is expected match win rate against the full modeled field, including mirrors at 50%. <b>Matchup floor</b> is the lowest matchup estimate against any non-mirror opponent in that field. The high-floor pick maximizes floor independently; performance breaks ties. Blue tradeoffs are decks for which no shown eligible peer is better on both measures.</p>
 <p>Every valid matchup observation contributes. Compatible history supplies partial pooling; uncertain and unobserved matchups remain estimates. Ranges are 95% conditional posterior intervals. The range beside the floor belongs to the named toughest pairing. Uncertainty in the minimum across all opponents is available under Evidence details; it also allows for unobserved bad pairings. Neither a high estimate nor missing bad results guarantees no bad matchups.</p>
@@ -52,17 +53,26 @@ const field = model.field || {};
 const fieldScenario = M.field_scenario || null;
 document.getElementById('freshness').textContent = `Results through ${M.corpus_max} · ${(M.observed_field_n || M.field_decks || 0).toLocaleString()} published lists since ${M.field_since} · Estimates, with 95% ranges`;
 if(fieldScenario){
- const supplied=fieldScenario.supplied_total==null?'shares only':`${Number(fieldScenario.supplied_total).toLocaleString()} supplied players`;
+ const supplied=fieldScenario.count_basis==='declared-effective-concentration'
+  ? `effective sample ${Number(fieldScenario.declared_effective_n).toLocaleString()}`
+  : fieldScenario.supplied_total==null?'shares only':`${Number(fieldScenario.supplied_total).toLocaleString()} supplied players`;
  const unknown=(fieldScenario.unknown_opponents || []).length;
  document.getElementById('scenario-caption').hidden=false;
  document.getElementById('scenario-caption').textContent=`Expected field: ${fieldScenario.label} · ${supplied}${unknown ? ` · ${unknown} unmapped opponent${unknown===1?'':'s'}` : ''} · scored with the current model`;
+ const comparisons=fieldScenario.global_vs_scenario || {};
+ for(const [key,id] of [['arch','scenario-comparison'],['camps','camp-scenario-comparison']]){
+  const comparison=comparisons[key];if(!comparison)continue;
+  const global=comparison.global || {},local=comparison.scenario || {};
+  const el=document.getElementById(id);el.hidden=false;
+  el.textContent=`Global → this field: Performance ${global.performance || '—'} → ${local.performance || '—'} · Floor ${global.floor || '—'} → ${local.floor || '—'}`;
+ }
 }
 const refreshChanges = M.refresh_changes || {};
 function renderRefreshChanges(){
  const comparison=refreshChanges.comparison || {},from=comparison.from,to=comparison.to || M.corpus_max;
  document.getElementById('refresh-comparison').textContent = from
-  ? `Published field comparison · ${from} → ${to}`
-  : `Published field comparison · baseline through ${to}`;
+  ? `${from} → ${to}`
+  : `Baseline through ${to}`;
  const insights=(refreshChanges.insights || []).slice(0,3);
  document.getElementById('refresh-insights').innerHTML = insights.length
   ? insights.map(item=>`<li>${escT(item.text)}</li>`).join('')
@@ -194,7 +204,7 @@ function tableHtml(rows,kind){
  selected.forEach(r=>{
   const d=decision(r),id=kind+'-'+r._idx,open=state.expanded.has(id);
   const badge=viewTradeoff(r,peers)?'<span class="badge frontier">tradeoff</span>':!d.eligible?'<span class="badge">'+(d.active?'prior only':'inactive')+'</span>':'';
-  html+=`<tr class="expander"><td><button class="row-toggle" data-row="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(r.subject)}</button>${badge}</td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${escT(d.worst_opponent || '—')}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share)}</td></tr>`;
+  html+=`<tr class="expander"><td><button class="row-toggle" data-row="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(r.subject)}</button>${badge}</td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${escT(d.worst_opponent || '—')}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share)}${fieldScenario?`<small>Global ${pct(d.global_field_share)}</small>`:''}</td></tr>`;
   if(open)html+=`<tr class="detail" id="detail-${escA(id)}"><td colspan="6">${detailHtml(r)}</td></tr>`;
  });
  return html+(selected.length?'':'<tr><td colspan="6" class="empty">No decks match these filters.</td></tr>')+'</tbody>';
@@ -211,7 +221,7 @@ document.addEventListener('click',e=>{
  document.querySelector(`button[data-row="${id}"]`)?.focus();
  document.getElementById('detail-'+id)?.scrollIntoView({block:'start'});
 });
-function render(){renderTable('t-arch',D.arch,'a');renderTable('t-camp',D.camps,'c');document.getElementById('sort-performance').setAttribute('aria-pressed',state.key==='performance');document.getElementById('sort-floor').setAttribute('aria-pressed',state.key==='floor');document.getElementById('ranking-count').textContent=sortedRows(D.arch).length+' archetypes · '+sortedRows(D.camps).length+' camps';renderPriorities();renderPlans();scatter();}
+function render(){state.revealedCamp=null;renderTable('t-arch',D.arch,'a');renderTable('t-camp',D.camps,'c');document.getElementById('sort-performance').setAttribute('aria-pressed',state.key==='performance');document.getElementById('sort-floor').setAttribute('aria-pressed',state.key==='floor');document.getElementById('ranking-count').textContent=sortedRows(D.arch).length+' archetypes · '+sortedRows(D.camps).length+' camps';renderPriorities();renderPlans();scatter();}
 function renderPriorities(){
  const rows=sortedRows(D.arch).filter(r=>decision(r).eligible);
  const best=[...rows].sort((a,b)=>decision(b).performance-decision(a).performance || a.subject.localeCompare(b.subject))[0];
@@ -222,9 +232,10 @@ function renderPriorities(){
  }).join('');
 }
 function renderPlans(){
- const plans=(D.plans || []).filter(p=>floorCoverage(p.decision || {})+1e-12>=state.minCoverage);
+ const plans=(D.plans || []).filter(p=>p.scenario_unavailable || floorCoverage(p.decision || {})+1e-12>=state.minCoverage);
+ if(fieldScenario)document.getElementById('plan-caption').textContent=`Plan shares cover ${pct((D.plans || []).reduce((sum,p)=>sum+(p.field_share || 0),0))} of this field. Performance and floors are shown for archetypes and camps.`;
  const html='<thead><tr><th>Plan</th><th>Performance</th><th>Floor vs plans</th><th>Floor coverage</th><th>'+fieldColumnLabel+'</th></tr></thead><tbody>'+plans.map(p=>{
-  if(p.scenario_unavailable)return `<tr><td>${escT(p.label)}</td><td colspan="4" class="empty">${escT(p.scenario_unavailable)}</td></tr>`;
+  if(p.scenario_unavailable)return `<tr><td>${escT(p.label)}</td><td>—</td><td>—</td><td>—</td><td>${pct(p.field_share)}</td></tr>`;
   const id='p-'+p.id,open=state.expanded.has(id), d=p.decision || {};
   const members=(p.members || []).map(m=>`<span class="member">${escT(m.archetype)}</span>`).join('');
   const cells=d.cells || [];
@@ -263,7 +274,7 @@ function mapTooltipHtml(r){
  const d=decision(r),cells=d.cells || [],worst=cells.find(c=>c.opponent===d.worst_opponent),supported=cells.filter(c=>c.n>=state.minN).length;
  const n=cells.reduce((sum,c)=>sum+c.n,0),observed=(field.exact_counts || {})[r.subject];
  const shareLabel=fieldScenario?'Scenario share':'Meta share',observedLabel=fieldScenario?'global observed lists':'observed lists';
- return `<div class="tip-title">${escT(r.subject)}${viewTradeoff(r,filteredRows(D.arch))?'<span class="badge frontier">tradeoff</span>':''}</div><dl><dt>Performance</dt><dd>${pct(d.performance)}<small>95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</small></dd><dt>Matchup floor</dt><dd>${pct(d.floor)}<small>Pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small></dd><dt>Toughest pairing</dt><dd>${escT(d.worst_opponent || '—')}<small>${worst && worst.n?`${worst.wins}–${worst.n-worst.wins} (n=${worst.n})`:'Prior only'}</small></dd><dt>Floor coverage</dt><dd>${pct(floorCoverage(d))} at n ≥ ${state.minN}<small>${supported}/${cells.length} matchups</small></dd><dt>Match sample</dt><dd>${n.toLocaleString()} non-mirror matches</dd><dt>${shareLabel}</dt><dd>${pct(d.field_share)}${observed!=null?`<small>${observed.toLocaleString()} ${observedLabel}</small>`:''}</dd></dl>`;
+ return `<div class="tip-title">${escT(r.subject)}${viewTradeoff(r,filteredRows(D.arch))?'<span class="badge frontier">tradeoff</span>':''}</div><dl><dt>Performance</dt><dd>${pct(d.performance)}<small>95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</small></dd><dt>Matchup floor</dt><dd>${pct(d.floor)}<small>Pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small></dd><dt>Toughest pairing</dt><dd>${escT(d.worst_opponent || '—')}<small>${worst && worst.n?`${worst.wins}–${worst.n-worst.wins} (n=${worst.n})`:'Prior only'}</small></dd><dt>Floor coverage</dt><dd>${pct(floorCoverage(d))} at n ≥ ${state.minN}<small>${supported}/${cells.length} matchups</small></dd><dt>Match sample</dt><dd>${n.toLocaleString()} non-mirror matches</dd><dt>${shareLabel}</dt><dd>${pct(d.field_share)}${fieldScenario?`<small>Global share ${pct(d.global_field_share)}</small>`:''}${observed!=null?`<small>${observed.toLocaleString()} ${observedLabel}</small>`:''}</dd></dl>`;
 }
 function placeMapTip(x,y){const rect=mapTip.getBoundingClientRect();mapTip.style.left=Math.max(8,Math.min(x+14,window.innerWidth-rect.width-8))+'px';mapTip.style.top=Math.max(8,y+14+rect.height>window.innerHeight?y-rect.height-14:y+14)+'px';}
 function showMapTip(r,el,event){mapTip.innerHTML=mapTooltipHtml(r);mapTip.hidden=false;el.setAttribute('aria-describedby','agency-tooltip');const rect=el.getBoundingClientRect();placeMapTip(event?event.clientX:rect.right,event?event.clientY:rect.top);}
