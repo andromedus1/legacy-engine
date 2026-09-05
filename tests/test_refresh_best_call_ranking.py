@@ -552,6 +552,44 @@ def test_local_camp_projection_handles_share_only_and_single_count_parent(
         con.close()
 
 
+def test_unknown_local_field_keeps_global_candidates_recommendable(tmp_path):
+    con = script_con()
+    try:
+        field_path = tmp_path / "unknown-local-field.txt"
+        field_path.write_text("1.0 Unmapped Combo\n", encoding="utf-8")
+        scenario = load_field_scenario(con, field_path)
+
+        global_blob = _blob(con, ground_n=3)
+        rbcr._publish_deck_rankings(con, global_blob)
+        global_eligibility = {
+            row["subject"]: row["decision"]["eligible"]
+            for row in global_blob["arch"]
+        }
+        assert any(global_eligibility.values())
+
+        local_blob = _blob(con, ground_n=3)
+        rbcr._publish_deck_rankings(
+            con,
+            local_blob,
+            field_override=scenario.projection_field(),
+            field_scenario=scenario,
+        )
+
+        for row in local_blob["arch"]:
+            decision = row["decision"]
+            assert decision["eligible"] == global_eligibility[row["subject"]]
+            assert decision["coverage"] == pytest.approx(0.0)
+            assert decision["cells"]
+            assert all(
+                cell["n"] == 0 and cell["mean"] == pytest.approx(0.5)
+                for cell in decision["cells"]
+            )
+        assert local_blob["meta"]["deck_rankings"]["performance_call"] is not None
+        assert local_blob["meta"]["deck_rankings"]["floor_call"] is not None
+    finally:
+        con.close()
+
+
 # ---------------------------------------------------------------------------
 # The retired per-parent path, reconstructed verbatim (the parity reference)
 # ---------------------------------------------------------------------------

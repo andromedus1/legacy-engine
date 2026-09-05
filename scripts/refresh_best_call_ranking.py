@@ -1993,16 +1993,7 @@ def _publish_deck_rankings(
         row_display_shares = display_shares if row_field_override is not None else None
         if row_shares:
             row_measurements = {row["subject"]: _row_measurements(row) for row in rows}
-            projection = project_ranking_rows(
-                row_measurements,
-                shares,
-                field_override=row_field_override,
-                counts=counts,
-                candidate_presence=presence,
-                cell_overrides=overrides,
-                override_sources={k: notes[k] for k in overrides},
-                override_identities=override_identities,
-            )
+            global_projection = None
             if row_field_override is not None:
                 global_projection = project_ranking_rows(
                     row_measurements,
@@ -2013,6 +2004,21 @@ def _publish_deck_rankings(
                     override_sources={k: notes[k] for k in overrides},
                     override_identities=override_identities,
                 )
+            projection = project_ranking_rows(
+                row_measurements,
+                shares,
+                field_override=row_field_override,
+                counts=counts,
+                candidate_presence=presence,
+                candidate_eligibility=(
+                    {subject: row["eligible"] for subject, row in global_projection["rows"].items()}
+                    if global_projection is not None else None
+                ),
+                cell_overrides=overrides,
+                override_sources={k: notes[k] for k in overrides},
+                override_identities=override_identities,
+            )
+            if global_projection is not None:
                 scenario_comparisons[key] = {
                     "global": projection_calls(global_projection),
                     "scenario": projection_calls(projection),

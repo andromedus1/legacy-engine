@@ -165,6 +165,7 @@ def _validate_inputs(
     draws: int,
     seed: int,
     candidate_presence: Mapping[str, float] | None,
+    candidate_eligibility: Mapping[str, bool] | None,
     overrides: Mapping[tuple[str, str], MatchupCell],
     override_sources: Mapping[tuple[str, str], str],
 ) -> tuple[dict[str, float], dict[str, float] | None]:
@@ -211,6 +212,15 @@ def _validate_inputs(
                 raise ValueError("candidate presence labels must be non-empty strings")
             if _number(value, name=f"candidate presence for {label}") < 0.0:
                 raise ValueError("candidate presence must be non-negative")
+
+    if candidate_eligibility is not None:
+        if not isinstance(candidate_eligibility, Mapping):
+            raise ValueError("candidate eligibility must be a mapping")
+        for label, value in candidate_eligibility.items():
+            if not isinstance(label, str) or not label:
+                raise ValueError("candidate eligibility labels must be non-empty strings")
+            if not isinstance(value, bool):
+                raise ValueError("candidate eligibility values must be boolean")
 
     for subject, measurements in rows.items():
         if not isinstance(subject, str) or not subject:
@@ -260,6 +270,7 @@ def rank_matchup_rows(
     cell_overrides: Mapping[tuple[str, str], MatchupCell] | None = None,
     override_sources: Mapping[tuple[str, str], str] | None = None,
     candidate_presence: Mapping[str, float] | None = None,
+    candidate_eligibility: Mapping[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Return full-field posterior performance and non-mirror matchup floor.
 
@@ -279,6 +290,7 @@ def rank_matchup_rows(
         draws=draws,
         seed=seed,
         candidate_presence=candidate_presence,
+        candidate_eligibility=candidate_eligibility,
         overrides=overrides,
         override_sources=override_sources,
     )
@@ -380,6 +392,9 @@ def rank_matchup_rows(
         nonmirror_coverage = (
             direct_nonmirror_mass / nonmirror_mass if nonmirror_mass > 0.0 else 1.0
         )
+        eligible = direct_cells > 0 and presence > 0.0
+        if candidate_eligibility is not None and subject in candidate_eligibility:
+            eligible = candidate_eligibility[subject]
         output_rows[subject] = {
             "subject": subject,
             "subject_field_share": presence,
@@ -394,7 +409,7 @@ def rank_matchup_rows(
             "bad_matchup_field_exposure_interval": _interval(bad_exposure_draws),
             "nonmirror_coverage": float(nonmirror_coverage),
             "direct_support": direct_cells > 0,
-            "eligible": direct_cells > 0 and presence > 0.0,
+            "eligible": eligible,
             "pareto": False,
         }
 
@@ -447,5 +462,9 @@ def rank_matchup_rows(
             "mirror_performance": "structural 0.5 included",
             "mirror_floor": "excluded",
             "prior_uncertainty": "conditional; prior estimation uncertainty omitted",
+            "candidate_eligibility": (
+                "caller-supplied global eligibility"
+                if candidate_eligibility is not None else "local direct support and presence"
+            ),
         },
     }
