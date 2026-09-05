@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-09-05T17:33:06Z'
+generated_at: '2026-09-05T19:11:06Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -35,8 +35,14 @@ documents:
       deferred behind it. The generated Deck Rankings landing page adds a separate
       posterior field-performance
 
-      and matchup-floor projection beside the mature advisory estimators. Local ops
-      runs the decision refresh and detection-only format monitor under one
+      and matchup-floor projection beside the mature advisory estimators. A separate
+      retrospective
+
+      served-model evaluator freezes that shared projection before later outcomes
+      are read; it has no
+
+      publication path. Local ops runs the decision refresh and detection-only format
+      monitor under one
 
       artifact lock; human `eras confirm` remains the only B&R acceptance authority.
 
@@ -119,6 +125,14 @@ documents:
       applies clean interval cells once as overrides while retaining each cell''s
       actual prior_strength and provenance; scripts/refresh_decision_data.py publishes
       the default decks/deck-rankings.html artifact.'
+    - 'SERVED DECK RANKINGS EVALUATION: scripts/evaluate_deck_rankings.py --served-model
+      freezes cutoff-refitted raw snapshots and shared production projections for
+      every declared retrospective fixed-parent origin before later outcomes are loaded.
+      Fixed prior-strength scales 1/.5/2 and the conditional opponent-plan-prior-v1
+      challenger share a cell grid and outcome-blind card-metadata quarantine policy;
+      scored evidence includes proper scores, support/calibration/reciprocity, paired
+      event differences, ranking order, and named-floor follow-up. The experiment
+      is pending and has no selection, apply, publication, or deployment path.'
     - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
       as the current/fallback projection. The built recurrent validation surface freezes
       cutoff-safe recurrent origins from a hash-bound parent benchmark plan, validates
@@ -172,9 +186,10 @@ documents:
     - The mature positioning estimator and future-only benchmark remain frozen reference
       surfaces. Their outputs do not validate or promote this current descriptive
       projection.
-    - 'scripts/evaluate_deck_rankings.py is a retrospective diagnostic: it compares
-      fixed field half-lives chronologically and optionally scores a limited matchup
-      baseline. It is not an exact production replay or a deployment gate.'
+    - scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic.
+      Separate --served-model mode freezes the shared production projection before
+      later outcomes, compares fixed prior scales and a conditional opponent-plan
+      prior challenger, and reports evidence without selecting or publishing a method.
     - The generated page is disposable. Edit the tracked script or template, then
       regenerate decks/deck-rankings.html; do not hand-edit the output.
   docs/analysis/meta-deck-analysis-loop.md:
@@ -435,10 +450,14 @@ documents:
       interval remains diagnostic. `advisory/recent_field.py` supplies a provisional
       28-day recency-weighted published-list field; observed integer counts remain
       separate from weighted/effective counts and transition prior counts.'
-    - 'DECK RANKINGS VALIDATION BOUNDARY: the current projection is descriptive. The
-      mature positioning estimator and future-only benchmark remain frozen references;
-      `scripts/evaluate_deck_rankings.py` is a retrospective field-method diagnostic
-      with an optional limited matchup baseline, not exact production validation.'
+    - 'DECK RANKINGS EVALUATION BOUNDARY: the current projection remains descriptive.
+      `scripts/evaluate_deck_rankings.py` retains its default field-method diagnostic
+      and optional limited matchup baseline; separate `--served-model` mode freezes
+      the shared production projection from cutoff-refitted retrospective fixed-parent
+      snapshots before opening later outcomes. It compares fixed prior scales 1/.5/2
+      and the conditional opponent-plan-prior-v1 challenger, reports proper scores/support/floor
+      sensitivity, and has no publication gate. The experiment is pending; no result
+      or production change has been selected.'
     - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters
       exactly ten estimators with production-ci-gated as the production-CI primary;
       retrospective-fixed-parent (frozen parent-rules identity) and dated contemporaneous

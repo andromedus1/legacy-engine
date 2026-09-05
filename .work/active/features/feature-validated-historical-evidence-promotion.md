@@ -93,3 +93,32 @@ scale is selected from confirmation results.
 
 ## Ownership
 One Luna xhigh implementation worker owns this feature's new shared projection/evaluator modules, evaluator CLI, production generator integration, and relevant tests; no nested agents. Host owns actual-corpus experiment execution, documentation, operational triage, and later-feature design. Standard review is the default. Keep one feature implementation commit and no push; host handles PR publication under project authorization.
+
+## Actual-corpus execution and selection protocol
+
+The first pilot stopped before scores because card metadata closure failed. Reuse the existing
+`quarantine-unresolved-decks` policy with fixed ceilings of 0.5% of decks and 2% of rounds,
+identically across methods and training/heldout windows. This is the known
+`bug-card-dimension-localized-and-new-card-gaps` backlog issue; no card names were guessed or
+metadata repaired. Read-only preflight found 26/66,750 decks and 100/80,845 rounds excluded before
+July 13; 27/69,303 decks and 104/81,875 rounds before August 31. The July 27 development horizon
+excludes one of 400 decks and four of 219 rounds. Other development and all confirmation horizons
+have zero exclusions. Every examined window remains within the existing ceilings.
+
+Six freeze-only runs launched from source commit `b13b0bd`, two processes at a time, under
+`data/benchmarks/deck-rankings-evaluation-v1/`. All six predictions must exist and verify before
+any heldout outcome is loaded. The fixed fourth method is `opponent-plan-prior-v1`: target-pair
+excluded donor counts, Beta(1,1) smoothing, strength min(15, donor n), primary-only registry
+assignment, same clean interval corpus, no-donor baseline unchanged.
+
+Before opening development outcomes, use match-weighted proper log loss as the primary
+comparison, Brier score as a corroborating check, and paired-event differences/support strata to
+explain stability. Record the selected development candidate and its settings before opening
+confirmation. Do not require significance to publish descriptive estimates. A confirmation
+reversal or conflicting scores can justify retaining the baseline; never tune the candidate on
+confirmation or call a sparse result proven. Independent performance and floor sensitivity are
+reported rather than optimized against a noisy realized future minimum. Actual findings remain
+pending; the baseline production prior is unchanged.
+
+The single standard independent implementation review runs alongside the forecast freezes.
+Actual-corpus results, review fixes, and CI remain required for final feature closure.
