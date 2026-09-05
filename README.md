@@ -2,13 +2,13 @@
 
 A **Magic: The Gathering Legacy-format analytics & advisory engine**. It answers, with data: *"What is the meta, how do I attack it, and how do I tune my deck?"*
 
-legacy-engine is rigorous and reproducible: it ingests real tournament results, labels every deck
-under a consistent three-level taxonomy (**superarchetype → parent archetype → data-driven camp**),
-detects each deck's **stable eras** from the corpus itself (bans *and* releases rebuild decks —
-every statistic windows to the largest stretch of still-solid data and names the disturbance that
-bounds it), and computes the metagame, matchup matrix, and field-aware advice on top — every number
-labeled, sample-gated, and traceable to its source. Thin or absent signal is always surfaced and
-labeled, never silently zeroed or blended away.
+The default refreshed analysis is [Deck Rankings](decks/deck-rankings.html), a generated local
+page with independent performance and matchup-floor rankings.
+
+legacy-engine ingests tournament results, labels decks with a three-level taxonomy
+(**superarchetype → parent archetype → camp**), and tracks changes caused by bans, releases,
+and deck evolution. Deck Rankings combines current observations with compatible history;
+thin evidence and prior estimates stay visible with their uncertainty and sources.
 
 It is the sibling of **edh-engine** (which does the same for cEDH), reusing that platform's
 three-data-layer architecture adapted to a 1v1, best-of-3, sideboarded, 60-card eternal format.
@@ -318,9 +318,9 @@ inclusion%, on-mode / off-distribution / missing tags, grouped by card type, plu
 confidence-tier banner. `--require "Card=N"`/`"Card>=N"` carves a sub-cohort; the
 window defaults to the current ban regime (override with `--since`).
 
-The Deck Rankings page has equal-priority performance and matchup-floor cards, a performance/floor
-map, strategic-plan context, archetype and camp tables, independent performance/floor sorting, and
-expandable matchup ledgers. Performance is the complete-field weighted mean of per-cell posterior
+Deck Rankings pairs performance and matchup-floor cards with an agency map, strategic plans,
+archetype/camp tables, and expandable matchups. Coverage/n filters narrow the shared view; map
+tooltips show matchup records, intervals, and evidence support. Performance is the complete-field weighted mean of per-cell posterior
 means; the floor is the minimum non-mirror posterior mean. Performance and floor have independent
 leaders, with performance breaking floor ties. Point estimates remain visible when cells
 are thin or prior-only; each such cell carries its interval, W-L/n, prior provenance, and source

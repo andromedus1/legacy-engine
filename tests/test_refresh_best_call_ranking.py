@@ -126,6 +126,7 @@ class Element {
 }
 const elements = new Map();
 const document = {
+  addEventListener() {},
   getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
   createElement() { return new Element(); },
   querySelectorAll() { return []; },
@@ -136,7 +137,7 @@ const localStorage = {
   getItem(key) { return saved.has(key) ? saved.get(key) : null; },
   setItem(key, value) { saved.set(key, String(value)); },
 };
-const window = {location: {href: ""}};
+const window = {location: {href: ""}, addEventListener() {}};
 const context = vm.createContext({document, localStorage, window,
   CSS: {escape: value => String(value)}});
 vm.runInContext(fs.readFileSync(0, "utf8"), context);
@@ -978,10 +979,55 @@ class TestMainEndToEnd:
         assert 'Toughest: Combo' in result["picks"]
         assert '42.0%' in result["ledger"] and '1–1' in result["ledger"]
         assert '&lt;unsafe&gt;' in result["ledger"] and '<unsafe>' not in result["ledger"]
-        assert 'Thin' in result["ledger"]
+        assert 'n&lt;8' in result["ledger"]
         assert 'Toughest pairing 95% 37.0–57.0' in result["picks"]
         assert 'Minimum across all opponents: 95% 1.0–15.0%' in result["ledger"]
         assert 'detail-a-0' in result["opened"] and 'detail-a-0' in result["persisted"]
+
+    def test_coverage_and_n_filters_share_one_view_and_tooltips_explain_support(self):
+        def row(name, performance, floor, counts, idx):
+            return {"subject": name, "_idx": idx, "decision": {
+                "performance": performance, "performance_low": performance-.05,
+                "performance_high": performance+.05, "floor": floor,
+                "worst_low": floor-.1, "worst_high": floor+.1,
+                "worst_opponent": "<Opponent>", "coverage": 1, "field_share": .1,
+                "eligible": True, "active": True, "pareto": name == "Thin",
+                "cells": [{"opponent": name, "share": share, "n": n, "wins": n//2,
+                           "mean": .5, "low": .3, "high": .7}
+                          for name,share,n in zip(("<Opponent>","Other"),(.7,.3),counts)],
+            }}
+        blob = {"meta": {"corpus_max": "2026-09-03", "field_since": "2026-08-10"},
+                "arch": [row("Thin",.58,.49,(2,1),0), row("Mixed",.56,.47,(10,2),1),
+                         row("Deep",.54,.45,(30,20),2)], "camps": [], "plans": []}
+        result = _run_template_javascript(blob, r"""
+        (() => {
+          const before=JSON.stringify(D.arch.map(r=>r.decision));
+          const coverage=D.arch.map(r=>floorCoverage(decision(r)));
+          document.getElementById('min-floor-coverage').listeners.input({target:{value:'75'}});
+          const covered=sortedRows(D.arch).map(r=>r.subject);
+          const picks=document.getElementById('priorities').innerHTML;
+          const map=document.getElementById('scatter-card').innerHTML;
+          const tradeoff=viewTradeoff(D.arch[2],filteredRows(D.arch));
+          const tip=mapTooltipHtml(D.arch[2]);
+          document.getElementById('min-matchup-n').listeners.input({target:{value:'25'}});
+          const highN=sortedRows(D.arch).map(r=>r.subject);
+          document.getElementById('min-matchup-n').listeners.input({target:{value:'1'}});
+          return {coverage,covered,picks,map,tradeoff,tip,highN,
+            restored:sortedRows(D.arch).map(r=>r.subject),
+            unchanged:before===JSON.stringify(D.arch.map(r=>r.decision))};
+        })()
+        """)
+        assert result["coverage"] == pytest.approx([0,.7,1])
+        assert result["covered"] == ["Deep"]
+        assert 'Deep' in result["picks"] and 'Thin' not in result["picks"]
+        assert result["map"].count('data-point=') == 1 and result["tradeoff"]
+        assert result["highN"] == []
+        assert result["restored"] == ["Thin","Mixed","Deep"]
+        assert result["unchanged"]
+        assert '&lt;Opponent&gt;' in result["tip"] and '<Opponent>' not in result["tip"]
+        for text in ('Performance','Matchup floor','Floor coverage','100.0% at n ≥ 8',
+                     '15–15 (n=30)','50 non-mirror matches','Meta share'):
+            assert text in result["tip"]
 
     def test_concise_report_preserves_named_surfaces(self):
         template = rbcr.TEMPLATE_PATH.read_text()

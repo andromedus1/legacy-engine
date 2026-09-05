@@ -82,7 +82,8 @@ separate from observed counts and recent presence.
 The page opens with two equal-priority cards: the performance leader and the independent floor
 leader. Performance breaks ties among equal floors. The visible floor range names the toughest
 pairing's cell interval; the all-opponent minimum-floor interval remains in evidence details.
-Tables sort independently by Performance or Matchup floor. The map marks Pareto-efficient tradeoffs. The strategic-plan, archetype, and camp
+Coverage/n controls filter the shared view; n defines which matchups count toward coverage.
+The map marks tradeoffs among shown decks, with hover/focus/tap tooltips. The strategic-plan, archetype, and camp
 surfaces remain available, with camps retaining their parent/camp presentation and plan cells
 remaining direct match aggregates.
 
@@ -95,8 +96,8 @@ classifier labels retain their field context but are not current deck recommenda
 to inspect opponent, field share, posterior interval, W-L/n, source window, prior source, and clean
 interval concentration details.
 
-The page’s “direct evidence” value is the non-mirror field-share fraction backed by positive observed
-matchup n. It is an evidence description, not a speaking gate. Intervals are conditional on supplied
+Floor coverage is the non-mirror field-share fraction meeting the chosen minimum matchup n.
+Coverage filters select rows; posterior estimates and intervals retain their original definition. Intervals are conditional on supplied
 priors and do not include every model, selection, event, or source-concentration uncertainty.
 
 The existing `advisory/positioning.py` estimator and its CLI remain available with their established

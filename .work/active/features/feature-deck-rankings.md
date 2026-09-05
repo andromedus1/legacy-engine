@@ -78,3 +78,22 @@ three important findings (utility ESS accounting, mobile hit areas/chart legibil
 entry points). The named code/docs/UI fixes are implemented; 98 focused tests pass. Final
 scheduled regeneration, browser measurements, and CI remain closure requirements. No second
 review pass is required. No deferred findings or backlog items remain from this review.
+
+
+## User review refinement (2026-09-05)
+Andrew requested restoring useful agency-map tooltips and the old floor-coverage/minimum-matchup-n
+controls. Add shared view filters: n defines the support counted toward non-mirror field coverage,
+coverage selects visible rows, and the same subset drives map and independent leaders. Estimates
+retain the coherent posterior definition. Restore a concise hover/focus/tap tooltip with intervals,
+worst pairing/record/prior status, coverage, match count, and field share. Reuse existing controls
+and disclosure styling; no new visual direction or independent review round is needed for these
+user-review corrections. Prior implementation CI passed on Python3.11 and3.13; the13 job passed
+its retry after one runner timeout. Verify the refinement through focused JS/browser checks and CI.
+
+- Refinement verification:43 focused report tests pass, including a new JS test proving support
+  filtering leaves posterior values unchanged, updates leaders/map, recomputes tradeoffs among
+  shown candidates, and escapes tooltip content. Desktop hover, keyboard/Enter/Escape, empty
+  state, coverage/n/filter reset, frontier, and disclosure checks pass against actual corpus data.
+  The map narrows64→13 candidates at40% coverage/n8 and restores64 on reset. Mobile tap tooltip
+  stays within390×844 viewport; page has no unintended overflow or JS errors. Controls reuse
+  the reviewed44px pattern; touch map points have44px hit areas and fine-pointer hover uses dots.
