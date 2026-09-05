@@ -1123,6 +1123,7 @@ def _phase_summary(
     methods = _phase_evidence(evaluated)
     return {
         "protocol_id": "deck-ranking-evaluation-v1",
+        "served_method_id": "deck-rankings-v1",
         "phase": phase,
         "origins_declared": [list(item) for item in origins_declared],
         "prior_scales": list(scales), "draws": draws,
@@ -1145,6 +1146,57 @@ def _write_digested(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
     value["artifact_sha256"] = content_sha256(value)
     atomic_write_canonical(path, value)
     return value
+
+
+def served_evaluation_disclosure(path: Path) -> dict[str, Any] | None:
+    """Read a compact, dated method study for the report's Method disclosure.
+
+    The study concerns retrospective global parent rankings, not the report's
+    current field or a user-supplied scenario. Missing local artifacts are fine.
+    Corrupt artifacts are rejected so callers can omit this optional disclosure.
+    """
+    if not path.exists():
+        return None
+    summary = _read_sealed_json(path, description="served-model evaluation")
+    if summary.get("protocol_id") != "deck-ranking-evaluation-v1" or summary.get("phase") not in {
+        "confirmation", "all",
+    }:
+        raise ValueError("method disclosure requires a completed confirmation artifact")
+    phases = []
+    for label, evidence in (("Development", summary["development"]), ("Confirmation", summary)):
+        origins = evidence["origins"]
+        methods = evidence["methods"]
+        baseline = methods["1"]["match_weighted"]
+        phases.append({
+            "label": label,
+            "since": min(origin["fold"]["cutoff"] for origin in origins),
+            "until": max(origin["fold"]["evaluation_until"] for origin in origins),
+            "matches": baseline["weight"],
+            "methods": {
+                method: {"log_loss": scores["match_weighted"]["log_loss"],
+                         "brier": scores["match_weighted"]["brier"]}
+                for method, scores in methods.items()
+            },
+            "call_changes": {
+                method: {
+                    priority: sum(
+                        origin["methods"][method][priority + "_order"][:1]
+                        != origin["methods"]["1"][priority + "_order"][:1]
+                        for origin in origins
+                    )
+                    for priority in ("performance", "floor")
+                }
+                for method in methods if method != "1"
+            },
+            "origins": len(origins),
+        })
+    return {
+        "method_id": summary.get("served_method_id"),
+        "artifact_sha256": summary["artifact_sha256"],
+        "scope": "Retrospective global parent rankings",
+        "selected_candidate": summary["selected_candidate"],
+        "phases": phases,
+    }
 
 
 def _seal_development_selection(

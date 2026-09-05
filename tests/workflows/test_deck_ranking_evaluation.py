@@ -10,6 +10,7 @@ from legacy_engine.workflows.deck_ranking_evaluation import (
     _seal_development_selection,
     _write_digested,
     evaluate_ranking_origin,
+    served_evaluation_disclosure,
 )
 
 
@@ -196,3 +197,29 @@ def test_event_uncertainty_requires_replication_and_preserves_paired_direction()
     assert low <= -.2 <= high < 0
     mixed_low, mixed_high = _event_mean_interval([-.2, .2])
     assert mixed_low < 0 < mixed_high
+
+
+def test_report_disclosure_preserves_scores_and_independent_call_sensitivity(tmp_path):
+    result = evaluate_ranking_origin(_artifact(), [_match()])
+    for method, scores in result["methods"].items():
+        scores["performance_order"] = ["A", "B"]
+        scores["floor_order"] = ["A", "B"] if method == "1" else ["B", "A"]
+    development = _phase_summary(
+        [result], phase="development", selected_method=None,
+        origins_declared=(("2026-01-01", "2026-01-08", "2025-12-01"),),
+        scales=(1.0, 0.5), draws=64,
+    )
+    confirmation = {**development, "phase": "confirmation", "selected_candidate": "0.5",
+                    "development": development}
+    path = tmp_path / "confirmation-summary.json"
+    assert served_evaluation_disclosure(path) is None
+    _write_digested(path, confirmation)
+    disclosure = served_evaluation_disclosure(path)
+    assert disclosure["method_id"] == "deck-rankings-v1"
+    phase = disclosure["phases"][1]
+    assert phase["matches"] == 1
+    assert phase["methods"]["1"]["log_loss"] == result["methods"]["1"]["log_loss"]
+    assert phase["call_changes"]["0.5"] == {"performance": 0, "floor": 1}
+    path.write_text(path.read_text().replace('"selected_candidate":"0.5"', '"selected_candidate":"1"'))
+    with pytest.raises(ValueError, match="digest"):
+        served_evaluation_disclosure(path)
