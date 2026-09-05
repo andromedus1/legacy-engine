@@ -1866,6 +1866,7 @@ def _publish_deck_rankings(con, blob, *, parent_interval=None, camp_interval=Non
         for plan in plans:
             raw = plan_projection["rows"][plan["id"]]
             plan["decision"] = normalized(raw, {"subject": plan["id"]}, {})
+            plan["decision"]["worst_opponent"] = plan_labels.get(raw["worst_opponent"], raw["worst_opponent"])
             for cell in plan["decision"]["cells"]:
                 cell["opponent"] = plan_labels.get(cell["opponent"], cell["opponent"])
                 cell["source"] = "since " + meta["field_since"]

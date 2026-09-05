@@ -1104,6 +1104,11 @@ class TestMainEndToEnd:
         assert '"plan_cells": [' in html
         assert '"plans": [' in html
         assert 'Superarchetypes / strategic plans' in html
+        page = json.JSONDecoder().raw_decode(html.split('const D = ', 1)[1])[0]
+        for plan in page['plans']:
+            d = plan['decision']
+            if d['worst_opponent'] is not None:
+                assert any(c['opponent'] == d['worst_opponent'] for c in d['cells'])
         assert "Against strategic plans" in html
         assert "Toughest pairing" in html
         assert "saCellHtml" not in html

@@ -97,3 +97,7 @@ its retry after one runner timeout. Verify the refinement through focused JS/bro
   The map narrows64→13 candidates at40% coverage/n8 and restores64 on reset. Mobile tap tooltip
   stays within390×844 viewport; page has no unintended overflow or JS errors. Controls reuse
   the reviewed44px pattern; touch map points have44px hit areas and fine-pointer hover uses dots.
+
+- Final integration correction: normalize the strategic-plan toughest-opponent label alongside
+  its cell labels so prior-floor badges resolve correctly. The report integration regression
+  checks that every named plan floor resolves to its supporting cell; all43 report tests pass.
