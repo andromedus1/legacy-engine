@@ -38,6 +38,10 @@ replace `decks/doomsday-variant-rankings.html`. Override those inputs with `--db
 refuses to overwrite the canonical field report, and records the source report hash, protocol,
 dates, and extraction audit in the generated page.
 
+`--since` must be a real date in canonical `YYYY-MM-DD` form. The inherited field report must also
+provide real canonical `field.since` and exclusive `field.until` dates in that form, with the start
+before the end. Malformed or truncated public dates stop publication instead of being repaired.
+
 The source database and canonical field report are inputs, not outputs. Refresh them through
 their own documented workflows; this focused command performs a read-only corpus analysis and
 publishes only the specialized report. It is a manual command and is not part of the scheduled
@@ -69,14 +73,16 @@ daily League publications remain distinct. The extraction audit reports this rep
 deduplication; it does not rewrite the database or the inherited global-field artifact.
 
 - **Standings** are published non-League tournament W-L-D records joined uniquely by normalized
-  player and event whose subject list contains no card banned at the report cutoff. Their opponents
+  player and event whose subject has known board labels, positive card counts, at least 60 main
+  cards, no more than 15 sideboard cards, and no card banned at the report cutoff. Their opponents
   are unknown and unfiltered, and their decisive win rate can include opponents whose lists or
   individual rounds are unavailable, so the report shows record and pilot counts with this denominator.
-- **Compatible rounds** are deduplicated physical matches for which both exact lists can be joined
-  unambiguously and neither contains a card banned at the report cutoff. This is a card-compatibility
-  filter, not a full reconstruction of deck-construction legality. League 5-0 publications are
-  registration evidence only and never become five invented wins. Ambiguous joins, duplicates,
-  banned-card lists, and other exclusions stay counted in the audit.
+- **Compatible rounds** are deduplicated physical matches for which both registered list partitions
+  can be joined unambiguously and pass that same plausible-list and banned-card filter. A 61- or
+  80-card main deck and a short sideboard can remain evidence; incomplete fragments cannot. This is
+  a card-compatibility and completeness filter, not a full reconstruction of deck-construction
+  legality. League 5-0 publications are registration evidence only and never become five invented
+  wins. Ambiguous joins, duplicates, banned-card lists, and other exclusions stay counted in the audit.
 
 The **All compatible** view starts at `--since`. The **Current regime** view starts at the canonical
 field report's `field_since`. Both end at the same exclusive report cutoff, and each row exposes its
