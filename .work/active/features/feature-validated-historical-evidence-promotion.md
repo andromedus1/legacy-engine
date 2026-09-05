@@ -230,3 +230,35 @@ Performance and floor leaders were unchanged by strength scaling at all three or
 This selection is recorded before opening any confirmation scores. Next: seal candidate `2`
 against the development artifact and evaluate the three fixed August confirmation horizons.
 Production remains at scale 1 until those outcomes are inspected; no confirmation tuning.
+
+## Actual confirmation result and production decision
+
+Retain production **prior scale 1**. The preselected doubled prior's development gain did not
+continue on confirmation: current/double log loss **0.685469 / 0.686405**, Brier
+**0.246262 / 0.246695**, over 92 directed half-match weights. Its equal-event mean delta was
++0.000788 (95% bootstrap interval -0.006090 to +0.007800; 8 improved / 6 worsened events).
+This small reversal is not proof that doubling is harmful, but it does not justify replacing the
+current default. Half-strength and plan borrowing were worse than the current prior on both
+aggregate confirmation scores. No challenger was tuned after confirmation.
+
+The doubled-prior performance and floor leaders matched the reference at all six origins.
+Half strength changed performance in 2/3 and floor in 3/3 confirmation origins; the plan prior
+changed floor leaders at all six origins while scoring worse. Direct later evidence for named
+floors is sparse: only 4 of 285 reference parent/origin floor pairings had confirmation outcomes.
+These are useful sensitivity findings, not validation that a high estimated floor guarantees
+no bad matchups. Every descriptive estimate remains visible.
+
+Artifacts: `data/benchmarks/deck-rankings-evaluation-v1/development-summary.json` and
+`confirmation-summary.json`, with distinct generated Markdown companions. Confirmation artifact
+SHA256: `5c5ef459fe316da5cd0123c6fbf6266260dd3726cc2b9cc92595db7b28b2d78e`.
+The sealed source DB SHA256 is `82011023b61848c52748d595336291ee815d168bdb08df8f1d6cb146c1f2c9da`.
+Current publication optionally reads that sealed study into the existing Method disclosure,
+showing dated scores and independent leader sensitivity. A missing study never blocks ranking
+publication. The study explicitly concerns retrospective global parents, including on a local
+scenario report; it does not claim evaluation of that local sample.
+
+One real orchestration bug surfaced after scoring: both phases wrote an immutable `summary.md`.
+Child `story-fix-ranking-phase-markdown` repairs distinct phase paths; scores were intact and
+were not recomputed. Its public sequence regression failed before the repair and passed after.
+All 17 evaluator/integrated-freeze tests now pass. Final combined CI and refreshed browser output
+remain required for closure; the single independent feature review and accepted fixes are complete.
