@@ -1,7 +1,7 @@
 ---
 id: feature-decision-unit-taxonomy
 kind: feature
-stage: review
+stage: done
 tags: [analytics, advisory]
 parent: null
 depends_on: [feature-ranking-refresh-insights]
@@ -229,3 +229,30 @@ singleton/missing-pilot tests pass (9 diagnostic tests total). Chromium verified
 Jeskai Midrange disclosure and that its camp link expands/focuses the destination, with no JS
 errors. Final combined CI remains pending. Standard pass count is one; accepted fixes require
 verification, not a second independent review.
+
+## Completion evidence — 2026-09-05
+
+Complete after the single standard independent review, accepted-fix verification, and final-source
+CI at `87f5f80637c06fddf5e5944e9774aae8c735544d`: run `33991481774` passed on Python 3.11
+and 3.13, each **4,183 passed, 2 skipped**. The final focused integration set passed 118 tests;
+touched-file Ruff and `git diff --check` passed. Documentation review found no Critical/High drift.
+
+Both actual reports were regenerated from that source and Chromium-checked at desktop and
+390px mobile widths: keyboard/touch tooltips, coverage and n filters, unchanged underlying
+recommendations and refresh comparisons, dated Method scores, and camp-link navigation all pass.
+Global and local reports preserve identical eligible archetype/camp sets. Corpus maximum is
+2026-09-03. Global performance/floor calls are ReaShow / Ad Nauseam Tendrils.
+
+Global artifact: `decks/deck-rankings.html`, SHA256
+`3735f4d155942c5a886b45226c22a36739d9eed7ee54c3b1c9e43792100a4a68`; the operational status
+records this digest. Refresh completed; two existing era alarms remain pending confirmation data.
+Local artifact: `decks/deck-rankings-local-saved.html`, SHA256
+`cd65f4d0d9c9883cbf9b7777c0eeb62566429b839256db0cb9e3426e077b9b6c`. Its saved post-May 18
+sample has 107 players, unspecified end date, and 7.48% explicit unknown opponent mass; it is
+not described as a newly observed local field. Local camp performance changes from Eldrazi
+[Abundant Countryside] to Death & Taxes [Marsh Flats]. Local plan shares remain visible while
+composition-specific plan performance/floor estimates are explicitly unavailable.
+
+Delivery PR: https://github.com/andromedus1/legacy-engine/pull/92, based on the existing
+`codex/deck-rankings-baseline` integration branch after PR91 merged there. No claim of a main
+release: the older baseline history remains separate from this feature's completion.
