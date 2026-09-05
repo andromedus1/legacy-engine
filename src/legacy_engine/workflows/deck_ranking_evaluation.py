@@ -1357,7 +1357,10 @@ def run_served_model_evaluation(
             })
             summary = _write_digested(root / "summary.json", summary)
     from legacy_engine.advisory.ranking_benchmark import atomic_write_text
-    atomic_write_text(root / "summary.md", _markdown_summary(summary))
+    markdown = _markdown_summary(summary)
+    atomic_write_text(root / f"{phase}-summary.md", markdown)
+    if not (root / "summary.md").exists():
+        atomic_write_text(root / "summary.md", markdown)
     return summary
 
 

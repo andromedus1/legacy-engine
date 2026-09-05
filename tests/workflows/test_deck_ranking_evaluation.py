@@ -223,3 +223,22 @@ def test_report_disclosure_preserves_scores_and_independent_call_sensitivity(tmp
     path.write_text(path.read_text().replace('"selected_candidate":"0.5"', '"selected_candidate":"1"'))
     with pytest.raises(ValueError, match="digest"):
         served_evaluation_disclosure(path)
+
+
+def test_development_then_confirmation_preserves_both_markdown_reports(tmp_path, monkeypatch):
+    from legacy_engine.workflows import deck_ranking_evaluation as workflow
+
+    result = evaluate_ranking_origin(_artifact(), [_match()])
+    monkeypatch.setattr(workflow, "_freeze_all_origins", lambda *a, **kw: [])
+    monkeypatch.setattr(workflow, "_load_frozen_origins", lambda *a, **kw: [])
+    monkeypatch.setattr(workflow, "_evaluate_frozen_origins", lambda *a, **kw: [result])
+    origins = (("2026-01-01", "2026-01-08", "2025-12-01"),
+               ("2026-01-08", "2026-01-15", "2025-12-01"))
+    workflow.run_served_model_evaluation(tmp_path / "source", tmp_path, origins=origins)
+    first_report = (tmp_path / "summary.md").read_bytes()
+    workflow.run_served_model_evaluation(
+        tmp_path / "source", tmp_path, origins=origins, phase="confirmation", selected_method="1",
+    )
+    assert "Phase: development" in (tmp_path / "development-summary.md").read_text()
+    assert "Phase: confirmation" in (tmp_path / "confirmation-summary.md").read_text()
+    assert (tmp_path / "summary.md").read_bytes() == first_report
