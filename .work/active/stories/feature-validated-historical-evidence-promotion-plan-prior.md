@@ -1,7 +1,7 @@
 ---
 id: feature-validated-historical-evidence-promotion-plan-prior
 kind: story
-stage: implementing
+stage: done
 tags: [analytics, advisory]
 parent: feature-validated-historical-evidence-promotion
 depends_on: [feature-deck-rankings]
@@ -22,3 +22,6 @@ The parent evaluator will test this challenger on identical frozen cases alongsi
 
 ## Verification
 Target outcome changes leave donor prior unchanged; reverse physical orientation has the right outcome; duplicate IDs and future outcomes fail; n0 cells can change mean from informative donors; no-donor/unmapped targets preserve fallback; no main/secondary plan double counting; deterministic output and capped strength. Child closes directly on green tests, and integrated feature receives one independent review.
+
+## Implementation and verification
+Implemented the pure clean-corpus donor index and bounded prior with corpus/plan-selection binding, distinct donor event/opponent counts, and historical-origin counts. Six focused tests pass: target exclusion, reverse orientation, prior-only estimate, cap, no-donor fallback, unrelated plans, duplicate physical IDs, and cutoff isolation. Child checkpoint is complete; parent integration and comparative evaluation remain the feature boundary.
