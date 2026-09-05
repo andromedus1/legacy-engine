@@ -6,6 +6,7 @@ tags: [analytics, advisory]
 parent: null
 depends_on: [feature-ranking-refresh-insights]
 release_binding: null
+gate_origin: null
 created: 2026-09-05
 updated: 2026-09-05
 ---
@@ -186,3 +187,24 @@ not change compute_blob, _publish_deck_rankings, classification, or posterior co
 imported gate proposals in this item are historical grounding only: the current design is a
 descriptive diagnostic with no taxonomy or publication gate. Host owns actual artifact refresh,
 review coordination, and final source verification.
+
+## Implementation notes (2026-09-05)
+
+Implemented the descriptive analyzer in `src/legacy_engine/advisory/decision_units.py` and the
+read-only `scripts/analyze_decision_units.py` audit. The analyzer uses the published parent/camp
+cells and current recency-weighted camp shares, excludes each parent from every camp's positive
+external field, leaves missing cells unavailable, and keeps the parent-versus-camp floor gap
+separate from pure pooling uplift. Date-bounded deck/card facts provide separate main/side slot
+distances, within-cohort radii, card-record coverage, and source-scoped normalized pilot overlap.
+The generator attaches the diagnostic after ranking projection as an additive disclosure field;
+the existing authority snapshot remains unchanged. The archetype dropdown renders a compact
+build-floor table and an optional composition/pilot table with escaped camp links.
+
+Focused tests: `tests/test_decision_units.py` (6 passed), existing ranking refresh tests (43
+passed), ranking snapshot/benchmark tests (33 passed), and `ruff check` on touched Python files.
+The read-only audit against `decks/deck-rankings.html` and `data/legacy.duckdb` for
+`2026-08-10` through `2026-09-04` found 29 parents, 27 exact common-field comparisons, and
+reproduced the previously grounded pure uplifts: Jeskai Midrange 3.62pp, Azorius Midrange
+2.28pp, Show and Tell 1.94pp, Dimir Tempo 1.13pp, and Eldrazi 0.62pp. This audit did not inspect
+heldout outcomes or alter the source database; canonical refresh and browser review remain
+host-owned.

@@ -42,6 +42,7 @@ const D = __D_BLOB__;
 const M = D.meta;
 const fmtP = p => p == null ? '—' : (100*p).toFixed(1);
 const pct = p => p == null ? '—' : fmtP(p)+'%';
+const pp = p => p == null ? '—' : `${p >= 0 ? '+' : ''}${fmtP(p)}pp`;
 const escT = value => String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const escA = escT;
 const model = M.deck_rankings || {};
@@ -129,6 +130,34 @@ function cellRows(cells){return [...cells].sort((a,b)=>b.share-a.share || a.oppo
  const label=c.n===0?'Prior':c.n<state.minN?'n<'+state.minN:c.n<30?'Thin':'';
  return `<tr><td>${escT(c.opponent)}${label?` <span class="badge">${escT(label)}</span>`:''}</td><td>${pct(c.share)}</td><td class="${cls}">${estimateHtml(c.mean,c.low,c.high)}</td><td>${c.n?`${c.wins}–${c.n-c.wins}`:'—'}</td><td>${escT(c.source || 'prior')}</td></tr>`;
 }).join('');}
+function campLink(label){
+ const row=(D.camps || []).find(c=>c.subject===label);
+ return row ? `<a href="#detail-c-${escA(row._idx)}">${escT(label)}</a>` : escT(label);
+}
+function slots(value){return value==null?'—':Number(value).toFixed(1);}
+function decisionUnitHtml(r){
+ const u=r.decision_units;
+ if(!u)return '';
+ const floor=u.floor_comparison || {}, composition=u.composition || {};
+ const compositionCamps=composition.camps || [];
+ const records=new Map(compositionCamps.map(c=>[c.camp,c]));
+ const campRows=(floor.camps || []).map(c=>{
+  const rec=records.get(c.camp) || {};
+  const weight=floor.camp_weights && floor.camp_weights[c.camp];
+  const tough=c.toughest_pairing || {};
+  return `<tr><td>${campLink(c.camp)}</td><td>${rec.list_count ?? c.current_list_count ?? 0}</td><td>${weight==null?'—':pct(weight)}</td><td>${pct(c.floor)}</td><td>${escT(tough.opponent || '—')}</td><td>${tough.n ?? '—'}</td><td>${tough.prior_contribution_fraction==null?'—':pct(tough.prior_contribution_fraction)}</td></tr>`;
+ }).join('');
+ const pairRows=(composition.camp_pairs || []).map(pair=>{
+  const main=pair.main || {},side=pair.side || {},pilot=pair.pilot_overlap || {};
+  return `<tr><td>${campLink(pair.camp_a)} · ${campLink(pair.camp_b)}</td><td>${slots(main.slot_distance)}</td><td>${slots(side.slot_distance)}</td><td>${main.card_coverage_a==null?'—':pct(main.card_coverage_a)} / ${main.card_coverage_b==null?'—':pct(main.card_coverage_b)}</td><td>${pilot.jaccard==null?'—':pct(pilot.jaccard)} (${pilot.overlap ?? 0}/${pilot.union ?? 0})</td></tr>`;
+ }).join('');
+ const summary=floor.available
+  ? `Current camp coverage ${pct(floor.current_camp_coverage)} · modeled parent coverage ${pct(floor.modeled_parent_coverage)} · floor lift from pooling ${pp(floor.pooling_uplift)} · parent/build floor gap ${pp(floor.parent_minus_weighted_camp_floor)}`
+  : `Unavailable: ${escT(floor.unavailable_reason || 'insufficient common evidence')}`;
+ const floors=campRows ? `<div class="table-scroll"><table class="ledger"><thead><tr><th>Build</th><th>Lists</th><th>Share</th><th>Floor</th><th>Toughest pairing</th><th>n</th><th>Prior</th></tr></thead><tbody>${campRows || '<tr><td colspan="7">No camp floor rows available.</td></tr>'}</tbody></table></div>` : '';
+ const pairs=pairRows ? `<details><summary>Composition and pilot overlap</summary><div class="table-scroll"><table class="ledger"><thead><tr><th>Build pair</th><th>Main slots</th><th>Side slots</th><th>Card records</th><th>Pilots · Jaccard</th></tr></thead><tbody>${pairRows || '<tr><td colspan="5">No camp pairs available.</td></tr>'}</tbody></table></div><p class="muted">Slot distance is 0.5 × the sum of absolute mean-copy differences, reported by zone. Pilot overlap is source-scoped after normalizing handles; unknown handles are excluded.</p></details>` : '';
+ return `<details class="method"><summary>Build decision units</summary><p class="muted">Descriptive parent-versus-camp diagnostic; it does not change taxonomy or ranking authority. Floor lifts are percentage points (pp); n and prior columns describe support.</p><p>${summary}</p>${floors}${pairs}</details>`;
+}
 function detailHtml(r){
  const d=decision(r), cells=d.cells || [];
  const info=`<div class="detail-meta"><span>Performance ${pct(d.performance)} · 95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</span><span>Floor ${pct(d.floor)} · toughest pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</span><span>${pct(d.coverage)} direct evidence</span></div>`;
@@ -136,7 +165,7 @@ function detailHtml(r){
  const plans=(r.plan_cells || []).map(c=>`<span class="member">${escT(c.opponent)} ${pct(c.p)} · ${c.wins}–${c.losses}</span>`).join('');
  const minimum=`Minimum across all opponents: 95% ${fmtP(d.floor_low)}–${fmtP(d.floor_high)}%. This includes uncertainty about which pairing is worst.`;
  const provenance=cells.filter(c=>c.prior_source || c.concentration_warning || c.intervals).map(c=>`${c.opponent}: ${c.prior_source || c.source}${c.prior_strength!=null?' · prior '+pct(c.prior_mean)+' / '+c.prior_strength.toFixed(1)+' pseudo-matches':''}${c.intervals?' · '+c.intervals:''}${c.concentration_warning?' · '+c.concentration_warning:''}`).join('\n');
- return info+ledger+(plans?`<details class="method"><summary>Against strategic plans</summary><div class="members">${plans}</div></details>`:'')+`<details class="method"><summary>Evidence details</summary><div class="audit">${escT(minimum+'\n'+(provenance || 'No additional historical evidence.'))}</div></details>`;
+ return info+ledger+decisionUnitHtml(r)+(plans?`<details class="method"><summary>Against strategic plans</summary><div class="members">${plans}</div></details>`:'')+`<details class="method"><summary>Evidence details</summary><div class="audit">${escT(minimum+'\n'+(provenance || 'No additional historical evidence.'))}</div></details>`;
 }
 const columns=[['Deck',null],['Performance','performance'],['Matchup floor','floor'],['Toughest pairing',null],['Floor coverage','coverage'],['Meta','field_share']];
 function tableHtml(rows,kind){

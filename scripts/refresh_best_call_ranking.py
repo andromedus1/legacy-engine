@@ -222,7 +222,10 @@ def _authority_payload(blob: dict) -> dict:
                 {
                     row_key: copy.deepcopy(row_value)
                     for row_key, row_value in row.items()
-                    if row_key not in {"diagnostic_evidence", "best_available_estimate", "decision"}
+                    if row_key not in {
+                        "diagnostic_evidence", "best_available_estimate", "decision",
+                        "decision_units",
+                    }
                 }
                 for row in value
             ]
@@ -234,6 +237,7 @@ def _authority_payload(blob: dict) -> dict:
     meta.pop("report_utility", None)
     meta.pop("deck_rankings", None)
     meta.pop("refresh_changes", None)
+    meta.pop("decision_units", None)
     return payload
 
 
@@ -2254,6 +2258,35 @@ def generate_ranking(
                 f"{time.perf_counter() - projection_started:.1f}s"
             )
         _publish_deck_rankings(con, blob, parent_interval=parent_interval, camp_interval=camp_interval)
+        # Build diagnostics consume the final projected rows so their matchup
+        # labels and shares match the disclosure.  They are descriptive
+        # additions and are excluded from the ranking authority payload above.
+        from legacy_engine.advisory.decision_units import analyze_decision_units
+
+        analysis_until = effective_until
+        if analysis_until is None:
+            corpus_max = blob.get("meta", {}).get("corpus_max")
+            if corpus_max:
+                analysis_until = (
+                    dt.date.fromisoformat(corpus_max) + dt.timedelta(days=1)
+                ).isoformat()
+        if analysis_until is not None:
+            decision_units = analyze_decision_units(
+                con, blob, since=effective_since, until=analysis_until,
+            )
+            by_parent = decision_units["by_parent"]
+            for row in blob.get("arch", ()):
+                item = by_parent.get(row.get("subject"))
+                if item is not None:
+                    row["decision_units"] = item
+            blob.setdefault("meta", {})["decision_units"] = {
+                "version": decision_units["version"],
+                "status": decision_units["status"],
+                "window": decision_units["window"],
+                "parents_analyzed": decision_units["summary"]["parents_analyzed"],
+                "parents_with_comparison": decision_units["summary"]["parents_with_comparison"],
+                "top_attention": decision_units["summary"]["top_attention"],
+            }
         # The evaluator consumes this typed handoff directly when it calls the
         # publisher. It must never enter the JSON/page blob, since it contains
         # Pydantic source objects rather than browser data.
@@ -2305,7 +2338,10 @@ def generate_ranking(
     page_blob = dict(blob)
     for key in ("arch", "camps"):
         page_blob[key] = [
-            {name: row[name] for name in ("subject", "_idx", "parent", "camp", "decision", "plan_cells") if name in row}
+            {name: row[name] for name in (
+                "subject", "_idx", "parent", "camp", "decision", "plan_cells",
+                "decision_units",
+            ) if name in row}
             for row in blob[key]
         ]
     page_blob["plans"] = [
