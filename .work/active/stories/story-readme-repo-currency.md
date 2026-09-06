@@ -1,14 +1,14 @@
 ---
 id: story-readme-repo-currency
 kind: story
-stage: drafting
+stage: implementing
 tags: [docs]
 parent: null
-depends_on: [epic-superarchetype-layer-three-level-page]
+depends_on: [feature-deck-rankings, feature-doomsday-variant-rankings]
 release_binding: null
 gate_origin: null
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-09-05
 ---
 
 # README full review + repo currency check (completion gate for the superarchetype arc)
@@ -44,3 +44,35 @@ Scope:
 Do NOT execute before the three-level page ships and passes its quality review — this story is
 deliberately the LAST item of the arc so the README describes the finished state once, not three
 intermediate ones.
+
+
+## Integration scope (2026-09-05)
+The maintainer authorized bringing the accumulated repository history through PRs
+into main and completing repository hygiene. Reuse this existing completion item;
+its original page dependency is satisfied by the archived Deck Rankings and
+Doomsday Variant Rankings features.
+
+Execution: one host owns branch integration and bounded inline story review;
+a documentation edit agent checks README/related claims. Review weight: standard,
+standalone-story lane. No new product architecture or UI work.
+
+Acceptance:
+- Preserve the tested accumulated history and merge through a green PR into main.
+- Account for all local branch tips; preserve any content not yet represented.
+- Review README in full, correct verified drift, and regenerate knowledge indexes
+  if indexed documents change.
+- Align the tracked lockfile with pyproject's supported Python range without
+  upgrading package versions as a side effect.
+- Keep other-session working files intact, and bring local main to the remote tip.
+- Inspect existing operational alerts and distinguish data/model pending work
+  from Git hygiene; do not dismiss evidence alerts to create a clean status.
+
+Simplification: retire the stacked integration boundary once its complete history
+is on main; archive this previously dangling completion item. Existing analytical
+bugs remain tracked work, not an instruction to drain the product backlog.
+
+Initial inventory: origin/main is an ancestor of the tested Deck Rankings +
+Doomsday head (394 unlanded commits, no main-only commits). Every local branch is
+contained except decks/energy-dnt-tron-specs: 14 of its 15 files are byte-identical,
+and its remaining backlog file has later additions. Hogaak files are uncommitted
+in the shared checkout; integration uses an isolated worktree.
