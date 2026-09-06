@@ -1,10 +1,10 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 3
-generated_at: '2026-09-05T21:49:32Z'
+generated_at: '2026-09-05T23:04:55Z'
 generated_from: frontmatter
-total_docs: 32
+total_docs: 33
 by_kind:
-  planning: 7
+  planning: 8
   research: 25
 recent:
 - path: docs/ARCHITECTURE.md
@@ -25,6 +25,10 @@ recent:
   updated: '2026-09-05'
 - path: docs/analysis/best-call-ranking.md
   title: Deck Rankings — refresh runbook
+  kind: planning
+  updated: '2026-09-05'
+- path: docs/analysis/doomsday-variant-rankings.md
+  title: Doomsday Variant Rankings — refresh runbook
   kind: planning
   updated: '2026-09-05'
 - path: docs/analysis/meta-deck-analysis-loop.md

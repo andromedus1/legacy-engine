@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-09-05T21:49:32Z'
+generated_at: '2026-09-05T23:04:55Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -191,6 +191,33 @@ documents:
       no phase publishes a method.
     - The generated page is disposable. Edit the tracked script or template, then
       regenerate decks/deck-rankings.html; do not hand-edit the output.
+  docs/analysis/doomsday-variant-rankings.md:
+    summary: 'Runbook for decks/doomsday-variant-rankings.html, a self-contained comparison
+      of
+
+      exclusive Doomsday color-and-signature cohorts against one current non-Doomsday
+
+      field. It keeps tournament standings, compatible resolved rounds, and exact
+      observed
+
+      decklists separate so sparse or historical evidence remains useful without looking
+      current.
+
+      '
+    decisions:
+    - The report is a separate descriptive surface from the canonical Deck Rankings
+      page and the dated Doomsday field guide; it does not change taxonomy or ranking
+      authority.
+    - Cohorts are mutually exclusive combinations of actual colored mana sources and
+      protection-package signatures, with white, green, red, other-splash, and unclassified
+      residuals retained instead of forced into target variants.
+    - Compatible external matchup rounds use a fixed Beta(1,1) prior per cell and
+      never borrow from the Doomsday parent; missing cells remain neutral with full
+      visible uncertainty.
+    - Published non-League standings and uniquely resolved physical rounds are separate
+      ledgers and are never converted into one denominator.
+    - The generated page is disposable. Edit the tracked Python or HTML template,
+      then regenerate the gitignored output; do not hand-edit it.
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo
