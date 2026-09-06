@@ -1,7 +1,7 @@
 ---
 id: story-readme-repo-currency
 kind: story
-stage: review
+stage: done
 tags: [docs]
 parent: null
 depends_on: [feature-deck-rankings, feature-doomsday-variant-rankings]
