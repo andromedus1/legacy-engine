@@ -7,7 +7,13 @@ summary: >
   defects with file:line, tests whose assertions do not bite, implementation-note
   claims that failed verification, and cross-cutting seam risks. Findings are
   reported for the orchestrator to file as follow-up items; no reverts.
-updated: 2026-08-01
+updated: 2026-08-11
+key_findings:
+  - The random-effects aggregation estimator matched independent hand calculations, but refused and not-computable cells exposed misleading or incomplete provenance text.
+  - The superarchetype local-veto contract was unevaluable for sparse sibling columns and did not surface that limitation to consumers.
+  - Several shipped tests were mutation-sensitive, while named weaker assertions and vacuous fixtures required follow-up repair.
+  - Cross-feature review found caller-dependent guards and implementation-note claims that needed verification at their consumption seams.
+  - Findings were follow-up work for the orchestrator; the review performed no reverts or substrate mutations.
 ---
 
 # Fresh-context deep review — features shipped 2026-07-31/08-01

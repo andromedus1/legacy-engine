@@ -1,0 +1,21 @@
+# Saved post-May 18 field (107 players), from the maintainer's paper-meta pull.
+# The source did not provide an end date. Counts are the supplied player counts; shares are count/107.
+# Affinity Combo is retained as an explicitly unclassified opponent (4 players) because no decklists
+# were available to establish an engine taxonomy mapping. This file is a historical sample scored by
+# the current model, not a current September observation.
+0.1121495327102804 Izzet Delver 12
+0.1028037383177570 Show and Tell 11
+0.0747663551401869 White Beanstalk 8
+0.0747663551401869 Dimir Tempo 8
+0.0747663551401869 Jeskai Midrange 8
+0.0654205607476636 Azorius Midrange 7
+0.0654205607476636 Black Midrange 7
+0.0654205607476636 Black Saga Storm 7
+0.0560747663551402 Death & Taxes 6
+0.0560747663551402 Doomsday 6
+0.0560747663551402 Eldrazi 6
+0.0467289719626168 Painter 5
+0.0373831775700935 Blue Artifacts 4
+0.0373831775700935 Energy 4
+0.0373831775700935 Esper Midrange 4
+0.0373831775700935 Affinity Combo 4

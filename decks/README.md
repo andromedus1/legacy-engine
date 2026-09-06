@@ -4,11 +4,30 @@ Working decklists and field files for deck-prep (`scripts/deck-prep.sh`).
 
 ## Generated review artifact
 
-- `best-deck-best-call-ranking.html` — local, git-ignored Best Deck / Best Call review page.
+- `deck-rankings.html` — local, git-ignored Deck Rankings review page.
   Refresh it with `.venv/bin/python scripts/refresh_best_call_ranking.py`; it is generated from
   the local analytics data and should be reviewed, not hand-edited.
 
-## Decklists (plain text: `N Cardname` per line, maindeck only)
+## Decklists (plain text: `N Cardname` per line)
+
+Ordinary deck-prep inputs may be maindeck-only; `*-75.txt` packages include an explicit
+`Sideboard` section.
+
+### Doomsday chassis registrations
+
+These observed 75s are selected for chassis learning, not consensus decks, matchup rankings, or
+speed measurements. Each file is an exact published registration with its source provenance in the
+header.
+
+The broader 15-artifact / 14-unique-list paired comparison registry and playtest protocol live in
+[doomsday-variants/](doomsday-variants/).
+
+| Structural label | Registration | Source |
+| --- | --- | --- |
+| `personal-tutor-turbo` | [doomsday-personal-tutor-turbo-75.txt](doomsday-personal-tutor-turbo-75.txt) — clan, 2026-08-18, 5-0 | exact published registration |
+| `tamiyo-bilbo-unearth-value` | [doomsday-tamiyo-bilbo-unearth-value-75.txt](doomsday-tamiyo-bilbo-unearth-value-75.txt) — Battlegrounds, 2026-08-12, 5-0 | exact published registration |
+| `wasteland-murktide-tempo` | [doomsday-wasteland-murktide-tempo-75.txt](doomsday-wasteland-murktide-tempo-75.txt) — HJ_Kaiser, 2026-08-12, 7th Place | exact published registration |
+
 - `dimir-tempo.txt` — the primary build: grindy/disruptive (2 Hymn to Tourach + 2 Baleful Strix
   over the consensus velocity package). Off-meta in those slots, but pointed at a big-mana meta.
 - `dimir-tempo.sb.txt` — its 15-card sideboard.

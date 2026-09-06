@@ -40,7 +40,9 @@ Units:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field as dataclass_field
+from typing import Literal, TypedDict
 
 import numpy as np
 
@@ -62,6 +64,93 @@ _COVERAGE_RESTRICT_THRESHOLD: float = 0.85   # below this data_coverage, restric
 _PBEST_SUPPRESS_COVERAGE: float = 0.05       # below this data_coverage, P(best) is imputation noise → suppress in display
 _DEFAULT_RISK_QUANTILE: float = 0.25   # default lower-quantile for risk-adjusted ranking
 _RISK_AVERSE_QUANTILE: float = 0.05   # quantile used when risk_averse=True
+
+RankingEvidenceStratum = Literal[
+    "grounded", "lean", "imputation-dominated", "transition-prior", "inactive", "unscorable"
+]
+
+
+class RankingEvidencePayload(TypedDict):
+    stratum: RankingEvidenceStratum
+    measured_share: float
+    imputed_share: float
+    observed_field_share: float
+    decision_field_share: float
+    eligible: bool
+    reason: str | None
+
+
+def ranking_evidence_payload(
+    *,
+    field_share: float | None = None,
+    measured_share: float,
+    resolved_cells: int,
+    grounded: bool,
+    observed_field_share: float | None = None,
+    decision_field_share: float | None = None,
+    transition_prior: bool = False,
+    suppress_coverage: float = _PBEST_SUPPRESS_COVERAGE,
+) -> RankingEvidencePayload:
+    """Classify a row's evidence without changing its score or display presence."""
+    if decision_field_share is None:
+        decision_field_share = field_share if field_share is not None else 0.0
+    if observed_field_share is None:
+        observed_field_share = decision_field_share
+    if decision_field_share < 0.0 or observed_field_share < 0.0:
+        raise ValueError("field shares must be non-negative")
+    measured = min(1.0, max(0.0, measured_share))
+    imputed = min(1.0, max(0.0, 1.0 - measured))
+    reason: str | None = None
+    if decision_field_share <= 0.0:
+        stratum: RankingEvidenceStratum = "inactive"
+        reason = "no current-field presence"
+    elif resolved_cells == 0:
+        stratum = "unscorable"
+        reason = "no resolved matchup cells against the selected field"
+    elif measured < suppress_coverage:
+        stratum = "unscorable"
+        reason = f"measured field coverage {measured:.1%} is below {suppress_coverage:.0%}"
+    elif transition_prior and observed_field_share <= 0.0:
+        stratum = "transition-prior"
+    elif imputed > 0.5:
+        stratum = "imputation-dominated"
+    elif grounded:
+        stratum = "grounded"
+    else:
+        stratum = "lean"
+    return {
+        "stratum": stratum,
+        "measured_share": measured,
+        "imputed_share": imputed,
+        "observed_field_share": float(observed_field_share),
+        "decision_field_share": float(decision_field_share),
+        "eligible": stratum not in ("inactive", "unscorable"),
+        "reason": reason,
+    }
+
+
+def practical_recommendation_order(
+    rows: Mapping[str, Mapping[str, object]],
+) -> tuple[str, ...]:
+    """Order supported rows by the existing posterior lean, without changing Agency authority."""
+    eligible: list[tuple[str, float, float]] = []
+    for label, row in rows.items():
+        evidence = row.get("ranking_evidence")
+        if isinstance(evidence, Mapping) and not evidence.get("eligible", False):
+            continue
+        methodology = row.get("methodology")
+        lean = methodology.get("lean") if isinstance(methodology, Mapping) else row.get("lean")
+        if not isinstance(lean, Mapping):
+            lean = row.get("posterior_lean")
+        if not isinstance(lean, Mapping):
+            continue
+        q25 = lean.get("q25")
+        median = lean.get("median")
+        if isinstance(q25, (int, float)) and isinstance(median, (int, float)):
+            eligible.append((str(label), float(q25), float(median)))
+    return tuple(label for label, _q25, _median in sorted(
+        eligible, key=lambda item: (-item[1], -item[2], item[0]),
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -228,17 +317,27 @@ def _sample_S(
 # ---------------------------------------------------------------------------
 
 
-def _is_covered_cell(matrix: MatchupMatrix, deck_archetype: str, opp: str) -> bool:
+def _is_covered_cell(
+    matrix: MatchupMatrix,
+    deck_archetype: str,
+    opp: str,
+    *,
+    min_n: int | None = None,
+) -> bool:
     """Whether ``deck`` has trustworthy matchup data against ``opp``.
 
     Single source of truth for "covered": the self-mirror (a fixed-0.5 cell that is never
     imputed) counts as covered, as does any *displayed* (n ≥ DISPLAY_GATE_N), non-mirror
     cell.  An absent or thin (n < gate) cell is NOT covered.
     """
+    if min_n is not None and min_n < 1:
+        raise ValueError("coverage min_n must be >= 1")
     if opp == deck_archetype:
         return True  # mirror: fixed 0.5, never imputed
     cell = matrix.cells.get((deck_archetype, opp))
-    return cell is not None and cell.display and not cell.is_mirror
+    if cell is None or cell.is_mirror:
+        return False
+    return cell.display if min_n is None else cell.n >= min_n
 
 
 def covered_field_archetypes(
@@ -258,6 +357,8 @@ def _compute_data_coverage(
     matrix: MatchupMatrix,
     field: FieldDistribution,
     deck_archetype: str,
+    *,
+    min_n: int | None = None,
 ) -> float:
     """Fraction of *non-mirror* field share-mass the deck has a measured cell against.
 
@@ -269,6 +370,8 @@ def _compute_data_coverage(
 
     Returns 1.0 when the field is empty (degenerate; no coverage needed).
     """
+    if min_n is not None and min_n < 1:
+        raise ValueError("coverage min_n must be >= 1")
     field_archetypes = list(field.shares)
     if not field_archetypes:
         return 1.0
@@ -281,7 +384,7 @@ def _compute_data_coverage(
             continue  # skip mirror — not part of the coverage-ratio denominator
         share = field.shares[opp]
         total_non_mirror_mass += share
-        if _is_covered_cell(matrix, deck_archetype, opp):
+        if _is_covered_cell(matrix, deck_archetype, opp, min_n=min_n):
             covered_mass += share
 
     if total_non_mirror_mass <= 0.0:
@@ -606,6 +709,7 @@ class DeckRanking:
     coverage_caveated: set[str]
     pairwise: dict[tuple[str, str], float]
     field_source: str
+    imputation_share: dict[str, float] = dataclass_field(default_factory=dict)
 
 
 def rank_decks(
@@ -619,6 +723,7 @@ def rank_decks(
     risk_averse: bool = False,
     risk_quantile: float = _DEFAULT_RISK_QUANTILE,
     min_coverage: float = 0.0,
+    coverage_min_n: int | None = None,
     seed: int | None = None,
 ) -> DeckRanking:
     """Rank candidate decks under shared-field MC.
@@ -649,6 +754,9 @@ def rank_decks(
         ``DeckRanking.low_coverage`` and flagged — they are NOT dropped
         from ``decks``.  Default 0.0 (no flagging).
     """
+    if coverage_min_n is not None and coverage_min_n < 1:
+        raise ValueError("coverage_min_n must be >= 1")
+
     # Reconcile risk_averse / risk_quantile: risk_averse=True → use 0.05
     effective_q = _RISK_AVERSE_QUANTILE if risk_averse else risk_quantile
 
@@ -665,6 +773,7 @@ def rank_decks(
             coverage_caveated=set(),
             pairwise={},
             field_source=field.field_source,
+            imputation_share={},
         )
 
     rng = np.random.default_rng(seed)
@@ -727,7 +836,13 @@ def rank_decks(
 
     # ── data_coverage per deck ────────────────────────────────────────────
     coverage_dict: dict[str, float] = {
-        deck: _compute_data_coverage(matrix, field, deck) for deck in candidates
+        deck: _compute_data_coverage(
+            matrix, field, deck, min_n=coverage_min_n,
+        ) for deck in candidates
+    }
+    imputation_dict = {
+        deck: min(1.0, max(0.0, 1.0 - coverage))
+        for deck, coverage in coverage_dict.items()
     }
 
     # ── low_coverage flag set ─────────────────────────────────────────────
@@ -787,6 +902,7 @@ def rank_decks(
         coverage_caveated=coverage_caveated,
         pairwise=pairwise,
         field_source=field.field_source,
+        imputation_share=imputation_dict,
     )
 
 

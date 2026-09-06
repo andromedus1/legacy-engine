@@ -1,0 +1,9 @@
+{
+  "source_path": "data/cache/Tournaments/MTGO/2026/08/12/legacy-league-2026-08-1210967.json",
+  "Date": "2026-08-12T00:00:00+00:00",
+  "Player": "Battlegrounds",
+  "Result": "5-0",
+  "AnchorUri": "https://www.mtgo.com/decklist/legacy-league-2026-08-1210967#deck_Battlegrounds",
+  "Mainboard": [{"Count": 4, "CardName": "Bilbo, Thief in the Night"}, {"Count": 4, "CardName": "Brainstorm"}, {"Count": 1, "CardName": "Cavern of Souls"}, {"Count": 1, "CardName": "Consider"}, {"Count": 4, "CardName": "Dark Ritual"}, {"Count": 4, "CardName": "Doomsday"}, {"Count": 1, "CardName": "Edge of Autumn"}, {"Count": 3, "CardName": "Flooded Strand"}, {"Count": 3, "CardName": "Flow State"}, {"Count": 4, "CardName": "Force of Will"}, {"Count": 1, "CardName": "Island"}, {"Count": 1, "CardName": "Lion's Eye Diamond"}, {"Count": 2, "CardName": "Lotus Petal"}, {"Count": 1, "CardName": "Marsh Flats"}, {"Count": 4, "CardName": "Polluted Delta"}, {"Count": 4, "CardName": "Ponder"}, {"Count": 1, "CardName": "Scrubland"}, {"Count": 1, "CardName": "Street Wraith"}, {"Count": 1, "CardName": "Swamp"}, {"Count": 4, "CardName": "Tamiyo, Inquisitive Student"}, {"Count": 2, "CardName": "Teferi, Time Raveler"}, {"Count": 1, "CardName": "Thassa's Oracle"}, {"Count": 2, "CardName": "Thoughtseize"}, {"Count": 1, "CardName": "Tundra"}, {"Count": 1, "CardName": "Undercity Sewers"}, {"Count": 3, "CardName": "Underground Sea"}, {"Count": 1, "CardName": "Unearth"}],
+  "Sideboard": [{"Count": 2, "CardName": "Barrowgoyf"}, {"Count": 2, "CardName": "Dauthi Voidwalker"}, {"Count": 2, "CardName": "Force of Negation"}, {"Count": 2, "CardName": "Murktide Regent"}, {"Count": 2, "CardName": "Orcish Bowmasters"}, {"Count": 2, "CardName": "Prismatic Ending"}, {"Count": 3, "CardName": "Swords to Plowshares"}]
+}

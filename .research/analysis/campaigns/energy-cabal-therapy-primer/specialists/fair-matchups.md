@@ -2,7 +2,7 @@
 description: Fair-matchup specialist report for the Energy Cabal Therapy primer
 type: research
 summary: Exact-75 plans for the prevalent tempo, control, creature, midrange, and Lands matchups.
-updated: 2026-08-03
+updated: 2026-08-11
 decisions:
   - Preserve the maindeck in fair matchups unless a sideboard card directly attacks a named engine.
   - Treat sideboarding recommendations as exact-75 synthesis, not copied pilot authority.
@@ -10,6 +10,7 @@ key_findings:
   - The sideboard is deliberately unfair-matchup-heavy, so several fair matchups require zero swaps.
   - Hexing Squelcher, Voice of Victory, Bowmasters, and basic Plains are the structural anti-tempo package.
   - Lands is the fair-side exception where eight sideboard cards are live.
+provenance: agent-synthesis
 ---
 
 # Fair-matchup report: Energy Cabal Therapy

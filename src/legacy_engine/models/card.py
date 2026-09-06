@@ -8,6 +8,9 @@ derivations (deck colors, staple roles, mana-base tags) are layered in the
 
 from __future__ import annotations
 
+from datetime import datetime
+from enum import StrEnum
+
 from legacy_engine.models.base import LegacyEngineModel
 
 
@@ -59,3 +62,56 @@ class Card(LegacyEngineModel):
     def from_scryfall(cls, raw: dict) -> "Card":
         """Build a Card from a raw Scryfall oracle-card dict (unmodeled keys dropped)."""
         return cls.model_validate(raw)
+
+
+class CardNameStatus(StrEnum):
+    CANONICAL = "canonical"
+    LOCALIZED = "localized"
+    NEW_CARD = "new_card"
+    AMBIGUOUS = "ambiguous"
+    SUSPECTED_TRUNCATED = "suspected_truncated"
+    UNRESOLVED = "unresolved"
+
+
+class CardNameResolution(LegacyEngineModel):
+    observed_name: str
+    normalized_name: str
+    status: CardNameStatus
+    canonical_name: str | None = None
+    language: str | None = None
+    scryfall_id: str | None = None
+    source: str
+    evidence: str | None = None
+    source_updated_at: str | None = None
+    resolved_at: datetime
+    reason: str
+
+
+class PrintedCardAlias(LegacyEngineModel):
+    printed_name: str
+    normalized_alias: str
+    canonical_name: str
+    language: str
+    scryfall_id: str
+
+
+class CardAliasManifest(LegacyEngineModel):
+    source_updated_at: str
+    built_at: datetime
+    release_codes: tuple[str, ...]
+    alias_count: int
+    ambiguous_key_count: int
+
+
+class CardCoverageGap(LegacyEngineModel):
+    observed_name: str
+    row_count: int
+    deck_count: int
+    first_event_date: str
+    providers: tuple[str, ...]
+    event_uris: tuple[str, ...]
+
+
+class CardCoverageCutoff(LegacyEngineModel):
+    cutoff: str | None
+    gaps: tuple[CardCoverageGap, ...]

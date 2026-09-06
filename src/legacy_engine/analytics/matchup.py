@@ -21,6 +21,7 @@ Units covered:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -28,13 +29,17 @@ from statsmodels.stats.proportion import proportion_confint
 
 from legacy_engine.analytics.match_results import compute_match_results
 from legacy_engine.confidence import tier_for_sample
-from legacy_engine.models.matchup import MatchupCell
+from legacy_engine.models.matchup import CellConcentration, MatchupCell
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
-    from legacy_engine.analytics.eras.consume import EraHorizon
-    from legacy_engine.analytics.match_results import MatchResults
+    from legacy_engine.analytics.eras.consume import (
+        AnalysisClock,
+        EraHorizon,
+        MatchupEvidenceViews,
+    )
+    from legacy_engine.analytics.match_results import MatchResults, SelectedOutcomeLedger
     from legacy_engine.analytics.superarchetype.aggregate import ImputedCell, PooledCell
     from legacy_engine.analytics.superarchetype.chain import LadderEntry
     from legacy_engine.analytics.superarchetype.registry import SuperarchetypeRegistry
@@ -133,6 +138,7 @@ def build_cell(
     prior_mean: float = 0.5,
     prior_source: str | None = None,
     prior_strength: float = SHRINK_STRENGTH,
+    concentration: CellConcentration | None = None,
 ) -> MatchupCell:
     """Build a directed ``MatchupCell`` for ``archetype_a`` vs ``archetype_b``.
 
@@ -188,6 +194,38 @@ def build_cell(
         display=display,
         prior_mean=prior_mean,
         prior_source=prior_source,
+        prior_strength=prior_strength,
+        concentration=concentration,
+    )
+
+
+def concentration_for_tallies(
+    event_counts: "Mapping[str, int]",
+    month_counts: "Mapping[str, int]",
+    *,
+    n: int,
+) -> CellConcentration | None:
+    """Return deterministic dominant event/month evidence for a non-empty tally."""
+    if n == 0:
+        return None
+    if sum(event_counts.values()) != n or sum(month_counts.values()) != n:
+        raise ValueError("concentration bucket counts must sum to cell n")
+
+    def dominant(counts: "Mapping[str, int]") -> tuple[str | None, int]:
+        if not counts:
+            return None, 0
+        key, count = min(counts.items(), key=lambda item: (-item[1], item[0]))
+        return key, count
+
+    event_id, event_n = dominant(event_counts)
+    month, month_n = dominant(month_counts)
+    return CellConcentration(
+        event_id=event_id,
+        event_n=event_n,
+        event_share=event_n / n,
+        month=month,
+        month_n=month_n,
+        month_share=month_n / n,
     )
 
 
@@ -441,6 +479,9 @@ def build_matrix(
             if tally is not None:
                 cells[(a, b)] = build_cell(
                     a, b, tally.wins, tally.n, prior_mean=prior_mean, prior_source=prior_source,
+                    concentration=_cell_concentration(
+                        mr.matchup_event_counts, mr.matchup_month_counts, (a, b), tally.n,
+                    ),
                 )
             else:
                 # Unobserved pair — emit n=0 cell to keep matrix rectangular
@@ -491,6 +532,33 @@ def _pool_opponent_tallies(
         wins, n = pooled.get((a, parent_b), (0, 0))
         pooled[(a, parent_b)] = (wins + tally.wins, n + tally.n)
     return pooled
+
+
+def _pool_opponent_counts(
+    counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    camp_parent: "Mapping[str, str]",
+) -> dict[tuple[str, str], dict[str, int]]:
+    """Pool event/month buckets with the same opponent mapping as numeric tallies."""
+    pooled: dict[tuple[str, str], dict[str, int]] = {}
+    for (subject, opponent), buckets in counts.items():
+        parent_opponent = camp_parent.get(opponent, opponent)
+        if camp_parent.get(subject) == parent_opponent:
+            continue
+        target = pooled.setdefault((subject, parent_opponent), {})
+        for bucket, count in buckets.items():
+            target[bucket] = target.get(bucket, 0) + count
+    return pooled
+
+
+def _cell_concentration(
+    event_counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    month_counts: "Mapping[tuple[str, str], Mapping[str, int]]",
+    key: tuple[str, str],
+    n: int,
+) -> CellConcentration | None:
+    return concentration_for_tallies(
+        event_counts.get(key, {}), month_counts.get(key, {}), n=n,
+    )
 
 
 def _multi_split_inclusion(
@@ -684,6 +752,8 @@ def build_multi_split_matrix(
     )
     subjects, opponents, observed_parents = _multi_split_inclusion(mr, min_row_share)
     pooled = _pool_opponent_tallies(mr, mr.camp_parent)
+    pooled_events = _pool_opponent_counts(mr.matchup_event_counts, mr.camp_parent)
+    pooled_months = _pool_opponent_counts(mr.matchup_month_counts, mr.camp_parent)
     marginals, parent_cells_lco, camp_of = _multi_hierarchy_inputs(
         mr, subjects, opponents, mr.camp_parent, pooled,
     )
@@ -702,6 +772,9 @@ def build_multi_split_matrix(
             wins, n = pooled.get((subject, opponent), (0, 0))
             cells[(subject, opponent)] = build_cell(
                 subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+                concentration=_cell_concentration(
+                    pooled_events, pooled_months, (subject, opponent), n,
+                ),
             )
 
     return MultiSplitMatrix(
@@ -761,6 +834,33 @@ class AdaptiveMatrix:
     audit_preamble: tuple[str, ...] = ()
 
 
+@dataclass
+class IntervalAdaptiveMatrix:
+    """Interval-authority wrapper; ``current`` remains ranking-authoritative."""
+
+    current: AdaptiveMatrix | AdaptiveMultiSplitMatrix
+    evidence: "dict[tuple[str, str], MatchupEvidenceViews]"
+    clock: "AnalysisClock"
+    selected_outcomes: "SelectedOutcomeLedger"
+    certificate_run_id: str | None = None
+    audit_preamble: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ScalarProjection:
+    value: str | None
+    refused: bool
+    reason: str
+
+
+def scalar_interval_projection(atoms: tuple[object, ...]) -> ScalarProjection:
+    """Losslessly project only a single interval; disjoint sets refuse widening."""
+    if len(atoms) != 1:
+        return ScalarProjection(value=None, refused=True, reason="disjoint-intervals-not-scalar")
+    atom = atoms[0]
+    return ScalarProjection(value=atom.start.isoformat() if atom.start is not None else None, refused=False, reason="single-current-component")
+
+
 def _base_archetype(label: str, split_variant: str | None) -> str:
     """Strip a variant-camp suffix so a camp label resolves to its parent's ban-affectedness horizon.
 
@@ -783,6 +883,8 @@ def build_adaptive_matrix(
     affect_threshold: float = 0.25,
     split_variant: str | None = None,
     horizons: dict[str, str | None] | None = None,
+    ban_events=None,
+    until: str | None = None,
 ) -> AdaptiveMatrix:
     """Build a matchup matrix where each pairwise cell pools data over the maximally-valid window.
 
@@ -820,7 +922,7 @@ def build_adaptive_matrix(
     cell's window was truncated at an era (not ban-only) boundary — see ``_cross_era_prior``.
     """
     # 1. Full-corpus scan → row inclusion (min_row_share) + marginals + mirror_n (stable basis).
-    full = compute_match_results(con, provenance=provenance, split_variant=split_variant)
+    full = compute_match_results(con, provenance=provenance, split_variant=split_variant, until=until)
     total_matches = full.coverage.decisive_matched
     _denom_base = total_matches + full.coverage.mirror_matches
     denom = 2 * _denom_base if _denom_base > 0 else 1
@@ -843,6 +945,7 @@ def build_adaptive_matrix(
         horizon_meta, audit_preamble = era_horizons(
             con, included, provenance=provenance, split_variant=split_variant,
             affect_threshold=affect_threshold,
+            ban_events=ban_events,
         )
         valid_since = {a: horizon_meta[a].since for a in included}
 
@@ -852,7 +955,7 @@ def build_adaptive_matrix(
     for s in set(valid_since.values()):
         if s is not None and s not in mr_by_since:
             mr_by_since[s] = compute_match_results(
-                con, provenance=provenance, since=s, split_variant=split_variant,
+                con, provenance=provenance, since=s, until=until, split_variant=split_variant,
             )
 
     # 3b. Hierarchical cell prior inputs (Unit 1), one per distinct since bucket — reuses the
@@ -922,7 +1025,11 @@ def build_adaptive_matrix(
         for b in included:
             if a == b:
                 continue
-            s_ab = max(valid_since[a] or "", valid_since[b] or "") or None
+            from legacy_engine.analytics.eras.consume import clamp_pair_window
+
+            s_ab = clamp_pair_window(
+                a, b, subject_since=valid_since[a], opponent_since=valid_since[b],
+            ).effective_since
             mr_ab = mr_by_since[s_ab]
             marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
             tally = mr_ab.matchups.get((a, b))
@@ -939,6 +1046,9 @@ def build_adaptive_matrix(
                 prior_mean, prior_source = _cross_era_prior(a, b, s_ab)
             cells[(a, b)] = build_cell(
                 a, b, wins, n, prior_mean=prior_mean, prior_source=prior_source,
+                concentration=_cell_concentration(
+                    mr_ab.matchup_event_counts, mr_ab.matchup_month_counts, (a, b), n,
+                ),
             )
             cell_windows[(a, b)] = s_ab
 
@@ -1005,8 +1115,10 @@ def build_multi_split_adaptive(
     min_row_share: float = 0.02,
     affect_threshold: float = 0.25,
     horizons: dict[str, str | None] | None = None,
+    ban_events=None,
     superarchetypes: "SuperarchetypeRegistry | None" = None,
     apply_superarchetype_priors: bool = True,
+    until: str | None = None,
 ) -> AdaptiveMultiSplitMatrix:
     """``build_adaptive_matrix`` for every split parent at once — one scan per distinct horizon.
 
@@ -1060,7 +1172,7 @@ def build_multi_split_adaptive(
     """
     # 1. Full maximal scan → subjects/opponents/parents inclusion (stable basis, as in the plain
     #    adaptive builder: only per-cell data sourcing is windowed).
-    full = compute_match_results(con, provenance=provenance, split_variants=parents)
+    full = compute_match_results(con, provenance=provenance, split_variants=parents, until=until)
     subjects, opponents, observed_parents = _multi_split_inclusion(full, min_row_share)
     camp_parent = dict(full.camp_parent)
     entities = sorted(set(subjects) | set(opponents))
@@ -1076,6 +1188,7 @@ def build_multi_split_adaptive(
         horizon_meta, audit_preamble = era_horizons(
             con, entities, provenance=provenance, camp_parent=camp_parent,
             affect_threshold=affect_threshold,
+            ban_events=ban_events,
         )
         valid_since = {a: horizon_meta[a].since for a in entities}
 
@@ -1085,7 +1198,7 @@ def build_multi_split_adaptive(
     for s in set(valid_since.values()):
         if s is not None and s not in mr_by_since:
             mr_by_since[s] = compute_match_results(
-                con, provenance=provenance, since=s, split_variants=parents,
+                con, provenance=provenance, since=s, until=until, split_variants=parents,
             )
 
     # 3b. Per-window pooling + hierarchy inputs, derived from each window's OWN scan (never a wider
@@ -1094,6 +1207,14 @@ def build_multi_split_adaptive(
     # camp's marginal exactly as `_camp_hierarchy_inputs` does when the camp has no sibling tally.
     pooled_by_since = {
         s: _pool_opponent_tallies(mr, mr.camp_parent) for s, mr in mr_by_since.items()
+    }
+    pooled_events_by_since = {
+        s: _pool_opponent_counts(mr.matchup_event_counts, mr.camp_parent)
+        for s, mr in mr_by_since.items()
+    }
+    pooled_months_by_since = {
+        s: _pool_opponent_counts(mr.matchup_month_counts, mr.camp_parent)
+        for s, mr in mr_by_since.items()
     }
     hierarchy_by_since = {
         s: _multi_hierarchy_inputs(mr, subjects, opponents, mr.camp_parent, pooled_by_since[s])
@@ -1127,7 +1248,7 @@ def build_multi_split_adaptive(
             # once if no entity horizon already produced it.
             if regime_start is not None and regime_start not in pooled_by_since:
                 regime_mr = compute_match_results(
-                    con, provenance=provenance, since=regime_start, split_variants=parents,
+                    con, provenance=provenance, since=regime_start, until=until, split_variants=parents,
                 )
                 pooled_by_since[regime_start] = _pool_opponent_tallies(
                     regime_mr, regime_mr.camp_parent,
@@ -1221,7 +1342,14 @@ def build_multi_split_adaptive(
         for opponent in opponents:
             if opponent == subject or opponent == own_parent:
                 continue
-            s_ab = max(valid_since[subject] or "", valid_since[opponent] or "") or None
+            from legacy_engine.analytics.eras.consume import clamp_pair_window
+
+            s_ab = clamp_pair_window(
+                subject,
+                opponent,
+                subject_since=valid_since[subject],
+                opponent_since=valid_since[opponent],
+            ).effective_since
             marginals, parent_cells_lco, camp_of = hierarchy_by_since[s_ab]
             wins, n = pooled_by_since[s_ab].get((subject, opponent), (0, 0))
             prior_mean, prior_source = _cell_prior(
@@ -1267,6 +1395,10 @@ def build_multi_split_adaptive(
             cells[(subject, opponent)] = build_cell(
                 subject, opponent, wins, n, prior_mean=prior_mean, prior_source=prior_source,
                 prior_strength=prior_strength_value,
+                concentration=_cell_concentration(
+                    pooled_events_by_since[s_ab], pooled_months_by_since[s_ab],
+                    (subject, opponent), n,
+                ),
             )
             cell_windows[(subject, opponent)] = s_ab
 
@@ -1334,4 +1466,102 @@ def build_multi_split_adaptive(
         multi=multi, valid_since=valid_since, cell_windows=cell_windows,
         horizon_meta=horizon_meta, audit_preamble=(*audit_preamble, *sa_audit),
         cluster_cells=cluster_cells, imputed_cells=imputed_cells, ladder=ladder,
+    )
+
+
+def build_interval_adaptive_matrix(
+    con, *, clock, certificate_run_id: str | None = None, provenance: str | None = None,
+    requested_since=None, split_variant: str | None = None,
+    split_variants=None, ban_events=None, **existing_matrix_options,
+) -> IntervalAdaptiveMatrix:
+    """Build the compatibility matrix through the interval consumption boundary.
+
+    The no-certificate path deliberately delegates to the mature adaptive builder so its
+    current-only values remain byte-compatible. Certificate-backed diagnostic views are additive
+    and are populated by callers using the resolved-match/evidence seams.
+    """
+    split_parents = tuple(split_variants) if split_variants is not None else None
+    if split_parents is not None:
+        current = build_multi_split_adaptive(
+            con, parents=split_parents, provenance=provenance,
+            ban_events=ban_events,
+            **existing_matrix_options,
+        )
+        current_matrix = current.multi
+    else:
+        current = build_adaptive_matrix(
+            con, provenance=provenance, split_variant=split_variant,
+            ban_events=ban_events,
+            **existing_matrix_options,
+        )
+        current_matrix = current.matrix
+    from legacy_engine.analytics.eras.consume import build_entity_eligibility, build_evidence_views
+    from legacy_engine.analytics.match_results import (
+        build_selected_outcome_ledger, selected_rows_for_pair,
+    )
+    evidence = {}
+    entities = tuple(current_matrix.archetypes) if hasattr(current_matrix, "archetypes") else tuple(sorted({*current_matrix.subjects, *current_matrix.opponents}))
+    camp_parent = (
+        dict(current_matrix.camp_parent)
+        if hasattr(current_matrix, "camp_parent")
+        else {
+            entity: split_variant
+            for entity in entities
+            if split_variant is not None and entity.startswith(f"{split_variant} [")
+        }
+    )
+    eligibilities = {
+        entity: build_entity_eligibility(
+            con, entity, clock=clock, certificate_run_id=certificate_run_id,
+            requested_since=requested_since, camp_parent=camp_parent,
+            ban_events=ban_events,
+        ) for entity in entities
+    }
+    pair_keys = tuple(key for key in current_matrix.cells if key[0] != key[1])
+    ledger = build_selected_outcome_ledger(
+        con,
+        pair_keys=pair_keys,
+        entity_eligibility=eligibilities,
+        clock=clock,
+        certificate_run_id=certificate_run_id,
+        provenance=provenance,
+        split_variant=split_variant,
+        split_variants=split_parents,
+    )
+    directed_by_subject = defaultdict(list)
+    for subject, opponent in pair_keys:
+        directed_by_subject[subject].extend(
+            selected_rows_for_pair(ledger, subject, opponent)
+        )
+    siblings_by_parent = {
+        parent: tuple(sorted(
+            camp for camp, sibling_parent in camp_parent.items()
+            if sibling_parent == parent
+        ))
+        for parent in set(camp_parent.values())
+    }
+    for subject, opponent in pair_keys:
+        selected = selected_rows_for_pair(ledger, subject, opponent)
+        hierarchy_subjects = siblings_by_parent.get(
+            camp_parent.get(subject), (subject,),
+        )
+        hierarchy_rows = tuple(
+            row
+            for hierarchy_subject in hierarchy_subjects
+            for row in directed_by_subject.get(hierarchy_subject, ())
+        )
+        evidence[(subject, opponent)] = build_evidence_views(
+            subject,
+            opponent,
+            selected,
+            clock=clock,
+            hierarchy_rows=hierarchy_rows,
+            camp_parent=camp_parent,
+            reasons=(*eligibilities[subject].reasons, *eligibilities[opponent].reasons),
+        )
+    audit = tuple(current.audit_preamble)
+    audit = (*audit, "// interval authority: resolved match selection populated evidence views")
+    return IntervalAdaptiveMatrix(
+        current=current, evidence=evidence, clock=clock, selected_outcomes=ledger,
+        certificate_run_id=certificate_run_id, audit_preamble=audit,
     )

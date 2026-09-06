@@ -1,0 +1,15 @@
+id,status,lands,fetchlands,acceleration,access,selection,protection,interaction,main_value_tempo,side_pivot,side_alt_combo,W_sources,U_sources,B_sources,R_sources,G_sources,p_land,p_2land,p_accel,p_access,p_selection,p_protection,p_access_black,p_access_selection_black
+current-dimir-creature-transform,exact-registration,17,9,8,6,14,11,0,2,7,1,0,15,15,0,0,91.656,64.821,65.359,54.144,86.141,77.758,49.32,40.55
+current-esper-teferi-swords,exact-registration,17,8,7,4,13,8,2,10,8,0,10,14,14,0,0,91.656,64.821,60.088,39.95,83.716,65.359,34.855,27.365
+current-light-green-white,exact-registration,17,8,8,5,15,10,2,0,5,0,10,15,13,0,9,91.656,64.821,65.359,47.456,88.25,74.137,41.516,34.908
+current-four-color-shield,exact-registration,17,8,9,4,10,14,3,7,0,1,10,15,12,0,10,91.656,64.821,70.023,39.95,74.137,86.141,34.855,23.717
+bug-veil-carpet-reconstructed,inferred-reconstruction,16,8,9,7,13,10,1,1,0,1,0,14,13,0,10,90.078,60.833,70.023,60.088,83.716,74.137,53.906,42.912
+grixis-squelcher-refresh,observed-historical,17,8,8,4,15,12,1,2,6,0,0,14,14,10,0,91.656,64.821,65.359,39.95,88.25,80.935,35.589,29.877
+personal-tutor-turbo,exact-registration,16,8,8,7,13,12,0,0,6,0,0,14,14,0,0,90.078,60.833,65.359,60.088,83.716,80.935,53.906,42.912
+wasteland-murktide-tempo,exact-registration,19,8,7,4,13,8,3,10,6,0,0,14,14,0,0,94.179,72.058,60.088,39.95,83.716,65.359,34.855,27.365
+paradigm-shift-oracle,observed-historical,16,8,9,5,16,10,0,0,0,7,0,14,13,0,0,90.078,60.833,70.023,47.456,90.078,74.137,42.38,36.626
+emrakul-shelldock-isle,observed-historical,16,9,9,7,11,12,0,1,0,2,0,15,15,0,0,90.078,60.833,70.023,60.088,77.758,80.935,54.844,40.178
+moonshadow-creature-switch,inferred-reconstruction,16,8,10,8,14,9,0,0,4,0,0,14,14,0,0,90.078,60.833,74.137,65.359,86.141,70.023,59.767,49.462
+cori-steel-cutter-barrowgoyf,inferred-reconstruction,16,7,9,7,17,9,0,0,10,1,0,13,13,9,0,90.078,60.833,70.023,60.088,91.656,70.023,53.906,47.881
+chancellor-annex-protection,observed-historical,16,8,9,5,15,11,0,0,9,0,0,14,14,0,0,90.078,60.833,70.023,47.456,88.25,77.758,42.38,35.701
+value-threats-jace-riddler-sheoldred,observed-historical,16,8,9,6,13,10,0,1,8,1,0,14,14,0,0,90.078,60.833,70.023,54.144,83.716,74.137,49.32,39.197

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from legacy_engine.ingestion.prices import PrintingPrice
 
 from legacy_engine.config import DUCKDB_PATH
-from legacy_engine.models.card import Card
+from legacy_engine.models.card import Card, CardAliasManifest, PrintedCardAlias
 from legacy_engine.models.tournament import TournamentResult
 
 # ── card_prices DDL ────────────────────────────────────────────────────────────────────────────────
@@ -108,6 +108,29 @@ CREATE TABLE IF NOT EXISTS ingest_ledger (
 )\
 """
 
+CARD_NAME_ALIASES_DDL = """\
+CREATE TABLE IF NOT EXISTS card_name_aliases (
+    normalized_alias VARCHAR NOT NULL,
+    canonical_name VARCHAR NOT NULL,
+    printed_name VARCHAR NOT NULL,
+    language VARCHAR NOT NULL,
+    sample_scryfall_id VARCHAR NOT NULL,
+    source_updated_at VARCHAR NOT NULL,
+    PRIMARY KEY (normalized_alias, canonical_name, language)
+)\
+"""
+
+CARD_ALIAS_MANIFEST_DDL = """\
+CREATE TABLE IF NOT EXISTS card_alias_manifest (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    source_updated_at VARCHAR NOT NULL,
+    built_at VARCHAR NOT NULL,
+    release_codes VARCHAR NOT NULL,
+    alias_count INTEGER NOT NULL,
+    ambiguous_key_count INTEGER NOT NULL
+)\
+"""
+
 
 def connect(path: Path | str = DUCKDB_PATH) -> duckdb.DuckDBPyConnection:
     """Open (creating parent dirs) a DuckDB connection. Use ":memory:" for tests."""
@@ -136,6 +159,152 @@ def init_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(PLAYER_ALIASES_DDL)
     # Derived state — empty ledger ⇒ full ingest; existing DBs gain this table on next init.
     con.execute(INGEST_LEDGER_DDL)
+
+
+def init_card_alias_schema(con: duckdb.DuckDBPyConnection) -> None:
+    """Create the rebuildable localized-name alias cache and its manifest."""
+    con.execute(CARD_NAME_ALIASES_DDL)
+    con.execute(CARD_ALIAS_MANIFEST_DDL)
+
+
+def rebuild_card_aliases(
+    con: duckdb.DuckDBPyConnection,
+    aliases: Iterable[PrintedCardAlias],
+    *,
+    manifest: CardAliasManifest,
+) -> CardAliasManifest:
+    """Atomically replace the derived alias snapshot, preserving every canonical collision."""
+    deduped: dict[tuple[str, str, str], PrintedCardAlias] = {}
+    for alias in aliases:
+        missing = [
+            field for field in (
+                "printed_name", "normalized_alias", "canonical_name", "language", "scryfall_id"
+            ) if not getattr(alias, field)
+        ]
+        if missing:
+            raise ValueError(
+                "card alias candidate missing required provenance: " + ", ".join(missing)
+            )
+        key = (alias.normalized_alias, alias.canonical_name, alias.language)
+        current = deduped.get(key)
+        if current is None or (alias.scryfall_id, alias.printed_name) < (
+            current.scryfall_id,
+            current.printed_name,
+        ):
+            deduped[key] = alias
+    if not deduped:
+        raise ValueError("refusing to replace card aliases with an empty candidate snapshot")
+    previous = load_card_alias_manifest(con)
+    if previous is not None and len(deduped) * 2 < previous.alias_count:
+        raise ValueError(
+            "refusing implausibly incomplete card-alias snapshot: "
+            f"{len(deduped)} candidates vs {previous.alias_count} last-good aliases"
+        )
+    canonical_by_key: dict[str, set[str]] = {}
+    for alias in deduped.values():
+        canonical_by_key.setdefault(alias.normalized_alias, set()).add(alias.canonical_name)
+    effective = manifest.model_copy(update={
+        "alias_count": len(deduped),
+        "ambiguous_key_count": sum(len(names) > 1 for names in canonical_by_key.values()),
+        "release_codes": tuple(sorted(set(manifest.release_codes))),
+    })
+
+    con.execute("BEGIN TRANSACTION")
+    try:
+        init_card_alias_schema(con)
+        con.execute("DELETE FROM card_name_aliases")
+        con.execute("DELETE FROM card_alias_manifest")
+        if deduped:
+            con.executemany(
+                """INSERT INTO card_name_aliases VALUES (?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        alias.normalized_alias,
+                        alias.canonical_name,
+                        alias.printed_name,
+                        alias.language,
+                        alias.scryfall_id,
+                        effective.source_updated_at,
+                    )
+                    for alias in sorted(
+                        deduped.values(),
+                        key=lambda item: (
+                            item.normalized_alias,
+                            item.canonical_name,
+                            item.language,
+                        ),
+                    )
+                ],
+            )
+        con.execute(
+            "INSERT INTO card_alias_manifest VALUES (TRUE, ?, ?, ?, ?, ?)",
+            [
+                effective.source_updated_at,
+                effective.built_at.isoformat(),
+                ",".join(effective.release_codes),
+                effective.alias_count,
+                effective.ambiguous_key_count,
+            ],
+        )
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return effective
+
+
+def load_card_alias_manifest(
+    con: duckdb.DuckDBPyConnection,
+) -> CardAliasManifest | None:
+    init_card_alias_schema(con)
+    row = con.execute(
+        """SELECT source_updated_at, built_at, release_codes, alias_count,
+                  ambiguous_key_count FROM card_alias_manifest WHERE singleton = TRUE"""
+    ).fetchone()
+    if row is None:
+        return None
+    return CardAliasManifest(
+        source_updated_at=row[0],
+        built_at=row[1],
+        release_codes=tuple(code for code in row[2].split(",") if code),
+        alias_count=row[3],
+        ambiguous_key_count=row[4],
+    )
+
+
+def fetch_card_alias_candidates(
+    con: duckdb.DuckDBPyConnection,
+    observed_name: str,
+) -> tuple[PrintedCardAlias, ...]:
+    from legacy_engine.ingestion.scryfall import normalize_alias_key
+
+    init_card_alias_schema(con)
+    rows = con.execute(
+        """SELECT printed_name, normalized_alias, canonical_name, language,
+                  sample_scryfall_id
+           FROM card_name_aliases WHERE normalized_alias = ?
+           ORDER BY canonical_name, language, printed_name""",
+        [normalize_alias_key(observed_name)],
+    ).fetchall()
+    return tuple(
+        PrintedCardAlias(
+            printed_name=row[0],
+            normalized_alias=row[1],
+            canonical_name=row[2],
+            language=row[3],
+            scryfall_id=row[4],
+        )
+        for row in rows
+    )
+
+
+def alias_snapshot_needs_refresh(
+    manifest: CardAliasManifest | None,
+    recent_release_codes: Iterable[str],
+) -> bool:
+    if manifest is None:
+        return True
+    return not set(recent_release_codes).issubset(manifest.release_codes)
 
 
 # Multi-face layout classes — determine how a face name inherits attributes.
@@ -482,6 +651,15 @@ def load_tournament(con: duckdb.DuckDBPyConnection, tr: TournamentResult) -> str
     # Idempotent refresh: clear this tournament's child rows, then re-insert.
     for table in ("decks", "deck_cards", "rounds", "standings"):
         con.execute(f"DELETE FROM {table} WHERE tournament_id = ?", [tid])
+    # Incremental variant assignments are keyed by tournament + deck index. A changed cache
+    # payload can reuse an index for a different deck/archetype, so stale assignments must not
+    # survive the fact-row replacement. The table is created lazily by the discovery path.
+    try:
+        con.execute(
+            "DELETE FROM variant_incremental_assignments WHERE tournament_id = ?", [tid]
+        )
+    except duckdb.CatalogException:
+        pass
 
     deck_rows = []
     card_rows = []

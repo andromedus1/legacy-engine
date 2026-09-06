@@ -86,6 +86,14 @@ def _echo_window(res: "WindowResolution") -> None:
         click.echo(f"// {res.banner}")
 
 
+def _echo_field_regime_currency(field) -> None:
+    """Echo typed field-currency evidence before advisory result data."""
+    from legacy_engine.advisory.report import field_regime_currency_lines
+
+    for line in field_regime_currency_lines(field):
+        click.echo(line)
+
+
 _STALE_DAYS = 30  # newest event older than this (vs wall clock) → staleness advisory
 
 
@@ -450,6 +458,324 @@ def refresh_cards(force: bool, horizon_days: int, lookback_days: int, verbose: b
             click.echo(f"  … ({len(diff.new_names) - 50} more)")
     else:
         click.echo("No new cards (diff is empty — card universe is current).")
+
+
+@refresh.command("card-coverage")
+@click.option("--db", type=click.Path(dir_okay=False), default=None,
+              help="DuckDB path (defaults to the configured analytical cache).")
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Frozen benchmark protocol whose training cutoffs must have metadata closure.")
+@_verbose
+def refresh_card_coverage(db: str | None, benchmark_protocol: str | None, verbose: bool) -> None:
+    """Reconcile exact card names and print one compact coverage audit."""
+    from datetime import datetime, timezone
+
+    from legacy_engine.ingestion import store
+    from legacy_engine.ingestion.card_coverage import (
+        card_coverage_audit_lines,
+        card_coverage_preflight_lines,
+        load_coverage_preflight_protocol,
+        reconcile_card_dimension,
+        unresolved_card_coverage_by_cutoff,
+    )
+
+    _setup_logging(verbose)
+    cutoffs = None
+    final_until = None
+    if benchmark_protocol:
+        try:
+            cutoffs, final_until = load_coverage_preflight_protocol(benchmark_protocol)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+    con = store.connect(db) if db else store.connect()
+    try:
+        diff = store.load_ingest_diff()
+        report = reconcile_card_dimension(
+            con,
+            new_card_names=frozenset(diff.new_names if diff else ()),
+            alias_manifest=store.load_card_alias_manifest(con),
+            alias_snapshot_reason=None,
+            resolved_at=datetime.now(timezone.utc),
+        )
+        cohorts = None
+        if cutoffs is not None and final_until is not None:
+            cohorts = unresolved_card_coverage_by_cutoff(
+                con, cutoffs=cutoffs, final_evaluation_until=final_until,
+            )
+    finally:
+        con.close()
+    for line in card_coverage_audit_lines(report, verbose=verbose):
+        click.echo(line)
+    if cohorts is not None:
+        for line in card_coverage_preflight_lines(cohorts):
+            click.echo(line)
+        blocking = tuple(cohort for cohort in cohorts if cohort.cutoff and cohort.gaps)
+        if blocking:
+            raise click.ClickException(
+                f"coverage preflight failed: {sum(len(c.gaps) for c in blocking)} "
+                "unresolved names enter planned training cutoffs"
+            )
+
+
+# ── ops: local scheduled maintenance + status ──
+@main.group()
+def ops() -> None:
+    """Operate local scheduled maintenance jobs."""
+
+
+@ops.command("scheduled-refresh")
+@click.option("--db", type=click.Path(dir_okay=False), default=None,
+              help="DuckDB path (defaults to the configured analytical cache).")
+@click.option("--out", type=click.Path(dir_okay=False), default=None,
+              help="Ranking HTML path (defaults to decks/deck-rankings.html).")
+@click.option("--status-dir", type=click.Path(file_okay=False), default=None,
+              help="Operational status directory (defaults to data/ops/status).")
+@click.option("--monitor-state-path", type=click.Path(dir_okay=False), default=None,
+              help="Format-monitor state path (defaults to data/ops/state/format-monitor.json).")
+@_verbose
+def ops_scheduled_refresh(
+    db: str | None,
+    out: str | None,
+    status_dir: str | None,
+    monitor_state_path: str | None,
+    verbose: bool,
+) -> None:
+    """Run the decision-data refresh once with locking and durable status."""
+    _setup_logging(verbose)
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from uuid import uuid4
+
+    from legacy_engine.config import (
+        DUCKDB_PATH, FORMAT_MONITOR_STATE_PATH, OPS_LOCK_DIR, OPS_STATUS_DIR, PROJECT_ROOT,
+    )
+    from legacy_engine.ops.format_monitor import DefaultFormatMonitorPorts
+    from legacy_engine.ops.scheduled_refresh import (
+        JOB_NAME,
+        decision_refresh_lock_path,
+        run_scheduled_decision_refresh,
+    )
+    from legacy_engine.ops.status import (
+        JobOutcome,
+        job_status_audit_lines,
+        read_job_status,
+    )
+    from legacy_engine.workflows.decision_refresh import DefaultDecisionRefreshPorts
+
+    resolved_status_dir = Path(status_dir).resolve() if status_dir else OPS_STATUS_DIR
+    resolved_monitor_state = (
+        Path(monitor_state_path).resolve()
+        if monitor_state_path
+        else (
+            resolved_status_dir.parent / "state" / "format-monitor.json"
+            if status_dir else FORMAT_MONITOR_STATE_PATH
+        )
+    )
+    status = run_scheduled_decision_refresh(
+        DefaultDecisionRefreshPorts(),
+        db_path=Path(db).resolve() if db else DUCKDB_PATH,
+        out_path=(
+            Path(out).resolve()
+            if out
+            else PROJECT_ROOT / "decks" / "deck-rankings.html"
+        ),
+        status_dir=resolved_status_dir,
+        lock_path=decision_refresh_lock_path(
+            Path(db).resolve() if db else DUCKDB_PATH,
+            Path(out).resolve() if out else PROJECT_ROOT / "decks" / "deck-rankings.html",
+            lock_dir=OPS_LOCK_DIR,
+        ),
+        clock=lambda: datetime.now(timezone.utc),
+        attempt_id_factory=lambda: uuid4().hex,
+        pid=os.getpid(),
+        format_monitor_ports=DefaultFormatMonitorPorts(),
+        format_monitor_state_path=resolved_monitor_state,
+    )
+    view = read_job_status(
+        resolved_status_dir / f"{JOB_NAME}.json",
+        now=datetime.now(timezone.utc),
+    ) if status.outcome is not JobOutcome.SKIPPED_OVERLAP else None
+    if view is not None:
+        for line in job_status_audit_lines(view):
+            click.echo(line)
+    else:
+        click.echo(f"// ⚠ scheduled refresh: skipped_overlap — {status.reason}")
+    if status.outcome is JobOutcome.SKIPPED_OVERLAP:
+        raise click.exceptions.Exit(75)
+    if status.outcome is JobOutcome.FAILED:
+        raise click.exceptions.Exit(1)
+
+
+@ops.command("status")
+@click.option("--status-dir", type=click.Path(file_okay=False), default=None,
+              help="Operational status directory (defaults to data/ops/status).")
+@click.option("--brief", is_flag=True, default=False,
+              help="Print one session-friendly status line.")
+@_verbose
+def ops_status(status_dir: str | None, brief: bool, verbose: bool) -> None:
+    """Inspect the last recorded decision-data refresh."""
+    _setup_logging(verbose)
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from legacy_engine.config import OPS_STATUS_DIR
+    from legacy_engine.ops.scheduled_refresh import JOB_NAME
+    from legacy_engine.ops.status import job_status_audit_lines, read_job_status
+
+    resolved = Path(status_dir).resolve() if status_dir else OPS_STATUS_DIR
+    view = read_job_status(
+        resolved / f"{JOB_NAME}.json",
+        now=datetime.now(timezone.utc),
+    )
+    for line in job_status_audit_lines(view, brief=brief):
+        click.echo(line)
+
+
+@ops.group("monitor")
+def ops_monitor() -> None:
+    """Inspect and acknowledge machine-observed format changes."""
+
+
+@ops_monitor.command("acknowledge")
+@click.argument("candidate_id")
+@click.option("--state-path", type=click.Path(dir_okay=False), default=None,
+              help="Format-monitor state path (defaults to data/ops/state/format-monitor.json).")
+@_verbose
+def ops_monitor_acknowledge(
+    candidate_id: str, state_path: str | None, verbose: bool,
+) -> None:
+    """Acknowledge the exact evidence currently attached to CANDIDATE_ID."""
+    _setup_logging(verbose)
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from legacy_engine.config import FORMAT_MONITOR_STATE_PATH
+    from legacy_engine.ops.format_monitor import (
+        acknowledge_monitor_candidate,
+    )
+
+    path = Path(state_path).resolve() if state_path else FORMAT_MONITOR_STATE_PATH
+    try:
+        acknowledge_monitor_candidate(
+            path, candidate_id, acknowledged_at=datetime.now(timezone.utc),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"// format candidate acknowledged: {candidate_id}")
+    click.echo("// unchanged evidence will stay suppressed; new evidence will resurface it")
+    click.echo("// acknowledgement does not change the B&R ledger; use `eras confirm` after review")
+
+
+@ops.group("scheduler")
+def ops_scheduler() -> None:
+    """Manage the local user LaunchAgent."""
+
+
+def _scheduler_spec(repo_root: str | None, launch_agents_dir: str | None, uid: int | None):
+    from pathlib import Path
+
+    from legacy_engine.config import PROJECT_ROOT
+    from legacy_engine.ops.launchd import build_refresh_launch_agent_spec
+
+    root = Path(repo_root).resolve() if repo_root else PROJECT_ROOT
+    agents = (
+        Path(launch_agents_dir).resolve()
+        if launch_agents_dir
+        else Path.home() / "Library" / "LaunchAgents"
+    )
+    return build_refresh_launch_agent_spec(
+        repo_root=root,
+        launch_agents_dir=agents,
+        uid=uid if uid is not None else __import__("os").getuid(),
+    )
+
+
+def _echo_scheduler_state(spec, state) -> None:
+    click.echo(f"// scheduler: {state.detail}")
+    click.echo(f"// label: {spec.label} ({spec.domain_target})")
+    click.echo(f"// plist: {state.plist_path}")
+    click.echo(f"// schedule: daily {spec.hour:02d}:{spec.minute:02d} local")
+    click.echo(f"// logs: {spec.stdout_path} | {spec.stderr_path}")
+    click.echo(f"// state: installed={state.installed} loaded={state.loaded}")
+
+
+def _scheduler_options(function):
+    for option in (
+        click.option("--uid", type=int, default=None, hidden=True),
+        click.option("--launch-agents-dir", type=click.Path(file_okay=False), default=None, hidden=True),
+        click.option("--repo-root", type=click.Path(file_okay=False), default=None, hidden=True),
+    ):
+        function = option(function)
+    return function
+
+
+@ops_scheduler.command("install")
+@_scheduler_options
+@_verbose
+def ops_scheduler_install(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Install or safely update the daily refresh LaunchAgent."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, install_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = install_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("inspect")
+@_scheduler_options
+@_verbose
+def ops_scheduler_inspect(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Inspect the configured and loaded LaunchAgent state."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, inspect_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = inspect_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("run-now")
+@_scheduler_options
+@_verbose
+def ops_scheduler_run_now(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Ask launchd to start the agent without killing an active run."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, run_launch_agent_now
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = run_launch_agent_now(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
+
+
+@ops_scheduler.command("uninstall")
+@_scheduler_options
+@_verbose
+def ops_scheduler_uninstall(
+    repo_root: str | None, launch_agents_dir: str | None, uid: int | None, verbose: bool,
+) -> None:
+    """Unload and remove only legacy-engine's refresh LaunchAgent."""
+    _setup_logging(verbose)
+    from legacy_engine.ops.launchd import SubprocessLaunchctl, uninstall_launch_agent
+
+    spec = _scheduler_spec(repo_root, launch_agents_dir, uid)
+    state = uninstall_launch_agent(spec, SubprocessLaunchctl())
+    _echo_scheduler_state(spec, state)
+    if not state.ok:
+        raise click.exceptions.Exit(1)
 
 
 # ── label: archetype classification ──
@@ -2573,6 +2899,855 @@ def advise() -> None:
     """Meta attack / advisory — how to attack the field."""
 
 
+@advise.group("benchmark")
+def advise_benchmark() -> None:
+    """Freeze rankings at historical cutoffs and evaluate them on later events."""
+
+
+@advise_benchmark.command("plan")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol-id", required=True)
+@click.option("--created-at", required=True, help="Frozen ISO timestamp for reproducible artifacts.")
+@click.option("--first-cutoff", required=True, help="First prediction origin (YYYY-MM-DD).")
+@click.option("--until", "final_until", required=True, help="Final evaluation bound (exclusive).")
+@click.option(
+    "--taxonomy-mode",
+    type=click.Choice(["retrospective-fixed-parent", "contemporaneous"]),
+    default="retrospective-fixed-parent", show_default=True,
+)
+@click.option("--registered-at", default=None, help="Actual registration timestamp for this protocol.")
+@click.option(
+    "--claim-ceiling", type=click.Choice(["descriptive", "predictive-claim-supported"]),
+    default="predictive-claim-supported", show_default=True,
+)
+@click.option(
+    "--card-metadata-policy",
+    type=click.Choice(["require-complete", "quarantine-unresolved-decks"]),
+    default="require-complete", show_default=True,
+)
+@click.option("--max-quarantined-deck-fraction", type=float, default=0.0, show_default=True)
+@click.option("--max-quarantined-round-fraction", type=float, default=0.0, show_default=True)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_plan(
+    db: str, protocol_id: str, created_at: str, first_cutoff: str, final_until: str,
+    taxonomy_mode: str, registered_at: str | None, claim_ceiling: str,
+    card_metadata_policy: str, max_quarantined_deck_fraction: float,
+    max_quarantined_round_fraction: float, out: str, verbose: bool,
+) -> None:
+    """Preregister the estimator set, support gates, and whole-date folds."""
+    _setup_logging(verbose)
+    from datetime import date
+    from pathlib import Path
+
+    import duckdb
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, CardMetadataPolicy, atomic_write_canonical,
+        plan_walk_forward_folds, protocol_sha256,
+    )
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    protocol = BenchmarkProtocol(
+        protocol_id=protocol_id, created_at=created_at, taxonomy_mode=taxonomy_mode,
+        first_cutoff=first_cutoff, final_evaluation_until=final_until,
+        registered_at=registered_at, claim_ceiling=claim_ceiling,
+        card_metadata=CardMetadataPolicy(
+            mode=card_metadata_policy,
+            max_deck_fraction=max_quarantined_deck_fraction,
+            max_round_fraction=max_quarantined_round_fraction,
+        ),
+    )
+    con = duckdb.connect(db, read_only=True)
+    try:
+        event_dates = [row[0] for row in con.execute(
+            "SELECT DISTINCT substr(date,1,10) FROM tournaments ORDER BY 1"
+        ).fetchall()]
+    finally:
+        con.close()
+    ban_ledger = tuple(
+        (effective.isoformat(), card, reason) for effective, card, reason in BAN_EVENTS
+        if effective < date.fromisoformat(final_until)
+    )
+    folds = plan_walk_forward_folds(event_dates, [event[0] for event in ban_ledger], protocol)
+    protocol = protocol.model_copy(update={
+        "planned_folds": folds,
+        "ban_events_as_of": ban_ledger,
+    })
+    digest = atomic_write_canonical(Path(out), protocol)
+    click.echo(f"// benchmark protocol: {protocol.protocol_id} hash={protocol_sha256(protocol)}")
+    click.echo(f"// taxonomy: {protocol.taxonomy_mode}; folds={len(folds)}; artifact={digest}")
+    click.echo(
+        f"// card metadata: {protocol.card_metadata.mode}; "
+        f"ceilings={protocol.card_metadata.max_deck_fraction:.3%}/"
+        f"{protocol.card_metadata.max_round_fraction:.3%}; claim={protocol.claim_ceiling}"
+    )
+    for fold in folds:
+        click.echo(
+            f"// fold {fold.fold_id}: {len(fold.event_dates)} event dates; "
+            f"regime={fold.regime_start}"
+        )
+
+
+def _benchmark_protocol_and_folds(db: str, protocol_path: str):
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+
+    protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
+    if not protocol.planned_folds:
+        raise click.ClickException(
+            "benchmark protocol has no frozen fold schedule; rerun `advise benchmark plan`"
+        )
+    return protocol, protocol.planned_folds
+
+
+@advise_benchmark.command("freeze")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--fold", "fold_id", required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_freeze(
+    db: str, protocol_path: str, fold_id: str, artifact_dir: str,
+    taxonomy_snapshot: str | None, verbose: bool,
+) -> None:
+    """Create a cutoff-safe DB and immutable prediction artifact for one fold."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        atomic_write_canonical, protocol_sha256, write_frozen_predictions,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        build_origin_snapshot, freeze_origin_predictions,
+    )
+
+    protocol, folds = _benchmark_protocol_and_folds(db, protocol_path)
+    fold = next((candidate for candidate in folds if candidate.fold_id == fold_id), None)
+    if fold is None:
+        raise click.ClickException(f"unknown benchmark fold: {fold_id}")
+    root = Path(artifact_dir)
+    snapshot_path = root / f"{fold.fold_id}.duckdb"
+    manifest = build_origin_snapshot(
+        Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
+        taxonomy_mode=protocol.taxonomy_mode,
+        taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+        ban_events=protocol.ban_events_as_of,
+        card_metadata_policy=protocol.card_metadata,
+    )
+    manifest_path = root / f"{fold.fold_id}.manifest.json"
+    atomic_write_canonical(manifest_path, manifest)
+    predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
+    predictions_path = root / f"{fold.fold_id}.predictions.json"
+    digest = write_frozen_predictions(predictions_path, predictions)
+    atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
+    click.echo(f"// benchmark cutoff: {fold.cutoff}; taxonomy={manifest.taxonomy_mode}")
+    click.echo(f"// snapshot manifest: {manifest_path} sha256={predictions.snapshot_manifest_sha256}")
+    click.echo(f"// frozen predictions: {predictions_path} sha256={digest}")
+    if manifest.card_metadata_quarantine is not None:
+        ledger = manifest.card_metadata_quarantine
+        click.echo(
+            f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+            f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+        )
+    for reason in manifest.reasons:
+        click.echo(f"// ⚠ {reason}")
+
+
+@advise_benchmark.command("evaluate")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--predictions", "predictions_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--checksum", "checksum_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--external", "external_paths", type=click.Path(exists=True, dir_okay=False), multiple=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_evaluate(
+    db: str, protocol_path: str, predictions_path: str, checksum_path: str,
+    external_paths: tuple[str, ...], taxonomy_snapshot: str | None,
+    out: str, report: str, verbose: bool,
+) -> None:
+    """Verify frozen bytes, open later outcomes, and write a separate evaluation."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, ExternalRankingSnapshot, FrozenOriginPredictions,
+        SnapshotManifest, aggregate_benchmark, atomic_write_canonical, atomic_write_text,
+        evaluate_origin, load_hashed_model,
+        render_benchmark_markdown,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_outcomes, validate_frozen_taxonomy, validate_snapshot_quarantine,
+    )
+
+    protocol = BenchmarkProtocol.model_validate_json(Path(protocol_path).read_bytes())
+    if protocol.taxonomy_mode == "contemporaneous" and taxonomy_snapshot is None:
+        raise click.ClickException("contemporaneous evaluation requires --taxonomy-snapshot")
+    checksum = json.loads(Path(checksum_path).read_text())["sha256"]
+    predictions, digest = load_hashed_model(
+        Path(predictions_path), FrozenOriginPredictions, checksum,
+    )
+    manifest_path = Path(predictions_path).with_name(f"{predictions.fold.fold_id}.manifest.json")
+    snapshot_path = manifest_path.with_name(f"{predictions.fold.fold_id}.duckdb")
+    if not manifest_path.is_file() or not snapshot_path.is_file():
+        raise click.ClickException(
+            "frozen prediction directory is missing its immutable snapshot manifest or corpus"
+        )
+    manifest, _manifest_digest = load_hashed_model(
+        manifest_path, SnapshotManifest, predictions.snapshot_manifest_sha256,
+    )
+    validate_snapshot_quarantine(manifest, protocol=protocol, snapshot_db=snapshot_path)
+    validate_frozen_taxonomy(
+        predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+    )
+    external = tuple(
+        ExternalRankingSnapshot.model_validate_json(Path(path).read_bytes())
+        for path in external_paths
+    )
+    evaluation = evaluate_origin(
+        predictions, load_heldout_outcomes(
+            Path(db), predictions.fold,
+            taxonomy_mode=predictions.taxonomy_mode,
+            expected_rules_sha256=predictions.rules_sha256,
+            taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            card_metadata_policy=protocol.card_metadata,
+        ),
+        protocol=protocol, external=external,
+    )
+    summary = aggregate_benchmark(protocol, [evaluation])
+    atomic_write_canonical(Path(out), evaluation)
+    atomic_write_text(Path(report), render_benchmark_markdown(summary))
+    click.echo(f"// verified frozen predictions: sha256={digest}")
+    click.echo(f"// exclusions: {evaluation.exclusions}")
+    if evaluation.card_metadata_quarantine is not None:
+        ledger = evaluation.card_metadata_quarantine
+        click.echo(
+            f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+            f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+        )
+    click.echo(f"// support: {evaluation.status}; {'; '.join(evaluation.reasons) or 'all fold gates pass'}")
+    click.echo(f"// evaluation: {out}; report: {report}")
+
+
+@advise_benchmark.command("run")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_run(
+    db: str, protocol_path: str, artifact_dir: str,
+    taxonomy_snapshot: str | None, verbose: bool,
+) -> None:
+    """Compose historical freeze-then-evaluate for every preregistered fold."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        aggregate_benchmark, atomic_write_canonical, atomic_write_text, evaluate_origin, protocol_sha256,
+        render_benchmark_markdown, write_frozen_predictions,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        build_origin_snapshot, freeze_origin_predictions, load_heldout_outcomes,
+        validate_frozen_taxonomy,
+    )
+
+    protocol, folds = _benchmark_protocol_and_folds(db, protocol_path)
+    root = Path(artifact_dir)
+    evaluations = []
+    for fold in folds:
+        try:
+            snapshot_path = root / f"{fold.fold_id}.duckdb"
+            manifest = build_origin_snapshot(
+                Path(db), snapshot_path, fold=fold, protocol_hash=protocol_sha256(protocol),
+                taxonomy_mode=protocol.taxonomy_mode,
+                taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+                ban_events=protocol.ban_events_as_of,
+                card_metadata_policy=protocol.card_metadata,
+            )
+            atomic_write_canonical(root / f"{fold.fold_id}.manifest.json", manifest)
+            predictions = freeze_origin_predictions(snapshot_path, protocol=protocol, manifest=manifest)
+            validate_frozen_taxonomy(
+                predictions, Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+            )
+            digest = write_frozen_predictions(root / f"{fold.fold_id}.predictions.json", predictions)
+            atomic_write_canonical(root / f"{fold.fold_id}.predictions.sha256.json", {"sha256": digest})
+            evaluation = evaluate_origin(
+                predictions, load_heldout_outcomes(
+                    Path(db), fold,
+                    taxonomy_mode=predictions.taxonomy_mode,
+                    expected_rules_sha256=predictions.rules_sha256,
+                    taxonomy_snapshot=Path(taxonomy_snapshot) if taxonomy_snapshot else None,
+                    card_metadata_policy=protocol.card_metadata,
+                ), protocol=protocol,
+            )
+            atomic_write_canonical(root / f"{fold.fold_id}.evaluation.json", evaluation)
+            evaluations.append(evaluation)
+            click.echo(f"// fold {fold.fold_id}: {evaluation.status}; predictions={digest}")
+            if evaluation.card_metadata_quarantine is not None:
+                ledger = evaluation.card_metadata_quarantine
+                click.echo(
+                    f"// card metadata ledger: decks={ledger.retained_decks}/{ledger.raw_decks}; "
+                    f"rounds={ledger.retained_rounds}/{ledger.raw_rounds}; sha256={ledger.digest}"
+                )
+        except ValueError as exc:
+            reason = f"benchmark execution stopped at fold {fold.fold_id}: {exc}"
+            partial = aggregate_benchmark(protocol, evaluations)
+            failed = partial.model_copy(update={
+                "status": "not-evaluable",
+                "reasons": (reason, *partial.reasons),
+            })
+            atomic_write_canonical(root / "summary.json", failed)
+            atomic_write_text(root / "summary.md", render_benchmark_markdown(failed))
+            raise click.ClickException(reason) from exc
+    summary = aggregate_benchmark(protocol, evaluations)
+    atomic_write_canonical(root / "summary.json", summary)
+    atomic_write_text(root / "summary.md", render_benchmark_markdown(summary))
+    click.echo(f"// benchmark status: {summary.status}; evaluable={summary.evaluable_folds}/{len(folds)}")
+    for reason in summary.reasons:
+        click.echo(f"// ⚠ {reason}")
+
+
+@advise.group("recurrent-validation")
+def advise_recurrent_validation() -> None:
+    """Plan, seal, evaluate, and assess recurrent evidence without promotion authority."""
+
+
+@advise_recurrent_validation.command("plan")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_plan(
+    protocol_path: str,
+    base_protocol: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Validate and store the immutable protocol and exact parent-plan binding."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import plan_recurrent_validation
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    digest = plan_recurrent_validation(protocol, base, artifact_root=Path(artifact_root))
+    click.echo(f"// recurrent protocol: {protocol.protocol_id}; sha256={digest}")
+    click.echo(f"// origins={len(protocol.folds)}; authority={protocol.authority}")
+
+
+@advise_recurrent_validation.command("freeze")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--fold", "fold_id", required=True)
+@click.option("--snapshot-db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--snapshot-manifest", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--stages", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--forecast", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--code-commit", required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_freeze(
+    protocol_path: str,
+    base_protocol: str,
+    fold_id: str,
+    snapshot_db: str,
+    snapshot_manifest: str,
+    stages: str,
+    forecast: str,
+    code_commit: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Seal a typed refit chain and its full aligned forecast grid."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, SnapshotManifest, content_sha256,
+    )
+    from legacy_engine.advisory.recurrent_validation import (
+        OriginForecastPayload, RefitStageArtifact, load_recurrent_protocol,
+        recurrent_protocol_sha256,
+    )
+    from legacy_engine.workflows.recurrent_validation import seal_and_store_recurrent_origin
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    try:
+        fold = next(item for item in protocol.folds if item.fold_id == fold_id)
+        base_fold = next(item for item in base.planned_folds if item.fold_id == fold_id)
+    except StopIteration as exc:
+        raise click.ClickException(f"fold {fold_id!r} is not registered") from exc
+    manifest = SnapshotManifest.model_validate_json(Path(snapshot_manifest).read_bytes())
+    if manifest.protocol_hash != recurrent_protocol_sha256(protocol) or manifest.fold != base_fold:
+        raise click.ClickException("snapshot manifest protocol or fold differs from recurrent plan")
+    if manifest.max_training_event_date and manifest.max_training_event_date >= fold.data_until:
+        raise click.ClickException("snapshot contains an outcome at or after the exclusive origin")
+    stage_payload = json.loads(Path(stages).read_text(encoding="utf-8"))
+    if isinstance(stage_payload, dict):
+        stage_payload = stage_payload.get("stages")
+    if not isinstance(stage_payload, list):
+        raise click.ClickException("stages artifact must be a JSON list or {'stages': [...]} object")
+    stage_artifacts = tuple(RefitStageArtifact.model_validate(item) for item in stage_payload)
+    frozen_forecast = OriginForecastPayload.model_validate_json(Path(forecast).read_bytes())
+    artifact = seal_and_store_recurrent_origin(
+        Path(snapshot_db),
+        protocol=protocol,
+        fold=fold,
+        snapshot_manifest_sha256=content_sha256(manifest.model_dump(mode="json")),
+        stages=stage_artifacts,
+        forecast=frozen_forecast,
+        artifact_root=Path(artifact_root),
+        code_commit=code_commit,
+    )
+    click.echo(
+        f"// recurrent origin: {fold.fold_id}; artifact={artifact.artifact_sha256}; "
+        f"predictions={artifact.origin.predictions_sha256}"
+    )
+
+
+@advise_recurrent_validation.command("evaluate")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--origin", "origin_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--cases", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--field-counts", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_evaluate(
+    protocol_path: str,
+    base_protocol: str,
+    origin_path: str,
+    cases: str,
+    field_counts: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Build the common future ledger and evaluate predictive and decision evidence."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import (
+        FrozenOriginArtifact, evaluate_recurrent_origin,
+    )
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    frozen = FrozenOriginArtifact.model_validate_json(Path(origin_path).read_bytes())
+    case_rows = json.loads(Path(cases).read_text(encoding="utf-8"))
+    counts = json.loads(Path(field_counts).read_text(encoding="utf-8"))
+    if not isinstance(case_rows, list) or not isinstance(counts, dict):
+        raise click.ClickException("cases must be a list and field counts must be an object")
+    artifact = evaluate_recurrent_origin(
+        frozen.origin,
+        case_rows,
+        protocol=protocol,
+        future_field_counts=counts,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(
+        f"// recurrent evaluation: artifact={artifact.artifact_sha256}; "
+        f"predictive={artifact.predictive.status}; decision={artifact.decision.status}"
+    )
+
+
+@advise_recurrent_validation.command("aggregate")
+@click.option("--protocol", "protocol_path", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--origin", "origin_paths", type=click.Path(exists=True, dir_okay=False), multiple=True, required=True)
+@click.option("--evaluation", "evaluation_paths", type=click.Path(exists=True, dir_okay=False), multiple=True, required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_aggregate(
+    protocol_path: str,
+    base_protocol: str,
+    origin_paths: tuple[str, ...],
+    evaluation_paths: tuple[str, ...],
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Evaluate every frozen challenger conjunction and write one immutable bundle."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import BenchmarkProtocol
+    from legacy_engine.advisory.recurrent_validation import load_recurrent_protocol
+    from legacy_engine.workflows.recurrent_validation import (
+        FrozenOriginArtifact, OriginEvaluationArtifact, aggregate_recurrent_evidence,
+    )
+
+    base = BenchmarkProtocol.model_validate_json(Path(base_protocol).read_bytes())
+    protocol = load_recurrent_protocol(protocol_path, base_protocol=base)
+    origins = tuple(
+        FrozenOriginArtifact.model_validate_json(Path(path).read_bytes()).origin
+        for path in origin_paths
+    )
+    evaluations = tuple(
+        OriginEvaluationArtifact.model_validate_json(Path(path).read_bytes())
+        for path in evaluation_paths
+    )
+    bundle, digest = aggregate_recurrent_evidence(
+        protocol,
+        origins,
+        evaluations,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(f"// recurrent bundle: sha256={digest}; assessments={len(bundle.assessments)}")
+    for assessment in bundle.assessments:
+        click.echo(f"// {assessment.candidate_id}: {assessment.status}")
+
+
+@advise_recurrent_validation.command("proposal")
+@click.option("--assessment", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--target-config-version", required=True)
+@click.option("--artifact-root", type=click.Path(file_okay=False), required=True)
+@_verbose
+def advise_recurrent_validation_proposal(
+    assessment: str,
+    target_config_version: str,
+    artifact_root: str,
+    verbose: bool,
+) -> None:
+    """Write an inert operator-review proposal from an exact promotable assessment."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.recurrent_validation import PromotionAssessment
+    from legacy_engine.workflows.recurrent_validation import write_operator_proposal
+
+    value = PromotionAssessment.model_validate_json(Path(assessment).read_bytes())
+    proposal = write_operator_proposal(
+        value,
+        target_config_version=target_config_version,
+        artifact_root=Path(artifact_root),
+    )
+    click.echo(
+        f"// operator review required: proposal={proposal.proposal_id}; "
+        f"candidate={proposal.candidate_id}"
+    )
+
+
+@advise_benchmark.group("player-effect")
+def advise_benchmark_player_effect() -> None:
+    """Experimental, production-neutral player identity sensitivity."""
+
+
+@advise_benchmark_player_effect.command("plan")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--protocol-id", required=True)
+@click.option("--created-at", required=True)
+@click.option(
+    "--identity-mode", type=click.Choice(["provenance-local-handle", "dated-curated-alias"]),
+    default="provenance-local-handle", show_default=True,
+)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_plan(
+    db: str, benchmark_protocol: str, protocol_id: str, created_at: str,
+    identity_mode: str, identity_snapshot: str | None, out: str, report: str, verbose: bool,
+) -> None:
+    """Freeze the experimental registry and report identity accessibility/stickiness."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, atomic_write_canonical, content_sha256, protocol_sha256,
+    )
+    from legacy_engine.analytics.players.diagnostic import (
+        PlayerAccessibilityReport, PlayerDiagnosticProtocol,
+        measure_pilot_stickiness, measure_player_accessibility,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import load_player_diagnostic_rows
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol).read_bytes())
+    protocol = PlayerDiagnosticProtocol(
+        protocol_id=protocol_id, created_at=created_at,
+        benchmark_protocol_hash=protocol_sha256(benchmark), identity_mode=identity_mode,
+    )
+    registrations, matches, identity_sha = load_player_diagnostic_rows(
+        Path(db), until=benchmark.first_cutoff, identity_mode=protocol.identity_mode,
+        identity_snapshot=Path(identity_snapshot) if identity_snapshot else None,
+    )
+    accessibility = measure_player_accessibility(registrations, matches, protocol)
+    stickiness = measure_pilot_stickiness(registrations, protocol)
+    limitations = (
+        "unaliased observations are provenance-local handles; no automatic aliasing was performed",
+        "pilot overlap is descriptive and emits no taxonomy verdict",
+    )
+    payload = PlayerAccessibilityReport(
+        protocol_hash=content_sha256(protocol), identity_snapshot_sha256=identity_sha,
+        by_provenance=accessibility, stickiness=stickiness, limitations=limitations,
+    )
+    atomic_write_canonical(Path(out), protocol)
+    atomic_write_canonical(Path(report), payload)
+    click.echo(f"// player-effect protocol: {protocol.protocol_id} hash={content_sha256(protocol)}")
+    click.echo(f"// identity basis: {protocol.identity_mode}; snapshot={identity_sha or 'none'}")
+    click.echo(f"// aggregate-only accessibility: {report}; production unchanged")
+
+
+def _load_player_effect_inputs(
+    benchmark_protocol_path: str, player_protocol_path: str,
+    base_path: str, base_checksum_path: str,
+):
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, FrozenOriginPredictions, load_hashed_model, protocol_sha256,
+    )
+    from legacy_engine.analytics.players.diagnostic import PlayerDiagnosticProtocol
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol_path).read_bytes())
+    player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol_path).read_bytes())
+    if player.benchmark_protocol_hash != protocol_sha256(benchmark):
+        raise click.ClickException("player protocol does not bind the loaded benchmark protocol")
+    expected = json.loads(Path(base_checksum_path).read_text())["sha256"]
+    base, _digest = load_hashed_model(Path(base_path), FrozenOriginPredictions, expected)
+    return benchmark, player, base
+
+
+@advise_benchmark_player_effect.command("freeze")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--checksum-out", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_freeze(
+    db: str, benchmark_protocol: str, player_protocol: str, base_predictions: str,
+    base_checksum: str, identity_snapshot: str | None, taxonomy_snapshot: str | None,
+    out: str, checksum_out: str, verbose: bool,
+) -> None:
+    """Freeze outcome-blind player-aware and neutral experimental forecasts."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import atomic_write_canonical
+    from legacy_engine.analytics.players.diagnostic import measure_player_accessibility
+    from legacy_engine.analytics.players.effect import freeze_player_effect_predictions
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        build_player_inner_folds, load_player_diagnostic_rows,
+        load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import validate_frozen_taxonomy
+
+    benchmark, player, base = _load_player_effect_inputs(
+        benchmark_protocol, player_protocol, base_predictions, base_checksum,
+    )
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    validate_frozen_taxonomy(base, taxonomy)
+    registrations, training, identity_sha = load_player_diagnostic_rows(
+        Path(db), until=base.fold.cutoff, identity_mode=player.identity_mode,
+        identity_snapshot=identity,
+    )
+    accessibility = measure_player_accessibility(registrations, training, player)
+    schedule = load_scheduled_player_matches(
+        Path(db), base.fold, identity_mode=player.identity_mode,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    inner = build_player_inner_folds(
+        Path(db), base.fold, benchmark_protocol=benchmark, player_protocol=player,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    frozen = freeze_player_effect_predictions(
+        base, benchmark, training, schedule, accessibility, player, inner_folds=inner,
+        identity_snapshot_sha256=identity_sha,
+    )
+    digest = atomic_write_canonical(Path(out), frozen)
+    atomic_write_canonical(Path(checksum_out), {"sha256": digest})
+    click.echo(f"// player-effect frozen: {out} sha256={digest}")
+    click.echo(f"// identity basis: {player.identity_mode}; inner origins={len(inner)}")
+    click.echo("// historical participant replay is outcome-blind; production remains unchanged")
+
+
+@advise_benchmark_player_effect.command("evaluate")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--base-checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--predictions", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--checksum", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--out", type=click.Path(dir_okay=False), required=True)
+@click.option("--report", type=click.Path(dir_okay=False), required=True)
+@_verbose
+def advise_benchmark_player_effect_evaluate(
+    db: str, benchmark_protocol: str, player_protocol: str, base_predictions: str,
+    base_checksum: str, predictions: str, checksum: str, identity_snapshot: str | None,
+    taxonomy_snapshot: str | None, out: str, report: str, verbose: bool,
+) -> None:
+    """Verify frozen bytes, open outcomes, and emit aggregate experimental evidence."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        atomic_write_canonical, atomic_write_text, content_sha256, load_hashed_model,
+    )
+    from legacy_engine.analytics.players.effect import (
+        FrozenPlayerEffectPredictions, aggregate_player_effect_evaluations,
+        evaluate_player_effect_fold, render_player_effect_markdown,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        load_player_effect_outcomes, load_player_identity_snapshot,
+        load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_outcomes, validate_frozen_taxonomy,
+    )
+
+    benchmark, player, base = _load_player_effect_inputs(
+        benchmark_protocol, player_protocol, base_predictions, base_checksum,
+    )
+    expected = json.loads(Path(checksum).read_text())["sha256"]
+    frozen, digest = load_hashed_model(Path(predictions), FrozenPlayerEffectPredictions, expected)
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    validate_frozen_taxonomy(base, taxonomy)
+    schedule = load_scheduled_player_matches(
+        Path(db), base.fold, identity_mode=player.identity_mode,
+        identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+    )
+    if content_sha256([row.model_dump(mode="json") for row in schedule]) != frozen.schedule_sha256:
+        raise click.ClickException("current outcome-free schedule does not match frozen predictions")
+    _aliases, identity_sha = load_player_identity_snapshot(
+        identity, mode=player.identity_mode, cutoff=base.fold.cutoff,
+    )
+    outcomes = load_player_effect_outcomes(Path(db), schedule)
+    benchmark_outcomes = load_heldout_outcomes(
+        Path(db), base.fold, taxonomy_mode=base.taxonomy_mode,
+        expected_rules_sha256=base.rules_sha256, taxonomy_snapshot=taxonomy,
+    )
+    evaluation = evaluate_player_effect_fold(
+        frozen, outcomes, base, benchmark, player, benchmark_outcomes,
+        identity_snapshot_sha256=identity_sha,
+    )
+    summary = aggregate_player_effect_evaluations(
+        (evaluation,), benchmark_protocol=benchmark, player_protocol=player,
+    )
+    atomic_write_canonical(Path(out), evaluation)
+    atomic_write_text(Path(report), render_player_effect_markdown(summary))
+    click.echo(f"// verified player-effect predictions: sha256={digest}")
+    click.echo(f"// status: {summary.status}; production ranking unchanged")
+
+
+@advise_benchmark_player_effect.command("run")
+@click.option("--db", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--player-protocol", type=click.Path(exists=True, dir_okay=False), required=True)
+@click.option("--benchmark-artifact-dir", type=click.Path(exists=True, file_okay=False), required=True)
+@click.option("--artifact-dir", type=click.Path(file_okay=False), required=True)
+@click.option("--identity-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@click.option("--taxonomy-snapshot", type=click.Path(exists=True, file_okay=False), default=None)
+@_verbose
+def advise_benchmark_player_effect_run(
+    db: str, benchmark_protocol: str, player_protocol: str, benchmark_artifact_dir: str,
+    artifact_dir: str, identity_snapshot: str | None, taxonomy_snapshot: str | None,
+    verbose: bool,
+) -> None:
+    """Compose freeze/evaluate over every already-frozen benchmark origin."""
+    _setup_logging(verbose)
+    import json
+    from pathlib import Path
+
+    from legacy_engine.advisory.ranking_benchmark import (
+        BenchmarkProtocol, FrozenOriginPredictions, atomic_write_canonical, atomic_write_text,
+        load_hashed_model, protocol_sha256,
+    )
+    from legacy_engine.analytics.players.diagnostic import (
+        PlayerDiagnosticProtocol, measure_player_accessibility,
+    )
+    from legacy_engine.analytics.players.effect import (
+        aggregate_player_effect_evaluations, evaluate_player_effect_fold,
+        freeze_player_effect_predictions, render_player_effect_markdown,
+    )
+    from legacy_engine.workflows.player_effect_diagnostic import (
+        build_player_inner_folds, load_player_diagnostic_rows, load_player_effect_outcomes,
+        load_scheduled_player_matches,
+    )
+    from legacy_engine.workflows.ranking_benchmark import (
+        load_heldout_outcomes, validate_frozen_taxonomy,
+    )
+
+    benchmark = BenchmarkProtocol.model_validate_json(Path(benchmark_protocol).read_bytes())
+    player = PlayerDiagnosticProtocol.model_validate_json(Path(player_protocol).read_bytes())
+    if player.benchmark_protocol_hash != protocol_sha256(benchmark):
+        raise click.ClickException("player protocol does not bind the loaded benchmark protocol")
+    benchmark_root, root = Path(benchmark_artifact_dir), Path(artifact_dir)
+    identity = Path(identity_snapshot) if identity_snapshot else None
+    taxonomy = Path(taxonomy_snapshot) if taxonomy_snapshot else None
+    evaluations = []
+    for fold in benchmark.planned_folds:
+        base_path = benchmark_root / f"{fold.fold_id}.predictions.json"
+        checksum_path = benchmark_root / f"{fold.fold_id}.predictions.sha256.json"
+        base, _digest = load_hashed_model(
+            base_path, FrozenOriginPredictions, json.loads(checksum_path.read_text())["sha256"],
+        )
+        validate_frozen_taxonomy(base, taxonomy)
+        registrations, training, identity_sha = load_player_diagnostic_rows(
+            Path(db), until=fold.cutoff, identity_mode=player.identity_mode,
+            identity_snapshot=identity,
+        )
+        accessibility = measure_player_accessibility(registrations, training, player)
+        schedule = load_scheduled_player_matches(
+            Path(db), fold, identity_mode=player.identity_mode,
+            identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+        )
+        inner = build_player_inner_folds(
+            Path(db), fold, benchmark_protocol=benchmark, player_protocol=player,
+            identity_snapshot=identity, taxonomy_snapshot=taxonomy,
+        )
+        frozen = freeze_player_effect_predictions(
+            base, benchmark, training, schedule, accessibility, player, inner_folds=inner,
+            identity_snapshot_sha256=identity_sha,
+        )
+        predictions_path = root / f"{fold.fold_id}.player-effect.predictions.json"
+        digest = atomic_write_canonical(predictions_path, frozen)
+        atomic_write_canonical(
+            root / f"{fold.fold_id}.player-effect.predictions.sha256.json", {"sha256": digest},
+        )
+        evaluation = evaluate_player_effect_fold(
+            frozen, load_player_effect_outcomes(Path(db), schedule), base, benchmark, player,
+            load_heldout_outcomes(
+                Path(db), fold, taxonomy_mode=base.taxonomy_mode,
+                expected_rules_sha256=base.rules_sha256, taxonomy_snapshot=taxonomy,
+            ), identity_snapshot_sha256=identity_sha,
+        )
+        atomic_write_canonical(root / f"{fold.fold_id}.player-effect.evaluation.json", evaluation)
+        evaluations.append(evaluation)
+        click.echo(f"// player-effect fold {fold.fold_id}: {evaluation.status}")
+    summary = aggregate_player_effect_evaluations(
+        tuple(evaluations), benchmark_protocol=benchmark, player_protocol=player,
+    )
+    atomic_write_canonical(root / "player-effect.summary.json", summary)
+    atomic_write_text(root / "player-effect.summary.md", render_player_effect_markdown(summary))
+    click.echo(f"// player-effect status: {summary.status}; production ranking unchanged")
+
+
 def _parse_lift_spec(spec: str | None) -> dict[str, float]:
     """Parse `--*-lift` "opp=+0.11,opp2=-0.03" → {opponent: delta}. Opp names may contain spaces."""
     out: dict[str, float] = {}
@@ -2725,6 +3900,7 @@ def advise_compare(
         matrix = inputs.matrix
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         lifts_a = _parse_lift_spec(a_lift)
         lifts_b = _parse_lift_spec(b_lift)
@@ -2766,7 +3942,7 @@ def advise_compare(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--candidates",
@@ -2774,6 +3950,16 @@ def advise_compare(
     type=click.Path(exists=True, dir_okay=False),
     default=None,
     help="Path to a file listing candidate archetypes (one per line) for ranking.",
+)
+@click.option(
+    "--ranking-strata",
+    is_flag=True,
+    default=False,
+    help=(
+        "Group --candidates by grounded/lean/imputation-dominated/inactive/unscorable "
+        "evidence; inactive means zero current presence, while unscorable names missing cells "
+        "or <5% measured coverage. Excluded rows show S/P(best)=n/a."
+    ),
 )
 @click.option(
     "--reserved",
@@ -2815,6 +4001,7 @@ def advise_positioning(
     archetype: str | None,
     field_file: str | None,
     candidates_file: str | None,
+    ranking_strata: bool,
     reserved: int,
     seed: int | None,
     list_granular: bool,
@@ -2831,8 +4018,9 @@ def advise_positioning(
     from pathlib import Path
 
     from legacy_engine.advisory.positioning import (
-        _PBEST_SUPPRESS_COVERAGE,
+        _compute_data_coverage,
         positioning_score,
+        ranking_evidence_payload,
         rank_decks,
     )
     from legacy_engine.advisory.report import _classify_deck, _load_field
@@ -2840,6 +4028,8 @@ def advise_positioning(
     from legacy_engine.ingestion import store
 
     mainboard, sideboard_cards = _resolve_deck_boards(deck, my_deck, "advise positioning")
+    if ranking_strata and not candidates_file:
+        raise click.ClickException("--ranking-strata requires --candidates")
     field_text = Path(field_file).read_text() if field_file else None
 
     if provenance is not None:
@@ -2859,6 +4049,7 @@ def advise_positioning(
         # the matchup matrix above. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -2871,26 +4062,66 @@ def advise_positioning(
                 ln.strip() for ln in Path(candidates_file).read_text().splitlines()
                 if ln.strip() and not ln.startswith("#")
             ]
-            ranking = rank_decks(matrix, field, candidates, seed=seed)
+            coverage = {
+                candidate: _compute_data_coverage(matrix, field, candidate)
+                for candidate in candidates
+            }
+            evidence = {}
+            for candidate in candidates:
+                resolved = sum(
+                    1 for opponent in field.shares
+                    if opponent != candidate
+                    and (cell := matrix.cells.get((candidate, opponent))) is not None
+                    and cell.n >= 1
+                )
+                evidence[candidate] = ranking_evidence_payload(
+                    field_share=field.shares.get(candidate, 0.0),
+                    measured_share=coverage[candidate],
+                    resolved_cells=resolved,
+                    grounded=coverage[candidate] >= 0.8,
+                )
+            eligible = [candidate for candidate in candidates if evidence[candidate]["eligible"]]
+            ranking = rank_decks(matrix, field, eligible, seed=seed)
             q_label = f"Q{ranking.quantile_level:.2f}"
             click.echo(f"\n=== Deck Ranking (field_source={ranking.field_source}, sort={q_label}) ===")
-            for d in ranking.decks:
+            ordered = [*ranking.decks, *(d for d in candidates if d not in ranking.decks)]
+            if ranking_strata:
+                order = ["grounded", "lean", "imputation-dominated", "inactive", "unscorable"]
+                ordered = [
+                    deck for stratum in order for deck in ordered
+                    if evidence[deck]["stratum"] == stratum
+                ]
+            last_stratum = None
+            for d in ordered:
+                item = evidence[d]
+                if ranking_strata and item["stratum"] != last_stratum:
+                    click.echo(f"\n  [{item['stratum']}]")
+                    last_stratum = item["stratum"]
+                cov = coverage[d]
+                imputed = item["imputed_share"]
+                stratum_flag = (
+                    " [imputation-dominated]"
+                    if item["stratum"] == "imputation-dominated" else ""
+                )
+                if not item["eligible"]:
+                    click.echo(
+                        f"  {d:<35}  S=n/a  P(best)=n/a  cov={cov:.2f}  "
+                        f"imputed={imputed:.0%} [{item['stratum']}: {item['reason']}]"
+                    )
+                    continue
                 lo, hi = ranking.s_ci[d]
-                cov = ranking.data_coverage[d]
                 low_flag = " [low_coverage]" if d in ranking.low_coverage else ""
                 # Label S as full-field when the deck would be restricted in the single-deck
                 # view — keeps the ranking path consistent with advise positioning output.
                 s_label = "S*" if d in ranking.coverage_caveated else "S"
                 # Suppress P(best) when coverage ≈ 0 — the value is imputation noise that
                 # otherwise reads as a spuriously confident ranking signal.
-                if cov < _PBEST_SUPPRESS_COVERAGE:
-                    pbest_str = "P(best)=n/a [cov≈0]"
-                else:
-                    pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
+                pbest_str = f"P(best)={ranking.p_best[d]:.3f}"
                 click.echo(
                     f"  {d:<35}  {s_label}={ranking.s_mean[d]:.3f}  "
                     f"CI=[{lo:.3f},{hi:.3f}]  {pbest_str}  "
-                    f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}{low_flag}"
+                    f"{q_label}={ranking.s_quantile[d]:.3f}  cov={cov:.2f}  "
+                    f"imputed={imputed:.0%}{stratum_flag}{low_flag}"
                 )
         else:
             pos = positioning_score(matrix, field, resolved_archetype, seed=seed)
@@ -3022,7 +4253,7 @@ def _render_list_granular(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--reserved",
@@ -3148,6 +4379,7 @@ def advise_sideboard(
         # the window's thinness check above. When --field is absent, provenance narrows the field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -3405,6 +4637,7 @@ def advise_backtest(
     con = store.connect(db) if db else store.connect()
     try:
         field = _load_field(con, field_text=field_text)
+        _echo_field_regime_currency(field)
         result = backtest_board(con, archetype, field, since=since, until=until, field_scope=field_scope)
 
         click.echo(f"// backtest: {result.archetype}")
@@ -3587,6 +4820,7 @@ def advise_sweep(
             field = _load_field(con, field_text=Path(field_file).read_text())
         else:
             field = build_global_field(con, since=eff_since, until=eff_until)
+        _echo_field_regime_currency(field)
 
         click.echo("// sweep: archetype-sweep backtest (batch divergence mining)")
         click.echo(
@@ -3774,7 +5008,7 @@ def advise_sweep(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--db",
@@ -3826,6 +5060,7 @@ def advise_whattoplay(
             click.echo(line)
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -3882,7 +5117,7 @@ def advise_whattoplay(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines). "
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts. "
          "Absent → global corpus field (optionally filtered by --provenance/window opts).",
 )
 @click.option(
@@ -3959,6 +5194,7 @@ def advise_field(
             since=win.since,
             until=win.until,
         )
+        _echo_field_regime_currency(field)
 
         # Warn on field warnings (thin-data banners, normalization, etc.)
         for w in field.warnings:
@@ -4012,7 +5248,7 @@ def advise_field(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--venues",
@@ -4125,6 +5361,7 @@ def advise_report(
                     since=inputs.field_since,
                     until=inputs.field_until,
                 )
+                _echo_field_regime_currency(v_field)
                 v_report = build_field_read_report(
                     con,
                     mainboard,
@@ -4149,6 +5386,7 @@ def advise_report(
         # the matchup matrix. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance, since=inputs.field_since, until=inputs.field_until)
+        _echo_field_regime_currency(field)
         report = build_field_read_report(
             con,
             mainboard,
@@ -4569,7 +5807,7 @@ def identify_track(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--colors",
@@ -4672,6 +5910,7 @@ def advise_acquire(
         # the window thinness check. When --field is absent, provenance narrows the global field.
         field_provenance = None if field_text is not None else provenance
         field = _load_field(con, field_text=field_text, provenance=field_provenance)
+        _echo_field_regime_currency(field)
 
         plan = acquire_plan(
             con,
@@ -5013,7 +6252,7 @@ def generate_consensus(
     "field_file",
     type=click.Path(exists=True, dir_okay=False),
     default=None,
-    help="Path to a custom field file (<share> <archetype> lines).",
+    help="Custom field: <share> <archetype> [count]; # current_regime_n requires complete counts.",
 )
 @click.option(
     "--since",
@@ -5176,6 +6415,7 @@ def generate_tune(
     discovery = None
     try:
         field = _load_field(con, field_text=field_text)
+        _echo_field_regime_currency(field)
 
         resolved_archetype = archetype
         if resolved_archetype is None:
@@ -7054,15 +8294,33 @@ def eras_run(db: str | None, provenance: str | None, alpha: float, verbose: bool
     Example: legacy-engine eras run
     """
     _setup_logging(verbose)
-    from legacy_engine.analytics.eras.run import run_eras
-    from legacy_engine.ingestion import store
+    from pathlib import Path
 
-    con = store.connect(db) if db else store.connect()
+    from legacy_engine.analytics.eras.run import run_eras
+    from legacy_engine.config import DUCKDB_PATH, OPS_LOCK_DIR, PROJECT_ROOT
+    from legacy_engine.ingestion import store
+    from legacy_engine.ops.scheduled_refresh import (
+        LockUnavailable,
+        decision_refresh_lock_path,
+        exclusive_file_lock,
+    )
+
+    db_path = Path(db).resolve() if db else DUCKDB_PATH
+    lock_path = decision_refresh_lock_path(
+        db_path,
+        PROJECT_ROOT / "decks" / "deck-rankings.html",
+        lock_dir=OPS_LOCK_DIR,
+    )
     try:
-        _echo_data_freshness(con, provenance=provenance)
-        result = run_eras(con, provenance=provenance, alpha=alpha)
-    finally:
-        con.close()
+        with exclusive_file_lock(lock_path):
+            con = store.connect(db_path)
+            try:
+                _echo_data_freshness(con, provenance=provenance)
+                result = run_eras(con, provenance=provenance, alpha=alpha)
+            finally:
+                con.close()
+    except LockUnavailable as exc:
+        raise click.ClickException(str(exc)) from exc
 
     click.echo(f"// eras run: {result.n_entities} entities analyzed (alpha={alpha})")
     if result.n_entities == 0:

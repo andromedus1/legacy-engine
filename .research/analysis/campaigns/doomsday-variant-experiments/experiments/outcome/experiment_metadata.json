@@ -1,0 +1,24 @@
+{
+  "schema": "doomsday-outcome-experiments",
+  "generated_from": "data/legacy.duckdb",
+  "database_sha256": "b984afffd2e1fb3c377f6c1877b1d9c56368e969c61b8e432601fe61bebf4dca",
+  "database_max_tournament_date": "2026-08-19",
+  "database_max_exact_doomsday_date": "2026-08-18",
+  "current_window": {
+    "start": "2026-08-10",
+    "end": "2026-08-19"
+  },
+  "population": "decks.archetype = 'Doomsday'",
+  "notes": [
+    "League rows are selected 5-0 publications and have no failed-run denominator.",
+    "Wilson intervals describe recorded match decisions for published entrants only.",
+    "Historical windows cross construction and legality regimes and are not pooled causal estimates.",
+    "Category memberships overlap; taxonomy classes are mutually exclusive by precedence."
+  ],
+  "row_counts": {
+    "current_exact_archetype": 12,
+    "current_broader_construction_only": 1,
+    "current_league_publications": 6,
+    "current_standings_backed": 6
+  }
+}

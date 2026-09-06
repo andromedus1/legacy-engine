@@ -1,0 +1,77 @@
+# Doomsday variant paired-playtest protocol
+
+This is a preregistered descriptive comparison of the 14 unique 75s in
+[manifest.json](manifest.json). The corpus contains 15 files because the Battlegrounds registration
+is both the Esper comparator and the Bilbo/Tamiyo chassis example; the manifest aliases that second
+artifact to one canonical experimental ID so its results cannot be split. The manifest is the only
+list-id authority. Published finishes
+and source dates are evidence posture, not playtest outcomes.
+
+## Experimental units
+
+- A **game** is one CSV row. `list_id`, `deck_sha256`, `list_version`, opponent list/version, board state,
+  play/draw, and list order identify the tested configuration.
+- A **pre/post-board pair** is represented by the same `match_id` with `board_state` set to
+  `pre` or `post`; pre-board rows use `not_applicable` for boarding and alternate-plan fields.
+- A **match** is the games sharing a `match_id` for one tested list. A completed match has at least
+  two games, both pre- and post-board states, and exactly one terminal `match_result` on its last
+  post-board row; use `not_seen` on earlier or unfinished rows.
+- A **matchup block** holds one candidate and the Dimir control against the same
+  `opponent_archetype` and `opponent_list_version`. `pair_id` links one candidate game to the
+  corresponding control game under the same opponent, board state, play/draw condition, pilot/date,
+  and randomized list-order assignment. Pair IDs are globally unique.
+
+The distributed log is game-level so opening decisions, actual combo turns, splash-mana effects,
+Wasteland exposure, boarding, protection relevance, and alternate-plan outcomes cannot be merged
+into a single headline number.
+
+## Registration and randomization
+
+Before a block begins, copy the candidate `list_id`, a version key from that candidate's manifest
+`versions` map, and the hash registered under that key into every row. A changed deck hash starts a
+new manifest version; retain the old version-to-hash entry so historical rows remain verifiable.
+An arbitrary label or the current hash paired with an older version is rejected. Register the
+opponent list/version as well. Randomize which list is played first and randomize play/draw
+within each block. A paired candidate/control game uses the same play/draw condition; rotate that
+condition and which list is tested first across pairs. Balance both dimensions so each arm has no
+more than one extra play or draw and no more than one extra first/second list position.
+
+Use a fresh `pilot_id`/`played_on` value for each pilot session. Do not use published event results
+as rows in this log.
+
+## Mulligans, play, and boarding
+
+Use the London mulligan and record the final opening-hand size, number of mulligans, and whether any
+mulligan was taken (`keep` means zero; `mulligan` means one or more). The final size must be
+`max(7 - mulligan_count, 0)`. Record `combo_turn` only when the primary Doomsday win actually
+occurred; otherwise use `not_seen`—this field is always applicable, so `not_applicable` is invalid.
+A value is a turn number, not a turn estimate or intended goldfish clock.
+
+Play the pre-board game(s) before sideboarding. For post-board games, record cards as
+`<count> <card>` entries separated by semicolons (for example, `2 Veil of Summer;1 Carpet of
+Flowers`). Use `not_seen` when a board change was not observed and `not_applicable` only before
+boarding.
+
+## Field definitions and conditional states
+
+Every cell is required. Use `not_seen` when the game ended before a signal could be observed and
+`not_applicable` when the signal cannot apply. Do not leave cells empty.
+
+- `splash_mana_effect` is `helped`, `hurt`, `neutral`, or a sentinel; if it is a real effect,
+  record `splash_color_failure` as `yes`, `no`, or `not_seen`. If the effect itself was `not_seen`,
+  the failure must also be `not_seen`; the validator does not infer an unobserved event.
+- `wasteland_punished` is meaningful only when `wasteland_exposed=yes`.
+- `protection_live` and `protection_relevant` are meaningful only when
+  `protection_present=yes`; relevance asks whether it matched the interaction actually presented,
+  not merely whether the card was held.
+- `alternate_plan=yes` means the alternate threat/line was deployed or attempted. Its result is
+  `win`, `loss`, or `not_seen`; otherwise its result is `not_applicable`.
+
+## Stopping rule and interpretation
+
+The preregistered stopping threshold is **20 completed matches per list**, with pre/post-board
+games and balanced paired blocks. A thin pilot may be stopped earlier for time or card-availability
+reasons, but the validator labels it `thin-sample` and the summarizer emits no ranking. Results are
+descriptive: denominators, game/match wins, keep rate, combo-turn observations, candidate-level
+paired deltas, and per-matchup-block paired deltas remain visible. No list is promoted to an
+interchangeable-sideboard series from this pilot alone.

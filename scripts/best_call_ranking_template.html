@@ -1,854 +1,306 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Best Deck / Best Call — Agency Ranking</title>
+<title>Deck Rankings</title>
 <style>
-:root {
-  color-scheme: light;
-  --surface-1:#fcfcfb; --page:#f9f9f7;
-  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10);
-  --s1:#2a78d6; --s1-weak:#9ec5f4; --bar:#86b6ef; --bar-deep:#2a78d6;
-  --amber:#fab219;
-  --bo-critical:#d03b3b;
-  --edge:#2a78d6;
-  --edge-dominant:#16845b;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --surface-1:#1a1a19; --page:#0d0d0d;
-    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
-    --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
-  }
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --surface-1:#1a1a19; --page:#0d0d0d;
-  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
-  --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
-}
-html, body { margin: 0; background: var(--page); color: var(--ink); }
-.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--page); color: var(--ink); margin:0; padding: 24px;
-  line-height: 1.45; min-height: 100vh; box-sizing: border-box; }
-.viz-root h1 { font-size: 22px; margin: 0 0 2px; }
-.viz-root h2 { font-size: 16px; margin: 28px 0 8px; }
-.audit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px; color: var(--muted); white-space: pre-wrap; margin: 10px 0 18px; }
-.card { background: var(--surface-1); border: 1px solid var(--ring);
-  border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
-.def { max-width: 880px; }
-.def b { color: var(--s1); }
-.def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
-.def .gates li { margin: 3px 0; }
-.def details.method + details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
-.def details.method summary { cursor: pointer; font-weight: 600; font-size: 13.5px;
-  color: var(--ink-2); user-select: none; }
-.def details.method summary:hover { color: var(--ink); }
-.def details.method ul { margin-top: 8px; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
-  text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px;
-  border-bottom: 1px solid var(--axis); white-space: nowrap; }
-td { padding: 6px 8px; border-bottom: 1px solid var(--grid);
-  font-variant-numeric: tabular-nums; white-space: nowrap; }
-td.name { font-weight: 600; }
-tr.thin td { color: var(--muted); }
-tr.thin td.name { font-weight: 500; }
-tr.stale td.name::after { content: " ◦not current"; color: var(--amber);
-  font-size: 10.5px; font-weight: 500; vertical-align: 1px; }
-.barcell { min-width: 150px; }
-.bar { display: inline-block; height: 8px; border-radius: 4px;
-  background: var(--bar-deep); vertical-align: middle; margin-right: 6px; }
-tr.thin .bar { background: var(--muted); opacity: .5; }
-.chip { font-size: 10.5px; color: var(--muted); border: 1px solid var(--ring);
-  border-radius: 8px; padding: 0 5px; margin-left: 4px; vertical-align: 1px; }
-.expander { cursor: pointer; }
-th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-.expander:hover { background: color-mix(in oklab, var(--s1) 7%, transparent); }
-tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 4%, transparent); }
-.cells { font-size: 12px; columns: 3; column-gap: 24px; padding: 4px 0; }
-.cells div { break-inside: avoid; padding: 1px 0; }
-.cells .unm { color: var(--muted); }
-/* Raw-WR matchup highlights in the expanded ledger. Text chips carry the meaning,
-   never color alone; only measured rows reach these four mutually exclusive bands. */
-.cells .bo-full, .cells .bo-half, .cells .edge, .cells .edge-dominant {
-  padding-left: 6px; border-radius: 4px; }
-.cells .bo-full { background: color-mix(in srgb, var(--bo-critical) 14%, transparent);
-  border-left: 3px solid var(--bo-critical); }
-.cells .bo-half { background: color-mix(in srgb, var(--amber) 16%, transparent);
-  border-left: 3px solid var(--amber); }
-.cells .edge { background: color-mix(in srgb, var(--edge) 13%, transparent);
-  border-left: 3px solid var(--edge); }
-.cells .edge-dominant { background: color-mix(in srgb, var(--edge-dominant) 15%, transparent);
-  border-left: 3px solid var(--edge-dominant); }
-.bo-key { display: inline-block; margin: 0 0 6px; font-size: 11px; color: var(--muted); }
-.bo-key .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
-  vertical-align: -1px; margin: 0 4px 0 10px; }
-.scroll { overflow-x: auto; }
-.tablewrap { overflow: visible; }
-.table-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-  color: var(--ink-2); font-size: 12px; }
-.table-controls input { width: 72px; padding: 4px 6px; color: var(--ink);
-  background: var(--surface-1); border: 1px solid var(--ring); border-radius: 6px;
-  font-variant-numeric: tabular-nums; }
-.table-count { color: var(--muted); }
-.table-scroll { max-height: 72vh; overflow: auto; }
-.table-scroll > table > thead > tr > th { position: sticky; top: 0; z-index: 2;
-  background: var(--surface-1); box-shadow: 0 1px 0 var(--axis); }
-svg text { font-family: inherit; }
-.footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
-.hint { font-size: 13.5px; color: var(--ink); margin: -6px 0 18px;
-  padding: 12px 14px; max-width: 980px; border: 1px solid var(--s1-weak);
-  border-left: 5px solid var(--s1); border-radius: 9px;
-  background: color-mix(in oklab, var(--s1) 11%, var(--surface-1));
-  box-shadow: 0 2px 9px color-mix(in srgb, var(--s1) 12%, transparent); }
-.hint-label { display: inline-block; margin-right: 8px; padding: 2px 7px;
-  border-radius: 999px; background: var(--s1); color: white; font-size: 10.5px;
-  font-weight: 750; letter-spacing: .06em; text-transform: uppercase; vertical-align: 1px; }
-.tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
-  border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
-  font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
-.plan-toggle { appearance:none; border:0; background:none; color:inherit; font:inherit;
-  font-weight:650; padding:0; cursor:pointer; text-align:left; }
-.plan-toggle::before { content:"▸ "; color:var(--s1); }
-.plan-toggle[aria-expanded="true"]::before { content:"▾ "; }
-.plan-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:3px; border-radius:2px; }
-.plan-portrait { display:grid; grid-template-columns:minmax(220px,.8fr) minmax(320px,1.2fr); gap:18px; }
-.plan-portrait h3 { margin:0 0 5px; font-size:16px; }
-.plan-portrait p { margin:0 0 10px; color:var(--ink-2); }
-.plan-stat { display:inline-block; margin:0 12px 6px 0; }
-.plan-members { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
-.plan-member { border:1px solid var(--ring); border-radius:7px; padding:3px 6px; }
-.plan-ledger td:first-child { font-weight:600; }
-/* Nested disclosures inside an archetype row's dropdown — the plan block and the exact
-   archetype ledger open independently, so neither has to be scrolled past to reach the other. */
-.subsection { border:1px solid var(--ring); border-radius:9px; margin:8px 0 0;
-  background: var(--surface-1); }
-.subsection > summary { cursor:pointer; list-style:none; padding:8px 11px;
-  font-weight:650; font-size:14px; border-radius:9px; }
-.subsection > summary::-webkit-details-marker { display:none; }
-.subsection > summary::before { content:"▸ "; color:var(--s1); }
-.subsection[open] > summary::before { content:"▾ "; }
-.subsection[open] > summary { border-bottom:1px solid var(--ring); border-radius:9px 9px 0 0; }
-.subsection > summary:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
-.subsection > summary .chip { font-weight:500; }
-.subsection > .subsection-body { padding:9px 11px 11px; }
-@media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--ink:#171715;--muted:#66655e;--line:#deddd7;--blue:#246dc4;--green:#16744e;--red:#b73939;--amber:#976512}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--page:#111110;--surface:#1c1c1a;--ink:#eeeee9;--muted:#b1b0a6;--line:#393933;--blue:#83b6fa;--green:#71cca4;--red:#f59696;--amber:#e0b766}}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:14px/1.45 system-ui,-apple-system,sans-serif}main{max-width:1500px;margin:auto;padding:28px}h1{font-size:30px;letter-spacing:-.8px;margin:0}h2{font-size:18px;margin:30px 0 10px}h3{font-size:16px;margin:0 0 8px}p{margin:7px 0}small,.muted{color:var(--muted)}a{color:var(--blue)}button,input,select{font:inherit;color:inherit}button,summary,select{cursor:pointer}button,input,select{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px}:focus-visible{outline:2px solid var(--blue);outline-offset:3px}header{display:flex;justify-content:space-between;align-items:center;gap:20px}.subtitle{color:var(--muted);margin:4px 0 16px}.card{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--surface)}.pick-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.badge{display:inline-block;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 5px;margin-left:5px}.frontier{color:var(--blue)}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:20px 0}.toolbar input[type="search"]{width:240px}.toolbar label{display:flex;align-items:center;gap:5px}.table-scroll{overflow:auto;max-height:72vh}table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}th{position:sticky;top:0;background:var(--surface);z-index:1;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.035em}th button{font:inherit;letter-spacing:inherit;text-transform:inherit;border:0;padding:0;background:none}td strong{font-weight:650}td small{display:block;font-size:11px}tr.expander:hover{background:color-mix(in srgb,var(--blue) 6%,transparent)}.row-toggle{font-weight:600;border:0;background:none;padding:0;text-align:left}.row-toggle::before{content:'▸ ';color:var(--blue)}.row-toggle[aria-expanded="true"]::before{content:'▾ '}.detail>td{white-space:normal;padding:18px;background:color-mix(in srgb,var(--blue) 3%,var(--surface))}.detail .table-scroll{max-height:440px}.ledger th{z-index:0}.bad{color:var(--red)}.good{color:var(--green)}.flat{color:var(--muted)}.detail-meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px}.audit{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace}.method{margin-top:24px;color:var(--muted)}.method p{max-width:950px}.method summary{font-weight:600;color:var(--ink)}.method details{margin-top:12px}.members{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.member{font-size:12px;padding:3px 7px;border:1px solid var(--line);border-radius:5px}.target-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}.target-control[hidden]{display:none}.target-unavailable{flex-basis:100%;margin:0}.empty{padding:18px;color:var(--muted)}svg text{font-family:inherit}.map-caption{color:var(--muted);font-size:12px}.notice{color:var(--amber)}@media(max-width:760px){main{padding:16px}header{display:block}th,td{padding:8px}.toolbar input[type="search"]{width:100%}}
+.detail>td{padding:10px 12px}.detail .ledger th,.detail .ledger td{padding:4px 8px;line-height:1.3}.detail .ledger td small{display:inline;margin-left:6px}.detail .ledger .history{max-width:28rem;white-space:normal;overflow-wrap:anywhere}
+.refresh-card{margin:22px 0}.refresh-card h2{margin:2px 0 4px}.refresh-card ol{margin:10px 0 0;padding-left:22px}.refresh-card li{margin:5px 0}.refresh-card li::marker{color:var(--blue)}
+#scatter-card{overflow-x:auto}
+@media(max-width:760px){#scatter-card svg{min-width:980px}button,input:not([type="checkbox"]),select{min-height:44px;min-width:44px}.toolbar label{min-height:44px;min-width:44px}summary{padding-block:12px}nav a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}}
+.evidence-controls input{width:78px}.evidence-controls small{flex-basis:100%}.map-tip{position:fixed;z-index:30;pointer-events:none;width:330px;max-width:calc(100vw - 24px);padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px #0003;font-size:13px;font-variant-numeric:tabular-nums}.map-tip[hidden]{display:none}.tip-title{font-size:15px;font-weight:650;margin-bottom:8px}.map-tip dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;margin:0}.map-tip dt{color:var(--muted)}.map-tip dd{margin:0;text-align:right}.map-tip small{display:block}.map-point{cursor:help}.map-point:hover .map-dot,.map-point:focus .map-dot{stroke:var(--ink);stroke-width:2}@media(pointer:fine){.map-hit{pointer-events:none}}.map-point:focus-visible{outline:2px solid var(--blue)}
 </style>
 </head>
-<body>
-<div class="viz-root">
-<h1>Best Deck / Best Call — ranked by Agency</h1>
-<div class="audit" id="audit"></div>
-<div class="hint" role="note"><span class="hint-label">Interactive tables</span><b>Click any row</b>
-in the Strategic Plans, Archetypes, or Subarchetypes tables
-to expand it. Plans show their member decks and direct plan-vs-plan ledger; archetypes and
-subarchetypes show every current-field opponent with shrunk + raw win rate, sample size, window,
-and blowout highlights.</div>
-
-<div class="card def">
-  <details class="method">
-  <summary>What is Agency&nbsp;%? — the metric and each column</summary>
-  <div style="margin-top:8px"><b>Agency % = min( adjusted field win rate , worst measured matchup ) × 100</b> —
-  how much of the match result your own play keeps in the worst case.
-  The <b>adjusted field WR</b> is your available shrunk matchup estimates weighted by the
-  current field's archetype shares and renormalized over that available share (are you
-  competitive <i>in general</i>?). Thin estimates may inform this average, but they cannot set
-  the floor. The <b>worst measured matchup</b> is the minimum shrunk estimate among cells that
-  clear the table's selected matchup-<i>n</i> gate (are you competitive <i>against anyone</i>?).
-  A high-agency deck never hands the result to the pairing screen:
-  it concedes no free wins to the room. Theory under test: <b>maximum agency = most fun</b>.</div>
-  <ul class="gates">
-    <li><b>Measured cells only</b> — a matchup counts when it clears the table's selected
-        minimum matchup <i>n</i> (the generated default is <code>--ground-n</code>, normally 8).
-        Era-windowed cells are preferred; when the era window is below that gate, a fallback cell is
-        used — and the fallback pools matches only since <b>the last ban that affected either
-        deck</b> in the pair (ran a banned card in ≥25% of its pre-ban lists), labeled
-        <span class="chip">BA date</span>. A true full-corpus cell
-        (<span class="chip">FC</span>) exists only when neither deck was ever ban-affected.
-        The Nadu rule: a banned engine's matches never inflate a row — in either direction.</li>
-    <li><b>Every measured matchup can set the floor</b> — once a cell clears the selected
-        measured-evidence gate, its shrunk estimate participates in the minimum. This
-        makes visible holes matter sooner. Because a deck with more measured opponents has
-        more chances to expose a low matchup, incomplete rows remain explicit upper bounds and
-        coverage must be read alongside agency.</li>
-    <li><b>Coverage counts against the floor</b> — unmeasured field share is shown per row;
-        a floor claim over 70% of the field is a 70% claim.</li>
-    <li><b>Blowouts</b> — count of measured current-field matchups where you're getting run over:
-        raw WR &lt;&nbsp;40% is a full blowout, 40–45% is a half. The chip shows
-        <span class="chip">full✕ + half½ of N measured</span>. Floor is your single worst hole;
-        blowout count is <i>how many</i> holes — a richer read on "competitive against anyone."
-        Classified on the observed record; cells below the measured evidence gate are excluded
-        entirely, so a shrinkage prior is never called a blowout.</li>
-    <li><b>% meta that blows you out</b> — the blowout count weighted by field share: the full
-        share of every sub-40% opponent plus half the share of every 40–45% opponent. This is
-        <i>how much of the room you sit down against at a structural disadvantage</i> — a small
-        count of blowouts against big-share decks matters more than many against fringe brews.
-        Measured share only, so it's a lower bound (unmeasured opponents can't be counted).</li>
-    <li><b>Positive matchup edges</b> — the inverse raw-WR bands appear in each expanded ledger:
-        <span class="chip">edge</span> at 55–60% and <span class="chip">dominant</span> above 60%.
-        They use the same measured-cell gate as blowouts and are descriptive highlights only;
-        they do not change any row metric or ranking.</li>
-    <li><b>Grounded rows</b> — the generated method requires the top
-        <code>--top-k</code> field opponents (normally 8) each to clear the selected matchup-<i>n</i>
-        gate and at least <code>--cover-min</code> of field share-mass (normally 80%) to be
-        measured. Rows failing either test are listed separately in gray: their agency number is
-        an upper-bound lean, not a floor claim.</li>
-    <li id="field-basis"></li>
-  </ul>
-  </details>
-  <details class="method">
-    <summary>How the numbers are made — matches, shrinkage, era windows, camps</summary>
-    <ul class="gates">
-      <li><b>Where matches come from</b> — decklists are mirrored from the public tournament
-      cache (MTGO + Melee + CardsRealm) and labeled with archetypes by a rules engine.
-      Matchup win rates come only from <b>rounds-bearing events</b> (Challenges and paper
-      events publish pairings; MTGO leagues publish decklists but no rounds). So a deck's
-      meta share and its matchup sample are different-sized populations — a big field share
-      with thin matchup cells is normal, not a bug. A match counts when one player took
-      strictly more games ("2-1", "2-0"); draws and byes are excluded from win rates.</li>
-      <li><b>What "current field" means</b> — the field is every published decklist since the
-      latest confirmed B&amp;R change (the audit header names the ban): a ban invalidates the
-      room it changed, so share estimates never mix regimes. <b>% of meta</b> is a deck's share
-      of all window decklists — raw counts, one published list = one vote, no win-rate
-      weighting. Know what gets published, because the field inherits that bias: MTGO leagues
-      publish only 5-0 lists, challenges publish top finishers, paper events publish whatever
-      the venue uploads — and online + paper are blended here (the engine tracks venue splits,
-      but this page doesn't). Decklists the labeling rules can't classify surface as
-      <i>Unknown</i> rather than being dropped. Note the two "currents": the field window is
-      the ban regime; the <b>◦not current</b> marker uses a shorter horizon (the last 4 corpus
-      weeks), because "legal in this regime" and "actually being played this month" are
-      different questions.</li>
-      <li><b>Why two win rates per matchup</b> — <i>raw</i> is literally wins/n: what
-      happened, but noisy at small n (a 3-1 cell reads 75% and means almost nothing).
-      The headline number is a <b>Beta-Binomial shrunk estimate</b>: it behaves as if the
-      cell started with ~15 phantom matches at a prior win rate, so small samples get pulled
-      toward the prior and big samples converge to raw. The gap between the two numbers is
-      itself a signal — a big gap means "small sample, don't trust raw".</li>
-      <li><b>The prior is hierarchical, not flat</b> — a matchup cell shrinks toward the
-      deck's own overall win rate (itself first shrunk toward 50%), so an unknown matchup
-      for a strong deck reads as "probably decent", not "coin flip". A camp's cell shrinks
-      toward its parent archetype's same matchup with that camp's decks removed — camps
-      inherit the parent's profile until their own data speaks. When an era boundary
-      truncates a cell below n=100, the pre-boundary value serves as its prior (labeled in
-      the cell's provenance), so history informs but never impersonates the current era.</li>
-      <li><b>Era windows ("since" column)</b> — every deck's history is bucketed by week and
-      scanned by four change detectors: card-presence cliffs/ramps (a ban or a new-set
-      adoption is a visible step), composition shifts in the flex slots, share-of-field
-      breaks, and win-rate corroboration (never primary evidence on its own). Nearby
-      candidates merge; the whole fleet of boundaries then passes one
-      <b>Benjamini–Hochberg false-discovery screen</b> (α=0.05) so ~150 entities screened
-      every refresh don't accumulate false eras; a surviving boundary is still rejected if
-      too few decks exist after it. The last accepted boundary is the deck's
-      <i>stable_since</i>; each boundary is attributed to a ban/release when the evidence
-      names one (e.g. "release: Flow State adoption"), and an unattributed disturbance
-      raises a drift alarm instead of silently re-windowing.</li>
-      <li><b>How a cell picks its window</b> — a matchup A-vs-B pools matches back to the
-      <i>later</i> of the two decks' stable_since dates (both sides must be in their current
-      form). If that era window falls below the selected matchup-<i>n</i> gate, a fallback cell is
-      shown instead — pooled since
-      the later of the two decks' <b>ban-affectedness</b> dates (labeled <b>BA date</b>), or
-      full history (<b>FC</b>) only when neither deck was ever materially hit by a ban. More
-      data, may blend older builds of the same legal engine — but never a banned one: the
-      Nadu-era Cephalid and Candelabra-era Forge matches are structurally excluded from
-      every fallback that touches those decks.</li>
-      <li><b>The matchup-<i>n</i> control recomputes the page</b> — changing it reselects each
-      archetype/camp cell from its embedded era and ban-scoped fallback candidates, then recomputes
-      adjusted field WR, floor, agency, blowouts, coverage, grounding, labels, and sorting in the
-      browser. Strategic-plan cells use the same selected gate over their uniform field window.
-      Cross-camp P(best) is a generated Monte-Carlo result, so it becomes n/a whenever the selected
-      gate differs from the generated <code>--ground-n</code> rather than showing a stale score.</li>
-      <li><b>Sample tiers</b> — tier words on this page (e.g. the field-basis tier in the
-      audit header) are fixed thresholds on n: <i>speculative</i> &lt;30, <i>evolving</i>
-      30–99, <i>established</i> ≥100.</li>
-      <li><b>Camps (subarchetypes)</b> — found by clustering each archetype's mainboard
-      flex slots (TF-IDF → SVD → HDBSCAN), then gated: the split must survive bootstrap
-      re-clustering (co-membership stability ≥0.9 over 50 resamples) and every camp needs a
-      real sample plus clearly divergent signature cards. Camps are a <i>staged overlay</i>
-      — applied for analysis, never silently promoted to taxonomy — and decks that fit no
-      camp stay honestly [unlabeled]. Camp field share = parent share × the camp's fraction
-      of the parent's current-window decks. All camp matchup cells come from ONE
-      multi-split matrix built over every staged parent at once — numerically identical to
-      the old one-matrix-per-parent builds (parity-tested in the engine), but every camp
-      now coexists in a single matrix.</li>
-      <li><b>Cross-camp P(best)</b> — the camp table's P(best) column comes from one
-      shared-field Monte-Carlo: sample the field once per draw (Dirichlet over the
-      parent-level window counts, fixed seed), score <i>every</i> candidate — all camps
-      plus all unsplit archetypes — against that same sampled field, and count how often
-      each is the argmax. Sharing the field draw is what makes the number comparable
-      across camps of different parents. Cells are the same era-preferred / ban-scoped
-      ones the ledger shows; candidates below 5% measured coverage are excluded (their
-      score would be imputation noise) and show n/a instead.</li>
-      <li><b>Strategic plans are direct match aggregates</b> — every current archetype has one
-      curated primary plan; optional secondary labels explain hybrids without duplicating field
-      share or matches. Plan-vs-plan cells pool decisive matches directly rather than averaging
-      rendered archetype rates. A plan's own diagonal is structural 50% context: exact mirrors and
-      cross-archetype same-plan matches are reported separately, but the diagonal is never measured,
-      never sets the floor, and is excluded from external coverage. Every archetype dropdown's five
-      plan cells are likewise built directly from that archetype's decisive non-mirror matches.
-      Composition-derived superarchetypes may support internal matrix borrowing, but they contribute
-      no page-visible lean and no ranking input.</li>
-      <li><b>No significance theater</b> — the clustering gate is stability-based on purpose:
-      running a t-test on data the clustering already saw would double-dip and inflate false
-      positives. Where a real multiple-testing control exists (era boundaries), it's BH-FDR;
-      where it can't exist honestly, the page shows sample sizes and tiers instead.</li>
-    </ul>
-  </details>
-</div>
-
-<h2>Agency map — general strength vs floor</h2>
-<div class="card scroll" id="scatter-card"></div>
-<div class="footnote" style="margin: -4px 2px 0">One dot per archetype with a computable
-adjusted WR and floor. <b>Blue = grounded floor</b>: the configured top field opponents are each
-measured at the generated gate and the configured field-share coverage floor is met, so the floor is a measured claim.
-<b>Gray = incomplete floor (upper bound)</b>: that grounding failed — unknown matchups sit near the deck's
-own shrunk average, and agency = min over cells can only <i>fall</i> as more get measured — so
-the dot's floor is an upper bound, not a claim. <b>Filled dot = current; hollow dot = not
-current</b> (fewer than 5 decks in the last 4 corpus weeks). Labels mark the top 5
-grounded-and-current decks by agency; hover any dot for its numbers.</div>
-
-<h2>Strategic plans</h2>
-<div class="card tablewrap">
-<div class="table-controls"><label for="coverage-plan">Minimum floor coverage</label>
-<input id="coverage-plan" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
-<label for="sample-plan">Minimum matchup n</label>
-<input id="sample-plan" type="number" min="1" step="1" value="8" inputmode="numeric">
-<span class="table-count" id="count-plan"></span></div>
-<div class="table-scroll"><table id="t-plan"></table></div>
-<div class="footnote">Five curated, mutually exclusive primary plans summarize what decks are
-trying to do; secondary labels explain hybrids without counting them twice. Expand a plan for its
-portrait, member archetypes, and exact plan-versus-plan ledger. Results are rebuilt from decisive
-matches. Same-plan play is structural 50% context and never sets the floor or inflates external
-coverage.</div></div>
-
-<h2>Archetypes</h2>
-<div class="card tablewrap">
-<div class="table-controls"><label for="coverage-arch">Minimum floor coverage</label>
-<input id="coverage-arch" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
-<label for="sample-arch">Minimum matchup n</label>
-<input id="sample-arch" type="number" min="1" step="1" value="8" inputmode="numeric">
-<span class="table-count" id="count-arch"></span></div>
-<div class="table-scroll"><table id="t-arch"></table></div>
-<div class="footnote">Click a row to expand its full matchup ledger — one line per
-current-field opponent: the chip after the name is that opponent's % of meta; the first
-number is the shrunk estimate, <i>raw</i> is wins/n; the window chip is
-<span class="chip">era</span> (era-windowed), <span class="chip">BA date</span> (fallback since
-the later ban that affected either deck), or <span class="chip">FC</span> (full corpus — neither
-deck ever ban-affected); "unmeasured" = below the table's selected minimum matchup n,
-excluded from floor and blowouts.
-<br>Column notes: <b>decks/4wk</b> = the deck's corpus count over the last 4 corpus weeks;
-<b>◦not current</b> marks names with fewer than 5 decks in that span (historical form, not a
-live pick); <b>window</b> = the row's era window (<span class="chip">since date</span> =
-stable_since from era detection; <span class="chip">full history</span> = no accepted era
-boundary); <b>% of meta</b> = share of all decks in the field window (audit header);
-<b>grounded</b> row = the configured top field opponents each clear the selected matchup-n gate and
-the generated minimum field-share coverage is met — its floor is broadly measured; <b>≤</b> plus the
-<span class="chip">upper bound</span> marker means grounding failed and the agency value can
-fall as more matchups become measured.</div></div>
-
-<h2>Subarchetypes (camps)</h2>
-<div class="card tablewrap">
-<div class="table-controls"><label for="coverage-camp">Minimum floor coverage</label>
-<input id="coverage-camp" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%
-<label for="sample-camp">Minimum matchup n</label>
-<input id="sample-camp" type="number" min="1" step="1" value="8" inputmode="numeric">
-<span class="table-count" id="count-camp"></span></div>
-<div class="table-scroll"><table id="t-camp"></table></div>
-<div class="footnote">Same columns, ledger, and markers as the archetype table above, plus
-<b>P(best)</b>: the probability this deck is the best call for the current field — one
-shared Monte-Carlo where every camp and every unsplit archetype is scored against the
-<i>same</i> sampled field (parent-level Dirichlet, fixed seed; parameters in the audit
-header), on the same era-preferred / ban-scoped cells the ledger shows. Because all
-candidates share one field draw, the values are comparable across camps of <i>different</i>
-parents — the single number the old per-parent matrices could never provide. Candidates
-need ≥&nbsp;5% measured field coverage; rows below that show <b>n/a</b> with their coverage
-(their score would be pure imputation). The chip is the risk-adjusted lower-quartile field
-WR (Q25); <b>S*</b> marks coverage &lt; 85% — a full-field estimate leaning on imputation
-for the unmeasured share, including each camp's own parent (that cell is absent by
-construction). <br>Camp % of meta = parent share × camp fraction among the parent's
-field-window decks.
-<b>[unlabeled]</b> = the parent's decks that fit no discovered camp (cluster noise / new
-builds the frozen membership hasn't seen) — surfaced honestly, never absorbed into a camp.
-Camp labels are staged-candidate provenance (speculative overlay, not promoted taxonomy).</div></div>
-
-<div class="tooltip" id="tip"></div>
-</div>
+<body><main>
+<header><div><h1>Deck Rankings</h1><p class="subtitle">Find your strongest deck. Know its toughest pairing.</p></div><nav><a href="#archetypes">Archetypes</a> · <a href="#camps">Camps</a> · <a href="#method">Method</a></nav></header>
+<p id="freshness" class="muted"></p>
+<p id="scenario-caption" class="notice" hidden></p>
+<p id="scenario-comparison" class="muted" hidden></p>
+<div id="target-control" class="target-control" hidden><label for="report-target">Analysis</label><select id="report-target"></select><span id="target-mode" class="badge"></span><span id="target-status" aria-live="polite"></span><ul id="target-unavailable" class="target-unavailable"></ul></div>
+<div class="toolbar evidence-controls" role="group" aria-label="Evidence filters"><label for="min-floor-coverage">Minimum floor coverage <input id="min-floor-coverage" type="number" min="0" max="100" step="5" value="0" inputmode="numeric">%</label><label for="min-matchup-n">Minimum matchup n <input id="min-matchup-n" type="number" min="1" step="1" value="8" inputmode="numeric"></label><small class="muted">Coverage counts matchups meeting your n. Filters select the decks shown; estimates use the same model.</small></div>
+<section class="card refresh-card" id="refresh-changes" aria-labelledby="refresh-changes-title"><div class="pick-label">Published field comparison</div><h2 id="refresh-changes-title">What changed</h2><p id="refresh-comparison" class="muted"></p><ol id="refresh-insights"></ol></section>
+<h2>Agency map</h2><div class="card" id="scatter-card"></div>
+<p class="map-caption">Right = stronger performance. Up = higher matchup floor. Blue marks the best tradeoffs among shown decks; dot size follows field share.</p>
+<h2>Superarchetypes / strategic plans</h2><p class="muted" id="plan-caption">The field by game plan. Expand for member decks and matchups.</p><div class="card table-scroll"><table id="t-plan"></table></div>
+<div class="toolbar" role="group" aria-label="Rankings controls"><input id="deck-search" type="search" aria-label="Find a deck" placeholder="Find a deck…"><label><input type="checkbox" id="show-inactive">Include inactive decks</label><label><input type="checkbox" id="frontier-only">Best tradeoffs only</label><span id="ranking-count" class="muted" aria-live="polite"></span></div>
+<h2 id="archetypes">Archetypes</h2><div class="card table-scroll"><table id="t-arch"></table></div>
+<h2 id="camps">Subarchetypes (camps)</h2><p id="camp-scenario-comparison" class="muted" hidden></p><div class="card table-scroll"><table id="t-camp"></table></div>
+<details id="method" class="card method"><summary>Method & sources</summary>
+<p><b>Current data.</b> <span id="method-data"></span></p>
+<p><b>Sources & selection.</b> Published Legacy decklists and tournament rounds come from the fbettega tournament cache, with card metadata from Scryfall. Decklists are classified using the current archetype rules and camp assignments. Lists describe what was published, not a census of all entrants: leagues and events without round records can inform field shares but cannot supply head-to-head results. Matchup records use resolvable, decisive rounds; draws, byes, forfeits and ambiguous or unmatched players are excluded. A list count and a matchup n therefore measure different populations.</p>
+<p><b>The current field.</b> The displayed field starts at the stated field boundary and ends at the latest included event date. Recent lists receive exponentially more weight, using a 28-day half-life: a list 28 days older carries half the weight. Exact sightings and the effective sample size after weighting remain separate. When the current field is very small, bounded historical field support can supplement it; that support is identified as a prior, not new observations. Source coverage is not assumed complete, and an online-heavy sample need not describe your local room.</p>
+<p id="field-basis"></p>
+<p><b>Using history.</b> Field composition and matchup evidence have different windows. An older match can still inform a current pairing when it falls in compatible periods for both decks. Pair-specific selection respects their applicable era and ban boundaries; localized checks can recover older periods where the relevant disruption was absent. The selected direct interval evidence takes precedence; otherwise the era estimate, then its ban-scoped fallback, supplies the cell. These are alternative views of evidence, not samples added together. Each dropdown records the chosen source, window and prior.</p>
+<p><b>Estimating a matchup.</b> Each cell combines selected wins and losses with a fitted Beta prior: <code>(wins + prior mean × prior strength) / (matches + prior strength)</code>. Priors borrow strength from relevant historical or broader deck evidence, so a few matches do not produce extreme certainty. More direct results progressively outweigh the prior. A supplied cell with no direct results retains its fitted prior; a completely absent cell gets a weak Beta(1, 1) prior centered on 50%. Thin and unobserved pairings stay visible. The coverage filter does not decide which observations enter the estimate.</p>
+<p><b>Performance & matchup floor.</b> Performance is the full-field weighted average of matchup estimates, including mirrors at 50%. Matchup floor is the lowest estimate against any positive-share non-mirror opponent, however rare. Changing share magnitudes affects performance; changing which opponents are present can change the floor. The model's floor recommendation maximizes floor independently, with performance breaking ties. Column sorting lets you compare either measure. Blue tradeoffs are decks for which no shown eligible peer is better on both measures.</p>
+<p><b>Reading the ranges.</b> Seeded posterior draws produce 95% conditional posterior intervals for performance and the minimum across opponents. Performance intervals also sample field shares when count evidence is supplied; share-only scenarios keep those weights fixed. The range beside the floor is the named toughest pairing's interval; the all-opponent minimum interval is under Evidence details. <b>Floor coverage</b> is the non-mirror field share meeting your chosen minimum matchup n. Filters change the rows shown, not their estimates. These intervals condition on fitted priors and do not capture every pilot, event or publication-selection effect. A high estimated floor is useful evidence, not a guarantee of no bad matchups.</p>
+<p><b>Plans, archetypes & builds.</b> Strategic plans summarize broad game plans; their direct-match aggregates are coarser than deck rankings. Camp rows expose different builds within an archetype. Build differences compares camp floors on the same full external opponent field and separates pooling uplift from the parent's actual floor gap. Composition and pilot overlap help interpret that gap; they do not establish a causal advantage. Current globally supported candidates define eligibility; prior-only estimates remain labeled, and inactive decks can be shown with the filter.</p>
+<p><b>Local fields & refresh changes.</b> A supplied field reweights the same matchup cells while keeping global candidate eligibility. Counts, declared effective sample size and fixed shares remain distinct; unknown opponents keep their positive mass with weak priors. Local plan shares are available, but plan performance and floors are omitted until their internal deck mixture can be reweighted coherently. What changed compares compatible published snapshots, separating performance movement into field-weight and matchup-estimate contributions. This is arithmetic attribution, not a causal claim.</p>
+<p><b>Checking the method.</b> The historical check below evaluates the served parent-archetype model at six cutoffs. Predictions were sealed before later outcomes were opened; development selected a challenger before the separate confirmation period. Lower log loss and Brier scores mean better probabilistic forecasts. Current, half-strength, doubled-strength and opponent-plan priors were compared. Doubling helped development but did not retain its advantage on confirmation, so the current prior remains. Fixed retrospective taxonomy and sparse later floor outcomes limit what this study establishes; it does not certify a local field or suppress current estimates.</p>
+<div id="validation-summary"></div>
+<details><summary>Refresh & evidence details</summary><div class="audit" id="audit"></div></details>
+</details>
+</main>
+<div id="agency-tooltip" class="map-tip" role="tooltip" hidden></div>
 <script>
 const D = __D_BLOB__;
-const fmtP = p => p == null ? "—" : (100*p).toFixed(1);
-const fieldTier = n => n >= 100 ? "established" : n >= 30 ? "evolving" : "SPECULATIVE";
-document.getElementById("field-basis").innerHTML =
-  `<b>Field basis</b> — shares come from the current ban-regime window` +
-  ` (since ${D.meta.field_since}${D.meta.regime_card ? ", post-" + D.meta.regime_card + " ban" : ""}):` +
-  ` ${D.meta.field_decks.toLocaleString()} decks through ${D.meta.corpus_max}` +
-  ` (${fieldTier(D.meta.field_decks)} tier). Shares are raw published-list counts, no win-rate` +
-  ` weighting. Matchup cells are windowed independently.`;
-// Audit header = data-shape stats only (methodology lives in the explainer sections below).
 const M = D.meta;
-const nf = v => v == null ? null : v.toLocaleString();
-const groundedCur = D.arch.filter(r => r.grounded && r.recent_4wk >= 5).length;
-let measCells = 0, totCells = 0;
-for (const r of [...D.arch, ...D.camps])
-  for (const c of r.cells) { totCells += 1; if (c.measured) measCells += 1; }
-const nParents = new Set(D.camps.map(r => r.parent)).size;
-const audit = [
-  `// corpus through ${M.corpus_max}`
-    + (M.corpus_decks ? ` · ${nf(M.corpus_decks)} decks / ${nf(M.corpus_events)} events` : "")
-    + (M.matches_total ? ` · ${nf(M.matches_total)} decisive matches (rounds-bearing events)` : ""),
-  `// field: ${nf(M.field_decks)} decks since ${M.field_since} (post-${M.regime_card || "ban"} regime — ${fieldTier(M.field_decks)} tier)`
-    + (M.field_events ? ` · ${nf(M.field_events)} events` : "")
-    + (M.field_archetypes ? ` · ${M.field_archetypes} archetypes` : ""),
-  `// tables: ${D.arch.length} archetypes (${groundedCur} grounded + current) · ${D.camps.length} camps across ${nParents} parents · ${nf(measCells)}/${nf(totCells)} matchup cells measured`,
-  ...(M.audit || []),
-].join("\n");
-document.getElementById("audit").textContent = audit;
-
-function windowChip(r) {
-  if (!r.since) return `<span class="chip">full history</span>`;
-  return `<span class="chip">since ${r.since}</span>`;
+const fmtP = p => p == null ? '—' : (100*p).toFixed(1);
+const pct = p => p == null ? '—' : fmtP(p)+'%';
+const pp = p => p == null ? '—' : `${p >= 0 ? '+' : ''}${fmtP(p)}pp`;
+const escT = value => String(value == null ? '' : value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const escA = escT;
+const model = M.deck_rankings || {};
+const validation = M.benchmark_validation || {status:'not-run', artifact_id:null};
+const field = model.field || {};
+const fieldScenario = M.field_scenario || null;
+const methodSources=Object.values(field.source_breakdown || {}).map(s=>`${s.source}: ${Number(s.exact_decks).toLocaleString()} lists`).join(' · ');
+document.getElementById('method-data').textContent=`Global corpus through ${M.corpus_max}; current field from ${M.field_since}: ${Number(M.observed_field_n || M.field_decks || 0).toLocaleString()} published lists${M.field_events==null?'':` across ${M.field_events} events`}.${methodSources?` ${methodSources}.`:''}${field.effective_sample_size==null?'':` Recency-weighted effective sample: ${Number(field.effective_sample_size).toFixed(1)} lists.`}${fieldScenario?' This report applies the separately labeled supplied field to that model; its sample date is distinct from the corpus cutoff.':''}`;
+document.getElementById('freshness').textContent = `Results through ${M.corpus_max} · ${(M.observed_field_n || M.field_decks || 0).toLocaleString()} published lists since ${M.field_since} · Estimates, with 95% ranges`;
+if(fieldScenario){
+ const supplied=fieldScenario.count_basis==='declared-effective-concentration'
+  ? `effective sample ${Number(fieldScenario.declared_effective_n).toLocaleString()}`
+  : fieldScenario.supplied_total==null?'shares only':`${Number(fieldScenario.supplied_total).toLocaleString()} supplied players`;
+ const unknown=(fieldScenario.unknown_opponents || []).length;
+ document.getElementById('scenario-caption').hidden=false;
+ document.getElementById('scenario-caption').textContent=`Expected field: ${fieldScenario.label} · ${supplied}${unknown ? ` · ${unknown} unmapped opponent${unknown===1?'':'s'}` : ''} · scored with the current model`;
+ const comparisons=fieldScenario.global_vs_scenario || {};
+ for(const [key,id] of [['arch','scenario-comparison'],['camps','camp-scenario-comparison']]){
+  const comparison=comparisons[key];if(!comparison)continue;
+  const global=comparison.global || {},local=comparison.scenario || {};
+  const el=document.getElementById(id);el.hidden=false;
+  el.textContent=`Global → this field: Performance ${global.performance || '—'} → ${local.performance || '—'} · Floor ${global.floor || '—'} → ${local.floor || '—'}`;
+ }
 }
-// Blowout tally over current-field matchups clearing the selected n gate: classified on the RAW
-// observed win rate — full <40%, half 40–45%. The measured-cell gate keeps thinner
-// records and shrinkage-only priors from being classified.
-// denom = # measured field matchups, shown so the count is interpretable.
-// metaShare = field share-mass that blows you out (full share <40% + half share 40–45%) —
-// the count weighted by how much of the room each blowout actually is. Measured share only,
-// so it's a lower bound (unmeasured opponents can't be counted).
-function blowouts(r) {
-  let full = 0, half = 0, denom = 0, metaFull = 0, metaHalf = 0;
-  for (const c of r.cells) {
-    if (!c.measured || c.raw == null || c.opp === r.subject) continue;
-    denom += 1;
-    if (c.raw < 0.40) { full += 1; metaFull += (c.share || 0); }
-    else if (c.raw < 0.45) { half += 1; metaHalf += (c.share || 0); }
-  }
-  return {score: full + 0.5 * half, full, half, denom,
-          metaShare: metaFull + 0.5 * metaHalf};
+const refreshChanges = M.refresh_changes || {};
+function renderRefreshChanges(){
+ const comparison=refreshChanges.comparison || {},from=comparison.from,to=comparison.to || M.corpus_max;
+ document.getElementById('refresh-comparison').textContent = from
+  ? `${from} → ${to}`
+  : `Baseline through ${to}`;
+ const insights=(refreshChanges.insights || []).slice(0,3);
+ document.getElementById('refresh-insights').innerHTML = insights.length
+  ? insights.map(item=>`<li>${escT(item.text)}</li>`).join('')
+  : '<li class="muted">No comparison observations are available for this publication.</li>';
 }
-const escA = s => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-const escT = s => escA(s == null ? "" : s).replace(/'/g, "&#39;");
-// Camp-only P(best) cell: ONE shared-field MC across all camps + unsplit archetypes
-// (meta.rank carries seed/draws/basis). p_best=null = below the candidacy coverage gate
-// (cov shown as the reason); the chip is the risk-adjusted lower-quantile field WR,
-// labeled S* when coverage < 85% (full-field value leaning on imputation).
-function pbestHtml(r) {
-  if (r._interactiveN !== D.meta.ground_n)
-    return `n/a <span class="chip">generated at n=${D.meta.ground_n}</span>`;
-  const covTxt = r.s_cov == null ? "—" : (100 * r.s_cov).toFixed(0) + "%";
-  if (r.p_best == null) return `n/a <span class="chip">cov ${covTxt}</span>`;
-  const q = Math.round(((D.meta.rank || {}).quantile ?? 0.25) * 100);
-  const s = r.s_caveated ? "S*" : "S";
-  return `${(100 * r.p_best).toFixed(1)}%` +
-    ` <span class="chip">Q${q} ${s} ${fmtP(r.s_q)}</span>`;
+renderRefreshChanges();
+document.getElementById('field-basis').textContent = field.description || 'Field shares describe published lists, not a census of tournament entrants. Recent lists receive more weight; observed counts remain separate from historical prior support.';
+const study=M.served_evaluation;
+if(study){
+ const names={'1':'Current prior','0.5':'Half prior','2':'Double prior','opponent-plan-prior-v1':'Plan borrowing'};
+ const score=x=>x==null?'—':Number(x).toFixed(4);
+ const rows=(study.phases || []).flatMap(phase=>Object.entries(phase.methods).map(([method,s])=>{
+  const changes=phase.call_changes[method];
+  return `<tr><td>${escT(phase.label)}</td><td>${escT(names[method] || method)}</td><td>${phase.matches}</td><td>${score(s.log_loss)}</td><td>${score(s.brier)}</td><td>${changes?`${changes.performance}/${phase.origins} · ${changes.floor}/${phase.origins}`:'Reference'}</td></tr>`;
+ })).join('');
+ document.getElementById('validation-summary').innerHTML=`<b>Historical method check</b><br>${escT(study.scope)}; ${escT(study.phases[0].since)} through ${escT(study.phases.at(-1).until)} (exclusive). Lower scores are better. Call changes count performance · floor leaders versus the current prior.<div class="table-scroll"><table class="ledger"><thead><tr><th>Period</th><th>Prior</th><th>Weighted matches</th><th>Log loss</th><th>Brier</th><th>Call changes</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
-function rowHtml(r, i, camp) {
-  const stale = r.recent_4wk < 5 ? " stale" : "";
-  const cls = (r.grounded ? "" : "thin") + stale;
-  const baseName = camp ? `${r.parent} <span style="color:var(--ink-2)">[${r.camp}]</span>` : r.subject;
-  const name = baseName + (r.grounded ? "" : ` <span class="chip">upper bound</span>`);
-  const w = Math.max(2, Math.round((r.agency || 0) * 220));
-  const agencyTxt = (r.grounded ? "" : "≤ ") + fmtP(r.agency);
-  const floorTxt = r.floor == null ? "—" :
-    `${fmtP(r.floor)} <span class="chip">vs ${r.floor_opp}</span>`;
-  const b = blowouts(r);
-  const bTxt = `${b.score % 1 ? b.score.toFixed(1) : b.score}` +
-    ` <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span>`;
-  const metaTxt = `${(100 * b.metaShare).toFixed(1)}%`;
-  return `<tr class="expander ${cls}" data-i="${r._idx}" data-v="${camp?'c':'a'}">
-    <td>${i + 1}</td>
-    <td class="name">${name}</td>
-    <td class="barcell"><span class="bar" style="width:${w}px"></span>${agencyTxt}</td>
-    <td>${fmtP(r.adj)}</td>
-    ${camp ? `<td>${pbestHtml(r)}</td>` : ""}
-    <td>${floorTxt}</td>
-    <td>${bTxt}</td>
-    <td>${metaTxt}</td>
-    <td>${(100*r.coverage).toFixed(0)}%</td>
-    <td>${(100*r.field_share).toFixed(1)}%</td>
-    <td>${r.recent_4wk}</td>
-    <td>${windowChip(r)}</td>
-  </tr>`;
-}
-const COLS = [
-  {label:"#", sort:false},
-  {label:"deck", get:r => (r.parent ? r.parent+" ["+r.camp+"]" : r.subject).toLowerCase(), dir:1},
-  {label:"agency % (≤ = upper bound)", get:r => r.agency, dir:-1},
-  {label:"adj field WR %", get:r => r.adj, dir:-1},
-  {label:"worst measured matchup %", get:r => r.floor, dir:-1},
-  {label:"blowouts", get:r => r._b.score, dir:1},
-  {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
-  {label:"measured coverage", get:r => r.coverage, dir:-1},
-  {label:"% of meta", get:r => r.field_share, dir:-1},
-  {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
-  {label:"window", get:r => r.since || "", dir:1},
-];
-// Camp table adds the cross-camp P(best) column (nulls — candidacy-gated rows — sort last).
-const CAMP_COLS = [...COLS.slice(0, 4),
-  {label:"P(best)", get:r => r._interactiveN === D.meta.ground_n ? r.p_best : null, dir:-1},
-  ...COLS.slice(4)];
-const colsFor = camp => camp ? CAMP_COLS : COLS;
-// Default sort: agency %, descending. Click a header to sort by that column;
-// click again to flip direction. Sorting happens WITHIN each honesty stratum —
-// grounded-current rows never intermix with not-current or thin-floor rows.
-const tableState = {
-  "t-plan": {col: 2, dir: -1, minCoverage: 0, minN: D.meta.ground_n, input: "coverage-plan", sample: "sample-plan", count: "count-plan", expanded: new Set()},
-  "t-arch": {col: 2, dir: -1, minCoverage: 0, minN: D.meta.ground_n, input: "coverage-arch", sample: "sample-arch", count: "count-arch"},
-  "t-camp": {col: 2, dir: -1, minCoverage: 0, minN: D.meta.ground_n, input: "coverage-camp", sample: "sample-camp", count: "count-camp"},
-};
-function selectCell(c, minN) {
-  if (!c.sources) return {...c, measured: c.n >= minN};
-  const era = c.sources.era, fallback = c.sources.fallback;
-  const use = era && era.n >= minN ? era :
-    fallback && fallback.n >= minN ? fallback : (era || fallback);
-  return {...c, ...(use || {p:null,raw:null,ci_low:null,ci_high:null,n:0,window:"era",tier:"speculative"}),
-    measured: !!use && use.n >= minN};
-}
-function recalcRow(r, minN) {
-  r.cells = r.cells.map(c => selectCell(c, minN));
-  (r.plan_cells || []).forEach(c => {
-    if (!c.same_primary_plan) c.measured = c.n >= minN;
-  });
-  const available = r.cells.filter(c => c.n >= 1 && c.p != null);
-  const mass = available.reduce((s,c) => s + c.share, 0);
-  r.adj = mass ? available.reduce((s,c) => s + c.share*c.p, 0) / mass : null;
-  const measured = r.cells.filter(c => c.measured && c.p != null);
-  const floorCell = measured.reduce((best,c) => !best || c.p < best.p ? c : best, null);
-  r.floor = floorCell ? floorCell.p : null;
-  r.floor_opp = floorCell ? floorCell.opp : null;
-  r.agency = [r.adj,r.floor].filter(v => v != null).reduce((a,v) => a == null ? v : Math.min(a,v), null);
-  const den = r.cells.reduce((s,c) => s + c.share, 0);
-  r.coverage = den ? measured.reduce((s,c) => s + c.share, 0) / den : 0;
-  const top = [...r.cells].sort((a,b) => b.share-a.share).slice(0,D.meta.top_k);
-  r.grounded = top.length > 0 && top.every(c => c.measured) && r.coverage >= D.meta.cover_min;
-  r._interactiveN = minN;
-  r._b = blowouts(r);
-}
-function recalcPlan(r, minN) {
-  r.cells.forEach(c => { if (!c.structural_same_plan) c.measured = c.n >= minN; });
-  const external = r.cells.filter(c => !c.structural_same_plan);
-  const measured = external.filter(c => c.measured && c.p != null);
-  const ownShare = r.field_share || 0;
-  const weight = ownShare + measured.reduce((s,c) => s+c.share,0);
-  r.adj = weight ? (ownShare*.5 + measured.reduce((s,c) => s+c.share*c.p,0))/weight : null;
-  const floorCell = measured.reduce((best,c) => !best || c.p < best.p ? c : best, null);
-  r.floor = floorCell ? floorCell.p : null; r.floor_opp = floorCell ? floorCell.opponent : null;
-  r.agency = r.adj != null && r.floor != null ? Math.min(r.adj,r.floor) : null;
-  const den = external.reduce((s,c) => s+c.share,0);
-  r.coverage = den ? measured.reduce((s,c) => s+c.share,0)/den : 0;
-  const top = [...external].sort((a,b) => b.share-a.share).slice(0,Math.min(D.meta.top_k,external.length));
-  r.grounded = top.length > 0 && top.every(c => c.measured) && r.coverage >= D.meta.cover_min;
-  r._b = blowouts({subject:r.id,cells:r.cells.map(c=>({...c,opp:c.opponent_id}))});
-}
-[...D.arch, ...D.camps].forEach(r => { r._b = blowouts(r); });
-(D.plans || []).forEach(r => { r._b = blowouts({subject:r.id, cells:r.cells.map(c => ({...c, opp:c.opponent_id}))}); });
-function cmpBy(col, dir, cols) {
-  const get = cols[col].get;
-  return (a, b) => {
-    const va = get(a), vb = get(b);
-    const na = va == null || va === "", nb = vb == null || vb === "";
-    if (na && nb) return 0;
-    if (na) return 1;   // nulls always last
-    if (nb) return -1;
-    return va < vb ? -dir : va > vb ? dir : 0;
+document.getElementById('audit').textContent = [
+ `Method: ${model.method_id || 'unavailable'}`,
+ `Previous method future-only validation: ${validation.status}; artifact ${validation.artifact_id || "none"}`,
+ `Field cutoff: ${M.field_since} to ${M.corpus_max}`,
+ ...(M.audit || []),
+ ...(M.evidence_audit ? [JSON.stringify(M.evidence_audit)] : [])
+].join('\n');
+(function targetNavigation() {
+  const manifestNode = document.getElementById("report-bundle-manifest");
+  const target = D.report_target;
+  if ((!manifestNode || !manifestNode.textContent) && !target) return;
+  const manifest = manifestNode && manifestNode.textContent ? JSON.parse(manifestNode.textContent) : {
+    selected_target_id: target.target_id,
+    targets: [{...target, href:null, status:"available", reasons:[]}],
   };
-}
-
-function headHtml(id, cols) {
-  const st = tableState[id];
-  return "<thead><tr>" + cols.map((c, k) => {
-    if (c.sort === false) return `<th>${c.label}</th>`;
-    const arrow = k === st.col ? (st.dir === 1 ? " ▲" : " ▼") : "";
-    return `<th class="sortable" data-col="${k}">${c.label}${arrow}</th>`;
-  }).join("") + "</tr></thead>";
-}
-
-const PLAN_COLS = [
-  {label:"#", sort:false},
-  {label:"strategic plan", get:r => r.label.toLowerCase(), dir:1},
-  {label:"agency % (≤ = upper bound)", get:r => r.agency, dir:-1},
-  {label:"adj field WR %", get:r => r.adj, dir:-1},
-  {label:"worst measured plan %", get:r => r.floor, dir:-1},
-  {label:"blowouts", get:r => r._b.score, dir:1},
-  {label:"% meta that blows you out", get:r => r._b.metaShare, dir:1},
-  {label:"measured coverage", get:r => r.coverage, dir:-1},
-  {label:"% of meta", get:r => r.field_share, dir:-1},
-  {label:"decks/4wk", get:r => r.recent_4wk, dir:-1},
-  {label:"window", get:r => r.since || "", dir:1},
-];
-function planRowHtml(plan, rank) {
-  const cls = plan.grounded ? "" : "thin";
-  const agency = `${plan.grounded ? "" : "≤ "}${fmtP(plan.agency)}`;
-  const floor = plan.floor == null ? "—" : `${fmtP(plan.floor)} <span class="chip">vs ${escT(plan.floor_opp)}</span>`;
-  const b = plan._b;
-  const detailId = `plan-detail-${plan.id}`;
-  return `<tr class="${cls} expander plan-expander" data-plan="${escA(plan.id)}"><td>${rank}</td><td class="name"><button type="button" class="plan-toggle"`+
-    ` data-plan="${escA(plan.id)}" aria-expanded="${tableState["t-plan"].expanded.has(plan.id)}" aria-controls="${detailId}">`+
-    `${escT(plan.label)}</button>${plan.grounded ? "" : ` <span class="chip">upper bound</span>`}</td>`+
-    `<td class="barcell"><span class="bar" style="width:${Math.max(2,Math.round((plan.agency||0)*220))}px"></span>${agency}</td>`+
-    `<td>${fmtP(plan.adj)}</td><td>${floor}</td>`+
-    `<td>${b.score % 1 ? b.score.toFixed(1) : b.score} <span class="chip">${b.full}✕ + ${b.half}½ of ${b.denom}</span></td>`+
-    `<td>${(100*b.metaShare).toFixed(1)}%</td><td>${(100*plan.coverage).toFixed(0)}%</td>`+
-    `<td>${(100*plan.field_share).toFixed(1)}%</td><td>${plan.recent_4wk}</td><td><span class="chip">since ${escT(plan.since || "full history")}</span></td></tr>`+
-    (tableState["t-plan"].expanded.has(plan.id) ? planDetailHtml(plan, detailId) : "");
-}
-function planDetailHtml(plan, detailId) {
-  const members = plan.members.map(m => `<span class="plan-member">${escT(m.archetype)}`+
-    `${m.secondary.map(id => `<span class="chip">${escT((D.plans.find(p=>p.id===id)||{label:id}).label)}</span>`).join("")}</span>`).join("");
-  const ledger = plan.cells.map(c => {
-    let result;
-    if (c.structural_same_plan) result = `<b>50.0%</b> <span class="chip">structural same-plan</span>`+
-      ` · ${c.observed_n} cross-archetype matches · ${c.mirror_n} archetype mirrors`;
-    else if (!c.measured) result = `<span class="unm">unmeasured — ${escT(c.reason)}; ${c.wins}-${c.losses}</span>`;
-    else result = `<b>${fmtP(c.p)}%</b> · raw ${fmtP(c.raw)}% · ${c.wins}-${c.losses}`;
-    return `<tr><td>${escT(c.opponent)}</td><td>${(100*c.share).toFixed(1)}%</td><td>${result}</td><td>${c.structural_same_plan ? c.observed_n + c.mirror_n : c.n}</td></tr>`;
-  }).join("");
-  return `<tr class="detail" id="${detailId}"><td colspan="${PLAN_COLS.length}"><div class="plan-portrait">`+
-    `<section><h3>${escT(plan.label)}</h3><p>${escT(plan.description)}</p>`+
-    `<span class="plan-stat"><b>${(100*plan.field_share).toFixed(1)}%</b> of field</span>`+
-    `<span class="plan-stat"><b>${plan.decisive_matches}</b> decisive matches</span>`+
-    `<span class="plan-stat"><b>${fmtP(plan.agency)}%</b> ${plan.grounded ? "grounded agency" : "agency upper bound"}</span>`+
-    `<div class="plan-members">${members}</div></section>`+
-    `<section><table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Field</th><th>Result</th><th>n</th></tr></thead><tbody>${ledger}</tbody></table></section>`+
-    `</div></td></tr>`;
-}
-function togglePlanDetail(id, focusToggle = false) {
-  const st = tableState["t-plan"];
-  if (st.expanded.has(id)) st.expanded.delete(id); else st.expanded.add(id);
-  renderPlanTable();
-  if (focusToggle) document.querySelector(`.plan-toggle[data-plan="${CSS.escape(id)}"]`)?.focus();
-}
-function renderPlanTable() {
-  const rows = D.plans || [], st = tableState["t-plan"], el = document.getElementById("t-plan");
-  const visible = rows.filter(r => r.coverage >= st.minCoverage);
-  const visibleIds = new Set(visible.map(r => r.id));
-  st.expanded = new Set([...st.expanded].filter(id => visibleIds.has(id)));
-  document.getElementById(st.count).textContent = `${visible.length} of ${rows.length} rows`;
-  let rank = 1, html = headHtml("t-plan", PLAN_COLS) + "<tbody>";
-  const strata = [["", visible.filter(r=>r.grounded)], ["ungrounded (INCOMPLETE EXTERNAL FLOOR — agency is an UPPER BOUND)", visible.filter(r=>!r.grounded)]];
-  for (const [label, set] of strata) {
-    if (!set.length) continue;
-    if (label) html += `<tr><td colspan="${PLAN_COLS.length}" style="color:var(--muted);font-size:11.5px;text-transform:uppercase;padding-top:14px">${label}</td></tr>`;
-    [...set].sort(cmpBy(st.col, st.dir, PLAN_COLS)).forEach(plan => { html += planRowHtml(plan, rank++); });
-  }
-  el.innerHTML = html + "</tbody>";
-  el.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
-    const col=Number(th.dataset.col); if(st.col===col) st.dir=-st.dir; else {st.col=col;st.dir=PLAN_COLS[col].dir;} renderPlanTable();
-  }));
-  el.querySelectorAll(".plan-toggle").forEach(button => button.addEventListener("click", event => {
-    event.stopPropagation();
-    togglePlanDetail(button.dataset.plan, true);
-  }));
-  el.querySelectorAll("tr.plan-expander").forEach(row => row.addEventListener("click", () => {
-    togglePlanDetail(row.dataset.plan);
-  }));
-}
-function archetypePlanHtml(r) {
-  if (!r.plan_cells) return "";
-  const rows = r.plan_cells.map(c => {
-    const same = c.same_primary_plan ? ` <span class="chip">primary plan</span>` : "";
-    const mirrors = c.mirror_n ? ` · ${c.mirror_n} archetype mirrors at structural 50%` : "";
-    const result = c.p == null ? `unmeasured — no decisive matches` :
-      `${c.measured ? `<b>${fmtP(c.p)}%</b>` : `<span class="unm">${fmtP(c.p)}% · thin</span>`}`+
-      ` · raw ${fmtP(c.raw)}% · ${c.wins}-${c.losses}${mirrors}`;
-    return `<tr><td>${escT(c.opponent)}${same}</td><td>${result}</td><td>${c.n}</td>`+
-      `<td><span class="chip">since ${escT(c.since)}</span>${c.provenance ? ` <span class="chip">${escT(c.provenance)}</span>` : ""}</td></tr>`;
-  }).join("");
-  const measured = r.plan_cells.filter(c => c.measured).length;
-  return subsectionHtml("plans", `Against strategic plans`,
-    `<span class="chip">${measured} of ${r.plan_cells.length} measured</span>`,
-    `<table class="plan-ledger"><thead><tr><th>Opponent plan</th><th>Result</th><th>n</th><th>Window</th></tr></thead><tbody>${rows}</tbody></table>`+
-    `<div class="footnote">Built directly from this archetype's decisive matches against every member of each primary plan; no rendered row averages or composition-family leans.</div>`);
-}
-
-// Open/closed state of the two nested disclosures, remembered across row expansions so a
-// reader who only wants one of them stops re-collapsing the other on every row.
-const subsectionOpen = { plans: true, exact: false };
-function subsectionHtml(key, title, chip, body) {
-  return `<details class="subsection" data-sub="${key}"${subsectionOpen[key] ? " open" : ""}>`+
-    `<summary>${title} ${chip}</summary><div class="subsection-body">${body}</div></details>`;
-}
-
-function renderTable(id, rows, camp) {
-  const el = document.getElementById(id);
-  const st = tableState[id];
-  const cols = colsFor(camp);
-  const visibleRows = rows.filter(r => r.coverage >= st.minCoverage);
-  document.getElementById(st.count).textContent =
-    `${visibleRows.length} of ${rows.length} rows`;
-  const strata = [
-    ["", visibleRows.filter(r => r.grounded && r.recent_4wk >= 5)],
-    ["grounded but not current (<5 decks in the last 4 corpus weeks — historical form, not a live pick)",
-      visibleRows.filter(r => r.grounded && r.recent_4wk < 5)],
-    ["ungrounded (INCOMPLETE FLOOR — every ≤ agency value is an UPPER BOUND and can fall as more matchups become measured)",
-      visibleRows.filter(r => !r.grounded)],
-  ];
-  let html = headHtml(id, cols) + "<tbody>", i = 0;
-  for (const [label, set] of strata) {
-    if (!set.length) continue;
-    if (label) html += `<tr><td colspan="${cols.length}" style="color:var(--muted);font-size:11.5px;
-      text-transform:uppercase;letter-spacing:.04em;padding-top:14px">${label}</td></tr>`;
-    [...set].sort(cmpBy(st.col, st.dir, cols)).forEach(r => { html += rowHtml(r, i, camp); i += 1; });
-  }
-  el.innerHTML = html + "</tbody>";
-  el.querySelectorAll("th.sortable").forEach(th => {
-    th.addEventListener("click", () => {
-      const col = Number(th.dataset.col);
-      if (st.col === col) st.dir = -st.dir;
-      else { st.col = col; st.dir = cols[col].dir; }
-      renderTable(id, rows, camp);
-    });
+  const control = document.getElementById("target-control");
+  const select = document.getElementById("report-target");
+  control.hidden = false;
+  manifest.targets.forEach(entry => {
+    const option = document.createElement("option");
+    option.value = entry.target_id;
+    option.textContent = `${entry.label} · ${entry.mode_label === "Today's model" ? "Today’s model" : entry.mode_label}`;
+    option.disabled = entry.status !== "available";
+    option.selected = entry.target_id === manifest.selected_target_id;
+    if (entry.href) option.dataset.href = entry.href;
+    select.append(option);
   });
-  el.querySelectorAll("tr.expander").forEach(tr => {
-    tr.addEventListener("click", () => {
-      const next = tr.nextElementSibling;
-      if (next && next.classList.contains("detail")) { next.remove(); return; }
-      const src = tr.dataset.v === "c" ? D.camps : D.arch;
-      const r = src[Number(tr.dataset.i)];
-      const cells = r.cells.map(c => {
-        const lbl = `${c.opp} <span class="chip">${(100*c.share).toFixed(1)}%</span>`;
-        if (!c.measured) return `<div class="unm">${lbl} — unmeasured (n=${c.n})</div>`;
-        const raw = c.raw == null ? "" : ` raw ${fmtP(c.raw)}`;
-        // Same thresholds as blowouts(): measured cells only, raw WR <40% full / 40–45% half.
-        let cls = "", tag = "";
-        if (c.raw != null && c.raw < 0.40) { cls = " class=\"bo-full\""; tag = ` <span class="chip">blowout</span>`; }
-        else if (c.raw != null && c.raw < 0.45) { cls = " class=\"bo-half\""; tag = ` <span class="chip">40–45</span>`; }
-        else if (c.raw > 0.60) { cls = " class=\"edge-dominant\""; tag = ` <span class="chip">dominant</span>`; }
-        else if (c.raw >= 0.55) { cls = " class=\"edge\""; tag = ` <span class="chip">edge</span>`; }
-        const ci = c.ci_low != null ? ` · 95% ${fmtP(c.ci_low)}–${fmtP(c.ci_high)}` : "";
-        return `<div${cls}>${lbl} ${fmtP(c.p)}%${raw}${ci} · n=${c.n} <span class="chip">${c.window}</span>${tag}</div>`;
-      }).join("");
-      const key = `<div class="bo-key">measured matchups tinted by raw WR:` +
-        `<span class="sw" style="background:var(--bo-critical)"></span>blowout (&lt;40%)` +
-        `<span class="sw" style="background:var(--amber)"></span>half (40–45%)` +
-        `<span class="sw" style="background:var(--edge)"></span>edge (55–60%)` +
-        `<span class="sw" style="background:var(--edge-dominant)"></span>dominant (&gt;60%)</div>`;
-      const measured = r.cells.filter(c => c.measured).length;
-      const exactBody = `${key}<div class="cells">${cells}</div>`;
-      // Camp rows carry no plan block, so there is nothing to scroll past — they keep the
-      // plain always-open section rather than a disclosure that only ever hides its own content.
-      const body = camp
-        ? `<section><h3 style="margin:4px 0 7px">Exact archetype matchups</h3>${exactBody}</section>`
-        : archetypePlanHtml(r) + subsectionHtml("exact", "Exact archetype matchups",
-            `<span class="chip">${measured} of ${r.cells.length} measured</span>`, exactBody);
-      const d = document.createElement("tr");
-      d.className = "detail";
-      d.innerHTML = `<td colspan="${cols.length}">${body}</td>`;
-      d.querySelectorAll("details.subsection").forEach(el => el.addEventListener("toggle", () => {
-        subsectionOpen[el.dataset.sub] = el.open;
-      }));
-      tr.after(d);
-    });
-  });
-}
-
-function bindCoverageFilter(id, rows, camp) {
-  const st = tableState[id];
-  document.getElementById(st.input).addEventListener("input", event => {
-    const value = Number(event.target.value);
-    st.minCoverage = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) / 100 : 0;
-    renderTable(id, rows, camp);
-  });
-}
-function bindSampleFilter(id, rows, camp) {
-  const st = tableState[id];
-  document.getElementById(st.sample).addEventListener("input", event => {
-    const value = Number(event.target.value);
-    st.minN = Number.isFinite(value) ? Math.max(1, Math.floor(value)) : D.meta.ground_n;
-    rows.forEach(r => camp === null ? recalcPlan(r, st.minN) : recalcRow(r, st.minN));
-    if (camp === null) renderPlanTable(); else renderTable(id, rows, camp);
-  });
-}
-bindCoverageFilter("t-arch", D.arch, false);
-bindCoverageFilter("t-camp", D.camps, true);
-["sample-plan","sample-arch","sample-camp"].forEach(id => {
-  document.getElementById(id).value = D.meta.ground_n;
-});
-bindSampleFilter("t-plan", D.plans || [], null);
-bindSampleFilter("t-arch", D.arch, false);
-bindSampleFilter("t-camp", D.camps, true);
-document.getElementById("coverage-plan").addEventListener("input", event => {
-  const value = Number(event.target.value);
-  tableState["t-plan"].minCoverage = Number.isFinite(value)
-    ? Math.min(100, Math.max(0, value)) / 100 : 0;
-  renderPlanTable();
-});
-renderPlanTable();
-renderTable("t-arch", D.arch, false);
-renderTable("t-camp", D.camps, true);
-
-// ---- scatter: adj WR (x) vs floor (y); agency = distance to the lower-left ----
-(function scatter() {
-  const rows = [
-    ...D.arch.filter(r => r.adj != null && r.floor != null).map(r => ({...r, kind:"arch",
-      label:r.subject})),
-  ];
-  const W = 860, H = 480, m = {l: 52, r: 16, t: 14, b: 40};
-  const xs = rows.map(r => r.adj), ys = rows.map(r => r.floor);
-  const xmin = Math.min(.40, ...xs) - .01, xmax = Math.max(.56, ...xs) + .01;
-  const ymin = Math.min(.25, ...ys) - .01, ymax = Math.max(.52, ...ys) + .01;
-  const X = v => m.l + (v - xmin) / (xmax - xmin) * (W - m.l - m.r);
-  const Y = v => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
-  let g = "";
-  for (let v = Math.ceil(xmin*20)/20; v <= xmax; v += .05)
-    g += `<line x1="${X(v)}" y1="${m.t}" x2="${X(v)}" y2="${H-m.b}" stroke="var(--grid)"/>` +
-         `<text x="${X(v)}" y="${H-m.b+16}" fill="var(--muted)" font-size="11" text-anchor="middle">${(100*v).toFixed(0)}</text>`;
-  for (let v = Math.ceil(ymin*20)/20; v <= ymax; v += .05)
-    g += `<line x1="${m.l}" y1="${Y(v)}" x2="${W-m.r}" y2="${Y(v)}" stroke="var(--grid)"/>` +
-         `<text x="${m.l-8}" y="${Y(v)+4}" fill="var(--muted)" font-size="11" text-anchor="end">${(100*v).toFixed(0)}</text>`;
-  // 50% reference lines
-  g += `<line x1="${X(.5)}" y1="${m.t}" x2="${X(.5)}" y2="${H-m.b}" stroke="var(--axis)" stroke-dasharray="4 3"/>`;
-  if (ymin < .5 && ymax > .5)
-    g += `<line x1="${m.l}" y1="${Y(.5)}" x2="${W-m.r}" y2="${Y(.5)}" stroke="var(--axis)" stroke-dasharray="4 3"/>`;
-  const topByAgency = rows.filter(r => r.grounded && r.recent_4wk >= 5)
-    .sort((a,b)=>b.agency-a.agency).slice(0,5).map(r=>r.label);
-  let dots = "", labels = "";
-  rows.forEach(r => {
-    const grounded = r.grounded, current = r.recent_4wk >= 5;
-    // color = grounding (blue grounded / gray thin); shape = currency (filled current / hollow not)
-    const col = grounded ? "var(--s1)" : "var(--muted)";
-    const op = grounded ? "1" : ".65";
-    const fill = current ? col : "var(--surface-1)";
-    const stroke = current ? "var(--surface-1)" : col;
-    const state = (grounded ? "grounded" : "thin floor")
-      + (current ? "" : " · not current (<5 decks/4wk)");
-    dots += `<circle cx="${X(r.adj)}" cy="${Y(r.floor)}" r="6" fill="${fill}" opacity="${op}"
-      stroke="${stroke}" stroke-width="2" data-label="${r.label}" data-a="${fmtP(r.agency)}"
-      data-x="${fmtP(r.adj)}" data-y="${fmtP(r.floor)}" data-g="${state}"/>`;
-    if (topByAgency.includes(r.label))
-      labels += `<text x="${X(r.adj)+9}" y="${Y(r.floor)+4}" font-size="11.5" fill="var(--ink)">${r.label}</text>`;
-  });
-  const legend = `
-    <circle cx="${m.l+8}" cy="${m.t+8}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
-    <text x="${m.l+18}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">grounded floor</text>
-    <circle cx="${m.l+128}" cy="${m.t+8}" r="6" fill="var(--muted)" opacity=".65" stroke="var(--surface-1)" stroke-width="2"/>
-    <text x="${m.l+138}" y="${m.t+12}" font-size="11.5" fill="var(--ink-2)">thin floor (lean)</text>
-    <circle cx="${m.l+8}" cy="${m.t+28}" r="6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>
-    <text x="${m.l+18}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">filled = current</text>
-    <circle cx="${m.l+128}" cy="${m.t+28}" r="6" fill="var(--surface-1)" stroke="var(--s1)" stroke-width="2"/>
-    <text x="${m.l+138}" y="${m.t+32}" font-size="11.5" fill="var(--ink-2)">hollow = not current (&lt;5 decks/4wk)</text>`;
-  document.getElementById("scatter-card").innerHTML =
-    `<svg viewBox="0 0 ${W} ${H}" width="${W}" style="max-width:100%">
-      ${g}${dots}${labels}${legend}
-      <text x="${(m.l+W-m.r)/2}" y="${H-6}" fill="var(--muted)" font-size="11.5" text-anchor="middle">adjusted field WR %</text>
-      <text x="14" y="${(m.t+H-m.b)/2}" fill="var(--muted)" font-size="11.5" text-anchor="middle" transform="rotate(-90 14 ${(m.t+H-m.b)/2})">worst matchup %</text>
-    </svg>`;
-  const tip = document.getElementById("tip");
-  document.querySelectorAll("#scatter-card circle[data-label]").forEach(c => {
-    c.addEventListener("mousemove", e => {
-      tip.style.display = "block";
-      tip.style.left = (e.clientX + 14) + "px";
-      tip.style.top = (e.clientY + 10) + "px";
-      tip.innerHTML = `<b>${c.dataset.label}</b><br>agency ${c.dataset.a}% · adj ${c.dataset.x}% · floor ${c.dataset.y}%<br><span style="color:var(--muted)">${c.dataset.g}</span>`;
-    });
-    c.addEventListener("mouseleave", () => tip.style.display = "none");
+  const selected = manifest.targets.find(entry => entry.target_id === manifest.selected_target_id);
+  document.getElementById("target-mode").textContent =
+    selected.mode_label === "Today's model" ? "Today’s model" : selected.mode_label;
+  document.getElementById("target-status").textContent = selected.data_until
+    ? `Exclusive data cutoff ${selected.data_until}; current taxonomy and configuration`
+    : `Current corpus through ${D.meta.corpus_max}; evidence cutoff ${selected.effective_data_until}`;
+  const unavailable = manifest.targets.filter(entry => entry.status === "unavailable");
+  document.getElementById("target-unavailable").innerHTML = unavailable.map(entry =>
+    `<li>${escT(entry.label)} unavailable — ${entry.reasons.map(escT).join("; ")}</li>`
+  ).join("");
+  select.addEventListener("change", event => {
+    const option = event.currentTarget.selectedOptions[0];
+    if (!option || !option.dataset.href) return;
+    document.getElementById("target-status").textContent = `Opening ${option.textContent}`;
+    window.location.href = option.dataset.href;
   });
 })();
+
+const state = {key:'performance',dir:-1,search:'',inactive:false,frontier:false,minCoverage:0,minN:M.ground_n || 8,expanded:new Set()};
+function decision(r){return r.decision || {};}
+function floorCoverage(d){const cells=d.cells || [],mass=cells.reduce((s,c)=>s+c.share,0);return mass?cells.filter(c=>c.n>=state.minN).reduce((s,c)=>s+c.share,0)/mass:0;}
+function rowValue(r,key){const d=decision(r);return key==='coverage'?floorCoverage(d):d[key];}
+function filteredRows(rows){return rows.filter(r=>floorCoverage(decision(r))+1e-12>=state.minCoverage && (state.inactive || decision(r).active) && (!state.search || r.subject.toLowerCase().includes(state.search)));}
+function viewTradeoff(r,peers){const d=decision(r);return d.eligible && d.floor!=null && !peers.some(p=>{const o=decision(p);return p!==r && o.eligible && o.floor!=null && o.performance>=d.performance && o.floor>=d.floor && (o.performance>d.performance || o.floor>d.floor);});}
+function sortedRows(rows){
+ const peers=filteredRows(rows);
+ return peers.filter(r=>!state.frontier || viewTradeoff(r,peers)).sort((a,b)=>{
+  const x=rowValue(a,state.key),y=rowValue(b,state.key);
+  if(x==null && y!=null)return 1;if(y==null && x!=null)return -1;
+  return (x==null ? 0 : (x-y)*state.dir) || a.subject.localeCompare(b.subject);
+ });
+}
+function estimateHtml(mean,low,high){return `<strong>${pct(mean)}</strong><small>${fmtP(low)}–${fmtP(high)}</small>`;}
+function priorFloor(d){return (d.cells || []).some(c=>c.opponent===d.worst_opponent && c.n===0);}
+function floorHtml(d){return `<strong>${pct(d.floor)}</strong>${priorFloor(d)?'<span class="badge">Prior</span>':''}<small>Pairing: ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small>`;}
+function cellRows(cells){return [...cells].sort((a,b)=>b.share-a.share || a.opponent.localeCompare(b.opponent)).map(c=>{
+ const cls=c.mean<.45?'bad':c.mean>=.55?'good':'flat';
+ const label=c.n===0?'Prior':c.n<state.minN?'n<'+state.minN:c.n<30?'Thin':'';
+ return `<tr><td>${escT(c.opponent)}${label?` <span class="badge">${escT(label)}</span>`:''}</td><td>${pct(c.share)}</td><td class="${cls}">${estimateHtml(c.mean,c.low,c.high)}</td><td>${c.n?`${c.wins}–${c.n-c.wins}`:'—'}</td><td class="history">${escT(c.source || 'prior')}</td></tr>`;
+}).join('');}
+function campLink(label){
+ const row=(D.camps || []).find(c=>c.subject===label);
+ return row ? `<a href="#detail-c-${escA(row._idx)}" data-camp-link="${escA(row._idx)}">${escT(label)}</a>` : escT(label);
+}
+function slots(value){return value==null?'—':Number(value).toFixed(1);}
+function decisionUnitHtml(r){
+ const u=r.decision_units;
+ if(!u)return '';
+ const floor=u.floor_comparison || {}, composition=u.composition || {};
+ const compositionCamps=composition.camps || [];
+ const records=new Map(compositionCamps.map(c=>[c.camp,c]));
+ const campRows=(floor.camps || []).map(c=>{
+  const rec=records.get(c.camp) || {};
+  const weight=floor.camp_weights && floor.camp_weights[c.camp];
+  const tough=c.toughest_pairing || {};
+  return `<tr><td>${campLink(c.camp)}</td><td>${rec.list_count ?? c.current_list_count ?? 0}</td><td>${weight==null?'—':pct(weight)}</td><td>${pct(c.floor)}</td><td>${escT(tough.opponent || '—')}</td><td>${tough.n ?? '—'}</td><td>${tough.prior_contribution_fraction==null?'—':pct(tough.prior_contribution_fraction)}</td></tr>`;
+ }).join('');
+ const pairRows=(composition.camp_pairs || []).map(pair=>{
+  const main=pair.main || {},side=pair.side || {},pilot=pair.pilot_overlap || {};
+  return `<tr><td>${campLink(pair.camp_a)} · ${campLink(pair.camp_b)}</td><td>${slots(main.slot_distance)}</td><td>${slots(side.slot_distance)}</td><td>${main.card_lists_a ?? 0}/${main.list_count_a ?? 0} · ${main.card_lists_b ?? 0}/${main.list_count_b ?? 0}</td><td>${side.card_lists_a ?? 0}/${side.list_count_a ?? 0} · ${side.card_lists_b ?? 0}/${side.list_count_b ?? 0}</td><td title="${pilot.a ?? 0} / ${pilot.b ?? 0} known pilots; ${pilot.unknown_records_a ?? 0} / ${pilot.unknown_records_b ?? 0} lists without handles">${pilot.jaccard==null?'—':pct(pilot.jaccard)+` (${pilot.overlap}/${pilot.union})`}</td></tr>`;
+ }).join('');
+ const summary=floor.available
+  ? `Pooling lifts the floor ${pp(floor.pooling_uplift)} · parent/build gap ${pp(floor.parent_minus_weighted_camp_floor)} · builds cover ${pct(floor.current_camp_coverage)} of this archetype`
+  : `Unavailable: ${escT(floor.unavailable_reason || 'insufficient common evidence')}`;
+ const floors=campRows ? `<div class="table-scroll"><table class="ledger"><thead><tr><th>Build</th><th>Lists</th><th>Share</th><th>Floor</th><th>Toughest pairing</th><th>n</th><th>Prior</th></tr></thead><tbody>${campRows || '<tr><td colspan="7">No camp floor rows available.</td></tr>'}</tbody></table></div>` : '';
+ const pairs=pairRows ? `<details><summary>Composition and pilot overlap</summary><div class="table-scroll"><table class="ledger"><thead><tr><th>Build pair</th><th>Main slots</th><th>Side slots</th><th>Main lists A · B</th><th>Side lists A · B</th><th>Pilot overlap</th></tr></thead><tbody>${pairRows || '<tr><td colspan="5">No camp pairs available.</td></tr>'}</tbody></table></div><p class="muted">Slots compare average card copies. List counts show records available / total. Pilot overlap uses known handles within each source.</p></details>` : '';
+ return `<details class="method"><summary>Build differences</summary><p>${summary}</p>${floors}${pairs}</details>`;
+}
+function detailHtml(r){
+ const d=decision(r), cells=d.cells || [];
+ const info=`<div class="detail-meta"><span>Performance ${pct(d.performance)} · 95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</span><span>Floor ${pct(d.floor)} · toughest pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</span><span>${pct(d.coverage)} direct evidence</span></div>`;
+ const ledger=`<div class="table-scroll"><table class="ledger"><thead><tr><th>Matchup</th><th>${fieldTableLabel}</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div>`;
+ const plans=(r.plan_cells || []).map(c=>`<span class="member">${escT(c.opponent)} ${pct(c.p)} · ${c.wins}–${c.losses}</span>`).join('');
+ const minimum=`Minimum across all opponents: 95% ${fmtP(d.floor_low)}–${fmtP(d.floor_high)}%. This includes uncertainty about which pairing is worst.`;
+ const provenance=cells.filter(c=>c.prior_source || c.concentration_warning || c.intervals).map(c=>`${c.opponent}: ${c.prior_source || c.source}${c.prior_strength!=null?' · prior '+pct(c.prior_mean)+' / '+c.prior_strength.toFixed(1)+' pseudo-matches':''}${c.intervals?' · '+c.intervals:''}${c.concentration_warning?' · '+c.concentration_warning:''}`).join('\n');
+ return info+ledger+decisionUnitHtml(r)+(plans?`<details class="method"><summary>Against strategic plans</summary><div class="members">${plans}</div></details>`:'')+`<details class="method"><summary>Evidence details</summary><div class="audit">${escT(minimum+'\n'+(provenance || 'No additional historical evidence.'))}</div></details>`;
+}
+const fieldColumnLabel=fieldScenario?'Scenario share':'Meta';
+const fieldTableLabel=fieldScenario?'Scenario share':'Field';
+const columns=[['Deck',null],['Performance','performance'],['Matchup floor','floor'],['Toughest pairing',null],['Floor coverage','coverage'],[fieldColumnLabel,'field_share']];
+function tableHtml(rows,kind){
+ const selected=sortedRows(rows),peers=filteredRows(rows);
+ if(kind==='c' && state.revealedCamp!=null){const linked=rows.find(r=>r._idx===state.revealedCamp);if(linked && !selected.includes(linked))selected.push(linked);}
+ let html='<thead><tr>'+columns.map(([label,key])=>`<th>${key?`<button data-sort="${key}">${label}${key===state.key?(state.dir<0?' ↓':' ↑'):''}</button>`:label}</th>`).join('')+'</tr></thead><tbody>';
+ selected.forEach(r=>{
+  const d=decision(r),id=kind+'-'+r._idx,open=state.expanded.has(id);
+  const badge=viewTradeoff(r,peers)?'<span class="badge frontier">tradeoff</span>':!d.eligible?'<span class="badge">'+(d.active?'prior only':'inactive')+'</span>':'';
+  html+=`<tr class="expander"><td><button class="row-toggle" data-row="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(r.subject)}</button>${badge}</td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${escT(d.worst_opponent || '—')}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share)}${fieldScenario?`<small>Global ${pct(d.global_field_share)}</small>`:''}</td></tr>`;
+  if(open)html+=`<tr class="detail" id="detail-${escA(id)}"><td colspan="6">${detailHtml(r)}</td></tr>`;
+ });
+ return html+(selected.length?'':'<tr><td colspan="6" class="empty">No decks match these filters.</td></tr>')+'</tbody>';
+}
+function renderTable(id,rows,kind){
+ const el=document.getElementById(id);el.innerHTML=tableHtml(rows,kind);
+ el.querySelectorAll('button[data-sort]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.sort;state.dir=state.key===k?-state.dir:-1;state.key=k;render();}));
+ el.querySelectorAll('button[data-row]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.row;state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);render();const next=el.querySelector(`button[data-row="${CSS.escape(id)}"]`);if(next)next.focus();}));
+}
+document.addEventListener('click',e=>{
+ const link=e.target.closest('[data-camp-link]');if(!link)return;
+ e.preventDefault();const idx=Number(link.dataset.campLink),id='c-'+idx;
+ state.revealedCamp=idx;state.expanded.add(id);renderTable('t-camp',D.camps,'c');
+ document.querySelector(`button[data-row="${id}"]`)?.focus();
+ document.getElementById('detail-'+id)?.scrollIntoView({block:'start'});
+});
+function render(){state.revealedCamp=null;renderTable('t-arch',D.arch,'a');renderTable('t-camp',D.camps,'c');document.getElementById('ranking-count').textContent=sortedRows(D.arch).length+' archetypes · '+sortedRows(D.camps).length+' camps';renderPlans();scatter();}
+const planSort={key:'field_share',dir:-1};
+const planColumns=[['Plan','label'],['Performance','performance'],['Floor vs plans','floor'],['Floor coverage','coverage'],[fieldColumnLabel,'field_share']];
+function planValue(p,key){
+ if(key==='label')return p.label;
+ if(key==='field_share')return p.decision?.field_share ?? p.field_share;
+ return p.scenario_unavailable?null:rowValue(p,key);
+}
+function renderPlans(){
+ const plans=(D.plans || []).filter(p=>p.scenario_unavailable || floorCoverage(p.decision || {})+1e-12>=state.minCoverage).sort((a,b)=>{
+  const x=planValue(a,planSort.key),y=planValue(b,planSort.key);
+  if(x==null && y!=null)return 1;if(y==null && x!=null)return -1;
+  return (x==null?0:(planSort.key==='label'?x.localeCompare(y):x-y)*planSort.dir) || a.label.localeCompare(b.label);
+ });
+ if(fieldScenario)document.getElementById('plan-caption').textContent=`Plan shares cover ${pct((D.plans || []).reduce((sum,p)=>sum+(p.field_share || 0),0))} of this field. Performance and floors are shown for archetypes and camps.`;
+ const html='<thead><tr>'+planColumns.map(([label,key])=>`<th aria-sort="${key===planSort.key?(planSort.dir<0?'descending':'ascending'):'none'}"><button data-plan-sort="${key}">${label}${key===planSort.key?(planSort.dir<0?' ↓':' ↑'):''}</button></th>`).join('')+'</tr></thead><tbody>'+plans.map(p=>{
+  if(p.scenario_unavailable)return `<tr><td>${escT(p.label)}</td><td>—</td><td>—</td><td>—</td><td>${pct(p.field_share)}</td></tr>`;
+  const id='p-'+p.id,open=state.expanded.has(id), d=p.decision || {};
+  const members=(p.members || []).map(m=>`<span class="member">${escT(m.archetype)}</span>`).join('');
+  const cells=d.cells || [];
+  return `<tr><td><button class="row-toggle" data-plan="${escA(id)}" aria-expanded="${open}" aria-controls="detail-${escA(id)}">${escT(p.label)}</button></td><td>${estimateHtml(d.performance,d.performance_low,d.performance_high)}</td><td>${floorHtml(d)}</td><td>${pct(floorCoverage(d))}<small>n ≥ ${state.minN}</small></td><td>${pct(d.field_share ?? p.field_share)}</td></tr>`+(open?`<tr class="detail" id="detail-${escA(id)}"><td colspan="5"><p>${escT(p.description)}</p><div class="members">${members}</div><div class="table-scroll"><table class="ledger"><thead><tr><th>Opponent plan</th><th>${fieldTableLabel}</th><th>Estimate · 95%</th><th>W–L</th><th>History</th></tr></thead><tbody>${cellRows(cells)}</tbody></table></div></td></tr>`:'');
+ }).join('')+(plans.length?'':'<tr><td colspan="5" class="empty">No plans match these filters.</td></tr>')+'</tbody>';
+ const el=document.getElementById('t-plan');el.innerHTML=html;
+ el.querySelectorAll('button[data-plan-sort]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.planSort;planSort.dir=planSort.key===k?-planSort.dir:(k==='label'?1:-1);planSort.key=k;renderPlans();el.querySelector(`button[data-plan-sort="${k}"]`).focus();}));
+ el.querySelectorAll('button[data-plan]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.plan;state.expanded.has(id)?state.expanded.delete(id):state.expanded.add(id);renderPlans();const next=el.querySelector(`button[data-plan="${CSS.escape(id)}"]`);if(next)next.focus();}));
+}
+function scatter(){
+ hideMapTip();
+ const peers=filteredRows(D.arch),rows=sortedRows(D.arch).filter(r=>decision(r).eligible && decision(r).floor!=null);
+ const W=980,H=360,m={l:50,r:30,t:20,b:45};
+ if(!rows.length){document.getElementById('scatter-card').innerHTML='<p class="empty">No ranked decks match these filters.</p>';return;}
+ const xmin=Math.min(.45,...rows.map(r=>decision(r).performance))-.01,xmax=Math.max(.55,...rows.map(r=>decision(r).performance))+.01;
+ const ymin=Math.min(.30,...rows.map(r=>decision(r).floor))-.02,ymax=Math.max(.5,...rows.map(r=>decision(r).floor))+.02;
+ const X=x=>m.l+(x-xmin)/(xmax-xmin)*(W-m.l-m.r),Y=y=>H-m.b-(y-ymin)/(ymax-ymin)*(H-m.t-m.b);
+ let svg='';
+ for(let v=Math.ceil(xmin*20)/20;v<=xmax;v+=.05)svg+=`<path d="M${X(v)} ${m.t}V${H-m.b}" stroke="var(--line)"/><text x="${X(v)}" y="${H-23}" text-anchor="middle" font-size="12" fill="var(--muted)">${fmtP(v)}</text>`;
+ for(let v=Math.ceil(ymin*20)/20;v<=ymax;v+=.05)svg+=`<path d="M${m.l} ${Y(v)}H${W-m.r}" stroke="var(--line)"/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end" font-size="12" fill="var(--muted)">${fmtP(v)}</text>`;
+ rows.forEach((r,i)=>{const d=decision(r),x=X(d.performance),y=Y(d.floor),tradeoff=viewTradeoff(r,peers),color=tradeoff?'var(--blue)':'var(--muted)';svg+=`<g class="map-point" data-point="${i}" tabindex="0" role="button" aria-label="${escA(r.subject)}: show matchup summary"><circle class="map-hit" cx="${x}" cy="${y}" r="22" fill="transparent" pointer-events="all"/><circle class="map-dot" cx="${x}" cy="${y}" r="${4+Math.sqrt(d.field_share || 0)*18}" fill="${color}" opacity="${tradeoff?1:.55}" pointer-events="all"/></g>`;if(tradeoff)svg+=`<text x="${x+10}" y="${y-8}" font-size="12" fill="var(--ink)" pointer-events="none">${escT(r.subject)}</text>`;});
+ document.getElementById('scatter-card').innerHTML=`<svg role="group" aria-label="Agency map: performance versus matchup floor" viewBox="0 0 ${W} ${H}" width="100%">${svg}<text x="${W/2}" y="${H-3}" font-size="12" text-anchor="middle" fill="var(--muted)">Expected match win rate %</text><text transform="translate(14 ${H/2}) rotate(-90)" text-anchor="middle" font-size="12" fill="var(--muted)">Lowest matchup estimate %</text></svg>`;
+
+ document.getElementById('scatter-card').querySelectorAll('[data-point]').forEach(el=>{
+  const r=rows[Number(el.dataset.point)];
+  el.addEventListener('pointerenter',e=>showMapTip(r,el,e));
+  el.addEventListener('pointermove',e=>{if(!mapTip.hidden)placeMapTip(e.clientX,e.clientY);});
+  el.addEventListener('pointerleave',()=>{if(document.activeElement!==el)hideMapTip();});
+  el.addEventListener('focus',()=>showMapTip(r,el));
+  el.addEventListener('blur',hideMapTip);
+  el.addEventListener('click',()=>{el.focus();showMapTip(r,el);});
+  el.addEventListener('keydown',e=>{if(e.key==='Escape')hideMapTip();if(e.key==='Enter' || e.key===' '){e.preventDefault();showMapTip(r,el);}});
+ });
+}
+const mapTip=document.getElementById('agency-tooltip');
+function mapTooltipHtml(r){
+ const d=decision(r),cells=d.cells || [],worst=cells.find(c=>c.opponent===d.worst_opponent),supported=cells.filter(c=>c.n>=state.minN).length;
+ const n=cells.reduce((sum,c)=>sum+c.n,0),observed=(field.exact_counts || {})[r.subject];
+ const shareLabel=fieldScenario?'Scenario share':'Meta share',observedLabel=fieldScenario?'global observed lists':'observed lists';
+ return `<div class="tip-title">${escT(r.subject)}${viewTradeoff(r,filteredRows(D.arch))?'<span class="badge frontier">tradeoff</span>':''}</div><dl><dt>Performance</dt><dd>${pct(d.performance)}<small>95% ${fmtP(d.performance_low)}–${fmtP(d.performance_high)}</small></dd><dt>Matchup floor</dt><dd>${pct(d.floor)}<small>Pairing 95% ${fmtP(d.worst_low)}–${fmtP(d.worst_high)}</small></dd><dt>Toughest pairing</dt><dd>${escT(d.worst_opponent || '—')}<small>${worst && worst.n?`${worst.wins}–${worst.n-worst.wins} (n=${worst.n})`:'Prior only'}</small></dd><dt>Floor coverage</dt><dd>${pct(floorCoverage(d))} at n ≥ ${state.minN}<small>${supported}/${cells.length} matchups</small></dd><dt>Match sample</dt><dd>${n.toLocaleString()} non-mirror matches</dd><dt>${shareLabel}</dt><dd>${pct(d.field_share)}${fieldScenario?`<small>Global share ${pct(d.global_field_share)}</small>`:''}${observed!=null?`<small>${observed.toLocaleString()} ${observedLabel}</small>`:''}</dd></dl>`;
+}
+function placeMapTip(x,y){const rect=mapTip.getBoundingClientRect();mapTip.style.left=Math.max(8,Math.min(x+14,window.innerWidth-rect.width-8))+'px';mapTip.style.top=Math.max(8,y+14+rect.height>window.innerHeight?y-rect.height-14:y+14)+'px';}
+function showMapTip(r,el,event){mapTip.innerHTML=mapTooltipHtml(r);mapTip.hidden=false;el.setAttribute('aria-describedby','agency-tooltip');const rect=el.getBoundingClientRect();placeMapTip(event?event.clientX:rect.right,event?event.clientY:rect.top);}
+function hideMapTip(){mapTip.hidden=true;}
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('.map-point'))hideMapTip();});
+window.addEventListener('resize',hideMapTip);
+document.getElementById('scatter-card').addEventListener('scroll',hideMapTip);
+document.getElementById('min-matchup-n').value=state.minN;
+document.getElementById('min-floor-coverage').addEventListener('input',e=>{const value=Number(e.target.value);state.minCoverage=Number.isFinite(value)?Math.max(0,Math.min(100,value))/100:0;render();});
+document.getElementById('min-matchup-n').addEventListener('input',e=>{const value=Number(e.target.value);state.minN=Number.isFinite(value)?Math.max(1,Math.floor(value)):8;render();});
+document.getElementById('deck-search').addEventListener('input',e=>{state.search=e.target.value.toLowerCase();render();});
+document.getElementById('show-inactive').addEventListener('change',e=>{state.inactive=e.target.checked;render();});
+document.getElementById('frontier-only').addEventListener('change',e=>{state.frontier=e.target.checked;render();});
+render();
 </script>
-</body>
-</html>
+</body></html>

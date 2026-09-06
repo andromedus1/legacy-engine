@@ -1,0 +1,155 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Deck Rankings refinement</title><style>
+:root {
+  color-scheme: light;
+  --surface-1:#fcfcfb; --page:#f9f9f7;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s1-weak:#9ec5f4; --bar:#86b6ef; --bar-deep:#2a78d6;
+  --amber:#fab219;
+  --bo-critical:#d03b3b;
+  --edge:#2a78d6;
+  --edge-dominant:#16845b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:#1a1a19; --page:#0d0d0d;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,0.10);
+  --s1:#3987e5; --s1-weak:#1c5cab; --bar:#1c5cab; --bar-deep:#3987e5;
+}
+html, body { margin: 0; background: var(--page); color: var(--ink); }
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--page); color: var(--ink); margin:0; padding: 24px;
+  line-height: 1.45; min-height: 100vh; box-sizing: border-box; }
+.viz-root h1 { font-size: 22px; margin: 0 0 2px; }
+.viz-root h2 { font-size: 16px; margin: 28px 0 8px; }
+.audit { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px; color: var(--muted); white-space: pre-wrap; margin: 10px 0 18px; }
+.card { background: var(--surface-1); border: 1px solid var(--ring);
+  border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+.def { max-width: 880px; }
+.def b { color: var(--s1); }
+.def .gates { font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+.def .gates li { margin: 3px 0; }
+.def details.method + details.method { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+.def details.method summary { cursor: pointer; font-weight: 600; font-size: 13.5px;
+  color: var(--ink-2); user-select: none; }
+.def details.method summary:hover { color: var(--ink); }
+.def details.method ul { margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .04em; padding: 6px 8px;
+  border-bottom: 1px solid var(--axis); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.name { font-weight: 600; }
+tr.thin td { color: var(--muted); }
+tr.thin td.name { font-weight: 500; }
+tr.stale td.name::after { content: " ◦not current"; color: var(--amber);
+  font-size: 10.5px; font-weight: 500; vertical-align: 1px; }
+.barcell { min-width: 150px; }
+.bar { display: inline-block; height: 8px; border-radius: 4px;
+  background: var(--bar-deep); vertical-align: middle; margin-right: 6px; }
+tr.thin .bar { background: var(--muted); opacity: .5; }
+.chip { font-size: 10.5px; color: var(--muted); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 0 5px; margin-left: 4px; vertical-align: 1px; }
+.expander { cursor: pointer; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.expander:hover { background: color-mix(in oklab, var(--s1) 7%, transparent); }
+tr.detail > td { white-space: normal; background: color-mix(in oklab, var(--s1) 4%, transparent); }
+.cells { font-size: 12px; columns: 3; column-gap: 24px; padding: 4px 0; }
+.cells div { break-inside: avoid; padding: 1px 0; }
+.cells .unm { color: var(--muted); }
+.evidence-warn { color: var(--amber); font-weight: 650; }
+/* Raw-WR matchup highlights in the expanded ledger. Text chips carry the meaning,
+   never color alone; only measured rows reach these four mutually exclusive bands. */
+.cells .bo-full, .cells .bo-half, .cells .edge, .cells .edge-dominant {
+  padding-left: 6px; border-radius: 4px; }
+.cells .bo-full { background: color-mix(in srgb, var(--bo-critical) 14%, transparent);
+  border-left: 3px solid var(--bo-critical); }
+.cells .bo-half { background: color-mix(in srgb, var(--amber) 16%, transparent);
+  border-left: 3px solid var(--amber); }
+.cells .edge { background: color-mix(in srgb, var(--edge) 13%, transparent);
+  border-left: 3px solid var(--edge); }
+.cells .edge-dominant { background: color-mix(in srgb, var(--edge-dominant) 15%, transparent);
+  border-left: 3px solid var(--edge-dominant); }
+.bo-key { display: inline-block; margin: 0 0 6px; font-size: 11px; color: var(--muted); }
+.bo-key .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  vertical-align: -1px; margin: 0 4px 0 10px; }
+.scroll { overflow-x: auto; }
+.tablewrap { overflow: visible; }
+.table-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+  color: var(--ink-2); font-size: 12px; }
+.table-controls input { width: 72px; padding: 4px 6px; color: var(--ink);
+  background: var(--surface-1); border: 1px solid var(--ring); border-radius: 6px;
+  font-variant-numeric: tabular-nums; }
+.table-count { color: var(--muted); }
+.table-scroll { max-height: 72vh; overflow: auto; }
+.table-scroll > table > thead > tr > th { position: sticky; top: 0; z-index: 2;
+  background: var(--surface-1); box-shadow: 0 1px 0 var(--axis); }
+svg text { font-family: inherit; }
+.footnote { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.hint { font-size: 13.5px; color: var(--ink); margin: -6px 0 18px;
+  padding: 12px 14px; max-width: 980px; border: 1px solid var(--s1-weak);
+  border-left: 5px solid var(--s1); border-radius: 9px;
+  background: color-mix(in oklab, var(--s1) 11%, var(--surface-1));
+  box-shadow: 0 2px 9px color-mix(in srgb, var(--s1) 12%, transparent); }
+.hint-label { display: inline-block; margin-right: 8px; padding: 2px 7px;
+  border-radius: 999px; background: var(--s1); color: white; font-size: 10.5px;
+  font-weight: 750; letter-spacing: .06em; text-transform: uppercase; vertical-align: 1px; }
+.tooltip { position: fixed; pointer-events: none; background: var(--surface-1);
+  border: 1px solid var(--ring); border-radius: 8px; padding: 6px 9px;
+  font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.18); display: none; z-index: 5; }
+.plan-toggle { appearance:none; border:0; background:none; color:inherit; font:inherit;
+  font-weight:650; padding:0; cursor:pointer; text-align:left; }
+.plan-toggle::before { content:"▸ "; color:var(--s1); }
+.plan-toggle[aria-expanded="true"]::before { content:"▾ "; }
+.plan-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:3px; border-radius:2px; }
+.plan-portrait { display:grid; grid-template-columns:minmax(220px,.8fr) minmax(320px,1.2fr); gap:18px; }
+.plan-portrait h3 { margin:0 0 5px; font-size:16px; }
+.plan-portrait p { margin:0 0 10px; color:var(--ink-2); }
+.plan-stat { display:inline-block; margin:0 12px 6px 0; }
+.plan-members { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+.plan-member { border:1px solid var(--ring); border-radius:7px; padding:3px 6px; }
+.plan-ledger td:first-child { font-weight:600; }
+/* Nested disclosures inside an archetype row's dropdown — the plan block and the exact
+   archetype ledger open independently, so neither has to be scrolled past to reach the other. */
+.subsection { border:1px solid var(--ring); border-radius:9px; margin:8px 0 0;
+  background: var(--surface-1); }
+.subsection > summary { cursor:pointer; list-style:none; padding:8px 11px;
+  font-weight:650; font-size:14px; border-radius:9px; }
+.subsection > summary::-webkit-details-marker { display:none; }
+.subsection > summary::before { content:"▸ "; color:var(--s1); }
+.subsection[open] > summary::before { content:"▾ "; }
+.subsection[open] > summary { border-bottom:1px solid var(--ring); border-radius:9px 9px 0 0; }
+.subsection > summary:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+.subsection > summary .chip { font-weight:500; }
+.subsection > .subsection-body { padding:9px 11px 11px; }
+.methodology-control { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.methodology-control button[aria-pressed="true"] { border-color:var(--s1); color:var(--ink); }
+.methodology-status { color:var(--muted); font-size:13px; }
+.target-control { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.target-control select { max-width:100%; padding:6px 30px 6px 8px; color:var(--ink);
+  background:var(--surface-1); border:1px solid var(--ring); border-radius:6px; }
+.target-control select:focus-visible { outline:2px solid var(--amber); outline-offset:2px; }
+.target-unavailable { flex-basis:100%; margin:2px 0 0; color:var(--muted); font-size:12px; }
+.diagnostic-boundary { border-left:3px solid var(--s1); padding:7px 9px; margin:0 0 9px;
+  background:color-mix(in oklab, var(--s1) 6%, transparent); }
+.diagnostic-table { min-width:720px; }
+.diagnostic-table td { vertical-align:top; white-space:normal; }
+.diagnostic-table code { overflow-wrap:anywhere; }
+.diagnostic-scroll { overflow-x:auto; }
+.grounding-path { margin:8px 0; padding:9px 11px; border-left:3px solid var(--amber);
+  background:var(--surface-1); font-size:13px; }
+.grounding-path ol { margin:6px 0; padding-left:22px; }
+@media (max-width:760px) { .plan-portrait { grid-template-columns:1fr; } }
+ .priorities{display:grid;grid-template-columns:1fr 1fr;gap:16px}.priorities h2{margin:8px 0}.split{display:grid;grid-template-columns:2fr 1fr;gap:20px}.split .priorities{display:block}button,summary{cursor:pointer}@media(max-width:760px){.split,.priorities{display:block}}</style><body><main class="viz-root"><p>REFINEMENT 1 · Illustrative data</p><h1>Deck Rankings</h1><p>Find your strongest deck. Know its toughest pairing.</p><div class="priorities"><div class="card"><small>PERFORMANCE</small><h2>Example Combo</h2><b>55% expected wins</b><p>38% weakest matchup</p></div><div class="card"><small>HIGH FLOOR</small><h2>Example Midrange</h2><b>47% weakest matchup</b><p>53% expected wins</p></div></div><h2>Agency map</h2><div class="card"><svg viewBox="0 0 800 170" width="100%" height="170" aria-label="Agency map"><path d="M45 5V140H780" fill="none" stroke="gray"/><text x="12" y="20">Floor ↑</text><text x="615" y="165">Performance →</text><circle cx="440" cy="55" r="9" fill="#2a78d6"/><text x="453" y="52">Midrange</text><circle cx="540" cy="88" r="9" fill="#2a78d6"/><text x="554" y="86">Tempo</text><circle cx="670" cy="120" r="9" fill="#2a78d6"/><text x="685" y="116">Combo</text></svg></div><h2>Superarchetypes / strategic plans</h2><div class="card"><table><thead><tr><th>Deck</th><th>Performance</th><th>Floor</th><th>Meta</th><th>Direct evidence</th></tr></thead><tbody><tr><td><details><summary>Example Tempo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>54%</td><td>44%</td><td>16%</td><td>74%</td></tr><tr><td><details><summary>Example Midrange</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>53%</td><td>47%</td><td>12%</td><td>74%</td></tr><tr><td><details><summary>Example Combo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>55%</td><td>38%</td><td>8%</td><td>74%</td></tr></tbody></table></div><h2>Archetypes</h2><div class="card"><p>Sort: <button>Performance</button> <button>Floor</button> · Click a deck for matchups</p><table><thead><tr><th>Deck</th><th>Performance</th><th>Floor</th><th>Meta</th><th>Direct evidence</th></tr></thead><tbody><tr><td><details><summary>Example Tempo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>54%</td><td>44%</td><td>16%</td><td>74%</td></tr><tr><td><details><summary>Example Midrange</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>53%</td><td>47%</td><td>12%</td><td>74%</td></tr><tr><td><details><summary>Example Combo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>55%</td><td>38%</td><td>8%</td><td>74%</td></tr></tbody></table></div><h2>Subarchetypes / camps</h2><div class="card"><table><thead><tr><th>Deck</th><th>Performance</th><th>Floor</th><th>Meta</th><th>Direct evidence</th></tr></thead><tbody><tr><td><details><summary>Example Tempo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>54%</td><td>44%</td><td>16%</td><td>74%</td></tr><tr><td><details><summary>Example Midrange</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>53%</td><td>47%</td><td>12%</td><td>74%</td></tr><tr><td><details><summary>Example Combo</summary><p>vs Tempo · 53% · 48–58% · 44–38 record<br>vs Combo · 46% · 37–55% · 14–17 record</p></details></td><td>55%</td><td>38%</td><td>8%</td><td>74%</td></tr></tbody></table></div><details class="card"><summary>Method & sources</summary><p>Estimates use compatible match history and the recent published field. Ranges show 95% posterior uncertainty. Unknown matchups use a weak prior. A high estimated floor is not a guarantee.</p></details></main></body></html>

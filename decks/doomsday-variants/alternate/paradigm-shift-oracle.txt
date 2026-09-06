@@ -1,0 +1,40 @@
+// Status: observed-historical (legal at current cutoff; not observed-current)
+// Evidence through: 2026-08-20 (read-only corpus cutoff; source date 2026-05-11)
+// Observed source: rgbandre, 5-0 MTGO Legacy League 2026-05-11; .research/attestation/ddv-compare-wide-corpus.md (passage 9)
+// Reconstruction: none. Exact registered 75; the sideboard module is a historical alternate-combo observation, not a performance claim.
+4 Brainstorm
+1 Cavern of Souls
+3 Consider
+4 Dark Ritual
+1 Daze
+1 Deep Analysis
+4 Doomsday
+1 Duress
+1 Edge of Autumn
+1 Flooded Strand
+4 Flow State
+4 Force of Will
+2 Island
+1 Lion's Eye Diamond
+4 Lotus Petal
+1 Marsh Flats
+1 Misty Rainforest
+1 Personal Tutor
+4 Polluted Delta
+4 Ponder
+1 Scalding Tarn
+1 Street Wraith
+1 Swamp
+1 Thassa's Oracle
+4 Thoughtseize
+1 Undercity Sewers
+3 Underground Sea
+1 Unearth
+
+Sideboard
+1 Cavern of Souls
+1 Duress
+4 Force of Negation
+2 Inquisition of Kozilek
+4 Paradigm Shift
+3 Thassa's Oracle

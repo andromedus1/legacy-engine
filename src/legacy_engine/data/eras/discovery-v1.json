@@ -1,0 +1,25 @@
+{
+  "calibration_id": "recurrent-segment-fingerprint-v2",
+  "method_id": "segment-fingerprint-complete-link-v2",
+  "bucket_days": 7,
+  "min_segment_buckets": 3,
+  "min_segment_decks": 30,
+  "min_segment_events": 3,
+  "min_subject_decks": 30,
+  "pelt_penalty": 0.5,
+  "smoothing_alpha": 0.5,
+  "weights": {
+    "main": 0.4,
+    "side": 0.25,
+    "field": 0.2,
+    "source": 0.1,
+    "subject_share": 0.05
+  },
+  "thresholds": {
+    "main_js_max": 0.12,
+    "side_js_max": 0.18,
+    "mixture_energy_max": 0.2,
+    "field_js_max": 0.25,
+    "source_js_max": 0.25
+  }
+}

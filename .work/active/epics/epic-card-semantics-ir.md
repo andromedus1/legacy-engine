@@ -2,16 +2,21 @@
 id: epic-card-semantics-ir
 kind: epic
 stage: drafting
-tags: [advisory, ingestion, needs-brief]
+tags: [advisory, ingestion, needs-brief, deferred]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Card-semantics rules layer — validated semantic IR replacing regex+memory
+
+> **DEFERRED 2026-08-11** — the full semantic/rules IR remains a large, correctness-sensitive
+> undertaking. Continue shipping independently verified tactical fixes, but do not activate the
+> strategic IR or use it as a prerequisite for current ranking/portability work without a new
+> operator decision.
 
 ## Brief
 

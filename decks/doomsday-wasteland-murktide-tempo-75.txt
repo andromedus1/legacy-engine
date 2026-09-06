@@ -1,0 +1,48 @@
+# structural_label: wasteland-murktide-tempo
+# color_configuration: dimir
+# evidence_scope: exact-published-registration
+# source_player: HJ_Kaiser
+# source_result: 7th Place
+# source_date: 2026-08-12
+# source_path: data/cache/Tournaments/MTGO/2026/08/12/legacy-challenge-32-2026-08-1212851626.json
+# source_url: https://www.mtgo.com/decklist/legacy-challenge-32-2026-08-1212851626#deck_HJ_Kaiser
+# research_origin: .research/analysis/campaigns/doomsday-splash-variants/parent.md
+# legality_snapshot: 2026-08-10
+# claim_boundary: construction label only; no measured kill-speed or matchup-superiority claim
+4 Brainstorm
+1 Cavern of Souls
+1 Consider
+4 Dark Ritual
+1 Daze
+4 Doomsday
+1 Edge of Autumn
+1 Flooded Strand
+4 Flow State
+4 Force of Will
+1 Jace, Wielder of Mysteries
+1 Lion's Eye Diamond
+2 Lotus Petal
+1 Marsh Flats
+1 Misty Rainforest
+2 Murktide Regent
+4 Polluted Delta
+3 Ponder
+1 Scalding Tarn
+1 Snow-Covered Island
+1 Snow-Covered Swamp
+1 Street Wraith
+4 Tamiyo, Inquisitive Student
+1 Thassa's Oracle
+3 Thoughtseize
+1 Undercity Sewers
+4 Underground Sea
+3 Wasteland
+
+Sideboard
+4 Barrowgoyf
+1 Bitter Triumph
+3 Consign to Memory
+2 Dauthi Voidwalker
+2 Fatal Push
+2 Force of Negation
+1 Long Goodbye

@@ -1,0 +1,39 @@
+# Exact registration: 2plus2isfive, Legacy Challenge 32, 2026-08-16, 10th Place.
+# Source: https://www.mtgo.com/decklist/legacy-challenge-32-2026-08-1612851673 (deck_idx 9).
+1 Bloodstained Mire
+4 Brainstorm
+1 Cavern of Souls
+1 Consider
+4 Dark Ritual
+3 Daze
+4 Doomsday
+1 Edge of Autumn
+1 Flooded Strand
+4 Flow State
+4 Force of Will
+1 Lion's Eye Diamond
+3 Lotus Petal
+1 Marsh Flats
+1 Misty Rainforest
+2 Personal Tutor
+4 Polluted Delta
+4 Ponder
+1 Scalding Tarn
+1 Snow-Covered Island
+1 Snow-Covered Swamp
+1 Street Wraith
+2 Tamiyo, Inquisitive Student
+1 Thassa's Oracle
+4 Thoughtseize
+1 Undercity Sewers
+4 Underground Sea
+
+Sideboard
+3 Barrowgoyf
+2 Dauthi Voidwalker
+1 Engineered Explosives
+3 Fatal Push
+2 Force of Negation
+1 Jace, Wielder of Mysteries
+2 Murktide Regent
+1 Snuff Out

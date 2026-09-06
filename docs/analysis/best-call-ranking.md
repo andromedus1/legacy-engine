@@ -1,199 +1,235 @@
 ---
-description: Read before refreshing or interpreting the Best Deck / Best Call agency ranking page — the one-command refresh runbook, the metric definitions, and the honesty gates baked into the page.
+description: Read before refreshing or interpreting the Deck Rankings page — the current performance and matchup-floor projection, its field basis, and its evidence boundaries.
 type: design
 kind: planning
 status: active
-updated: 2026-08-08
+updated: 2026-09-05
 summary: |
-  Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored, fully
-  regenerable). One tracked script recomputes the page from the DuckDB corpus through a
-  tracked HTML template: scripts/refresh_best_call_ranking.py +
-  scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-  strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
-  including exact archetype-versus-plan evidence in every archetype dropdown;
-  the page itself carries the authoritative definitional prose.
+  Runbook for decks/deck-rankings.html, a self-contained generated landing page. The
+  refresh script retains the mature Best Call evidence ledger and adds a separately
+  named current projection whose two visible priorities are full-field performance
+  and the highest worst-matchup floor.
 decisions:
-  - "Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page's single ranking number; theory under test: maximum agency = most fun."
-  - "Measured cells only: a matchup counts at n>=8; era-windowed cells preferred; the fallback pools matches since the last ban that affected either deck (BA label, archetype_valid_since) — full-corpus FC only when neither deck was ever ban-affected. The Nadu rule: a banned engine's matches never inflate a row (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28)."
-  - "Every measured cell (n>=8 by default) can set the floor using its shrunk estimate; this exposes apparent holes sooner. Because better-covered decks have more chances to reveal a low matchup, ungrounded agency remains an explicit upper bound and must be read with measured coverage. Blowouts classify on the raw observed rate after the same measured-cell gate."
-  - "Grounded row = top-8 field opponents all measured AND >=80% of field share-mass covered; ungrounded rows are labeled leans (agency shown as an upper bound), and sorting never intermixes strata."
-  - "Field basis = the current ban-regime window; --field-since defaults to the latest confirmed ban event so regime changes auto-track; its confidence tier is computed from window size, never hardcoded."
-  - "Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform multi-split matrix per distinct ban-fallback date) — numerically identical to per-parent split builds (parity-tested at engine and script level, ~25x cheaper), keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows."
-  - "Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps + unsplit field archetypes on the page-used cells; candidacy is gated at the same coverage threshold that suppresses display (<5% measured coverage -> n/a + reason) because zero-coverage candidates otherwise absorb the whole argmax as imputation noise; S* labels full-field values below 85% coverage."
-  - "Strategic plans are a curated, independent five-plan taxonomy: every current-field archetype has exactly one primary plan for mutually exclusive match-level aggregation and may carry secondary labels for hybrid explanation only. Plan cells pool decisive matches directly rather than averaging archetype rates."
-  - "Strategic-plan same-plan play is structural 50% context: the diagonal displays zero directional wins, losses, and n, while observed_n separately reports cross-archetype same-plan matches and mirror_n reports mirror context. It contributes to adjusted field WR but is never measured, never sets the floor, and is excluded from the external-coverage denominator. External plan cells use the page's n>=8 measured gate; grounding requires the top external plans measured and >=80% external field-share coverage."
-  - "Every archetype dropdown begins with five Against strategic plans cells built directly from that archetype's decisive non-mirror MatchResults, grouped by opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's uniform field window/provenance, and measured/thin state. Exact-archetype mirrors are reported separately as mirror_n and shown only as structural 50% context; they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured gate. The exact archetype ledger remains below."
-  - "Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes stay internal to matrix construction and statistical borrowing — no page-visible dropdown payload, family lean, family range, or presentation audit line. A COLOUR SPLIT is archetype-level: the curated registry rewrites decks.archetype at label time, so each branch earns its own archetype row, its own field share, and its own column in every OTHER archetype's ledger. Camps stay subject-side only (the multi-split matrix pools the opponent side back to parent), so a distinction that changes how opponents must play against you belongs in a colour split, not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland black."
-  - "The output page is gitignored and disposable; the template + refresh script are the tracked artifacts — regenerate, don't hand-edit (data changes go in the script, presentation changes in the template)."
+  - "Performance is the field-share-weighted mean of per-cell posterior means, including structural 50% mirrors; floor is the minimum posterior mean across non-mirror current-field opponents."
+  - "The performance interval and all-opponent minimum-floor interval use seeded posterior draws; the visible floor range is the named toughest pairing's cell interval, while the all-opponent minimum interval remains available in evidence details."
+  - "Performance and floor have independent leaders. The floor leader maximizes the floor among eligible rows, with performance breaking floor ties; both are independent table sorts, and Pareto rows show the efficient frontier."
+  - "Every valid cell contributes an estimate. Prior-only and uncertain cells remain visible with W-L/n, interval, prior strength, prior provenance, source kind, and source window; prior-only rows are not recommendation candidates."
+  - "The current field uses a provisional 28-day exponential half-life over the observed ban-regime slice. The denominator is published deck lists, not a census of entrants. Integer observed counts, decay-weighted counts, effective sample size, and bounded transition prior counts remain separate."
+  - "Clean interval evidence may override a cell once. The override keeps the actual MatchupCell prior_strength and its interval/source provenance; it is not pooled again with overlapping fallback evidence."
+  - "The mature positioning estimator and future-only benchmark remain frozen reference surfaces. Their outputs do not validate or promote this current descriptive projection."
+  - "scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic. Separate --served-model phases seal all six predictions before development scoring and require a sealed development selection before confirmation outcomes open; no phase publishes a method."
+  - "The generated page is disposable. Edit the tracked script or template, then regenerate decks/deck-rankings.html; do not hand-edit the output."
 ---
 
-# Best Deck / Best Call agency ranking — refresh runbook
+# Deck Rankings — refresh runbook
 
-The page: [decks/best-deck-best-call-ranking.html](../../decks/best-deck-best-call-ranking.html)
-(gitignored, self-contained offline HTML). Tables are click-sortable per column
-(default: agency % descending); sorting stays within honesty strata. Coverage
-filters and column sorting apply to the strategic-plan, archetype, and camp peer
-tables. Only direct headers of those outer peer tables are sticky; headers in
-nested plan ledgers scroll with their expanded row. Rows expand to accessible
-per-opponent matchup ledgers.
+The generated page is [decks/deck-rankings.html](../../decks/deck-rankings.html). It is offline,
+self-contained, and gitignored. The tracked implementation is
+`scripts/refresh_best_call_ranking.py` plus `scripts/best_call_ranking_template.html`.
 
-## Refresh (one command, after a data cycle)
+## Refresh
 
-The page reads eras + variants, so run it **last**, after the standard cycle:
+For the complete data lifecycle, run:
 
 ```bash
-.venv/bin/legacy-engine refresh all          # mirror + ingest new events
-.venv/bin/legacy-engine label                # full-corpus archetype relabel; also applies the
-                                             # curated colour splits (echoes each one it applied)
-# re-apply every staged camp split (variant labels are wiped by label):
-.venv/bin/legacy-engine discover list | grep 'status: candidate' | sed 's/  \[status.*//' | \
-  while IFS= read -r a; do .venv/bin/legacy-engine discover apply --archetype "$a"; done
-.venv/bin/legacy-engine eras run             # re-detect era boundaries + drift alarms
-# Preview a candidate over each archetype's own stable era. Review its membership,
-# churn, and quality output; this does not replace the serving family registry:
-.venv/bin/legacy-engine superarchetype run --compare-since 2026-06-29
-# Only after explicitly approving that candidate, promote it to the serving registry:
-# .venv/bin/legacy-engine superarchetype run --promote
+.venv/bin/python scripts/refresh_decision_data.py
+```
+
+That composed command refreshes sources and cards, reconciles names, labels decks, applies staged
+camps, runs era detection, and writes the ranking last. It uses the default output above and leaves
+the previous page in place when a required step fails. Release and format-monitor degradation is
+reported in typed status; it does not silently claim a fresh ranking.
+
+For a focused ranking rebuild after its inputs are already current:
+
+```bash
 .venv/bin/python scripts/refresh_best_call_ranking.py
 ```
 
-Optionally re-run discovery first (`discover run --archetype <parent> --since 2024-12-16`
-per parent) when the corpus has grown materially — staged splits carry frozen
-membership, so **new decks get camp labels only after a re-staged PASS + apply**.
-A gate-A FAIL keeps the old frozen split; treat that parent's camp rows as stale.
+The script name is retained for callers and scheduler wiring. `--db` and `--out` remain available;
+the default output is `decks/deck-rankings.html`. Historical target flags still produce exclusive-
+cutoff “Today’s model” pages using current taxonomy/configuration, with optional interval evidence
+attached diagnostically.
 
-Knobs (defaults are the page's published method): `--field-since` (defaults to the
-latest confirmed ban event date), `--ground-n 8`, `--top-k 8`, `--cover-min 0.8`,
-`--min-row-share 0.001`, `--db`, `--out`.
+## Current projection
 
-## What the script does
+`src/legacy_engine/advisory/deck_ranking.py::rank_matchup_rows` receives the typed matchup ledger
+and field shares. For each row it computes a conditional Beta posterior from `wins`, `n`,
+`prior_mean`, and the cell’s actual `prior_strength`. A supplied cell with zero direct results retains its fitted prior; only an absent ledger cell
+uses a weak Beta(1, 1) 50% prior. The cell’s analytic posterior mean is the point estimate. Draws use the same posterior and
+seeded RNG to produce 95% performance intervals, 95% minimum-floor intervals, probability that
+performance exceeds 50%, and expected exposure to cells below the descriptive 45% marker.
 
-`scripts/refresh_best_call_ranking.py` computes the embedded data blob —
-archetype rows from one `build_adaptive_matrix` + one `build_matrix` per distinct
-ban-affectedness fallback date; camp rows from ONE `build_multi_split_adaptive`
-pass over every staged discovery parent (`staged_split_parents()`) plus one
-`build_multi_split_matrix` per distinct ban-scoped fallback date serving all
-parents at once; field shares and camp fractions from the ban-regime window —
-and splices it into `scripts/best_call_ranking_template.html` at the
-`__D_BLOB__` placeholder. Camp cells are field-for-field identical to per-parent
-`split_variant` builds — the engine parity suite plus the script-level parity
-test (`tests/test_refresh_best_call_ranking.py`, old path reconstructed in-test
-and diffed row-for-row) enforce it — and the one-pass sweep keeps the per-pair
-`max(subj_ban, opp_ban)` Nadu-rule fallback windows.
+Performance is the weighted mean over the complete field. A structural mirror is fixed at 50% and
+is included in performance. The floor is the minimum point estimate over non-mirror opponents with
+positive field share; its draw interval takes the minimum across those same opponents on each draw.
+The floor does not claim that unobserved opponents are safe. The page shows the direct-evidence
+share and every cell’s estimate so missing and uncertain parts of the floor can be inspected.
 
-The camp table's **P(best) column** comes from one shared-field `rank_decks` MC
-(fixed seed `RANK_SEED`, parameters in the blob's `meta.rank` + audit lines):
-every camp and every unsplit field archetype is scored against the same sampled
-parent-level Dirichlet field, on the page-used cells (era preferred, ban-scoped
-fallback), so values are comparable across camps of different parents.
-Candidacy is gated at the display-suppression coverage threshold — a candidate
-below 5% measured coverage shows n/a with its coverage instead of an
-imputation-noise score.
+`_publish_deck_rankings` in `scripts/refresh_best_call_ranking.py` supplies the current field from
+`src/legacy_engine/advisory/recent_field.py::build_recent_field`, then applies each available clean
+interval cell as one override. It preserves interval/source notes and the overridden cell’s prior
+strength. Era evidence is preferred when present; fallback is used only when era evidence is absent,
+and overlapping sources are not combined a second time.
 
-**Strategic-plan view.** The page adds a `plans` peer table above the archetype
-table. Its registry defines five curated plans (`Disrupt + Pressure`, `Go Off`,
-`Go Over`, `Go Wide`, and `Lock + Outlast`) independently of composition-derived
-superarchetypes. Every current-field archetype must have exactly one primary
-assignment; optional secondary assignments describe hybrids in the expanded
-portrait but do not duplicate their matches or field share across rows.
+The field projection uses the half-open `[field_since, corpus_max + 1 day)` window and a provisional
+28-day half-life. `RecentField` records exact integer sightings, weighted counts, Kish effective
+sample size, source composition, camp fractions, and recent-vs-previous movement. The source
+denominator is explicitly `published-list`; completeness of those lists is unverified. Transition
+support contributes bounded integer prior counts to effective field concentration while remaining
+separate from observed counts and recent presence.
 
-Plan cells are rebuilt from decisive match records mapped through those primary
-assignments. They are therefore match-level aggregates, not averages of rendered
-archetype percentages. External plan matchups use the same `n>=8` measured gate
-as the page. Same-plan matches are shown as structural 50% context. The diagonal
-therefore reports zero directional wins, losses, and `n`; `observed_n` separately
-reports decisive cross-archetype matches within that plan, and `mirror_n` reports
-exact-archetype mirror context. The displayed 50% contributes to adjusted field WR
-at that plan's field share, but the diagonal is never marked measured, never sets
-the floor, and never enters external coverage. The floor is
-the worst measured external plan. Coverage is measured external opponent share
-divided by all external opponent share; grounding requires every top external
-opponent (up to `--top-k`) measured plus `--cover-min` external coverage. Thus an
-incomplete plan agency remains an explicit upper bound.
+The archetype and camp tables carry the performance and floor calls as independent sortable
+columns. The strategic-plan table also makes all five headers sortable: plan, performance, floor,
+coverage, and field share. The visible floor range names the toughest pairing's cell interval; the
+all-opponent minimum-floor interval remains in Evidence details. Coverage/n controls filter the
+shared view, and n defines which matchups count toward coverage. Compact row dropdowns expose the
+matchup ledger without displacing the comparison table. The map marks tradeoffs among shown decks,
+with hover/focus/tap tooltips. Camps retain their parent/camp presentation, and plan cells remain
+direct match aggregates.
 
-The peer table is sortable within grounded/ungrounded honesty strata and has a
-minimum-floor-coverage filter. Each plan name is a real keyboard-focusable
-disclosure button with `aria-expanded`/`aria-controls`; opening it yields a
-responsive portrait (description, field footprint, decisive-match count, agency,
-member archetypes, and secondary-plan chips) beside the exact plan-versus-plan
-ledger. The ledger distinguishes measured shrunk/raw records, below-gate or empty
-external cells, and the structural same-plan diagonal in text rather than color
-alone.
+## Expected-field reports
 
-**Archetype dropdowns lead with direct plan evidence.** Opening any archetype row
-shows two independent disclosures: **Against strategic plans** (open by default) and
-**Exact archetype matchups**. Each carries a measured-of-total cell count in its header and
-opens or closes on its own, so neither must be scrolled past to reach the other; the
-open/closed choice persists across row expansions. Camp rows have no plan block and keep a
-single always-open section. The plan block is exactly five cells in registry order.
-Each cell is aggregated directly from that archetype's decisive `MatchResults`
-against opponents assigned to the corresponding primary plan; it is not derived
-from rendered archetype percentages or from composition-family evidence. Each
-cell carries shrunk/raw rates, W-L, observed `n`, the uniform field window and
-provenance, and its measured/thin state under the same `n>=8` page gate. In the
-archetype's own primary-plan cell, exact-archetype mirrors are retained separately
-as `mirror_n` and displayed only as structural 50% context. They do not contribute
-to observed `n`, the raw or shrunk estimate, or the `n>=8` measured gate. The exact
-archetype-versus-archetype ledger follows this five-cell block.
+Use the same projection for a private expected field by supplying a separate output:
 
-**Superarchetypes are internal only.** Composition-derived superarchetypes may
-still support matrix construction and statistical borrowing, but the ranking
-page exposes no family fallback payload: no archetype or camp dropdown gains an
-imputed/pooled lean, family range, provenance chip, or superarchetype presentation
-audit line. The page-visible dropdown evidence is the direct strategic-plan block
-followed by the exact archetype ledger.
+```bash
+.venv/bin/python scripts/refresh_best_call_ranking.py \
+  --field decks/local-field-saved-post-may18-107.txt \
+  --field-label "Saved post-May 18 field (107 players)" \
+  --out decks/deck-rankings-local-saved.html
+```
 
-The full refresh runs in ~40s on the current corpus (~11s archetype matrices +
-~13s one-pass camp matrices + ~2s shared-field ranking); the script echoes each
-phase's wall time.
+The saved sample has no supplied end date and is historical evidence scored with the current model;
+its 107 counted players include four explicitly unmapped Affinity Combo players. The input uses the
+established `<share> <archetype> [count]` grammar. Every row must include a count for a supplied-
+observation scenario; `# effective_n` instead declares concentration, and rows without either remain
+fixed weights.
 
-Metric definitions live in the page's "What is Agency %?" card and in the
-frontmatter decisions above — the page prose is authoritative.
+The page records the file hash, evidence basis, unknown opponents, and global-versus-scenario
+performance/floor calls. Scenario shares and counts reweight the existing cells; global current-corpus
+presence still determines which decks can be recommended, so a playable deck need not appear among
+the expected opponents. Positive unknown mass remains as weak-prior cells. Strategic-plan shares stay
+visible, but every local plan projection is explicitly unavailable because the global plan cells
+cannot be coherently reweighted within plan composition. Custom runs cannot replace
+`decks/deck-rankings.html`, and refresh comparisons require the same scenario identity.
 
-## Interpretation guardrails
+## Refresh changes
 
-- **Strata are honesty walls**: grounded+current, grounded-but-not-current
-  (<5 decks in the last 4 corpus weeks), ungrounded (thin floor = upper bound).
-  Column sorting reorders *within* a stratum only.
-- **Blowouts** count measured current-field matchups at raw observed WR <40%
-  (full) / 40–45% (half). The `n>=8` measured-cell gate excludes thin cells;
-  among those measured cells, classification uses the raw rate rather than the
-  shrunk estimate. "% meta that blows you out" weights them by field share and
-  is a lower bound (unmeasured opponents can't be counted).
-- **Positive ledger highlights** apply only to measured (`n>=8`) cells and use
-  raw observed WR: **Edge** at 55–60% inclusive and **Dominant** above 60%.
-  They are descriptive ledger bands only; they do not affect any metric,
-  grounding decision, or ranking.
-- **Floors use every measured cell** — once a matchup reaches the page's
-  `n>=8` measured gate, its shrunk estimate can set the floor. This exposes
-  holes earlier, while the explicit upper-bound marker and measured-coverage
-  column keep incomplete rows from masquerading as fully mapped claims. Still
-  check the expanded ledger (raw record and CI shown) before acting on one cell.
-- **The measured-cell gate is interactive in each table.** `Minimum matchup n`
-  defaults to the generated `--ground-n` value (normally 8) and recomputes the
-  era-preferred / ban-scoped-fallback selection, adjusted field WR, floor,
-  agency, blowouts, coverage, grounding strata, labels, and sorting in-browser.
-  Cross-camp P(best) remains the generated-threshold Monte Carlo and is shown as
-  n/a when the interactive gate differs rather than presenting a stale value.
-- **Fallback windows are ban-scoped** — a deck whose engine was banned (Nadu
-  Cephalid, Candelabra Forge) keeps none of its banned-era matches in any cell
-  that touches it; coverage drops honestly instead (Forge 95%→17% grounding was
-  Candelabra-era data).
-- Camp rows carry staged-candidate provenance (speculative overlay, never
-  promoted taxonomy).
-- **Plan rows are mutually exclusive primary-plan aggregates** — secondary chips
-  explain hybrid decks but never count their matches or field share again.
-  Same-plan 50% is structural context, not evidence: judge a plan's floor and
-  grounding only from its external cells and external-coverage percentage.
-- **Archetype plan cells are direct evidence** — read their shrunk/raw rates, W-L,
-  observed `n`, measured/thin state, and uniform field provenance before the exact
-  opponent ledger below. `mirror_n` in the row's own primary-plan cell is separate
-  structural 50% context: mirrors contribute neither directional wins/losses nor
-  observed `n`, estimates, or measured-gate eligibility.
-- **Cross-camp P(best) is a shared-budget number** — all camps and unsplit
-  archetypes compete in ONE argmax, so the values are comparable across parents
-  and can never sum past 1. n/a means the row failed the 5% measured-coverage
-  candidacy gate (its score would be pure imputation); S* means the supporting
-  field WR is a full-field estimate leaning on imputation for unmeasured share,
-  which always includes the camp's own parent (that cell is absent by
-  construction).
+After projecting the current page, the publisher reads the prior page's embedded JSON without
+executing the HTML. Compatible snapshots share method, scenario, regime, and field start. The page
+shows at most three observations: largest visible field movement, largest modeled performance
+beneficiary, and changed performance/floor calls. For each candidate with the full union of required
+opponent forecasts, performance movement is exactly decomposed into symmetric field-weight and
+matchup-estimate terms. A floor explanation names a changed minimum pairing or positive-support set;
+field-share magnitudes do not explain floor movement when opponent support is unchanged.
+
+First publication starts a baseline; analytically equal inputs report no change. Incompatible or
+malformed prior payloads and missing forecasts remain explicit while the new page stays publishable.
+The comparison snapshot uses the same atomic HTML publication, and refresh diagnostics are excluded
+from the ranking-authority invariant.
+
+## Build decision units
+
+Expanded parent rows compare at least two current camp rows on the full positive-share external-opponent
+set, excluding the parent. The disclosure separates pure pooling uplift—minimum of the camp-weighted
+matchup vector minus the weighted camp minima—from the actual parent/build floor gap, which can also
+reflect priors or evidence windows. Missing opponent cells remain unavailable. Camp weights,
+common-opponent field coverage, toughest pairing, n, and prior fraction stay visible, including `n=0`
+cells.
+
+Composition uses `0.5 × Σ|mean copies A − mean copies B|` separately for main and side decks, with
+within-camp radius and separate main/side card-record denominators. Pilot overlap uses source-scoped
+normalized handles, reports known and missing-handle denominators, and is unavailable if either build
+has no known pilot. The disclosure never promotes a camp or changes the parent call. For a
+read-only JSON or Markdown audit of the generated page, run:
+
+```bash
+.venv/bin/python scripts/analyze_decision_units.py \
+  --db data/legacy.duckdb --report decks/deck-rankings.html --format markdown
+```
+
+The 2026-08-10 through 2026-09-04 audit found 29 parents and 16 exact two-current-build comparisons.
+The largest grounded pure pooling uplifts were Jeskai Midrange 3.62pp, Azorius Midrange 2.28pp,
+Show and Tell 1.94pp, and Dimir Tempo 1.13pp; these point-estimate diagnostics did not change taxonomy.
+
+## Evidence and interpretation
+
+There is no point-estimate threshold that suppresses a new projection estimate. A row can show
+posterior values from direct evidence, clean historical evidence, or fitted/weak priors without direct results.
+Rows without direct support are labeled `prior only` and are excluded from the two calls; inactive
+classifier labels retain their field context but are not current deck recommendations. Expand a row
+to inspect opponent, field share, posterior interval, W-L/n, source window, prior source, and clean
+interval concentration details.
+
+Floor coverage is the non-mirror field-share fraction meeting the chosen minimum matchup n.
+Coverage filters select rows; posterior estimates and intervals retain their original definition. Intervals are conditional on supplied
+priors and do not include every model, selection, event, or source-concentration uncertainty.
+
+The existing `advisory/positioning.py` estimator and its CLI remain available with their established
+adaptive field/matchup windowing and `--provenance` options. They are a legacy reference surface;
+their Agency/P(best) terminology must not be read as the definition of the Deck Rankings page.
+Likewise, the future-only ranking benchmark evaluates its preregistered legacy estimators and does
+not certify this new current method.
+
+`scripts/evaluate_deck_rankings.py` has two retrospective modes. The default field diagnostic still
+scores fixed 14-, 28-, 56-day, and uniform methods on chronological complete-day folds without
+tuning; its optional matchup pass remains the limited pre-cutoff adaptive baseline.
+
+`--served-model --output-dir <path>` instead evaluates the current Deck Rankings projection through
+optional `--phase freeze|development|confirmation|all`; the default is `development`. Freeze only
+seals artifacts. Development creates raw pre-cutoff snapshots and seals predictions for all six
+declared origins before loading outcomes for its first three. Confirmation validates and reuses that
+exact configuration, requires `--selected-method <method>`, writes an immutable development-selection
+artifact, and only then opens the final three horizons. `all` is the combined convenience phase and
+also requires the selected method.
+
+The taxonomy is parent-only but includes the production color split that labels Energy as Boros
+Energy or Mardu Energy. Parent rules and the color-split registry are hash-pinned across freeze and
+evaluation; camps are disabled. Card availability is observed-by-cutoff where release dates are
+unavailable, and retrospective fixed-parent labeling does not reconstruct the label knowledge an
+operator had at the cutoff. The same outcome-blind card-metadata quarantine applies to training and
+held-out data for every method, with hard ceilings of `.5%` of decks and `2%` of rounds. Raw and
+retained denominators, evidence, and hashes remain visible; quarantine excludes unresolved whole
+decks rather than repairing metadata.
+
+The declared comparison includes production scale `1`, fixed prior-strength sensitivities `.5` and
+`2`, and `opponent-plan-prior-v1`. The challenger conditionally borrows a prior from cutoff-safe
+evidence for opponents assigned to the same primary strategic plan while preserving each target
+cell's direct wins/n and selected-source identity. Outputs retain source/config hashes and report log
+loss, Brier score, calibration, support strata, reciprocity, paired event log-loss differences,
+performance/floor order, and later support for the baseline's named floor pairings. Missing forecasts
+and unavailable floor outcomes stay visible. Each frozen cell also carries the exact selected view,
+its observation match-id digest, admitted components and windows, analysis clock, status, and
+concentration evidence. Existing predictions are reused only when their fold, protocol, requested
+scales/draws, taxonomy, quarantine policy, strategic-plan registry, manifest, snapshot, and artifact
+hashes still match.
+
+Development scored 347.5 weighted half-match cases and selected scale `2`: log loss was `0.690337`
+versus `0.696988` for scale `1`, and Brier was `0.248590` versus `0.251759`. Confirmation scored 92
+weighted cases and slightly reversed that result: scale `1` had log loss `0.685469` and Brier
+`0.246262`, versus `0.686405` and `0.246695` for scale `2`. The independent scale-`2` leaders stayed
+unchanged at all six origins; scale `.5` and the plan challenger changed calls but did not improve
+the proper scores. The declared current prior therefore remains scale `1`; this choice was retained
+after the development/confirmation experiment rather than selected from confirmation alone. The
+generated page may load the sealed confirmation artifact into its Method disclosure; the evaluator
+has no publication or deployment gate.
+
+The operational status schema may report `useful` when the generated artifact contains supported
+performance/floor estimates and a practical call, even when evidence is thin or the current method
+has no validation claim. Inspect `legacy-engine ops status` for the artifact path, digest, utility
+summary, and any pending action before intervening. `effective_observed` is the recency-weighted
+observed ESS; prior pseudo-lists stay separate. The legacy integer total remains in stored status.
+
+## Related code and docs
+
+- `src/legacy_engine/advisory/deck_ranking.py` — posterior rows, intervals, floor, and Pareto status.
+- `src/legacy_engine/advisory/recent_field.py` — dated field observations and evidence accounting.
+- `src/legacy_engine/advisory/field_scenario.py` — private expected-field validation and provenance.
+- `src/legacy_engine/advisory/ranking_changes.py` — successive-publication comparison and attribution.
+- `src/legacy_engine/advisory/decision_units.py` — parent/build floor, composition, and pilot diagnostics.
+- `scripts/refresh_best_call_ranking.py` — legacy ledger plus current projection and publication.
+- `scripts/refresh_decision_data.py` — full refresh composition and default publication path.
+- `scripts/evaluate_deck_rankings.py` — default field diagnostic and frozen served-model evaluation.
+- `src/legacy_engine/advisory/deck_ranking_projection.py` — shared production/evaluation projection handoff.
+- `src/legacy_engine/workflows/deck_ranking_evaluation.py` — freeze-before-outcomes artifact and scoring workflow.
+- [README.md](../../README.md) — user-facing commands and local refresh overview.

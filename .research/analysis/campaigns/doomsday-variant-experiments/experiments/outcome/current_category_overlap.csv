@@ -1,0 +1,7 @@
+overlapping_signature,entries
+bilbo_main + tamiyo_main + teferi_main,3
+bilbo_main + tamiyo_main + wasteland_main,1
+murktide_main + tamiyo_main + wasteland_main,2
+personal_tutor_main,4
+personal_tutor_main + tamiyo_main,1
+tamiyo_main + teferi_main,1

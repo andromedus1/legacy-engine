@@ -640,6 +640,32 @@ class TestAdviseCLI:
         assert "cov=" in result.output, (
             f"Expected coverage column 'cov=...' in output; got:\n{result.output}"
         )
+        assert "imputed=" in result.output
+        assert "P(best)=n/a" in result.output
+
+    def test_positioning_candidates_can_group_same_rows_by_evidence(self, runner, tmp_path):
+        deck_path = _write_deck(tmp_path, _BRAINSTORM_DECKLIST)
+        candidates_path = tmp_path / "candidates.txt"
+        candidates_path.write_text("Control\nCombo\n")
+        db_path = _setup_db(tmp_path)
+        result = runner.invoke(main, [
+            "advise", "positioning", "--deck", deck_path,
+            "--candidates", str(candidates_path), "--ranking-strata",
+            "--db", db_path, "--seed", "42",
+        ])
+        assert result.exit_code == 0, result.output
+        assert "[inactive]" in result.output or "[unscorable]" in result.output
+        assert result.output.count("Control") == 1
+        assert result.output.count("Combo") == 1
+
+    def test_ranking_strata_requires_candidates(self, runner, tmp_path):
+        deck_path = _write_deck(tmp_path, _BRAINSTORM_DECKLIST)
+        db_path = _setup_db(tmp_path)
+        result = runner.invoke(main, [
+            "advise", "positioning", "--deck", deck_path, "--ranking-strata", "--db", db_path,
+        ])
+        assert result.exit_code != 0
+        assert "requires --candidates" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +778,65 @@ class TestLoadFieldCounts:
         con = _con()
         with pytest.raises(ValueError, match="positive integer"):
             _load_field(con, field_text="# effective_n: 10.5\n0.6 Delver\n0.4 Lands")
+
+    def test_current_regime_header_uses_per_line_count_total(self):
+        con = _con()
+        field = _load_field(
+            con,
+            field_text="# current_regime_n: 3\n0.6 Delver 6\n0.4 Lands 4",
+        )
+        assert field.regime_currency is not None
+        assert field.regime_currency.current_n == 3
+        assert field.regime_currency.total_n == 10
+        assert field.regime_currency.share == 0.3
+
+    def test_current_regime_header_uses_effective_n_after_allocation(self):
+        con = _con()
+        field = _load_field(
+            con,
+            field_text="# effective_n: 20\n# current_regime_n: 12\n0.6 Delver\n0.4 Lands",
+        )
+        assert field.regime_currency is not None
+        assert field.regime_currency.total_n == sum(field.counts.values()) == 20
+        assert field.regime_currency.share == 0.6
+
+    @pytest.mark.parametrize("value", ["-1", "1.5", "nope"])
+    def test_current_regime_header_rejects_malformed_count(self, value):
+        con = _con()
+        with pytest.raises(ValueError, match="non-negative integer"):
+            _load_field(
+                con,
+                field_text=f"# current_regime_n: {value}\n0.6 Delver 6\n0.4 Lands 4",
+            )
+
+    def test_current_regime_header_requires_count_basis(self):
+        con = _con()
+        with pytest.raises(ValueError, match="requires per-line counts"):
+            _load_field(
+                con,
+                field_text="# current_regime_n: 3\n0.6 Delver\n0.4 Lands",
+            )
+
+    def test_current_regime_header_rejects_partial_row_counts(self):
+        con = _con()
+        with pytest.raises(ValueError, match="real count on every field row"):
+            _load_field(
+                con,
+                field_text="# current_regime_n: 3\n0.6 Delver 6\n0.4 Lands",
+            )
+
+    def test_partial_counts_without_currency_keep_dirichlet_fallback(self):
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver 6\n0.4 Lands")
+        assert field.counts == {"Delver": 6, "Lands": 1}
+        assert field.regime_currency.share is None
+
+    def test_undated_custom_field_carries_unavailable_currency(self):
+        con = _con()
+        field = _load_field(con, field_text="0.6 Delver\n0.4 Lands")
+        assert field.regime_currency is not None
+        assert field.regime_currency.share is None
+        assert "undated aggregate" in field.regime_currency.reason
 
     def test_archetype_with_spaces_in_name_share_only(self):
         """Multi-word archetype names work in share-only format."""

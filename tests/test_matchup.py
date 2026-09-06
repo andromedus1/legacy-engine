@@ -18,6 +18,7 @@ from legacy_engine.analytics import (
     build_matrix,
     build_mirror_cell,
     compute_match_results,
+    concentration_for_tallies,
     wilson_or_jeffreys_ci,
 )
 from legacy_engine.cli import main
@@ -785,6 +786,21 @@ class TestReportMatchupsCLI:
 # ---------------------------------------------------------------------------
 # beta_binomial_shrink_to — Unit 2 of epic-deck-generation-per-card-value
 # ---------------------------------------------------------------------------
+
+
+class TestCellConcentration:
+    def test_dominant_buckets_and_tie_break_are_deterministic(self):
+        result = concentration_for_tallies(
+            {"event-b": 2, "event-a": 2}, {"2026-05": 3, "2026-06": 1}, n=4,
+        )
+        assert result is not None
+        assert (result.event_id, result.event_n, result.event_share) == ("event-a", 2, 0.5)
+        assert (result.month, result.month_n, result.month_share) == ("2026-05", 3, 0.75)
+
+    def test_absent_observations_are_null_and_bad_totals_fail(self):
+        assert concentration_for_tallies({}, {}, n=0) is None
+        with pytest.raises(ValueError, match="must sum to cell n"):
+            concentration_for_tallies({"event": 1}, {"2026-05": 2}, n=2)
 
 
 class TestBetaBinomialShrinkTo:

@@ -5,16 +5,21 @@ numbers, so the contribution bar is mostly about *evidence*, not ceremony.
 
 ## Getting a working checkout
 
-Requires **Python 3.11+**. Note that the optional `discovery` extra pulls in `umap-learn` →
-`numba`, which lags new Python and NumPy releases; the UMAP test skips itself when that stack
-isn't importable, and everything else works without it.
+Requires **Python 3.11–3.13**. Maintainer checkouts use Python **3.13** via `.python-version`, and
+CI tests both the 3.11 lower bound and that pinned runtime. Python 3.14 is not supported until the
+scientific/discovery dependency stack is green there.
+
+The optional `discovery` extra pulls in `umap-learn` → `numba`. It is supported only on the
+tested interpreters where that transitive NumPy/Numba stack installs and imports successfully.
+The UMAP-specific test skips honestly when the optional stack is unavailable; the core suite does
+not treat a missing optional dependency as evidence that discovery works.
 
 ```bash
 git clone https://github.com/andromedus1/legacy-engine.git
 cd legacy-engine
-python3 -m venv .venv && source .venv/bin/activate
+python3.13 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python -m pytest -q          # ~3,500 tests, about 3 minutes
+python -m pytest -q          # run the hermetic suite
 ```
 
 The test suite is **hermetic** — it builds its own temporary DuckDB files and needs no network
@@ -57,7 +62,7 @@ legacy-engine seed banlist && legacy-engine label
 | `.agents/skills/patterns/` | documented code patterns, the convention source of truth |
 | `.work/` | delivery substrate — epics, features, stories with frontmatter |
 | `decks/` | decklists, primers, and field files used for dogfooding |
-| `scripts/` | one-shot generators (e.g. the Best Deck / Best Call ranking page) |
+| `scripts/` | report generators (e.g. Deck Rankings and Doomsday Variant Rankings) |
 
 ## Reporting a data problem
 

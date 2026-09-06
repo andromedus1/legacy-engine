@@ -1,0 +1,30 @@
+{
+  "protocol_id": "recurrent-evidence-future-v1",
+  "registered_at": "2026-08-16T00:00:00Z",
+  "authority": "evaluation-only",
+  "replay_mode": "retrospective-policy-replay",
+  "base_benchmark_protocol_sha256": "2c3f56aa4feab1f1c9d09f079a3be8140ce60d0eb1fd19b1526daf49e9d223c7",
+  "base_fold_plan_sha256": "03f05367f77ed520512b58ab317ea21060beca00a431c0622fba1295adb9c88e",
+  "base_ban_ledger_sha256": "92e1855968c02045ec618f48b5a0abf2adbcec2f1d4455a596ef78f3721a8324",
+  "base_taxonomy_mode": "retrospective-fixed-parent",
+  "estimator_ids": ["current-only-v1", "contiguous-era-v1", "recurrent-expanded-v1", "component-hierarchical-v1", "composition-kernel-v1", "strategic-family-ladder-v1", "skew-low-rank-r1-v1", "skew-low-rank-r2-v1", "skew-low-rank-r4-v1"],
+  "discovery_calibration_sha256": "4e846d26e0b7f2ec4955637a0a409e57227384d188a37a19fd7ed2a6b1f712f4",
+  "certification_calibration_sha256": "c3800a81ffa3266cd4804a4f4d5473733c862fc34a83ad747df7c0c01c551ec9",
+  "interval_policy_sha256": "27c138aeaec451f4a9e6e436cb8308b5e796039a58cd1bede06e99f1e2d558c2",
+  "amplification_profile_sha256": "9ea5e0685585de4c74c71eaa65e7adfca27fc6e52fec6b965be46aff99c872e2",
+  "structure_policy_sha256": "bf971be244d9b3d5b061c5091081df7de2272a116d0e863cb6c310f46383e72b",
+  "folds": [
+    {"fold_id": "2026-08-17--2026-09-14", "data_until": "2026-08-17", "knowledge_as_of": "2026-08-17T00:00:00Z", "evaluation_until": "2026-09-14", "regime_id": "2026-08-10"},
+    {"fold_id": "2026-09-14--2026-10-12", "data_until": "2026-09-14", "knowledge_as_of": "2026-09-14T00:00:00Z", "evaluation_until": "2026-10-12", "regime_id": "2026-08-10"},
+    {"fold_id": "2026-10-12--2026-11-09", "data_until": "2026-10-12", "knowledge_as_of": "2026-10-12T00:00:00Z", "evaluation_until": "2026-11-09", "regime_id": "2026-08-10"},
+    {"fold_id": "2026-11-09--2026-12-07", "data_until": "2026-11-09", "knowledge_as_of": "2026-11-09T00:00:00Z", "evaluation_until": "2026-12-07", "regime_id": "2026-08-10"},
+    {"fold_id": "2026-12-07--2027-01-04", "data_until": "2026-12-07", "knowledge_as_of": "2026-12-07T00:00:00Z", "evaluation_until": "2027-01-04", "regime_id": "2026-08-10"},
+    {"fold_id": "2027-01-04--2027-02-01", "data_until": "2027-01-04", "knowledge_as_of": "2027-01-04T00:00:00Z", "evaluation_until": "2027-02-01", "regime_id": "2026-08-10"}
+  ],
+  "log_clip_epsilon": 0.000001,
+  "interval_level": 0.95,
+  "bootstrap_draws": 2000,
+  "seed": 730021,
+  "support": {"min_common_matches": 250, "min_events": 10, "min_event_dates": 4, "min_origins": 6, "min_regimes": 1, "min_calibration_matches": 500, "min_supported_actions": 5, "min_action_matches": 8, "min_future_field_coverage": 0.8},
+  "margins": {"alpha": 0.05, "min_served_field_coverage_gain": 0.05, "min_served_event_coverage_gain": 0.05, "max_log_loss_delta": 0.02, "max_brier_delta": 0.02, "max_calibration_delta": 0.05, "min_interval_coverage": 0.9, "max_interval_score_delta": 0.05, "max_regret_delta": 0.05, "oracle_practical_tie_margin": 0.01, "min_oracle_stability": 0.8}
+}

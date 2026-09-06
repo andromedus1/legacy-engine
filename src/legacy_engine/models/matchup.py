@@ -10,6 +10,17 @@ from legacy_engine.confidence import ConfidenceLevel
 from legacy_engine.models.base import LegacyEngineModel
 
 
+class CellConcentration(LegacyEngineModel):
+    """Dominant event/month shares for the observations behind one cell."""
+
+    event_id: str | None
+    event_n: int
+    event_share: float
+    month: str | None
+    month_n: int
+    month_share: float
+
+
 class MatchupCell(LegacyEngineModel):
     """One directed matchup estimate: archetype_a vs archetype_b.
 
@@ -28,8 +39,8 @@ class MatchupCell(LegacyEngineModel):
     p_raw
         Raw win-rate ``wins / n``; ``None`` when ``n == 0``.
     p_shrunk
-        Beta-Binomial posterior mean — shrunk toward 0.5 with prior α=β=7.5.
-        ``None`` when ``n == 0`` (degenerate cell); ``0.5`` for mirror cells.
+        Beta-Binomial posterior mean using the supplied prior (default α=β=7.5).
+        The fitted prior mean when ``n == 0``; ``0.5`` for mirror cells.
         Always shown alongside ``p_raw`` when ``n > 0`` (never shrunk-only).
     ci_low, ci_high
         95% confidence interval (Jeffreys for n≤40; Wilson for n>40).
@@ -62,7 +73,7 @@ class MatchupCell(LegacyEngineModel):
     wins: int
     n: int  # matchup-n (decisive a-vs-b matches); NOT metashare-n
     p_raw: float | None  # wins/n; None when n==0
-    p_shrunk: float | None  # Beta-Binomial posterior mean; None when n==0 (or 0.5 prior)
+    p_shrunk: float | None  # Beta-Binomial posterior mean; fitted prior mean when n==0
     ci_low: float | None
     ci_high: float | None
     tier: ConfidenceLevel  # tier_for_sample(n)
@@ -70,3 +81,5 @@ class MatchupCell(LegacyEngineModel):
     display: bool = True  # False when n<30 (speculative gate): hide rate, show "n=X, insufficient"
     prior_mean: float | None = None  # what p_shrunk was shrunk toward (additive)
     prior_source: str | None = None  # "marginal" | "parent cell (leave-camp-out)" | cross-era label
+    prior_strength: float = 15.0  # total Beta prior pseudo-count (additive)
+    concentration: CellConcentration | None = None

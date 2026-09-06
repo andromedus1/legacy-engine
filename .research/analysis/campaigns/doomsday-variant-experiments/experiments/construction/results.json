@@ -1,0 +1,866 @@
+{
+  "schema": "doomsday-construction-experiment-v1",
+  "generated_on": "2026-08-20",
+  "method": {
+    "draw_model": "exact multivariate hypergeometric; unordered seven-card hand; no mulligans",
+    "seed": null,
+    "limits": [
+      "no sequencing or mana-spending order",
+      "no Doomsday-pile construction",
+      "no opponent interaction",
+      "no matchup or win-rate inference",
+      "role-map categories are analyst-composed from the registered card names"
+    ]
+  },
+  "candidate_count": 14,
+  "candidates": [
+    {
+      "id": "current-dimir-creature-transform",
+      "path": "decks/doomsday-variants/current-dimir-creature-transform.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-registration",
+      "sha256": "02eb0b378efbd7861e7be9e9b5aac61e34e83fc842af627bf061ba48262d62ab",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 17,
+        "fetchlands": 9,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 8,
+        "access": 6,
+        "direct_doomsday": 4,
+        "personal_tutor": 2,
+        "selection": 14,
+        "protection": 11,
+        "interaction": 0,
+        "main_value_tempo": 2,
+        "side_pivot": 7,
+        "side_alt_combo": 1,
+        "side_interaction": 5,
+        "max_pivot_displacement_pct": 11.67,
+        "land_sources": {
+          "W": 0,
+          "U": 15,
+          "B": 15,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 91.656,
+        "land_2plus": 64.821,
+        "acceleration_1plus": 65.359,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 54.144,
+        "selection_1plus": 86.141,
+        "protection_1plus": 77.758,
+        "black_land_source_1plus": 88.25,
+        "blue_land_source_1plus": 88.25,
+        "access_and_black_or_petal": 49.32,
+        "access_and_selection_and_black_or_petal": 40.55
+      }
+    },
+    {
+      "id": "current-esper-teferi-swords",
+      "path": "decks/doomsday-variants/current-esper-teferi-swords.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-registration",
+      "sha256": "e0237b790a3c7579331903611147df3f32892afcf1b1bce3cf7a9c090fdf7620",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 17,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 7,
+        "access": 4,
+        "direct_doomsday": 4,
+        "personal_tutor": 0,
+        "selection": 13,
+        "protection": 8,
+        "interaction": 2,
+        "main_value_tempo": 10,
+        "side_pivot": 8,
+        "side_alt_combo": 0,
+        "side_interaction": 5,
+        "max_pivot_displacement_pct": 13.33,
+        "land_sources": {
+          "W": 10,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": [
+          "W"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 91.656,
+        "land_2plus": 64.821,
+        "acceleration_1plus": 60.088,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 39.95,
+        "selection_1plus": 83.716,
+        "protection_1plus": 65.359,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 34.855,
+        "access_and_selection_and_black_or_petal": 27.365,
+        "w_land_source_1plus": 74.137
+      }
+    },
+    {
+      "id": "current-light-green-white",
+      "path": "decks/doomsday-variants/current-light-green-white.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-registration",
+      "sha256": "dbd444ab43279a87d82d58fc1eef244f5451116451797c017a5057d7bf4b0f98",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 17,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 8,
+        "access": 5,
+        "direct_doomsday": 4,
+        "personal_tutor": 1,
+        "selection": 15,
+        "protection": 10,
+        "interaction": 2,
+        "main_value_tempo": 0,
+        "side_pivot": 5,
+        "side_alt_combo": 0,
+        "side_interaction": 5,
+        "max_pivot_displacement_pct": 8.33,
+        "land_sources": {
+          "W": 10,
+          "U": 15,
+          "B": 13,
+          "R": 0,
+          "G": 9
+        },
+        "splash_colors": [
+          "W",
+          "G"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 91.656,
+        "land_2plus": 64.821,
+        "acceleration_1plus": 65.359,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 47.456,
+        "selection_1plus": 88.25,
+        "protection_1plus": 74.137,
+        "black_land_source_1plus": 83.716,
+        "blue_land_source_1plus": 88.25,
+        "access_and_black_or_petal": 41.516,
+        "access_and_selection_and_black_or_petal": 34.908,
+        "w_land_source_1plus": 74.137,
+        "g_land_source_1plus": 70.023
+      }
+    },
+    {
+      "id": "current-four-color-shield",
+      "path": "decks/doomsday-variants/current-four-color-shield.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-registration",
+      "sha256": "4109763e425cb4db5cf2b41cc1e2b9214aa56573b393cf3ab1930fb5a71480fe",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 17,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 4,
+        "direct_doomsday": 4,
+        "personal_tutor": 0,
+        "selection": 10,
+        "protection": 14,
+        "interaction": 3,
+        "main_value_tempo": 7,
+        "side_pivot": 0,
+        "side_alt_combo": 1,
+        "side_interaction": 6,
+        "max_pivot_displacement_pct": 0.0,
+        "land_sources": {
+          "W": 10,
+          "U": 15,
+          "B": 12,
+          "R": 0,
+          "G": 10
+        },
+        "splash_colors": [
+          "W",
+          "G"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 91.656,
+        "land_2plus": 64.821,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 39.95,
+        "selection_1plus": 74.137,
+        "protection_1plus": 86.141,
+        "black_land_source_1plus": 80.935,
+        "blue_land_source_1plus": 88.25,
+        "access_and_black_or_petal": 34.855,
+        "access_and_selection_and_black_or_petal": 23.717,
+        "w_land_source_1plus": 74.137,
+        "g_land_source_1plus": 74.137
+      }
+    },
+    {
+      "id": "bug-veil-carpet-reconstructed",
+      "path": "decks/doomsday-variants/dated/bug-veil-carpet-reconstructed.txt",
+      "status": "inferred-reconstruction",
+      "evidence_posture": "inferred-reconstruction",
+      "sha256": "2eab3e5ee88ebcbdcdc4e1a8fdf8c2901cfb6b5a11636543b20429e2854d1906",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 7,
+        "direct_doomsday": 4,
+        "personal_tutor": 3,
+        "selection": 13,
+        "protection": 10,
+        "interaction": 1,
+        "main_value_tempo": 1,
+        "side_pivot": 0,
+        "side_alt_combo": 1,
+        "side_interaction": 5,
+        "max_pivot_displacement_pct": 0.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 13,
+          "R": 0,
+          "G": 10
+        },
+        "splash_colors": [
+          "G"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 60.088,
+        "selection_1plus": 83.716,
+        "protection_1plus": 74.137,
+        "black_land_source_1plus": 83.716,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 53.906,
+        "access_and_selection_and_black_or_petal": 42.912,
+        "g_land_source_1plus": 74.137
+      }
+    },
+    {
+      "id": "grixis-squelcher-refresh",
+      "path": "decks/doomsday-variants/dated/grixis-squelcher-refresh.txt",
+      "status": "observed-historical",
+      "evidence_posture": "observed-historical; legal-at-cutoff (not observed-current)",
+      "sha256": "b950ff11c75cea553a57c14c22fdf4fc5edff5c74ff0d0923a1e7b82882cecba",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 17,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 8,
+        "access": 4,
+        "direct_doomsday": 4,
+        "personal_tutor": 0,
+        "selection": 15,
+        "protection": 12,
+        "interaction": 1,
+        "main_value_tempo": 2,
+        "side_pivot": 6,
+        "side_alt_combo": 0,
+        "side_interaction": 8,
+        "max_pivot_displacement_pct": 10.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 10,
+          "G": 0
+        },
+        "splash_colors": [
+          "R"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 91.656,
+        "land_2plus": 64.821,
+        "acceleration_1plus": 65.359,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 39.95,
+        "selection_1plus": 88.25,
+        "protection_1plus": 80.935,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 35.589,
+        "access_and_selection_and_black_or_petal": 29.877,
+        "r_land_source_1plus": 74.137
+      }
+    },
+    {
+      "id": "personal-tutor-turbo",
+      "path": "decks/doomsday-personal-tutor-turbo-75.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-published-registration",
+      "sha256": "b53aef5db9603ffa8e88e3b92b8dbd30da4e282034ebf9f848fa8b5c79075e36",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 8,
+        "access": 7,
+        "direct_doomsday": 4,
+        "personal_tutor": 3,
+        "selection": 13,
+        "protection": 12,
+        "interaction": 0,
+        "main_value_tempo": 0,
+        "side_pivot": 6,
+        "side_alt_combo": 0,
+        "side_interaction": 3,
+        "max_pivot_displacement_pct": 10.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 65.359,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 60.088,
+        "selection_1plus": 83.716,
+        "protection_1plus": 80.935,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 53.906,
+        "access_and_selection_and_black_or_petal": 42.912
+      }
+    },
+    {
+      "id": "wasteland-murktide-tempo",
+      "path": "decks/doomsday-wasteland-murktide-tempo-75.txt",
+      "status": "exact-registration",
+      "evidence_posture": "exact-published-registration",
+      "sha256": "a3b4be9ef98542aa8d317ce3e3d9d7bdf4388d402d0a3d349dedf857240e26b8",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 19,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 7,
+        "access": 4,
+        "direct_doomsday": 4,
+        "personal_tutor": 0,
+        "selection": 13,
+        "protection": 8,
+        "interaction": 3,
+        "main_value_tempo": 10,
+        "side_pivot": 6,
+        "side_alt_combo": 0,
+        "side_interaction": 7,
+        "max_pivot_displacement_pct": 10.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 94.179,
+        "land_2plus": 72.058,
+        "acceleration_1plus": 60.088,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 39.95,
+        "selection_1plus": 83.716,
+        "protection_1plus": 65.359,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 34.855,
+        "access_and_selection_and_black_or_petal": 27.365
+      }
+    },
+    {
+      "id": "paradigm-shift-oracle",
+      "path": "decks/doomsday-variants/alternate/paradigm-shift-oracle.txt",
+      "status": "observed-historical",
+      "evidence_posture": "observed-historical; legal-at-cutoff (not observed-current)",
+      "sha256": "4645f0497d1b05ddfd1dbceaaa0095a7a54db6f521828674a1ee407e007eb00a",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 5,
+        "direct_doomsday": 4,
+        "personal_tutor": 1,
+        "selection": 16,
+        "protection": 10,
+        "interaction": 0,
+        "main_value_tempo": 0,
+        "side_pivot": 0,
+        "side_alt_combo": 7,
+        "side_interaction": 0,
+        "max_pivot_displacement_pct": 0.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 13,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 47.456,
+        "selection_1plus": 90.078,
+        "protection_1plus": 74.137,
+        "black_land_source_1plus": 83.716,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 42.38,
+        "access_and_selection_and_black_or_petal": 36.626
+      }
+    },
+    {
+      "id": "emrakul-shelldock-isle",
+      "path": "decks/doomsday-variants/alternate/emrakul-shelldock-isle.txt",
+      "status": "observed-historical",
+      "evidence_posture": "observed-historical; legal-at-cutoff (not observed-current)",
+      "sha256": "9b675ea4b0519c5c1a3b004ffa861c2edb3fdbc83a66db6b192664c559ccd006",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 9,
+        "restricted_rainbow_lands": 0,
+        "acceleration": 9,
+        "access": 7,
+        "direct_doomsday": 4,
+        "personal_tutor": 3,
+        "selection": 11,
+        "protection": 12,
+        "interaction": 0,
+        "main_value_tempo": 1,
+        "side_pivot": 0,
+        "side_alt_combo": 2,
+        "side_interaction": 0,
+        "max_pivot_displacement_pct": 0.0,
+        "land_sources": {
+          "W": 0,
+          "U": 15,
+          "B": 15,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 60.088,
+        "selection_1plus": 77.758,
+        "protection_1plus": 80.935,
+        "black_land_source_1plus": 88.25,
+        "blue_land_source_1plus": 88.25,
+        "access_and_black_or_petal": 54.844,
+        "access_and_selection_and_black_or_petal": 40.178
+      }
+    },
+    {
+      "id": "moonshadow-creature-switch",
+      "path": "decks/doomsday-variants/alternate/moonshadow-creature-switch.txt",
+      "status": "inferred-reconstruction",
+      "evidence_posture": "inferred-reconstruction; Fantasticar-era source",
+      "sha256": "7bbd7c3640e16236fa73fd231d07b99efb66b4d18718209af5b503c95f0eedd0",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 10,
+        "access": 8,
+        "direct_doomsday": 4,
+        "personal_tutor": 4,
+        "selection": 14,
+        "protection": 9,
+        "interaction": 0,
+        "main_value_tempo": 0,
+        "side_pivot": 4,
+        "side_alt_combo": 0,
+        "side_interaction": 5,
+        "max_pivot_displacement_pct": 6.67,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 74.137,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 65.359,
+        "selection_1plus": 86.141,
+        "protection_1plus": 70.023,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 59.767,
+        "access_and_selection_and_black_or_petal": 49.462
+      }
+    },
+    {
+      "id": "cori-steel-cutter-barrowgoyf",
+      "path": "decks/doomsday-variants/alternate/cori-steel-cutter-barrowgoyf.txt",
+      "status": "inferred-reconstruction",
+      "evidence_posture": "inferred-reconstruction; Fantasticar-era source",
+      "sha256": "87ae6ffe0cd33245234249c1575440337948694d9f2175f9d7cd9f9b0365b50f",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 7,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 7,
+        "direct_doomsday": 4,
+        "personal_tutor": 3,
+        "selection": 17,
+        "protection": 9,
+        "interaction": 0,
+        "main_value_tempo": 0,
+        "side_pivot": 10,
+        "side_alt_combo": 1,
+        "side_interaction": 2,
+        "max_pivot_displacement_pct": 16.67,
+        "land_sources": {
+          "W": 0,
+          "U": 13,
+          "B": 13,
+          "R": 9,
+          "G": 0
+        },
+        "splash_colors": [
+          "R"
+        ]
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 60.088,
+        "selection_1plus": 91.656,
+        "protection_1plus": 70.023,
+        "black_land_source_1plus": 83.716,
+        "blue_land_source_1plus": 83.716,
+        "access_and_black_or_petal": 53.906,
+        "access_and_selection_and_black_or_petal": 47.881,
+        "r_land_source_1plus": 70.023
+      }
+    },
+    {
+      "id": "chancellor-annex-protection",
+      "path": "decks/doomsday-variants/alternate/chancellor-annex-protection.txt",
+      "status": "observed-historical",
+      "evidence_posture": "observed-historical; concentrated pilot lineage",
+      "sha256": "fbe82f8aef61e41f24eaab6a5efdeea90601e6102a46d65dc29078c699b2d600",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 5,
+        "direct_doomsday": 4,
+        "personal_tutor": 1,
+        "selection": 15,
+        "protection": 11,
+        "interaction": 0,
+        "main_value_tempo": 0,
+        "side_pivot": 9,
+        "side_alt_combo": 0,
+        "side_interaction": 3,
+        "max_pivot_displacement_pct": 15.0,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 47.456,
+        "selection_1plus": 88.25,
+        "protection_1plus": 77.758,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 42.38,
+        "access_and_selection_and_black_or_petal": 35.701
+      }
+    },
+    {
+      "id": "value-threats-jace-riddler-sheoldred",
+      "path": "decks/doomsday-variants/alternate/value-threats-jace-riddler-sheoldred.txt",
+      "status": "observed-historical",
+      "evidence_posture": "observed-historical; heterogeneous module",
+      "sha256": "33f0802a7aa0efa35053ee080070e7e424f615939968dca73451a9fe2b3fbb3e",
+      "boards": {
+        "main": 60,
+        "side": 15
+      },
+      "legality": {
+        "2026-08-10": {
+          "legal": true,
+          "errors": []
+        },
+        "current": {
+          "legal": true,
+          "errors": []
+        }
+      },
+      "composition": {
+        "lands": 16,
+        "fetchlands": 8,
+        "restricted_rainbow_lands": 1,
+        "acceleration": 9,
+        "access": 6,
+        "direct_doomsday": 4,
+        "personal_tutor": 2,
+        "selection": 13,
+        "protection": 10,
+        "interaction": 0,
+        "main_value_tempo": 1,
+        "side_pivot": 8,
+        "side_alt_combo": 1,
+        "side_interaction": 3,
+        "max_pivot_displacement_pct": 13.33,
+        "land_sources": {
+          "W": 0,
+          "U": 14,
+          "B": 14,
+          "R": 0,
+          "G": 0
+        },
+        "splash_colors": []
+      },
+      "opening_7_pct": {
+        "land_1plus": 90.078,
+        "land_2plus": 60.833,
+        "acceleration_1plus": 70.023,
+        "doomsday_1plus": 39.95,
+        "access_1plus": 54.144,
+        "selection_1plus": 83.716,
+        "protection_1plus": 74.137,
+        "black_land_source_1plus": 86.141,
+        "blue_land_source_1plus": 86.141,
+        "access_and_black_or_petal": 49.32,
+        "access_and_selection_and_black_or_petal": 39.197
+      }
+    }
+  ]
+}

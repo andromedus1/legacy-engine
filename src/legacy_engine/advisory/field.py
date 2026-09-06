@@ -16,11 +16,13 @@ import logging
 import math
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Mapping
 
 import duckdb
 
 from legacy_engine.analytics.metashare import _is_never_other, compute_metashare
+from legacy_engine.analytics.trends import regime_windows
+from legacy_engine.models.base import LegacyEngineModel
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +76,130 @@ def _normalize_shares(raw: dict[str, float]) -> tuple[dict[str, float], list[str
 
 FieldSource = Literal["global", "custom", "local"]
 
+FieldEvidenceKind = Literal["observed", "transition-stabilized", "observed-thin"]
+
+
+class FieldSlice(LegacyEngineModel):
+    """One exact, date-bounded field count used by the transition projection."""
+
+    since: str
+    until: str | None
+    deck_n: int
+    counts: dict[str, int]
+
+
+class TransitionField(LegacyEngineModel):
+    """Observed current field plus a bounded preceding-regime composition prior."""
+
+    kind: FieldEvidenceKind
+    observed: FieldSlice
+    prior: FieldSlice | None
+    affected_archetypes: tuple[str, ...]
+    prior_strength: int
+    effective_counts: dict[str, int]
+    shares: dict[str, float]
+    reason: str
+
+
+@dataclass(frozen=True)
+class RegimeCurrency:
+    """Count-backed evidence for how much of a field belongs to the current ban regime."""
+
+    current_regime_since: str
+    current_regime_label: str
+    current_n: int | None
+    total_n: int | None
+    share: float | None
+    reason: str | None
+
+
+def _current_regime_identity() -> tuple[str, str]:
+    current = regime_windows()[-1]
+    if current.since is None:  # pragma: no cover - BAN_EVENTS always defines a current regime
+        raise RuntimeError("current ban regime has no opening date")
+    return current.since.isoformat(), current.label
+
+
+def custom_regime_currency(
+    *,
+    current_n: int | None,
+    total_n: int | None,
+) -> RegimeCurrency:
+    """Build exact custom-field currency, or an honest unavailable result."""
+    regime_since, regime_label = _current_regime_identity()
+    if current_n is not None and (not isinstance(current_n, int) or current_n < 0):
+        raise ValueError("current_regime_n must be a non-negative integer")
+    if total_n is not None and (not isinstance(total_n, int) or total_n < 0):
+        raise ValueError("total_n must be a non-negative integer")
+    if current_n is None:
+        return RegimeCurrency(
+            regime_since, regime_label, None, total_n, None,
+            "unavailable for undated aggregate",
+        )
+    if total_n is None or total_n == 0:
+        raise ValueError("current_regime_n requires a positive count basis")
+    if current_n > total_n:
+        raise ValueError(
+            f"current_regime_n ({current_n}) cannot exceed total field count ({total_n})"
+        )
+    return RegimeCurrency(
+        regime_since, regime_label, current_n, total_n, current_n / total_n, None
+    )
+
+
+def compute_regime_currency(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> RegimeCurrency:
+    """Measure current-regime share over the same dated, positionable global-field population."""
+    return _compute_regime_currency(
+        con,
+        provenance=provenance,
+        since=since,
+        until=until,
+        definition="raw",
+    )
+
+
+def _compute_regime_currency(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    provenance: str | None,
+    since: str | None,
+    until: str | None,
+    definition: str,
+) -> RegimeCurrency:
+    regime_since, regime_label = _current_regime_identity()
+
+    def positionable_n(window_since: str | None, window_until: str | None) -> int:
+        report = compute_metashare(
+            con,
+            definition=definition,
+            provenance=provenance,
+            group_other=False,
+            since=window_since,
+            until=window_until,
+        )
+        return sum(entry.n for entry in report.entries if not _is_never_other(entry.archetype))
+
+    total_n = positionable_n(since, until)
+    if total_n == 0:
+        return RegimeCurrency(
+            regime_since, regime_label, 0, 0, None,
+            "no positionable decks in selected field window",
+        )
+
+    current_since = max(filter(None, (since, regime_since)), default=regime_since)
+    current_n = 0 if until is not None and until <= current_since else positionable_n(
+        current_since, until
+    )
+    return RegimeCurrency(
+        regime_since, regime_label, current_n, total_n, current_n / total_n, None
+    )
+
 
 @dataclass
 class FieldDistribution:
@@ -90,6 +216,7 @@ class FieldDistribution:
     counts: dict[str, int] | None
     no_data: frozenset[str]
     warnings: tuple[str, ...]
+    regime_currency: RegimeCurrency | None = None
 
     def restrict_to(self, keep: Collection[str]) -> tuple["FieldDistribution", float]:
         """Return a copy restricted to ``keep`` (renormalized to sum 1.0) + the excluded share mass.
@@ -130,9 +257,161 @@ class FieldDistribution:
                 counts=restricted_counts,
                 no_data=self.no_data & frozenset(keep_set),
                 warnings=self.warnings,
+                regime_currency=self.regime_currency,
             ),
             excluded_share,
         )
+
+
+def _transition_previous_since(current_ban_since: str) -> str | None:
+    """Return the immediately preceding confirmed regime opening date."""
+    from legacy_engine.ingestion.banlist import BAN_EVENTS
+
+    dates = sorted({event_date.isoformat() for event_date, _card, _reason in BAN_EVENTS})
+    prior = [value for value in dates if value < current_ban_since]
+    return prior[-1] if prior else None
+
+
+def _field_slice(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    since: str | None,
+    until: str | None,
+    provenance: str | None,
+) -> FieldSlice:
+    predicates = ["k.archetype IS NOT NULL", "k.archetype <> ''"]
+    params: list[object] = []
+    if since is not None:
+        predicates.append("substr(t.date, 1, 10) >= ?")
+        params.append(since)
+    if until is not None:
+        predicates.append("substr(t.date, 1, 10) < ?")
+        params.append(until)
+    if provenance is not None:
+        predicates.append("t.provenance = ?")
+        params.append(provenance)
+    where = " AND ".join(predicates)
+    rows = con.execute(
+        f"""
+        SELECT k.archetype, count(*)
+        FROM decks k JOIN tournaments t ON k.tournament_id = t.id
+        WHERE {where}
+        GROUP BY k.archetype
+        ORDER BY k.archetype
+        """,  # noqa: S608 — predicates contain only fixed SQL and bound values
+        params,
+    ).fetchall()
+    counts = {str(label): int(count) for label, count in rows}
+    return FieldSlice(
+        since=since or "",
+        until=until,
+        deck_n=sum(counts.values()),
+        counts=counts,
+    )
+
+
+def _largest_remainder_counts(
+    counts: Mapping[str, int], strength: int,
+) -> dict[str, int]:
+    """Allocate integer pseudo-decks deterministically, breaking ties by label."""
+    if strength <= 0 or not counts:
+        return {}
+    total = sum(counts.values())
+    if total <= 0:
+        return {}
+    ideals = {label: strength * count / total for label, count in counts.items()}
+    allocated = {label: int(value) for label, value in ideals.items()}
+    remaining = strength - sum(allocated.values())
+    order = sorted(
+        counts,
+        key=lambda label: (-(ideals[label] - allocated[label]), label),
+    )
+    for label in order[:remaining]:
+        allocated[label] += 1
+    return {label: count for label, count in allocated.items() if count > 0}
+
+
+def build_transition_field(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    current_ban_since: str,
+    until: str | None,
+    affected_since: Mapping[str, str | None],
+    target_n: int = 500,
+    provenance: str | None = None,
+) -> TransitionField:
+    """Project a thin current regime onto a bounded, explicit preceding-regime prior.
+
+    The observed slice is never altered.  Only the effective composition used for ranking receives
+    pseudo-decks, and direct affected archetypes are removed before deterministic largest-remainder
+    allocation.  Matchup windows remain owned by ``EraHorizon``/``PairWindow`` and are untouched.
+    """
+    if not current_ban_since:
+        raise ValueError("current_ban_since must be a non-empty ISO date")
+    if target_n < 1:
+        raise ValueError("target_n must be >= 1")
+
+    observed = _field_slice(
+        con, since=current_ban_since, until=until, provenance=provenance,
+    )
+    prior_since = _transition_previous_since(current_ban_since)
+    prior = (
+        _field_slice(con, since=prior_since, until=current_ban_since, provenance=provenance)
+        if prior_since is not None
+        else None
+    )
+    if prior is not None and prior.deck_n == 0:
+        prior = None
+
+    # ``archetype_valid_since`` is a lifetime summary.  Transition stabilization
+    # must exclude only entities affected at this boundary; excluding every
+    # historically affected archetype silently discarded most of the prior field.
+    affected = tuple(sorted(
+        label for label, since in affected_since.items() if since == current_ban_since
+    ))
+    affected_set = set(affected)
+    prior_eligible = (
+        {label: count for label, count in prior.counts.items() if label not in affected_set}
+        if prior is not None else {}
+    )
+    requested_strength = min(
+        prior.deck_n if prior is not None else 0,
+        max(0, target_n - observed.deck_n),
+    )
+    prior_counts = _largest_remainder_counts(prior_eligible, requested_strength)
+    prior_strength = sum(prior_counts.values())
+    effective_counts = dict(observed.counts)
+    for label, count in prior_counts.items():
+        effective_counts[label] = effective_counts.get(label, 0) + count
+    total = sum(effective_counts.values())
+    shares = (
+        {label: count / total for label, count in sorted(effective_counts.items())}
+        if total else {}
+    )
+    if observed.deck_n >= target_n:
+        kind: FieldEvidenceKind = "observed"
+        reason = f"observed current field has {observed.deck_n} decks (target floor {target_n})"
+    elif prior_strength:
+        kind = "transition-stabilized"
+        reason = (
+            f"thin current field ({observed.deck_n} decks); added {prior_strength} prior pseudo-decks "
+            f"from the preceding regime, excluding {len(affected)} affected archetype(s)"
+        )
+    else:
+        kind = "observed-thin"
+        reason = (
+            f"thin current field ({observed.deck_n} decks) with no qualifying preceding-regime prior"
+        )
+    return TransitionField(
+        kind=kind,
+        observed=observed,
+        prior=prior,
+        affected_archetypes=affected,
+        prior_strength=prior_strength,
+        effective_counts=effective_counts,
+        shares=shares,
+        reason=reason,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +448,13 @@ def build_global_field(
         since=since,
         until=until,
     )
+    regime_currency = _compute_regime_currency(
+        con,
+        provenance=provenance,
+        since=since,
+        until=until,
+        definition=definition,
+    )
 
     kept_entries = []
     excluded_share = 0.0
@@ -193,6 +479,7 @@ def build_global_field(
             counts={},
             no_data=frozenset(),
             warnings=tuple(warnings),
+            regime_currency=regime_currency,
         )
 
     raw_shares = {entry.archetype: entry.share for entry in kept_entries}
@@ -207,6 +494,7 @@ def build_global_field(
         counts=counts,
         no_data=frozenset(),
         warnings=tuple(warnings),
+        regime_currency=regime_currency,
     )
 
 
@@ -220,6 +508,7 @@ def build_custom_field(
     *,
     known_archetypes: frozenset[str] | None = None,
     counts: dict[str, int] | None = None,
+    regime_currency: RegimeCurrency | None = None,
 ) -> FieldDistribution:
     """Build a user-supplied custom field (the 'best call for MY room' headline).
 
@@ -291,4 +580,5 @@ def build_custom_field(
         counts=resolved_counts,
         no_data=no_data,
         warnings=tuple(warnings),
+        regime_currency=regime_currency,
     )

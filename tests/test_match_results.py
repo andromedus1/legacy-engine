@@ -375,6 +375,16 @@ class TestComputeMatchResults:
         assert cov.mirror_matches == 0
         con.close()
 
+    def test_decisive_match_carries_directed_event_and_month_buckets(self):
+        con = _con()
+        tid = self._load_online_challenge(con)
+        res = compute_match_results(con)
+
+        for key in (("Delver", "Lands"), ("Lands", "Delver")):
+            assert res.matchup_event_counts[key] == {str(tid): 1}
+            assert res.matchup_month_counts[key] == {"2026-05": 1}
+        con.close()
+
     # ── cell symmetry ────────────────────────────────────────────────────────
 
     def test_cell_symmetry(self):

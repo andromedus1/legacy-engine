@@ -1,0 +1,42 @@
+// Status: observed-historical (legal at current cutoff; not observed-current)
+// Evidence through: 2026-08-20 (read-only corpus cutoff; source date 2026-05-12)
+// Observed source: Bejamel, 5-0 MTGO Legacy League 2026-05-12; .research/attestation/ddv-packages-module-census.md (passage 7)
+// Reconstruction: none. Exact registered 75; Shelldock Isle and Emrakul are a dated alternate-win module, not a current-stock recommendation.
+4 Brainstorm
+1 Cabal Ritual
+1 Consider
+4 Dark Ritual
+2 Daze
+4 Doomsday
+2 Edge of Autumn
+2 Flooded Strand
+2 Flusterstorm
+4 Force of Will
+1 Island
+1 Jace, Wielder of Mysteries
+1 Lion's Eye Diamond
+3 Lotus Petal
+2 Misty Rainforest
+3 Personal Tutor
+4 Polluted Delta
+4 Ponder
+1 Scalding Tarn
+1 Spoils of the Vault
+2 Street Wraith
+1 Swamp
+1 Thassa's Oracle
+4 Thoughtseize
+1 Undercity Sewers
+4 Underground Sea
+
+Sideboard
+3 Duress
+1 Emrakul, the Aeons Torn
+1 Flusterstorm
+2 Force of Negation
+1 Hide on the Ceiling
+3 Leyline of the Void
+1 Nihil Spellbomb
+1 Shelldock Isle
+1 Unearth
+1 Vision Charm

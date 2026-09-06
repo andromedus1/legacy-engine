@@ -15,19 +15,215 @@ pre-ban sample leaves an archetype unaffected (keeps full history).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from datetime import date
+from typing import Literal
 
 import duckdb
+from pydantic import model_validator
 
 from legacy_engine.ingestion.banlist import BAN_EVENTS
+from legacy_engine.models.base import LegacyEngineModel
 
 _DEFAULT_AFFECT_THRESHOLD: float = 0.25  # banned-card inclusion in pre-ban decks → "affected"
 
+ExposureBoundaryProvenance = Literal[
+    "released-at", "corpus-first-seen", "first-material-adoption"
+]
+PreExposureLowerBoundProvenance = Literal[
+    "previous-confirmed-ban", "open-corpus"
+]
 
-def _cards_by_ban_date() -> list[tuple[date, list[str]]]:
-    """Group ``BAN_EVENTS`` into ``[(date, [cards])]`` ordered by date."""
+
+class ExposureBoundaryAuthority(LegacyEngineModel):
+    """Outcome-free contamination boundary for one materially affected entity/card.
+
+    The two clean bounds deliberately repeat the half-open contamination endpoints.  That makes
+    the excluded span inspectable without asking a downstream consumer to infer it from a scalar
+    ``valid_since`` date.
+    """
+
+    entity: str
+    cards: tuple[str, ...]
+    ban_date: date
+    clean_pre_exposure_start: date | None
+    clean_pre_exposure_start_provenance: PreExposureLowerBoundProvenance
+    clean_pre_exposure_end: date
+    contaminated_start: date
+    contaminated_end: date
+    clean_post_ban_start: date
+    provenance: ExposureBoundaryProvenance
+    materiality_scope: Literal["same-date-card-union"] = "same-date-card-union"
+    material_decks: int
+    pre_ban_decks: int
+    ban_event_inclusion_rate: float
+
+    @model_validator(mode="after")
+    def _coherent_boundary(self) -> "ExposureBoundaryAuthority":
+        if not (
+            self.clean_pre_exposure_end
+            == self.contaminated_start
+            < self.contaminated_end
+            == self.clean_post_ban_start
+            == self.ban_date
+        ):
+            raise ValueError("exposure authority requires one exact half-open contamination gap")
+        if (
+            self.clean_pre_exposure_start is not None
+            and self.clean_pre_exposure_start >= self.clean_pre_exposure_end
+        ):
+            raise ValueError("pre-exposure lower bound must precede the contamination gap")
+        if (
+            (self.clean_pre_exposure_start is None)
+            != (self.clean_pre_exposure_start_provenance == "open-corpus")
+        ):
+            raise ValueError("pre-exposure lower-bound provenance must match its bound")
+        if self.pre_ban_decks <= 0 or not (0 <= self.material_decks <= self.pre_ban_decks):
+            raise ValueError("exposure authority material counts must fit the pre-ban denominator")
+        if not 0.0 <= self.ban_event_inclusion_rate <= 1.0:
+            raise ValueError("ban-event inclusion rate must be between zero and one")
+        return self
+
+
+def exposure_boundary_authorities(
+    con: duckdb.DuckDBPyConnection,
+    entities: Sequence[str],
+    *,
+    provenance: str | None = None,
+    affect_threshold: float = _DEFAULT_AFFECT_THRESHOLD,
+    ban_events: Sequence[tuple[date, str, str]] | None = None,
+    released_at_by_card: Mapping[str, date] | None = None,
+) -> dict[str, tuple[ExposureBoundaryAuthority, ...]]:
+    """Return exact localized-ban gaps for materially affected parent entities.
+
+    Materiality intentionally reuses :func:`archetype_valid_since`'s denominator and ANY-card
+    rule.  An authoritative release date wins when supplied; otherwise the card cohort's first
+    corpus deck across every archetype is the deterministic, outcome-free fallback.  Unaffected
+    entities retain an empty tuple rather than acquiring a global ban boundary.
+    """
+
+    result: dict[str, list[ExposureBoundaryAuthority]] = {entity: [] for entity in entities}
+    if not entities:
+        return {entity: () for entity in entities}
+    entity_ph = ",".join("?" for _ in entities)
+    previous: date | None = None
+    grouped = _cards_by_ban_date(tuple(ban_events) if ban_events is not None else None)
+    release_dates = released_at_by_card or {}
+    for ban_date, cards in grouped:
+        card_ph = ",".join("?" for _ in cards)
+        since = previous.isoformat() if previous is not None else None
+        material_rows = con.execute(
+            f"""
+            WITH pool AS (
+                SELECT d.archetype, d.tournament_id, d.deck_idx
+                FROM decks d
+                JOIN tournaments t ON t.id = d.tournament_id
+                WHERE d.archetype IN ({entity_ph})
+                  AND (? IS NULL OR t.provenance = ?)
+                  AND (? IS NULL OR t.date >= ?)
+                  AND t.date < ?
+            )
+            SELECT p.archetype,
+                   count(DISTINCT (p.tournament_id, p.deck_idx)) AS decks,
+                   count(DISTINCT CASE WHEN dc.name IN ({card_ph})
+                                       THEN (p.tournament_id, p.deck_idx) END) AS run_decks
+            FROM pool p
+            LEFT JOIN deck_cards dc
+              ON dc.tournament_id = p.tournament_id AND dc.deck_idx = p.deck_idx
+            GROUP BY p.archetype
+            """,
+            [*entities, provenance, provenance, since, since, ban_date.isoformat(), *cards],
+        ).fetchall()
+        affected = {
+            str(entity): (int(decks), int(run_decks))
+            for entity, decks, run_decks in material_rows
+            if decks and run_decks / decks >= affect_threshold
+        }
+        if not affected:
+            previous = ban_date
+            continue
+        first_rows = con.execute(
+            f"""
+            SELECT dc.name,
+                   min(cast(substr(t.date, 1, 10) AS DATE)) AS first_seen
+            FROM decks d
+            JOIN tournaments t ON t.id = d.tournament_id
+            JOIN deck_cards dc
+              ON dc.tournament_id = d.tournament_id AND dc.deck_idx = d.deck_idx
+            WHERE dc.name IN ({card_ph})
+              AND (? IS NULL OR t.provenance = ?)
+              AND t.date < ?
+            GROUP BY dc.name
+            """,
+            [*cards, provenance, provenance, ban_date.isoformat()],
+        ).fetchall()
+        first_seen_by_card = {str(card): first_seen for card, first_seen in first_rows}
+        cohort: list[tuple[str, date, date | None]] = []
+        for card in cards:
+            release_date = release_dates.get(card)
+            if release_date is not None and release_date >= ban_date:
+                raise ValueError(
+                    f"release date for {card} must precede its {ban_date.isoformat()} ban"
+                )
+            first_seen = first_seen_by_card.get(card)
+            if release_date is not None or first_seen is not None:
+                observed_start = first_seen if first_seen is not None else release_date
+                assert observed_start is not None
+                cohort.append((card, observed_start, release_date))
+        if not cohort:
+            previous = ban_date
+            continue
+        # Materiality and contamination are one same-date event cohort.  A corpus fallback is
+        # therefore global per card/cohort, never re-learned later from each affected archetype.
+        exposure_start = min(release or first for _card, first, release in cohort)
+        if exposure_start >= ban_date:
+            previous = ban_date
+            continue
+        prior_ban = max(
+            (event_date for event_date, _event_cards in grouped if event_date < exposure_start),
+            default=None,
+        )
+        cohort_cards = tuple(sorted(card for card, _first, _release in cohort))
+        provenance_kind: ExposureBoundaryProvenance = (
+            "released-at"
+            if all(release is not None for _card, _first, release in cohort)
+            else "corpus-first-seen"
+        )
+        for entity, (decks, run_decks) in affected.items():
+            result[entity].append(
+                ExposureBoundaryAuthority(
+                    entity=entity,
+                    cards=cohort_cards,
+                    ban_date=ban_date,
+                    clean_pre_exposure_start=prior_ban,
+                    clean_pre_exposure_start_provenance=(
+                        "previous-confirmed-ban" if prior_ban is not None else "open-corpus"
+                    ),
+                    clean_pre_exposure_end=exposure_start,
+                    contaminated_start=exposure_start,
+                    contaminated_end=ban_date,
+                    clean_post_ban_start=ban_date,
+                    provenance=provenance_kind,
+                    material_decks=run_decks,
+                    pre_ban_decks=decks,
+                    ban_event_inclusion_rate=run_decks / decks,
+                )
+            )
+        previous = ban_date
+    return {
+        entity: tuple(
+            sorted(rows, key=lambda row: (row.contaminated_start, row.ban_date, row.cards))
+        )
+        for entity, rows in result.items()
+    }
+
+
+def _cards_by_ban_date(
+    ban_events: tuple[tuple[date, str, str], ...] | None = None,
+) -> list[tuple[date, list[str]]]:
+    """Group a ban ledger into ``[(date, [cards])]`` ordered by date."""
     grouped: dict[date, list[str]] = {}
-    for event_date, card, _reason in BAN_EVENTS:
+    for event_date, card, _reason in BAN_EVENTS if ban_events is None else ban_events:
         grouped.setdefault(event_date, []).append(card)
     return [(d, grouped[d]) for d in sorted(grouped)]
 
@@ -38,6 +234,7 @@ def archetype_valid_since(
     *,
     provenance: str | None = None,
     affect_threshold: float = _DEFAULT_AFFECT_THRESHOLD,
+    ban_events: tuple[tuple[date, str, str], ...] | None = None,
 ) -> dict[str, str | None]:
     """Map each archetype to the ISO date of the latest ban that materially affected it (else None).
 
@@ -52,7 +249,7 @@ def archetype_valid_since(
 
     arch_ph = ",".join("?" for _ in archetypes)
     prev_d: date | None = None
-    for d, cards in _cards_by_ban_date():
+    for d, cards in _cards_by_ban_date(ban_events):
         since = prev_d.isoformat() if prev_d else None
         until = d.isoformat()
         card_ph = ",".join("?" for _ in cards)

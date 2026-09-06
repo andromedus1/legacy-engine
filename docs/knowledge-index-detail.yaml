@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-08-08T18:33:27Z'
+generated_at: '2026-09-06T00:16:17Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -7,7 +7,8 @@ documents:
     summary: 'Detailed architecture for legacy-engine, a Magic: The Gathering Legacy
       analytics platform (sibling to
 
-      edh-engine). Python 3.11+ Click CLI mirroring edh-engine''s stack, plus scipy/numpy/statsmodels/pulp
+      edh-engine). Python 3.11–3.13 Click CLI mirroring edh-engine''s stack, plus
+      scipy/numpy/statsmodels/pulp
 
       for advisory and DuckDB as an embedded analytical store (the one justified divergence,
       driven by the
@@ -32,13 +33,25 @@ documents:
       of ingestion/. goldfish/ is the deferred pillar; only goldfish-validated candidate-validation
       remains
 
-      deferred behind it.
+      deferred behind it. The generated Deck Rankings landing page adds a separate
+      posterior field-performance
+
+      and matchup-floor projection beside the mature advisory estimators. A separate
+      retrospective
+
+      served-model evaluator freezes that shared projection before later outcomes
+      are read; it has no
+
+      publication path. Local ops runs the decision refresh and detection-only format
+      monitor under one
+
+      artifact lock; human `eras confirm` remains the only B&R acceptance authority.
 
       '
     decisions:
-    - Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files)
-      + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and
-      vl-convert-python (Vega-Lite viz render).
+    - Mirror edh-engine's stack (Python 3.11–3.13, Click CLI, Pydantic, httpx, local
+      files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP),
+      and vl-convert-python (Vega-Lite viz render).
     - 'STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/,
       data/scryfall/, data/rules/, data/banlist/, data/collection/); a rebuildable
       embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share
@@ -77,118 +90,135 @@ documents:
     - 'PRICES: ingestion/prices.py + seed prices + ingestion/releases.py serve the
       acquisition and new-card surface; PriceQuote.all_null is the honest-null signal
       (never a silent 0).'
-    - 'PLAYER SUBSYSTEM: analytics/players/{identity,strength,history}.py classifies
-      player handles via alias resolution, gates strength scoring on confidence tier,
-      and tracks per-regime archetype history — drives generate consensus --strong
-      and identify suggest|strong|track.'
+    - 'PLAYER SUBSYSTEM: analytics/players/{identity,strength,history,diagnostic,effect}.py
+      classifies player handles via alias resolution, gates strength scoring on confidence
+      tier, tracks per-regime archetype history, and runs a production-neutral future-only
+      player-effect sensitivity. Diagnostic identity is provenance-local unless a
+      dated curated snapshot exists; aggregate-only output can reach candidate-for-promotion-study
+      but never alters the headline automatically.'
     - 'HONEST-DEGRADE POLICY: thin/absent signal → labeled banner or degraded flag
       + named reason + suppressed magnitude. No silent zeros. Applies in window.py
       (thin-regime banner), primer/sideboard (degraded=True note), the sideboard recommender
       (returns fewer than 15 with commit/insurance labels + a marginal-coverage curve
       rather than padding to a forced 15), speculation (PRE-DATA FORECAST label),
       prices (all_null flag), venue divergence.'
-    - 'SUPERARCHETYPES (built; exploratory Best Call authority): analytics/superarchetype/
-      adds the third taxonomy level above parent archetype. An offline `superarchetype
-      run` preview clusters archetypes on staple-stripped maindeck core sets (Jaccard
-      + average-linkage agglomerative, AU multiscale-bootstrap cut over resampled
-      card features; definers >=30 decks/>=8 core cards, the tail assigned by mean
-      Jaccard dissimilarity to cluster definers) and explicit `--promote` persists
-      a reviewed derived registry merged under a package-shipped curated override
-      registry (hybrid-derived-curated-registry + curated-json-resource-loader). Clustering
+    - 'SUPERARCHETYPES (built; internal context): analytics/superarchetype/ adds the
+      third taxonomy level above parent archetype. An offline `superarchetype run`
+      preview clusters archetypes on staple-stripped maindeck core sets (Jaccard +
+      average-linkage agglomerative, AU multiscale-bootstrap cut over resampled card
+      features; definers >=30 decks/>=8 core cards, the tail assigned by mean Jaccard
+      dissimilarity to cluster definers) and explicit `--promote` persists a reviewed
+      derived registry merged under a package-shipped curated override registry. Clustering
       reads deck_cards ONLY — never rounds — so the cut can never be tuned against
-      the matchup coverage it unlocks. matchup.py then coarsens the OPPONENT axis
-      one more level (camp -> parent -> cluster, extending _pool_opponent_tallies)
-      and gains one shrinkage rung between the leave-camp-out parent cell and the
-      subject marginal, computed leave-opponent-out; pooling is random-effects DerSimonian-Laird
-      and the resulting n_eff (not raw pooled n) feeds the existing tier_for_sample/display
-      gate. Empty/absent registry is byte-identical to today (gated-additive).'
-    - 'STABLE ERAS: analytics/eras/ detects per-entity (archetype AND camp) era boundaries
-      from the corpus itself (S1 presence cliffs/ramps, S2 composition CPD via ruptures,
-      S3 share shifts, S4 WR corroboration; fleet BH-FDR + 30-deck era floor), persists
-      them (entity_eras table + eras run|list|explain|confirm CLI, ban/release/unattributed
-      attribution, BOCPD drift alarm), and stable_since replaces ban-only valid_since
-      as the DEFAULT horizon everywhere (adaptive matrix, advisory window + detection-derived
-      global field era, consensus/card-frequency, era-default discovery pools with
-      Gate C temporal-mixing). Matchup cells shrink toward hierarchical priors (camp
-      → leave-camp-out parent′ → marginal′ → 0.5; thin post-boundary cells toward
-      their own pre-disturbance value, labeled).'
+      matchup coverage. matchup.py coarsens the opponent axis and adds the random-effects
+      shrinkage rung; the resulting n_eff feeds the existing tier/display gate. Deck
+      Rankings keeps composition-derived family evidence internal and exposes curated
+      strategic plans plus exact matchup ledgers.'
+    - 'DECK RANKINGS PROJECTION: advisory/deck_ranking.py consumes typed matchup measurements
+      and normalized field shares to compute conditional Beta posterior cells, full-field
+      performance, the non-mirror floor, seeded intervals, coverage, and Pareto status.
+      advisory/recent_field.py supplies the provisional 28-day published-list field;
+      advisory/field_scenario.py validates an optional private override while retaining
+      global candidate presence. The atomic publisher attaches scenario provenance/comparison,
+      successive-snapshot changes, and parent/build diagnostics outside the ranking
+      authority payload. Local strategic-plan shares remain visible, but projections
+      are unavailable until composition-specific aggregates exist.'
+    - 'SERVED DECK RANKINGS EVALUATION: scripts/evaluate_deck_rankings.py --served-model
+      has freeze, development (default), and confirmation phases. All six predictions
+      are sealed before development scoring; confirmation validates and reuses their
+      bound configuration and seals --selected-method from development before future
+      outcomes open. Retrospective production parent rules and the color-split registry
+      are hash-pinned, including Boros/Mardu Energy, while camps remain disabled.
+      Fixed scales 1/.5/2 and opponent-plan-prior-v1 retain the chosen cell view,
+      match digest, and windows. Development selected scale 2; confirmation slightly
+      favored scale 1, which remains in production. Dated score disclosure is read-only,
+      with no apply or publication path.'
+    - 'STABLE ERAS: analytics/eras/ detects per-entity boundaries and retains stable_since
+      as the current/fallback projection. The built recurrent validation surface freezes
+      cutoff-safe recurrent origins from a hash-bound parent benchmark plan, validates
+      typed refit stages and full forecast grids, evaluates predictive + decision
+      evidence on a shared future ledger, aggregates exact promotion assessments,
+      and can emit only inert operator-review proposals. The intended recurrent-era
+      serving extension still separates outcome-free candidate discovery from independent
+      equivalence certification, persists versioned EraCertificates over disjoint
+      half-open intervals, and lets matchup consumption intersect subject and opponent
+      interval sets before estimation. Confirmed affectedness is a semantic veto;
+      expanded evidence remains distinct from current-only evidence and requires future-only
+      validation before promotion.'
+    - 'FORMAT MONITOR: the scheduled refresh consumes current Scryfall gzipped JSONL,
+      diffs Legacy legalities, strictly parses WotC Legacy attribution, and combines
+      the existing set scan with actual new-card ingest evidence. Machine state is
+      atomic under data/ops; signals distinguish clear/pending/not_due/unavailable;
+      acknowledgement suppresses unchanged evidence only; `eras confirm` remains the
+      sole supported ban-registration authority.'
   docs/analysis/best-call-ranking.md:
-    summary: 'Runbook + method spec for decks/best-deck-best-call-ranking.html (gitignored,
-      fully
+    summary: 'Runbook for decks/deck-rankings.html, a self-contained generated landing
+      page. The
 
-      regenerable). One tracked script recomputes the page from the DuckDB corpus
-      through a
+      refresh script retains the mature Best Call evidence ledger and adds a separately
 
-      tracked HTML template: scripts/refresh_best_call_ranking.py +
+      named current projection whose two visible priorities are full-field performance
 
-      scripts/best_call_ranking_template.html. Defines Agency %, the grounded/current
-
-      strata, the cross-camp P(best) column, and the five-plan strategic taxonomy,
-
-      including exact archetype-versus-plan evidence in every archetype dropdown;
-
-      the page itself carries the authoritative definitional prose.
+      and the highest worst-matchup floor.
 
       '
     decisions:
-    - 'Agency % = min(adjusted field WR, worst measured matchup) x 100 — the page''s
-      single ranking number; theory under test: maximum agency = most fun.'
-    - 'Measured cells only: a matchup counts at n>=8; era-windowed cells preferred;
-      the fallback pools matches since the last ban that affected either deck (BA
-      label, archetype_valid_since) — full-corpus FC only when neither deck was ever
-      ban-affected. The Nadu rule: a banned engine''s matches never inflate a row
-      (Nadu Cephalid inflated agency 40.5 vs honest 31.1, 2026-07-28).'
-    - Every measured cell (n>=8 by default) can set the floor using its shrunk estimate;
-      this exposes apparent holes sooner. Because better-covered decks have more chances
-      to reveal a low matchup, ungrounded agency remains an explicit upper bound and
-      must be read with measured coverage. Blowouts classify on the raw observed rate
-      after the same measured-cell gate.
-    - Grounded row = top-8 field opponents all measured AND >=80% of field share-mass
-      covered; ungrounded rows are labeled leans (agency shown as an upper bound),
-      and sorting never intermixes strata.
-    - Field basis = the current ban-regime window; --field-since defaults to the latest
-      confirmed ban event so regime changes auto-track; its confidence tier is computed
-      from window size, never hardcoded.
-    - Camp sweep = ONE multi-split pass (build_multi_split_adaptive + one uniform
-      multi-split matrix per distinct ban-fallback date) — numerically identical to
-      per-parent split builds (parity-tested at engine and script level, ~25x cheaper),
-      keeping the per-pair max(subj_ban, opp_ban) Nadu-rule fallback windows.
-    - Cross-camp P(best) = ONE shared-field rank_decks MC (fixed seed) over all camps
-      + unsplit field archetypes on the page-used cells; candidacy is gated at the
-      same coverage threshold that suppresses display (<5% measured coverage -> n/a
-      + reason) because zero-coverage candidates otherwise absorb the whole argmax
-      as imputation noise; S* labels full-field values below 85% coverage.
-    - 'Strategic plans are a curated, independent five-plan taxonomy: every current-field
-      archetype has exactly one primary plan for mutually exclusive match-level aggregation
-      and may carry secondary labels for hybrid explanation only. Plan cells pool
-      decisive matches directly rather than averaging archetype rates.'
-    - 'Strategic-plan same-plan play is structural 50% context: the diagonal displays
-      zero directional wins, losses, and n, while observed_n separately reports cross-archetype
-      same-plan matches and mirror_n reports mirror context. It contributes to adjusted
-      field WR but is never measured, never sets the floor, and is excluded from the
-      external-coverage denominator. External plan cells use the page''s n>=8 measured
-      gate; grounding requires the top external plans measured and >=80% external
-      field-share coverage.'
-    - Every archetype dropdown begins with five Against strategic plans cells built
-      directly from that archetype's decisive non-mirror MatchResults, grouped by
-      opponent primary plan. Cells carry shrunk/raw rates, W-L, observed n, the page's
-      uniform field window/provenance, and measured/thin state. Exact-archetype mirrors
-      are reported separately as mirror_n and shown only as structural 50% context;
-      they never contribute to the observed n, raw/shrunk estimate, or n>=8 measured
-      gate. The exact archetype ledger remains below.
-    - 'Each taxonomy layer surfaces at its own altitude. Composition-derived superarchetypes
-      stay internal to matrix construction and statistical borrowing — no page-visible
-      dropdown payload, family lean, family range, or presentation audit line. A COLOUR
-      SPLIT is archetype-level: the curated registry rewrites decks.archetype at label
-      time, so each branch earns its own archetype row, its own field share, and its
-      own column in every OTHER archetype''s ledger. Camps stay subject-side only
-      (the multi-split matrix pools the opponent side back to parent), so a distinction
-      that changes how opponents must play against you belongs in a colour split,
-      not the camp table. Energy is the first: Boros Energy / Mardu Energy on mainboard-nonland
-      black.'
-    - The output page is gitignored and disposable; the template + refresh script
-      are the tracked artifacts — regenerate, don't hand-edit (data changes go in
-      the script, presentation changes in the template).
+    - Performance is the field-share-weighted mean of per-cell posterior means, including
+      structural 50% mirrors; floor is the minimum posterior mean across non-mirror
+      current-field opponents.
+    - The performance interval and all-opponent minimum-floor interval use seeded
+      posterior draws; the visible floor range is the named toughest pairing's cell
+      interval, while the all-opponent minimum interval remains available in evidence
+      details.
+    - Performance and floor have independent leaders. The floor leader maximizes the
+      floor among eligible rows, with performance breaking floor ties; both are independent
+      table sorts, and Pareto rows show the efficient frontier.
+    - Every valid cell contributes an estimate. Prior-only and uncertain cells remain
+      visible with W-L/n, interval, prior strength, prior provenance, source kind,
+      and source window; prior-only rows are not recommendation candidates.
+    - The current field uses a provisional 28-day exponential half-life over the observed
+      ban-regime slice. The denominator is published deck lists, not a census of entrants.
+      Integer observed counts, decay-weighted counts, effective sample size, and bounded
+      transition prior counts remain separate.
+    - Clean interval evidence may override a cell once. The override keeps the actual
+      MatchupCell prior_strength and its interval/source provenance; it is not pooled
+      again with overlapping fallback evidence.
+    - The mature positioning estimator and future-only benchmark remain frozen reference
+      surfaces. Their outputs do not validate or promote this current descriptive
+      projection.
+    - scripts/evaluate_deck_rankings.py retains its retrospective field diagnostic.
+      Separate --served-model phases seal all six predictions before development scoring
+      and require a sealed development selection before confirmation outcomes open;
+      no phase publishes a method.
+    - The generated page is disposable. Edit the tracked script or template, then
+      regenerate decks/deck-rankings.html; do not hand-edit the output.
+  docs/analysis/doomsday-variant-rankings.md:
+    summary: 'Runbook for decks/doomsday-variant-rankings.html, a self-contained comparison
+      of
+
+      exclusive Doomsday color-and-signature cohorts against one current non-Doomsday
+
+      field. It keeps tournament standings, compatible resolved rounds, and exact
+      observed
+
+      decklists separate so sparse or historical evidence remains useful without looking
+      current.
+
+      '
+    decisions:
+    - The report is a separate descriptive surface from the canonical Deck Rankings
+      page and the dated Doomsday field guide; it does not change taxonomy or ranking
+      authority.
+    - Cohorts are mutually exclusive combinations of actual colored mana sources and
+      protection-package signatures, with white, green, red, other-splash, and unclassified
+      residuals retained instead of forced into target variants.
+    - Compatible external matchup rounds use a fixed Beta(1,1) prior per cell and
+      never borrow from the Doomsday parent; missing cells remain neutral with full
+      visible uncertainty.
+    - Published non-League standings and uniquely resolved physical rounds are separate
+      ledgers and are never converted into one denominator.
+    - The generated page is disposable. Edit the tracked Python or HTML template,
+      then regenerate the gitignored output; do not hand-edit it.
   docs/analysis/meta-deck-analysis-loop.md:
     summary: 'Codifies the five-stage meta-deck analysis loop proven on Dimir Tempo
       + Doomsday Tempo
@@ -245,24 +275,28 @@ documents:
       only where Legacy demands it.'
     - 'Key architectural delta: an explicit archetype-parser layer (no commander to
       key on) — labels decklists into the community taxonomy.'
-    - MVP arc = ingestion + meta analytics + advisory + deck generation (consensus
-      baseline, field-tuning mode 2, export) shipped together; goldfish simulation
-      and deck generation gap-discovery (mode 3) / goldfish-validated candidate-validation
-      come in later pillars.
+    - Current shipped arc = ingestion + meta analytics + advisory + deck generation
+      (consensus, field tuning, export, gap discovery, and deck doctor); goldfish
+      simulation and goldfish-validated candidate evaluation remain deferred Deck
+      Mechanics work.
     - Legacy is a 1v1, best-of-3, 60-card-with-sideboard format — sideboarding and
       matchups are first-class, unlike edh-engine's 4-player goldfish framing.
     - Banned-list legality is a live blacklist (changes ~quarterly) and must be version-stamped
       by date for historical analysis.
-    - 'Per-entity stable eras: every per-archetype/per-camp statistic windows to the
-      entity''s own detected stable era (change-point detection on composition/play-rate/win-rate
-      — bans AND releases disturb decks), not just global ban regimes; corpus-fingerprint
-      detection self-heals banlist announcement lag; every windowed figure names its
-      window and triggering disturbance.'
+    - 'Per-entity stable eras: every per-archetype/per-camp statistic uses the entity''s
+      own detected and certified set of compatible time intervals, not just one global
+      ban regime or monotone suffix; bans and releases nominate disturbances, confirmed
+      affectedness remains a hard boundary, and every windowed figure names the admitted
+      intervals and evidence provenance.'
     - 'Three-level taxonomy: superarchetype (data-driven strategy cluster over archetypes,
-      curated overrides) → parent archetype → camp. Superarchetypes expose pooled
-      strategy-family evidence with labeled provenance and intra-cluster flags; they
-      remain an exploratory navigation/explanation layer while archetype-level Best
-      Call stays decision-authoritative until the future-only benchmark passes.'
+      curated overrides) → parent archetype → camp. Superarchetypes support internal
+      context and strategic-plan navigation; the Deck Rankings page makes performance
+      and worst-matchup floor equally visible while the mature Agency/P(best) projection
+      and benchmark remain frozen reference surfaces.'
+    - 'Deck Rankings is a current descriptive decision projection: full-field posterior
+      mean performance and the minimum non-mirror posterior matchup mean are shown
+      with intervals, provenance, and Pareto tradeoffs. Performance and floor have
+      independent leaders, with performance breaking floor ties.'
     - 'Persistent-coach layer (cross-cutting): engine-generated knowledge — meta reads,
       per-deck findings, consensus decklists with primers — persists across sessions
       and is surfaced automatically; advice is grounded in a user profile (decks played,
@@ -289,8 +323,8 @@ documents:
       compiled not re-derived) and adds Legacy-specific ones: legality is live data,
       always label the
 
-      meta-% definition and online/paper basis, confidence-gate every stat, and treat
-      the advisory layer
+      meta-% definition and online/paper basis, uncertainty-qualify every stat, and
+      treat the advisory layer
 
       as a first-class product.
 
@@ -306,8 +340,9 @@ documents:
       list changes ~quarterly and history must stay correct.
     - Never an unlabeled meta-% — always state the definition (raw/top-cut/winrate-weighted)
       and the online/paper/blend basis; they diverge materially.
-    - Confidence-gate every derived stat — sample size + CI on matchup cells; low-n
-      flagged, not silently shown.
+    - Uncertainty qualifies strength and wording, not permission to speak — sample
+      size, intervals, priors, and provenance accompany every estimate; low-n and
+      prior-only values remain visible with honest labels.
     - Advisory is first-class — 'how to attack the field' is a headline product surface,
       not a footnote to descriptive stats.
     - Ban-regime-aware windowing is the default, and the window is always stated —
@@ -320,34 +355,30 @@ documents:
     - slug: docs/ARCHITECTURE.md
       relationship: parallel-to
   docs/research-plan.md:
-    summary: 'Research routing plan for legacy-engine. Two grounding briefs are already
-      done (legacy-foundations,
+    summary: 'Current research posture for legacy-engine. The pre-architecture ingestion,
+      taxonomy, format,
 
-      legacy-metagame). One load-bearing /research remains before /architecture: the
-      fbettega-cache +
+      metagame, and advisory-method grounding is complete and reflected in the shipped
+      architecture.
 
-      MTGOFormatData data contracts (the ingestion + archetype-parser layer). Advisory
-      statistics is a
+      New briefs are required only for still-deferred work or when a consequential
+      assumption needs a
 
-      smaller /research; Scryfall is reuse-from-edh-engine (no research). Goldfish
-      and generation research
-
-      are deferred to their pillars.
+      fresh external check.
 
       '
     decisions:
-    - Two grounding briefs are DONE (legacy-foundations, legacy-metagame) — they cover
-      rules, mulligan, constraints, meta, archetypes, data sources, and how-to-attack.
-    - 'One load-bearing /research before /architecture: the fbettega cache JSON schema
-      + MTGOFormatData rule schema + parser port strategy (the ingestion + archetype-parser
-      data contracts).'
-    - Advisory statistics is a focused /research (win-rate CI method, sample-size
-      gating, sideboard set-cover formulation) — can run before or alongside /architecture.
+    - 'Pre-architecture grounding is complete: format/metagame briefs, the ingestion-archetype
+      campaign, and advisory methods now support the current architecture.'
+    - The canonical ingestion/archetype research root is docs/briefs/ingestion-archetype-contracts/parent.md
+      with its specialist child briefs.
+    - Future consequential modeling work receives a fresh bounded brief before design
+      rather than relying on this routing record.
     - Scryfall card-data ingestion needs NO research — port edh-engine's scryfall.py
       directly.
     - Goldfish-pillar research (mana-solver port, straight-London mulligan adaptation,
-      clock calibration) is deferred to the Deck Mechanics pillar; rules grounding
-      already exists in legacy-foundations.
+      clock calibration, and candidate validation) remains deferred to the Deck Mechanics
+      pillar.
     related:
     - slug: docs/ARCHITECTURE.md
       relationship: depends-on
@@ -373,7 +404,8 @@ documents:
       generation modes), and non-functional requirements (reproducibility, version-stamped
       legality,
 
-      sample-size confidence gating, honest-degrade policy).
+      sample-size confidence metadata, uncertainty-qualified language, and honest-degrade
+      policy).
 
       '
     decisions:
@@ -382,10 +414,12 @@ documents:
       meta-% / matchup matrix / per-card win-rate / subgroup split / venue divergence
       / new-card speculation), the advisory layer (positioning + maindeck-aware sideboard
       + what-to-play + field-read report + collection-aware acquire + refresh + primer),
-      player-strength + history, and all deck generation modes 1+2+3+export (consensus
-      baseline with --variant/--players/--strong, field-tuned decklist, gap-discovery,
-      deck doctor), the archetype-sweep backtest (advise sweep), and data-driven subarchetype
-      resolution (discover run|list|apply|promote + opt-in variant overlays).
+      future-only validation surfaces (advise benchmark, advise recurrent-validation,
+      and the benchmark-scoped player-effect diagnostic), player-strength + history,
+      and all deck generation modes 1+2+3+export (consensus baseline with --variant/--players/--strong,
+      field-tuned decklist, gap-discovery, deck doctor), the archetype-sweep backtest
+      (advise sweep), and data-driven subarchetype resolution (discover run|list|apply|promote
+      + opt-in variant overlays).
     - Deferred capabilities = goldfish simulation (Deck Mechanics pillar); goldfish-validated
       candidate-validation remains deferred until goldfish/ ships. Gap-discovery (mode
       3) itself is built.
@@ -397,8 +431,9 @@ documents:
     - Meta-% is computed under multiple definitions (raw entry count, top-cut presence,
       win-rate-weighted) and every report is labeled online/paper/blend — never a
       single unlabeled number.
-    - Matchup cells and any derived stat carry sample-size + confidence metadata;
-      low-n cells (n<100) are flagged, reusing edh-engine's confidence-metadata pattern.
+    - Matchup cells and derived stats carry sample size, intervals, provenance, and
+      uncertainty metadata; low-n and prior-only values remain visible with qualified
+      wording rather than being silently suppressed.
     - 'Reproducibility is an NFR: deterministic given inputs+seed; all external data
       pre-fetched and cached; legality validated against a dated BanListSnapshot.'
     - Visualization is a cross-cutting Vega-Lite presentation layer (interactive HTML
@@ -414,13 +449,16 @@ documents:
     - 'PRICES + ACQUISITION: seed prices + report prices + advise acquire give the
       user a priced buy list ranked by field-relevance × archetype-relevance; PriceQuote.all_null
       is the honest-null signal.'
-    - 'STABLE ERAS: per-entity era boundaries detected from the corpus (change-point
-      ensemble + fleet FDR + era floors), persisted with attribution and a drift alarm
-      (eras run|list|explain|confirm), and consumed as the DEFAULT window everywhere
-      (adaptive matrix, detection-derived global field era, consensus/card-frequency,
-      era-default discovery pools with Gate C); matchup cells carry hierarchical +
-      cross-era priors with prior_source labels. Byte-identical ban-only fallback
-      when no era data exists.'
+    - 'STABLE ERAS: the built detector persists per-entity boundaries and stable_since
+      fallbacks; the recurrent validation surface now freezes cutoff-safe recurrent
+      origins against the hash-bound parent benchmark plan, scores current-only /
+      contiguous-era / recurrent-expanded evidence plus additive amplification methods
+      on a common future ledger, aggregates exact promotion assessments, and can write
+      only inert operator-review proposals. The intended serving-time recurrent-era
+      contract still certifies a union of compatible historical intervals with outcome-free
+      discovery, affectedness/context/support guards, and pairwise subject/opponent
+      intersection. Current-only evidence remains the fallback, and expanded evidence
+      cannot become authoritative without future-only validation.'
     - 'SUPERARCHETYPES: a third taxonomy level ABOVE parent archetype — strategy clusters
       derived from staple-stripped maindeck core sets (Jaccard + average-linkage agglomerative,
       AU-bootstrap cut) with a curated override layer, persisted as a registry by
@@ -429,8 +467,35 @@ documents:
       and the display gate, gated on concentration (m_eff = 1/HHI >= 2.0, max member
       share <= 0.60) and heterogeneity (I-squared bands, with I-squared treated as
       ONE-SIDED evidence). Typed family cells carry labeled provenance and intra-cluster
-      flags; the Best Call page keeps them exploratory and ledger/navigation-only
-      until the future-only decision benchmark passes.'
+      flags; Deck Rankings uses strategic-plan and exact matchup views while keeping
+      composition-derived family evidence internal.'
+    - 'DECK RANKINGS: `advisory/deck_ranking.py` computes full-field posterior mean
+      performance and the non-mirror floor, with intervals, prior provenance, coverage,
+      and Pareto status. A private field override reweights the same cells while global
+      corpus presence retains candidate eligibility; local strategic-plan projections
+      remain unavailable until composition-specific aggregates exist. Successive compatible
+      publications add deterministic field/matchup attribution and changed-call observations;
+      expanded rows add descriptive parent-versus-build diagnostics. These additions
+      remain outside ranking authority and taxonomy.'
+    - 'DECK RANKINGS EVALUATION BOUNDARY: the current projection remains descriptive.
+      `scripts/evaluate_deck_rankings.py` retains its default field-method diagnostic;
+      separate `--served-model` phases freeze all six cutoff-refitted predictions
+      before development scoring, then require a sealed development selection before
+      confirmation outcomes open. The hash-pinned production parent taxonomy includes
+      color splits while camps remain disabled. Development selected scale 2, but
+      confirmation slightly favored the current scale 1 on log loss and Brier, so
+      production retains scale 1. The page may disclose dated scores and call sensitivity;
+      evaluation has no publication gate.'
+    - 'RANKING BENCHMARK: the future-only parent-archetype validation preregisters
+      exactly ten estimators with production-ci-gated as the production-CI primary;
+      retrospective-fixed-parent (frozen parent-rules identity) and dated contemporaneous
+      taxonomy replay are separate modes. The protocol freezes its exact whole-date
+      fold schedule and as-of B&R ledger. Raw pre-cutoff snapshots and prediction-before-evaluation
+      hashes, deck-mass field coverage, explicit support/censoring gates, stable event-block
+      field-weighted regret with structural mirror utility, player-sensitivity boundaries,
+      proper scores, and dated parent-taxonomy external snapshots are part of the
+      evidence. Deterministic paths allow byte-identical replay and reject different
+      overwrites. Evaluation is read-only and never tunes production.'
     related:
     - slug: docs/VISION.md
       relationship: depends-on
@@ -1887,3 +1952,15 @@ documents:
       reported for the orchestrator to file as follow-up items; no reverts.
 
       '
+    key_findings:
+    - The random-effects aggregation estimator matched independent hand calculations,
+      but refused and not-computable cells exposed misleading or incomplete provenance
+      text.
+    - The superarchetype local-veto contract was unevaluable for sparse sibling columns
+      and did not surface that limitation to consumers.
+    - Several shipped tests were mutation-sensitive, while named weaker assertions
+      and vacuous fixtures required follow-up repair.
+    - Cross-feature review found caller-dependent guards and implementation-note claims
+      that needed verification at their consumption seams.
+    - Findings were follow-up work for the orchestrator; the review performed no reverts
+      or substrate mutations.

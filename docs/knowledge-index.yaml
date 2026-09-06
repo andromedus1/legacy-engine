@@ -1,27 +1,36 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
 schema_version: 2
-generated_at: '2026-08-08T18:33:27Z'
+generated_at: '2026-09-06T00:16:17Z'
 generated_from: frontmatter
-total_docs: 32
+total_docs: 33
 documents:
 - path: docs/ARCHITECTURE.md
   title: 'Architecture: legacy-engine'
   type: architecture
   kind: planning
-  updated: '2026-08-02'
+  updated: '2026-09-05'
   consumer_hint: Read for how legacy-engine is built — module map, file responsibilities,
     data flow, the core data models, storage decision, conventions, dependencies,
     and the built-vs-deferred split. The detailed architecture grounded in all four
     research streams.
 - path: docs/analysis/best-call-ranking.md
-  title: Best Deck / Best Call agency ranking — refresh runbook
+  title: Deck Rankings — refresh runbook
   type: design
   kind: planning
-  updated: '2026-08-08'
+  updated: '2026-09-05'
   status: active
-  consumer_hint: Read before refreshing or interpreting the Best Deck / Best Call
-    agency ranking page — the one-command refresh runbook, the metric definitions,
-    and the honesty gates baked into the page.
+  consumer_hint: Read before refreshing or interpreting the Deck Rankings page — the
+    current performance and matchup-floor projection, its field basis, and its evidence
+    boundaries.
+- path: docs/analysis/doomsday-variant-rankings.md
+  title: Doomsday Variant Rankings — refresh runbook
+  type: design
+  kind: planning
+  updated: '2026-09-05'
+  status: active
+  consumer_hint: Read before refreshing or interpreting the Doomsday Variant Rankings
+    report — its exclusive cohort rules, evidence ledgers, current-field projection,
+    and uncertainty limits.
 - path: docs/analysis/meta-deck-analysis-loop.md
   title: The meta-deck analysis loop
   type: design
@@ -35,7 +44,7 @@ documents:
   title: 'Vision: legacy-engine'
   type: north-star
   kind: planning
-  updated: '2026-08-02'
+  updated: '2026-09-05'
   consumer_hint: Read first — the why and what of legacy-engine. Vision, problem,
     principles pointer, and the four-pillar domain model for the Legacy analytics
     platform.
@@ -43,22 +52,21 @@ documents:
   title: 'Principles: legacy-engine'
   type: principles
   kind: planning
-  updated: '2026-06-13'
+  updated: '2026-09-05'
   consumer_hint: Read when making a design or modeling trade-off — the decision heuristics
     specific to legacy-engine (beyond generic best practice).
 - path: docs/research-plan.md
   title: 'Research Plan: legacy-engine'
   type: research-plan
   kind: planning
-  updated: '2026-05-29'
-  consumer_hint: Read to know what research must run before /architecture, and what's
-    deferred per-pillar. The routing plan for /research, /deep-research, and /brief
-    invocations.
+  updated: '2026-08-16'
+  consumer_hint: Read to understand which research grounds the current architecture
+    and which deferred questions still require a fresh brief before implementation.
 - path: docs/SPEC.md
   title: 'Spec: legacy-engine'
   type: spec
   kind: planning
-  updated: '2026-08-02'
+  updated: '2026-09-05'
   consumer_hint: Read when scoping what to build — the capabilities, domain entities,
     and non-functional requirements of legacy-engine. Pairs with VISION (why) and
     ARCHITECTURE (how).
@@ -324,7 +332,7 @@ documents:
   title: Fresh-context deep review — features shipped 2026-07-31/08-01
   type: review
   kind: research
-  updated: '2026-08-01'
+  updated: '2026-08-11'
   consumer_hint: Read when auditing what actually shipped to main across 2026-07-31/08-01
     — a fresh-context, adversarial post-merge deep review of the seven shipped features
     (superarchetype aggregation/chain/clustering, camp-incremental assignment, matchup-plan

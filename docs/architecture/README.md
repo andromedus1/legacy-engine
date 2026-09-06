@@ -1,10 +1,12 @@
 # Architecture
 
-Repo-level planning docs live here.
+Repo-level planning docs live at the top of `docs/`, with `.work/` owning delivery decomposition.
 
-- **`north-star-legacy-engine.md`** — vision, principles, domain model (produced by `/ideate`)
-- **`architecture.md`** — modules, data flow, conventions (produced by `/architecture`)
-- **`roadmap.md`** — phased build plan with blocking briefs (produced by `/roadmap`)
-- **`conventions.md`** — directory layout, naming, cross-module rules (hand-written, updated as the project matures)
+- **`docs/VISION.md`** — vision, problem, principles pointer, and the four-pillar domain model
+- **`docs/SPEC.md`** — capabilities, domain entities, and non-functional requirements
+- **`docs/ARCHITECTURE.md`** — modules, data flow, storage, conventions, and built-vs-deferred architecture
+- **`docs/PRINCIPLES.md`** — project-specific decision heuristics
+- **`docs/research-plan.md`** — research routing context for the foundation and follow-on work
+- **`.work/`** — active delivery substrate for epics, features, stories, backlog, and releases
 
 Every doc should carry the standard frontmatter (`description`, `type`, `updated`) so `/knowledge-index` can catalog it.

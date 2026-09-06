@@ -12,6 +12,8 @@ import logging
 import time
 import unicodedata
 import urllib.parse
+import gzip
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -23,6 +25,9 @@ if TYPE_CHECKING:
 
 from legacy_engine.config import (
     SCRYFALL_API_BASE,
+    SCRYFALL_ALL_CARDS_BULK_TYPE,
+    SCRYFALL_ALL_CARDS_META_PATH,
+    SCRYFALL_ALL_CARDS_PATH,
     SCRYFALL_API_DELAY,
     SCRYFALL_BULK_TYPE,
     SCRYFALL_DIR,
@@ -31,7 +36,7 @@ from legacy_engine.config import (
     SCRYFALL_PRICES_PATH,
     USER_AGENT,
 )
-from legacy_engine.models.card import Card
+from legacy_engine.models.card import Card, PrintedCardAlias
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,152 @@ METADATA_PATH = SCRYFALL_DIR / "metadata.json"
 
 _SCRYFALL_ALLOWED_HOSTS = frozenset({"scryfall.com", "api.scryfall.com", "c2.scryfall.com"})
 _SCRYFALL_ALLOWED_SUFFIXES = (".scryfall.com", ".scryfall.io")
+_ALL_CARDS_MIN_ROWS = 100_000
+_ALL_CARDS_MIN_ALIASES = 1_000
+
+
+def _bulk_download_uri(meta: dict[str, object]) -> tuple[str, bool]:
+    """Return the current Scryfall bulk URI and whether it is gzipped JSONL.
+
+    Scryfall replaced ``download_uri`` with ``jsonl_download_uri`` in the live
+    bulk metadata contract.  The legacy key remains readable for recorded
+    fixtures and old caches, but the current key always wins when both exist.
+    """
+    jsonl_uri = meta.get("jsonl_download_uri")
+    if isinstance(jsonl_uri, str) and jsonl_uri.strip():
+        return jsonl_uri, True
+    legacy_uri = meta.get("download_uri")
+    if isinstance(legacy_uri, str) and legacy_uri.strip():
+        return legacy_uri, False
+    raise ValueError(
+        "Scryfall bulk metadata is missing required jsonl_download_uri "
+        "(or legacy download_uri)"
+    )
+
+
+def _open_bulk(path: Path):
+    """Open a bulk mirror, auto-detecting gzip independently of its suffix."""
+    with path.open("rb") as probe:
+        compressed = probe.read(2) == b"\x1f\x8b"
+    return gzip.open(path, "rb") if compressed else path.open("rb")
+
+
+def iter_bulk_rows(path: Path) -> Iterator[dict]:
+    """Stream a legacy JSON array or current JSONL bulk mirror."""
+    with _open_bulk(path) as fh:
+        first = fh.read(1)
+        while first and first.isspace():
+            first = fh.read(1)
+        fh.seek(0)
+        if first == b"[":
+            import ijson
+
+            rows = ijson.items(fh, "item")
+        elif first == b"{":
+            rows = (json.loads(line) for line in fh if line.strip())
+        else:
+            raise ValueError("Scryfall bulk payload must be a JSON array or JSONL objects")
+        found = False
+        for index, raw in enumerate(rows):
+            if not isinstance(raw, dict):
+                raise ValueError(f"Scryfall bulk row {index} is not an object")
+            found = True
+            yield raw
+        if not found:
+            raise ValueError("Scryfall bulk payload contains no card rows")
+
+
+def _write_metadata(path: Path, payload: dict[str, object]) -> None:
+    """Atomically publish metadata after its corresponding mirror is valid."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _positive_metadata_int(meta: dict[str, object], key: str) -> int | None:
+    value = meta.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"Scryfall bulk metadata has invalid {key}")
+    return value
+
+
+def _bulk_completeness(meta: dict[str, object]) -> tuple[int | None, int | None]:
+    """Return provider-declared byte/row completeness without inventing thresholds."""
+    compressed_size = _positive_metadata_int(meta, "compressed_size")
+    object_count = _positive_metadata_int(meta, "object_count")
+    if compressed_size is None and object_count is None:
+        raise ValueError(
+            "Scryfall bulk metadata lacks compressed_size and object_count completeness"
+        )
+    return compressed_size, object_count
+
+
+def _validate_row_count(actual: int, expected: int) -> None:
+    if actual != expected:
+        raise ValueError(
+            f"Scryfall bulk row count mismatch: expected {expected}, received {actual}"
+        )
+
+
+def _stream_jsonl_bulk(
+    client,
+    uri: str,
+    destination: Path,
+    *,
+    expected_compressed_size: int | None,
+    expected_rows: int | None,
+) -> int:
+    """Stream, validate, and atomically normalize gzipped JSONL to plain JSONL."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    raw_tmp = destination.with_name(f".{destination.name}.download.tmp")
+    normalized_tmp = destination.with_name(f".{destination.name}.normalized.tmp")
+    try:
+        with client.stream("GET", uri, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            encoding = (resp.headers.get("content-encoding") or "").lower()
+            with raw_tmp.open("wb") as handle:
+                chunks = (
+                    resp.iter_raw(chunk_size=64 * 1024)
+                    if "gzip" in encoding or uri.endswith(".gz")
+                    else resp.iter_bytes(chunk_size=64 * 1024)
+                )
+                for chunk in chunks:
+                    handle.write(chunk)
+
+        if expected_compressed_size is not None:
+            actual_size = raw_tmp.stat().st_size
+            if actual_size != expected_compressed_size:
+                raise ValueError(
+                    "Scryfall bulk compressed size mismatch: "
+                    f"expected {expected_compressed_size}, received {actual_size}"
+                )
+
+        count = 0
+        with normalized_tmp.open("w", encoding="utf-8") as handle:
+            for row in iter_bulk_rows(raw_tmp):
+                if not row.get("name"):
+                    raise ValueError(f"Scryfall bulk row {count} is missing required name")
+                handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                count += 1
+            handle.flush()
+            os.fsync(handle.fileno())
+        if expected_rows is not None:
+            _validate_row_count(count, expected_rows)
+        os.replace(normalized_tmp, destination)
+        return count
+    finally:
+        raw_tmp.unlink(missing_ok=True)
+        normalized_tmp.unlink(missing_ok=True)
 
 
 def _validate_scryfall_uri(uri: str) -> None:
@@ -75,6 +226,14 @@ def normalize_name(name: str) -> str:
     return unicodedata.normalize("NFC", name.replace("’", "'").replace("‘", "'")).strip()
 
 
+def normalize_alias_key(name: str) -> str:
+    """Build an exact-comparison key for localized aliases, never a fuzzy-search key."""
+    normalized = name.replace("’", "'").replace("‘", "'").casefold()
+    decomposed = unicodedata.normalize("NFKD", normalized)
+    without_marks = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(without_marks.split())
+
+
 class ScryfallClient:
     """Client for Scryfall — bulk download, whole-pool index, and on-demand Card lookup."""
 
@@ -104,20 +263,40 @@ class ScryfallClient:
                 return ORACLE_CARDS_PATH
 
         meta = self._fetch_bulk_metadata()
-        _validate_scryfall_uri(meta["download_uri"])
-        logger.info("Downloading Scryfall %s bulk from %s", SCRYFALL_BULK_TYPE, meta["download_uri"])
-        resp = self.client.get(meta["download_uri"], follow_redirects=True)
-        resp.raise_for_status()
-        cards = resp.json()
-
-        ORACLE_CARDS_PATH.write_text(json.dumps(cards))
-        METADATA_PATH.write_text(
-            json.dumps(
-                {"updated_at": meta.get("updated_at"), "card_count": len(cards), "bulk_type": SCRYFALL_BULK_TYPE},
-                indent=2,
+        expected_compressed_size, expected_rows = _bulk_completeness(meta)
+        uri, is_jsonl = _bulk_download_uri(meta)
+        _validate_scryfall_uri(uri)
+        logger.info("Downloading Scryfall %s bulk from %s", SCRYFALL_BULK_TYPE, uri)
+        if is_jsonl:
+            card_count = _stream_jsonl_bulk(
+                self.client, uri, ORACLE_CARDS_PATH, expected_rows=expected_rows,
+                expected_compressed_size=expected_compressed_size,
             )
-        )
-        logger.info("Downloaded %d cards", len(cards))
+        else:
+            resp = self.client.get(uri, follow_redirects=True)
+            resp.raise_for_status()
+            cards = resp.json()
+            if not isinstance(cards, list) or not cards:
+                raise ValueError("Scryfall oracle bulk must be a non-empty card array")
+            if expected_rows is None:
+                raise ValueError("legacy Scryfall array metadata requires object_count")
+            _validate_row_count(len(cards), expected_rows)
+            candidate = ORACLE_CARDS_PATH.with_name(f".{ORACLE_CARDS_PATH.name}.tmp")
+            try:
+                candidate.write_text(json.dumps(cards), encoding="utf-8")
+                os.replace(candidate, ORACLE_CARDS_PATH)
+            finally:
+                candidate.unlink(missing_ok=True)
+            card_count = len(cards)
+
+        _write_metadata(METADATA_PATH, {
+            "updated_at": meta.get("updated_at"),
+            "card_count": card_count,
+            "compressed_size": expected_compressed_size,
+            "object_count": expected_rows,
+            "bulk_type": SCRYFALL_BULK_TYPE,
+        })
+        logger.info("Downloaded %d cards", card_count)
         self._card_index = None  # invalidate
         return ORACLE_CARDS_PATH
 
@@ -128,6 +307,110 @@ class ScryfallClient:
             if item.get("type") == SCRYFALL_BULK_TYPE:
                 return item
         raise RuntimeError(f"Scryfall bulk type not found: {SCRYFALL_BULK_TYPE}")
+
+    def _fetch_all_cards_metadata(self) -> dict:
+        resp = self.client.get(BULK_DATA_URL)
+        resp.raise_for_status()
+        for item in resp.json().get("data", []):
+            if item.get("type") == SCRYFALL_ALL_CARDS_BULK_TYPE:
+                return item
+        raise RuntimeError(f"Scryfall bulk type not found: {SCRYFALL_ALL_CARDS_BULK_TYPE}")
+
+    def download_all_cards_bulk(self, *, force: bool = False) -> Path:
+        """Stream the every-printing/every-language bulk into the local raw mirror."""
+        SCRYFALL_DIR.mkdir(parents=True, exist_ok=True)
+        if not force and SCRYFALL_ALL_CARDS_PATH.exists() and SCRYFALL_ALL_CARDS_META_PATH.exists():
+            return SCRYFALL_ALL_CARDS_PATH
+
+        meta = self._fetch_all_cards_metadata()
+        if not isinstance(meta.get("updated_at"), str) or not meta["updated_at"].strip():
+            raise ValueError("Scryfall all-cards metadata is missing required updated_at provenance")
+        uri, _is_jsonl = _bulk_download_uri(meta)
+        _validate_scryfall_uri(uri)
+        tmp_path = SCRYFALL_ALL_CARDS_PATH.with_suffix(".gz.tmp")
+        try:
+            with self.client.stream("GET", uri, follow_redirects=True) as resp:
+                resp.raise_for_status()
+                encoding = (resp.headers.get("content-encoding") or "").lower()
+                with tmp_path.open("wb") as fh:
+                    if "gzip" in encoding or uri.endswith(".gz"):
+                        # Preserve transport gzip bytes. httpx.iter_bytes() decodes content
+                        # encodings, which would leave a plain JSON body at our .json.gz path.
+                        for chunk in resp.iter_raw(chunk_size=64 * 1024):
+                            fh.write(chunk)
+                    else:
+                        with gzip.GzipFile(fileobj=fh, mode="wb") as zipped:
+                            for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                                zipped.write(chunk)
+            self._validate_all_cards_bulk(tmp_path)
+            tmp_path.replace(SCRYFALL_ALL_CARDS_PATH)
+            _write_metadata(SCRYFALL_ALL_CARDS_META_PATH, {
+                "updated_at": meta.get("updated_at"),
+                "bulk_type": SCRYFALL_ALL_CARDS_BULK_TYPE,
+            })
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        return SCRYFALL_ALL_CARDS_PATH
+
+    def _iter_all_card_rows(self, path: Path) -> Iterator[dict]:
+        for index, raw in enumerate(iter_bulk_rows(path)):
+            missing = [field for field in ("id", "lang", "name") if not raw.get(field)]
+            if missing:
+                raise ValueError(
+                    f"Scryfall all-cards row {index} missing required provenance: "
+                    + ", ".join(missing)
+                )
+            yield raw
+
+    def _validate_all_cards_bulk(self, path: Path) -> None:
+        row_count = 0
+        alias_count = 0
+        for raw in self._iter_all_card_rows(path):
+            row_count += 1
+            if raw.get("printed_name") and raw["printed_name"] != raw["name"]:
+                alias_count += 1
+            alias_count += sum(
+                bool(face.get("printed_name") and face.get("name")
+                     and face["printed_name"] != face["name"])
+                for face in raw.get("card_faces") or []
+            )
+        if row_count < _ALL_CARDS_MIN_ROWS or alias_count < _ALL_CARDS_MIN_ALIASES:
+            raise ValueError(
+                "Scryfall all-cards candidate is implausibly incomplete: "
+                f"{row_count} rows / {alias_count} localized aliases; expected at least "
+                f"{_ALL_CARDS_MIN_ROWS} / {_ALL_CARDS_MIN_ALIASES}"
+            )
+
+    def iter_printed_aliases(self, path: Path | None = None) -> Iterator[PrintedCardAlias]:
+        """Stream localized printed names from all-cards JSON array or JSONL gzip."""
+        src = path or SCRYFALL_ALL_CARDS_PATH
+        if not src.exists():
+            raise FileNotFoundError(f"Scryfall all-cards bulk not found at {src}")
+        for raw in self._iter_all_card_rows(src):
+            language = str(raw["lang"])
+            scryfall_id = str(raw["id"])
+            printed = raw.get("printed_name")
+            canonical = raw["name"]
+            if printed and printed != canonical:
+                yield PrintedCardAlias(
+                    printed_name=printed,
+                    normalized_alias=normalize_alias_key(printed),
+                    canonical_name=canonical,
+                    language=language,
+                    scryfall_id=scryfall_id,
+                )
+            for face in raw.get("card_faces") or []:
+                face_printed = face.get("printed_name")
+                face_canonical = face.get("name")
+                if face_printed and face_canonical and face_printed != face_canonical:
+                    yield PrintedCardAlias(
+                        printed_name=face_printed,
+                        normalized_alias=normalize_alias_key(face_printed),
+                        canonical_name=face_canonical,
+                        language=language,
+                        scryfall_id=scryfall_id,
+                    )
 
     # ── index + resolution ──
     def load_card_index(self) -> dict[str, dict]:
@@ -140,9 +423,8 @@ class ScryfallClient:
         if not ORACLE_CARDS_PATH.exists():
             raise FileNotFoundError("Scryfall bulk not found. Run `legacy seed cards` first.")
 
-        cards = json.loads(ORACLE_CARDS_PATH.read_text())
         index: dict[str, dict] = {}
-        for card in cards:
+        for card in iter_bulk_rows(ORACLE_CARDS_PATH):
             name = card.get("name", "")
             if not name:
                 continue
@@ -189,31 +471,43 @@ class ScryfallClient:
                 return SCRYFALL_PRICES_PATH
 
         meta = self._fetch_prices_metadata()
-        _validate_scryfall_uri(meta["download_uri"])
+        expected_compressed_size, expected_rows = _bulk_completeness(meta)
+        uri, is_jsonl = _bulk_download_uri(meta)
+        _validate_scryfall_uri(uri)
         logger.info(
             "Downloading Scryfall %s bulk from %s",
             SCRYFALL_PRICES_BULK_TYPE,
-            meta["download_uri"],
+            uri,
         )
         # Stream into a temp file first, then rename atomically so a partial download
         # never leaves a corrupt mirror.
-        tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
-        with self.client.stream("GET", meta["download_uri"], follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with tmp_path.open("wb") as fh:
-                for chunk in resp.iter_bytes(chunk_size=64 * 1024):
-                    fh.write(chunk)
-
-        tmp_path.rename(SCRYFALL_PRICES_PATH)
-        SCRYFALL_PRICES_META_PATH.write_text(
-            json.dumps(
-                {
-                    "updated_at": meta.get("updated_at"),
-                    "bulk_type": SCRYFALL_PRICES_BULK_TYPE,
-                },
-                indent=2,
+        if is_jsonl:
+            _stream_jsonl_bulk(
+                self.client, uri, SCRYFALL_PRICES_PATH, expected_rows=expected_rows,
+                expected_compressed_size=expected_compressed_size,
             )
-        )
+        else:
+            tmp_path = SCRYFALL_PRICES_PATH.with_suffix(".json.tmp")
+            try:
+                with self.client.stream("GET", uri, follow_redirects=True) as resp:
+                    resp.raise_for_status()
+                    with tmp_path.open("wb") as fh:
+                        for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+                            fh.write(chunk)
+                # Validate before replacing the last-good mirror.
+                count = sum(1 for _row in iter_bulk_rows(tmp_path))
+                if expected_rows is None:
+                    raise ValueError("legacy Scryfall array metadata requires object_count")
+                _validate_row_count(count, expected_rows)
+                os.replace(tmp_path, SCRYFALL_PRICES_PATH)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+        _write_metadata(SCRYFALL_PRICES_META_PATH, {
+            "updated_at": meta.get("updated_at"),
+            "compressed_size": expected_compressed_size,
+            "object_count": expected_rows,
+            "bulk_type": SCRYFALL_PRICES_BULK_TYPE,
+        })
         logger.info("Downloaded prices bulk (updated_at=%s)", meta.get("updated_at"))
         return SCRYFALL_PRICES_PATH
 
@@ -240,8 +534,6 @@ class ScryfallClient:
         """
         from legacy_engine.ingestion.prices import _raw_to_printing_price  # prices.py imports nothing from scryfall
 
-        import json as _json
-
         src = path or SCRYFALL_PRICES_PATH
         if not src.exists():
             raise FileNotFoundError(
@@ -251,32 +543,16 @@ class ScryfallClient:
         # Inject price_date from the metadata file so each PrintingPrice row carries staleness info.
         price_date = self.prices_updated_at()
 
-        # Stream-parse with ijson when available; fall back to a full json.load for
-        # environments/tests where ijson is not installed.
-        try:
-            import ijson  # type: ignore[import]
-            use_ijson = True
-        except ImportError:
-            use_ijson = False
-
         def _with_date(raw: dict) -> dict:
             if price_date is not None:
                 raw = dict(raw)  # don't mutate the original
                 raw["_price_date"] = price_date
             return raw
 
-        if use_ijson:
-            with src.open("rb") as fh:
-                for raw in ijson.items(fh, "item"):
-                    pp = _raw_to_printing_price(_with_date(raw))
-                    if pp is not None:
-                        yield pp
-        else:
-            data = _json.loads(src.read_text())
-            for raw in data:
-                pp = _raw_to_printing_price(_with_date(raw))
-                if pp is not None:
-                    yield pp
+        for raw in iter_bulk_rows(src):
+            pp = _raw_to_printing_price(_with_date(raw))
+            if pp is not None:
+                yield pp
 
     def prices_updated_at(self) -> str | None:
         """Return the ``updated_at`` timestamp from the prices metadata file, or None."""

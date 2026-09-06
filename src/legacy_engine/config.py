@@ -16,6 +16,12 @@ CACHE_DIR = DATA_DIR / "cache"        # mirrored fbettega tournament JSON
 RULES_DIR = DATA_DIR / "rules"        # vendored MTGOFormatData rules
 BANLIST_DIR = DATA_DIR / "banlist"    # dated WotC B&R snapshots
 DUCKDB_PATH = DATA_DIR / "legacy.duckdb"  # rebuildable analytical store
+OPS_DIR = DATA_DIR / "ops"                # local operational state (created by writers)
+OPS_STATUS_DIR = OPS_DIR / "status"       # atomic job status + immutable attempts
+OPS_LOG_DIR = OPS_DIR / "logs"            # launchd stdout/stderr targets
+OPS_LOCK_DIR = OPS_DIR / "locks"          # kernel-backed execution lock files
+OPS_STATE_DIR = OPS_DIR / "state"          # recoverable machine-observed operational state
+FORMAT_MONITOR_STATE_PATH = OPS_STATE_DIR / "format-monitor.json"
 
 # Discovered-variant staging registry (derived side — written by `discover run`, read by
 # `discover list`/`discover promote`; never hand-curated, unlike VARIANTS_REGISTRY_PATH).
@@ -27,6 +33,9 @@ DERIVED_SUPERARCHETYPES_PATH = DATA_DIR / "superarchetypes" / "derived.json"
 
 # Package-shipped (tracked in git) static data — hand-curated, version-stamped configs.
 PACKAGE_DATA_DIR = Path(__file__).parent / "data"
+ERAS_DIR = PACKAGE_DATA_DIR / "eras"
+DISCOVERY_CALIBRATION_PATH = ERAS_DIR / "discovery-v1.json"
+CERTIFICATION_CALIBRATION_PATH = ERAS_DIR / "certification-v1.json"
 VARIANTS_DIR = PACKAGE_DATA_DIR / "variants"
 VARIANTS_REGISTRY_PATH = VARIANTS_DIR / "legacy.json"  # shipped variant registry
 COLOR_SPLITS_DIR = PACKAGE_DATA_DIR / "color_splits"
@@ -43,10 +52,15 @@ BAN_EVENTS_DIR = PACKAGE_DATA_DIR / "banlist"
 BAN_EVENTS_PATH = BAN_EVENTS_DIR / "events.json"        # shipped dated B&R events (curated SSOT;
                                                          # ingestion.banlist.BAN_EVENTS binds from
                                                          # this at import; `eras confirm` appends)
+CARD_NAME_ALIASES_DIR = PACKAGE_DATA_DIR / "card_name_aliases"
+CARD_NAME_ALIASES_PATH = CARD_NAME_ALIASES_DIR / "legacy.json"  # verified provider-name history
 
 # ── Scryfall ──
 SCRYFALL_API_BASE = "https://api.scryfall.com"
 SCRYFALL_BULK_TYPE = "oracle_cards"
+SCRYFALL_ALL_CARDS_BULK_TYPE = "all_cards"
+SCRYFALL_ALL_CARDS_PATH = SCRYFALL_DIR / "all_cards.json.gz"
+SCRYFALL_ALL_CARDS_META_PATH = SCRYFALL_DIR / "all_cards_metadata.json"
 SCRYFALL_API_DELAY = 0.1  # seconds between REST requests (bulk has no limit)
 USER_AGENT = "LegacyEngine/0.1.0"
 SCRYFALL_SETS_URL = f"{SCRYFALL_API_BASE}/sets"   # GET /sets — the release calendar

@@ -1,14 +1,14 @@
 ---
 id: epic-data-autonomy
 kind: epic
-stage: drafting
+stage: implementing
 tags: [ingestion, infra, needs-brief]
 parent: null
 depends_on: []
 release_binding: null
 gate_origin: null
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-11
 ---
 
 # Data autonomy & currency — own the supply chain, automate freshness
@@ -42,6 +42,17 @@ first by epic-design.
 
 ## Child stories (quick win, stage: implementing)
 - epic-data-autonomy-catalog-lint — CI lint cross-checking curated JSON (hosers, linchpins) against the cards table in DuckDB
+
+## Authorized feature slice (2026-08-11)
+
+The operator authorized the local currency/monitoring slice while continuing to defer the
+hot-spare upstream recreation and Card Kingdom price arcs. This partial decomposition deliberately
+does not activate those larger members:
+
+- `epic-data-autonomy-local-refresh-operations` — schedule the existing composed refresh locally,
+  with overlap protection, durable success/failure status, and operator controls.
+- `epic-data-autonomy-format-monitoring` — detect B&R and release changes, preserve attribution,
+  and require human confirmation before changing format truth.
 
 ## Member findings (absorbed from backlog; full text below)
 

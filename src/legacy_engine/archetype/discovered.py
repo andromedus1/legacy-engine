@@ -401,6 +401,42 @@ class IncrementalAssignmentResult:
     note: str | None
 
 
+def _clear_conflicting_assignments(con, parent: str) -> None:
+    """Remove this path's stale rows when a deck key is now labeled under another parent.
+
+    Tournament reloads invalidate these rows in ``store.load_tournament``. This boundary sweep
+    also repairs databases produced before that invalidation existed, or refreshes that skipped an
+    unchanged cache file. Only rows written by this path are removable; an unknown owner remains a
+    fail-fast state rather than being silently overwritten.
+    """
+    conflicts = con.execute(
+        """
+        SELECT a.tournament_id, a.deck_idx, a.parent, a.assigned_by
+        FROM variant_incremental_assignments a
+        JOIN decks d
+          ON d.tournament_id = a.tournament_id
+         AND d.deck_idx = a.deck_idx
+        WHERE d.archetype = ?
+          AND a.parent IS DISTINCT FROM ?
+        """,
+        [parent, parent],
+    ).fetchall()
+    unknown = sorted({row[3] for row in conflicts} - _VALID_ASSIGNED_BY)
+    if unknown:
+        raise ValueError(
+            f"assign_incremental: stale assignment rows for decks under {parent!r} carry "
+            f"assigned_by {unknown} outside the known vocabulary "
+            f"{sorted(_VALID_ASSIGNED_BY)} — refusing to clear state this path did not write"
+        )
+    for tid, idx, assignment_parent, assigned_by in conflicts:
+        con.execute(
+            "DELETE FROM variant_incremental_assignments "
+            "WHERE tournament_id = ? AND deck_idx = ? AND parent IS NOT DISTINCT FROM ? "
+            "AND assigned_by = ?",
+            [tid, idx, assignment_parent, assigned_by],
+        )
+
+
 def assign_incremental(
     con,
     parent: str,
@@ -445,6 +481,11 @@ def assign_incremental(
         )
 
     con.execute(_INCREMENTAL_ASSIGNMENTS_DDL)
+
+    # A prior refresh may have skipped an unchanged cache file, leaving an assignment whose
+    # reused deck index now belongs to another archetype. Clear those owned collisions before the
+    # candidate loop can attempt its authoritative insert.
+    _clear_conflicting_assignments(con, parent)
 
     prior = con.execute(
         "SELECT tournament_id, deck_idx, assigned_by FROM variant_incremental_assignments "

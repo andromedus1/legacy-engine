@@ -1,0 +1,6 @@
+archetype,strategic_role,decision_field_share,observed_count,prior_count,field_evidence_kind,field_since,corpus_max
+Dimir Tempo,disrupt-pressure,0.084,28,14,transition-stabilized,2026-08-10,2026-08-19
+Tron,go-over,0.07,31,4,transition-stabilized,2026-08-10,2026-08-19
+Boros Energy,go-wide,0.064,25,7,transition-stabilized,2026-08-10,2026-08-19
+Azorius Midrange,lock-outlast,0.058,18,11,transition-stabilized,2026-08-10,2026-08-19
+Doomsday,go-off,0.024,12,0,transition-stabilized,2026-08-10,2026-08-19
