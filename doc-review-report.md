@@ -1,40 +1,28 @@
-# Documentation Review Report
+# Repository currency documentation review
 
-**Project:** legacy-engine
+Date: 2026-09-05. Scope: README, setup, CLI contracts and ranking references during
+integration of the accumulated implementation into main.
 
-**Date:** 2026-09-05
+A fresh bounded pass reviewed seven system/user documents and three relevant
+module runbooks against Click definitions, pyproject metadata and publishing
+scripts. Verdict: zero Critical/High findings. Two Medium findings were fixed:
+README now names the separate online/paper default for `advise refresh`, and
+ARCHITECTURE consistently states Python 3.11–3.13.
 
-**Scope:** Doomsday Variant Rankings implementation, README pointer, SPEC capability row,
-ARCHITECTURE module entry, and `docs/analysis/doomsday-variant-rankings.md`.
+The initial full README pass also corrected `deck save --deck`, the exact
+provenance-enabled serving command list and accepted values, stale tool labels,
+and fixed test-count/runtime prose. All 85 documented CLI examples resolve to
+real commands/options; 11 additional help checks passed in the fresh audit.
+The ranking runbooks retain the separation between global rankings, specialized
+Doomsday evidence, and the older positioning estimator.
 
-**Review:** one balanced, fresh, same-harness standard feature-review pass.
+Knowledge index regeneration reports zero errors and six existing warnings:
+two large foundation decision lists and four documentation-directory README files
+without frontmatter. The separate research-index discovery gap remains tracked
+as `bug-knowledge-index-omits-research-analysis`.
 
-**Result:** two documentation/code contradictions found, accepted, and addressed; no other scoped
-documentation findings.
-
-The integrated pass compared the feature contract, implementation, tests, report template, CLI
-surface, and all four changed documentation surfaces. It checked the report's manual refresh
-boundary, exclusive cohort definitions, global external-field inheritance, evidence ledgers,
-date windows, uncertainty disclosures, exact-list selection, generated-output location, and links.
-
-## Accepted corrections
-
-1. **Ledger list completeness.** The earlier wording allowed any nonempty card fragment to look like
-   a compatible list. Standings now require the subject registration to have known board labels,
-   positive counts, at least 60 main-deck cards, no more than 15 sideboard cards, and no
-   card banned at the cutoff. Resolved rounds apply the same filter to both participants. Larger
-   main decks and short sideboards remain evidence; the recent exact-list selector separately
-   requires 60 main plus 15 side cards.
-2. **Public date parsing.** The earlier parser could truncate malformed strings into plausible dates.
-   The public `--since`, inherited `field.since`, and exclusive `field.until` values now require real
-   canonical `YYYY-MM-DD` dates, and field start must precede field end. Database dates continue to
-   use the canonical SQL date path.
-
-The runbook now states both boundaries directly. README, SPEC, and ARCHITECTURE remain consistent
-with the corrected implementation and need no further expansion.
-
-## Verification boundary
-
-The host is verifying the accepted fixes through the focused checks and final delivery workflow.
-The standard review contract calls for one fresh independent pass, so these accepted corrections do
-not trigger a second reviewer pass. This report does not assert a final test count or completed CI.
+This is a scoped documentation consistency review, not a new whole-code or
+research-verification claim. Runtime, test, script, CI and package-definition trees
+are unchanged from the fully green Doomsday commit `0caebfe`; the lockfile only
+aligns Python compatibility and the local project version, preserving all third-
+party package versions. PR #92 owns the final integration checks.

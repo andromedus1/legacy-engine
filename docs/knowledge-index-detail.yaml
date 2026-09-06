@@ -1,5 +1,5 @@
 # Auto-generated. DO NOT EDIT BY HAND. Run /knowledge-index (scripts/gen_knowledge_index.py) to regenerate.
-generated_at: '2026-09-06T00:14:36Z'
+generated_at: '2026-09-06T00:16:17Z'
 generated_from: frontmatter
 schema_version: 2
 documents:
@@ -7,7 +7,8 @@ documents:
     summary: 'Detailed architecture for legacy-engine, a Magic: The Gathering Legacy
       analytics platform (sibling to
 
-      edh-engine). Python 3.11+ Click CLI mirroring edh-engine''s stack, plus scipy/numpy/statsmodels/pulp
+      edh-engine). Python 3.11–3.13 Click CLI mirroring edh-engine''s stack, plus
+      scipy/numpy/statsmodels/pulp
 
       for advisory and DuckDB as an embedded analytical store (the one justified divergence,
       driven by the
@@ -48,9 +49,9 @@ documents:
 
       '
     decisions:
-    - Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files)
-      + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and
-      vl-convert-python (Vega-Lite viz render).
+    - Mirror edh-engine's stack (Python 3.11–3.13, Click CLI, Pydantic, httpx, local
+      files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP),
+      and vl-convert-python (Vega-Lite viz render).
     - 'STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/,
       data/scryfall/, data/rules/, data/banlist/, data/collection/); a rebuildable
       embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share

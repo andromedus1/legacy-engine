@@ -1,7 +1,7 @@
 ---
 id: story-readme-repo-currency
 kind: story
-stage: implementing
+stage: review
 tags: [docs]
 parent: null
 depends_on: [feature-deck-rankings, feature-doomsday-variant-rankings]
@@ -76,3 +76,34 @@ Doomsday head (394 unlanded commits, no main-only commits). Every local branch i
 contained except decks/energy-dnt-tron-specs: 14 of its 15 files are byte-identical,
 and its remaining backlog file has later additions. Hogaak files are uncommitted
 in the shared checkout; integration uses an isolated worktree.
+
+
+## Implementation and verification
+- All local and remote branch tips are represented after a history-only merge of
+  decks/energy-dnt-tron-specs. Fourteen files were identical; the fifteenth's newer
+  body was a strict superset and was retained. The merge changed no tree entries.
+- README was read in full. Corrections cover supported Python, real CLI flags,
+  provenance exceptions, stale names and outdated test-count prose. A fresh scoped
+  documentation audit found zero Critical/High and two Medium findings, both fixed.
+- `uv lock --offline` + `uv lock --check --offline` pass. Only the local project
+  version and Python compatibility changed; third-party versions are identical.
+  The resulting file matches the shared checkout's existing lockfile byte-for-byte.
+- Knowledge index regenerated: zero errors, six pre-existing warnings. Changed-file
+  whitespace check passes. Historical research CSV CRLF and Markdown hard-break
+  whitespace are preserved rather than rewriting evidence artifacts for diff style.
+- Runtime/tests/scripts/CI/pyproject trees are identical to fully green commit
+  0caebfe (CI 33997861767; both Python 3.11 and 3.13). Final integration checks belong
+  to PR #92, retargeted to main under the user's explicit integration authorization.
+- Every branch tip is accounted for. The old best-call worktree contains 78 staged
+  changes that restore pre-privacy-cleanup wording, not missing feature work. Its
+  exact binary patch is backed up under the local .git/repo-hygiene-backups directory;
+  the worktree is locked and retained. Hogaak work remains isolated and unpublished.
+- Existing era-boundary pending-confirmation alerts, the global event-alias bug and
+  the research-index discovery bug are accounted-for product work, not Git failures.
+
+## Review (2026-09-05)
+Verdict: Approve the integration contents. Standard bounded inline standalone-story
+review; no independent code reviewer. Documentation received its own required fresh
+consistency pass. No new runtime behavior was introduced by this integration stride.
+No unresolved content blockers. PR #92 must pass its final checks before merge;
+local-main synchronization and merged-branch pruning follow the successful merge.
