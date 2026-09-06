@@ -73,7 +73,7 @@ pillar remains deferred:
 | Variant overlays, opt-in (`report matchups --split-variant` · `report cards --conditioned [--variant]` · `report subgroup --winrates`) | ✅ built |
 | What-to-play (proactivity, vulnerability tags incl. ramp, hate-equity, best-deck/best-call) | ✅ built |
 | Standalone field read (`advise field` — field composition + vulnerability/hate-equity; no deck required) | ✅ built |
-| Provenance-filtered advisory (`--provenance online|paper` on all advise leaves + report matchups/meta) | ✅ built |
+| Provenance-filtered serving advice and meta/matchup reports (`--provenance online|paper`) | ✅ built |
 | Field Read & Deck Recommendation report (the `advise report` surface; `--venues` cross-venue) | ✅ built |
 | Deck refresh (`advise refresh` — per-venue tuned maindeck + sideboard + primer) | ✅ built |
 | Acquisition plan (`advise acquire` — ranked priced buy list) | ✅ built |
@@ -106,12 +106,12 @@ emitted unlabeled.
 
 ## Install
 
-Requires **Python 3.11+**.
+Requires **Python 3.11–3.13**; maintainer checkouts use Python **3.13**.
 
 ```bash
 git clone https://github.com/andromedus1/legacy-engine.git
 cd legacy-engine
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -211,7 +211,7 @@ legacy-engine report subgroup --archetype "Doomsday" --signature "Murktide Regen
 #   metagame overlaps --field's archetypes; --no-field-scope reproduces the prior global sample
 # --my-deck NAME loads a saved UserDeck; --field FILE supplies a custom field
 # --collection FILE enables owned/acquire annotations; --budget N caps the acquire plan
-# --provenance online|paper is available on all advise leaves (and report matchups/meta)
+# --provenance online|paper filters serving advice (listed below) and report matchups/meta
 # recurrent validation is evaluation-only: no `run`, no `latest`, and no auto-apply/promote command
 
 # Player identity and strength
@@ -235,7 +235,7 @@ legacy-engine collection import --file binder.txt  # import card inventory
 legacy-engine collection show                       # show inventory (--free-only / --card NAME)
 legacy-engine collection status                     # allocation summary
 legacy-engine collection rebuild                    # rebuild DuckDB from JSON SSOT
-legacy-engine deck save --name "my Dimir Tempo" --file my.txt  # save / version a deck
+legacy-engine deck save --name "my Dimir Tempo" --deck my.txt  # save / version a deck
 legacy-engine deck load --name "my Dimir Tempo"                # load current version
 legacy-engine deck buildable --name "my Dimir Tempo"           # check what you can build
 
@@ -409,9 +409,10 @@ Agency/P(best), evidence strata, adaptive windowing, and `--provenance` behavior
 matchup bands on that surface use raw win rate: **Blowout** <40%, **Half** 40–45%, **Edge** 55–60%
 inclusive, and **Dominant** >60%.
 
-Each leaf takes `-v/--verbose`; all `advise` leaves and `report matchups|meta` take
-`--provenance [online|paper|all]` and a `--db` path. Every emitted number is labeled with its
-definition/basis, sample size, and confidence tier; advisory output carries a heuristic-vs-data-driven
+Each leaf takes `-v/--verbose`. `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`
+and `report matchups|meta` take `--provenance online|paper` and a `--db` path.
+Omit `--provenance` for combined advice; meta/matchup reports also accept `all`.
+Statistics identify their basis and evidence support; advisory output carries a heuristic-vs-data-driven
 audit trail. Absent/thin signal is always labeled (never a silent zero). Commands not yet implemented
 fail loudly rather than returning empty results.
 
@@ -444,7 +445,7 @@ src/legacy_engine/
                #   players/  (identity, strength, history)
                #   superarchetype/ (strategy clustering, registry, aggregation, consumption)
   advisory/    # field, positioning, sideboard, whattoplay, report, gaps, window,
-               #   collection, acquire, primer, refresh
+               #   collection, acquire, primer, refresh, deck_ranking, doomsday_variants
   generation/  # consensus, export, tuning, discovery (modes 1+2+3), card_distribution, models
                #   (generate doctor lives in tuning/models)
   collection/  # persist (JSON SSOT), store (DuckDB), inventory, decks, allocation
@@ -453,7 +454,7 @@ src/legacy_engine/
   models/      # shared Pydantic types (Card, TournamentResult, MatchupCell, Variant,
                #   Inventory, UserDeck, ...)
   cli.py · config.py · confidence.py · card_tags.py · colors.py · interaction_facts.py
-scripts/       # standalone helpers: knowledge-index gen; viz + Best Call refresh helpers
+scripts/       # knowledge-index generation; visualizations; Deck and Doomsday Variant Rankings
 docs/          # vision, spec, architecture, principles, briefs, knowledge index
 tests/         # hermetic pytest suite; CI/current checks are authoritative
 ```

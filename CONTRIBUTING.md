@@ -19,7 +19,7 @@ git clone https://github.com/andromedus1/legacy-engine.git
 cd legacy-engine
 python3.13 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python -m pytest -q          # ~3,500 tests, about 3 minutes
+python -m pytest -q          # run the hermetic suite
 ```
 
 The test suite is **hermetic** — it builds its own temporary DuckDB files and needs no network
@@ -62,7 +62,7 @@ legacy-engine seed banlist && legacy-engine label
 | `.agents/skills/patterns/` | documented code patterns, the convention source of truth |
 | `.work/` | delivery substrate — epics, features, stories with frontmatter |
 | `decks/` | decklists, primers, and field files used for dogfooding |
-| `scripts/` | one-shot generators (e.g. the Best Deck / Best Call ranking page) |
+| `scripts/` | report generators (e.g. Deck Rankings and Doomsday Variant Rankings) |
 
 ## Reporting a data problem
 
