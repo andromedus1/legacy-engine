@@ -6,7 +6,7 @@ kind: planning
 updated: 2026-09-05
 summary: |
   Detailed architecture for legacy-engine, a Magic: The Gathering Legacy analytics platform (sibling to
-  edh-engine). Python 3.11+ Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
+  edh-engine). Python 3.11–3.13 Click CLI mirroring edh-engine's stack, plus scipy/numpy/statsmodels/pulp
   for advisory and DuckDB as an embedded analytical store (the one justified divergence, driven by the
   matchup-matrix rounds-join workload). Full arc: ingestion/ (Scryfall + prices + fbettega cache + vendored
   MTGOFormatData rules + ban-list + releases) → archetype/ (ported MTGOArchetypeParser matcher + variant
@@ -21,7 +21,7 @@ summary: |
   publication path. Local ops runs the decision refresh and detection-only format monitor under one
   artifact lock; human `eras confirm` remains the only B&R acceptance authority.
 decisions:
-  - "Mirror edh-engine's stack (Python 3.11+, Click CLI, Pydantic, httpx, local files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and vl-convert-python (Vega-Lite viz render)."
+  - "Mirror edh-engine's stack (Python 3.11–3.13, Click CLI, Pydantic, httpx, local files) + add scipy/numpy/statsmodels (advisory stats), pulp/CBC (sideboard ILP), and vl-convert-python (Vega-Lite viz render)."
   - "STORAGE: raw mirrored JSON is the reproducible source of truth (data/cache/, data/scryfall/, data/rules/, data/banlist/, data/collection/); a rebuildable embedded DuckDB (data/legacy.duckdb) is the analytical layer for meta-share + matchup-matrix + prices + collection joins. The one justified divergence from edh-engine's pure-files approach, driven by the rounds-join matchup workload."
   - "archetype/ is the novel subsystem: vendor MTGOFormatData rules-as-JSON pinned to a SHA (data/rules/ + manifest), reimplement only the ~210-line MTGOArchetypeParser Detect matcher in Python, golden-test to >=99% label agreement against the archived C# parser's published labels (fallback: hand-curated fixtures). variants.py adds sub-archetype tagging (e.g. Bauble) driven by a card-presence registry."
   - "Scryfall ADR RESOLVED: EXTEND edh-engine's ingestion/scryfall.py (every needed function verified to exist), index the WHOLE oracle pool (~30k+ IDs, not a fixed subset); do NOT adopt Scrython (bulk index makes the API path rare) or mtg_parser (fbettega JSON is the decklist source, already name-normalized)."
@@ -50,7 +50,7 @@ decisions:
 
 ## System Overview
 
-A Python 3.11+ Legacy-format analytics platform with a Click CLI and a local data layer. It **mirrors
+A Python 3.11–3.13 Legacy-format analytics platform with a Click CLI and a local data layer. It **mirrors
 edh-engine's architecture** (three data layers → analytical pillars, deck-as-data, Scryfall card
 dimension, confidence metadata) with two deliberate divergences justified by the domain: an explicit
 **`archetype/` classifier** (Legacy decks have no commander key) and an embedded **DuckDB** analytical

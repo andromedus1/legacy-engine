@@ -411,7 +411,8 @@ inclusive, and **Dominant** >60%.
 
 Each leaf takes `-v/--verbose`. `advise positioning|sideboard|whattoplay|field|report|refresh|acquire|compare`
 and `report matchups|meta` take `--provenance online|paper` and a `--db` path.
-Omit `--provenance` for combined advice; meta/matchup reports also accept `all`.
+Omitting `--provenance` combines evidence for serving advice, except `advise refresh`, which
+defaults to separate online and paper packages. Meta/matchup reports also accept `all`.
 Statistics identify their basis and evidence support; advisory output carries a heuristic-vs-data-driven
 audit trail. Absent/thin signal is always labeled (never a silent zero). Commands not yet implemented
 fail loudly rather than returning empty results.
